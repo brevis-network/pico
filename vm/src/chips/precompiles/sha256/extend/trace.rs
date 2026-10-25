@@ -3,25 +3,42 @@ use crate::{
         chips::{byte::event::ByteRecordBehavior, events::ByteLookupEvent},
         precompiles::sha256::extend::{
             columns::{ShaExtendCols, NUM_SHA_EXTEND_COLS},
+            ffi::ShaExtendFfiEvent,
             ShaExtendChip,
         },
-        utils::pad_rows_fixed,
+        trace::TraceData,
+        utils::{next_power_of_two, pad_rows_fixed},
     },
     compiler::riscv::{opcode::ByteOpcode, program::Program},
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
     emulator::riscv::{
+        ffi::FFIEmulationRecord,
         record::EmulationRecord,
         syscalls::{
             precompiles::{PrecompileEvent, ShaExtendEvent},
             SyscallCode,
         },
     },
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::chip::ChipBehavior,
 };
+use core::{borrow::BorrowMut, mem::size_of};
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+use p3_koala_bear::KoalaBear;
+
+use cudart_sys::*;
+use log::info;
 use p3_air::BaseAir;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
-use std::borrow::BorrowMut;
+use pico_gpu_api::cuda_precompile_sha256_extend_generate_extra_record_and_main;
 
 impl<F: PrimeField32> BaseAir<F> for ShaExtendChip<F> {
     fn width(&self) -> usize {
@@ -30,8 +47,9 @@ impl<F: PrimeField32> BaseAir<F> for ShaExtendChip<F> {
 }
 
 impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
-    type Program = Program;
     type Record = EmulationRecord;
+    type GpuRecord = FFIEmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         "ShaExtend".to_string()
@@ -97,6 +115,90 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
             !record
                 .get_precompile_events(SyscallCode::SHA_EXTEND)
                 .is_empty()
+        }
+    }
+
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let events = &prepared_gpu_events.sha_extend_events;
+
+        let num_cols_per_row = NUM_SHA_EXTEND_COLS;
+        let log_rows = input.shape_chip_size(&self.name());
+        // Each SHA extend event generates 48 rows
+        let num_total_rows = next_power_of_two(events.len() * 48, log_rows);
+        let trace_size = num_total_rows * num_cols_per_row;
+        let event_size = events.len();
+
+        // TODO: hack so that zero length events are correct, which requires
+        // calling the kernel
+        //
+        // our CUDA bridge uses as_slice to convert to pointer for some reason
+        // which causes rust to panic when the allocation is 0
+        let event_alloc_size = if event_size == 0 { 1 } else { event_size };
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        // Allocate device memory for events
+        let mut d_events = DevicePoolAllocation::<ShaExtendFfiEvent>::alloc_from_pool_async(
+            event_alloc_size,
+            mem_pool,
+            stream,
+        )
+        .unwrap();
+        // Allocate device memory for trace output
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+
+        unsafe {
+            let _ = cudaMemcpyAsync(
+                d_events.as_mut_c_void_ptr(),
+                events.as_c_void_ptr(),
+                event_size * size_of::<ShaExtendFfiEvent>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+        }
+
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+        unsafe {
+            cuda_precompile_sha256_extend_generate_extra_record_and_main(
+                d_events.as_ptr() as *const _,
+                event_size,
+                d_trace.as_mut_ptr() as *mut _,
+                num_total_rows,
+                num_cols_per_row,
+                d_byte_trace.as_mut_ptr() as *mut _,
+                stream.into(),
+            );
+        }
+
+        // Switch to main stream for further processing
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[precompile-sha256-extend-chip] generate_extra_record_and_main on GPU");
+
+        TraceData::Gpu(num_cols_per_row, d_trace)
+    }
+
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            !record.sha_extend_events.is_empty()
         }
     }
 }

@@ -1481,9 +1481,9 @@ mod split_tests {
     /// The gate the whole split rests on: interpreting the two children concurrently must produce
     /// the record that interpreting them in order produces.
     ///
-    /// Here rather than only in a replay of a dumped node (gpu-base's `rec-emulate-replay`),
-    /// which someone has to remember to run. ⚠️ CI does not run this test, so it is a gate for
-    /// whoever runs `cargo test`, not an automatic one.
+    /// Here rather than only in `rec-emulate-replay`, which needs a dumped node and someone to
+    /// remember to run it. ⚠️ CI does not run this test, so it is a gate for whoever runs
+    /// `cargo test`, not an automatic one.
     #[test]
     fn split_and_serial_produce_the_same_record() {
         let program = Arc::new(tiny_split_program());

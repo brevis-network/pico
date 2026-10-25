@@ -3,29 +3,44 @@ use super::{
     KeccakPermuteChip, STATE_SIZE,
 };
 use crate::{
-    chips::precompiles::checked_u64_to_u32,
+    chips::{precompiles::checked_u64_to_u32, trace::TraceData},
     compiler::riscv::program::Program,
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
     emulator::{
         record::RecordBehavior,
         riscv::{
+            ffi::FFIEmulationRecord,
             record::EmulationRecord,
             syscalls::{
-                precompiles::{KeccakPermuteEvent, PrecompileEvent},
+                precompiles::{
+                    keccak256::event::FFIKeccakPermuteEvent, KeccakPermuteEvent, PrecompileEvent,
+                },
                 SyscallCode,
             },
         },
     },
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     iter::{PicoBridge, PicoIterator},
     machine::chip::ChipBehavior,
 };
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+use cudart_sys::*;
 use p3_air::BaseAir;
 use p3_field::PrimeField32;
 use p3_keccak_air::{
     generate_trace_rows, KeccakCols as UpstreamKeccakCols, NUM_KECCAK_COLS, NUM_ROUNDS,
 };
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+use pico_gpu_api::cuda_precompile_keccak_generate_extra_record_and_main;
 use std::borrow::{Borrow, BorrowMut};
-use tracing::debug;
+use tracing::{debug, info};
 
 impl<F> BaseAir<F> for KeccakPermuteChip<F> {
     fn width(&self) -> usize {
@@ -35,6 +50,7 @@ impl<F> BaseAir<F> for KeccakPermuteChip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
     type Record = EmulationRecord;
+    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -127,6 +143,74 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
                 .is_empty()
         }
     }
+
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        _input: &Self::Record,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let events = &prepared_gpu_events.keccak_events;
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let event_size = events.len();
+        let mut d_events = DevicePoolAllocation::<FFIKeccakPermuteEvent>::alloc_from_pool_async(
+            event_size, mem_pool, stream,
+        )
+        .unwrap();
+        unsafe {
+            let _ = cudaMemcpyAsync(
+                d_events.as_mut_c_void_ptr(),
+                events.as_c_void_ptr(),
+                event_size * size_of::<FFIKeccakPermuteEvent>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+        }
+
+        let num_rows = (event_size * NUM_ROUNDS).next_power_of_two();
+        let trace_size = num_rows * NUM_KECCAK_MEM_COLS;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+        unsafe {
+            cuda_precompile_keccak_generate_extra_record_and_main(
+                NUM_KECCAK_MEM_COLS,
+                event_size,
+                trace_size,
+                d_events.as_ptr() as *const _,
+                d_trace.as_mut_ptr() as *mut _,
+                d_byte_trace.as_mut_ptr() as *mut _,
+                stream.into(),
+            );
+        }
+        stream.synchronize().unwrap();
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[precompile-keccak-chip] generate_extra_record_and_main on GPU");
+
+        TraceData::Gpu(NUM_KECCAK_MEM_COLS, d_trace)
+    }
+
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            !record.keccak_events.is_empty()
+        }
+    }
 }
 
 impl<F: PrimeField32> KeccakPermuteChip<F> {
@@ -134,7 +218,7 @@ impl<F: PrimeField32> KeccakPermuteChip<F> {
     /// (no `preimage`), tagged with the VM context. `export_in` is set on the first step and
     /// `export` (p3's multiset-export flag, which p3's generator leaves at 0) on the final step:
     /// those rows carry the permutation's input (`a`) and output (`a'''`) onto the `KeccakPermute`
-    /// state bus (`constraint.rs`). Mirrored by `keccak_populate.hpp` on the GPU.
+    /// state bus (`constraint.rs`). Mirrored by `keccak_populate.cuh` on the GPU.
     pub fn populate_chunk(event: &KeccakPermuteEvent, rounds: &mut [F]) {
         let start_clk = event.clk;
         let chunk = event.chunk;

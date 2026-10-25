@@ -10,7 +10,6 @@ use pico_mle_core::{config::riscv_params_with_100_bits_security, StarkEngine};
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
-    emulator::opts::EmulatorOpts,
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::logger::setup_logger,
     mle::machine::riscv,
@@ -40,14 +39,8 @@ fn main() {
         program.pc_start,
     );
 
-    let emulated = riscv::emulate_with_opts(program, &stdin, EmulatorOpts::default())
-        .expect("emulation failed");
-    info!(
-        "emulated {} chunk(s) into {} record(s)",
-        emulated.chunks,
-        emulated.records.len()
-    );
-    let records = emulated.records;
+    let records = riscv::emulate(program, stdin, None);
+    info!("emulated {} chunk(s)", records.len());
     // Heights via `build_ctx` — the exact traces proving uses (covers every AIR incl.
     // precompiles / memory / byte / program, unlike `riscv_heights`' core-only view).
     let chips = RiscvChipType::<riscv::Kb>::all_chips();

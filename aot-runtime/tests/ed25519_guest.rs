@@ -21,7 +21,10 @@ use pico_vm::{
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
         opts::{EmulatorOpts, SnapshotMainMode, SplitOpts},
-        riscv::{chunk_split::ChunkSplitConfig, riscv_emulator::RiscvEmulator},
+        riscv::{
+            chunk_split::ChunkSplitConfig, public_values::RecordFinalPvsState,
+            riscv_emulator::RiscvEmulator,
+        },
         stdin::EmulatorStdin,
     },
 };
@@ -70,7 +73,12 @@ fn the_ed25519_guest_runs_the_same_under_aot() {
         .compile();
     let stdin = stdin();
 
-    let mut interpreter = RiscvEmulator::new_single::<KoalaBear>(program.clone(), opts(), None);
+    let mut interpreter = RiscvEmulator::new_single::<KoalaBear>(
+        program.clone(),
+        Arc::new(RecordFinalPvsState::default()),
+        opts(),
+        None,
+    );
     interpreter.write_stdin(&stdin);
     loop {
         let report = interpreter

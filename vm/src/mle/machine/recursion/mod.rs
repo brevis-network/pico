@@ -2,24 +2,25 @@
 //! Convert, Combine, Embed, and Compress; **Convert** and **Combine** are wired today (Embed and
 //! Compress are sibling drivers that consume the same helpers).
 //!
-//! - `chips` — the recursion chip set, keygen AIR refs, and proving-context construction. Generic
-//!   over the protocol config (`SC::F = Kb`): the AIRs and traces are pure KoalaBear, so the same
-//!   chip set serves both the inner Poseidon2-KoalaBear config and the outer BN254-hashed embed
-//!   config.
-//! - `layout` — stacking layout, constraint-DAG extraction, and VK-layout extraction. Bound to
-//!   [`Sc`] on purpose: these read the *child* proof being verified in-circuit, which is always an
-//!   inner-config recursion proof, whatever config the parent is proven under.
-//! - `witness` — WHIR query-index derivation, the proof → witness-stream serializer, and the
-//!   convert and combine setup drivers. Child-side, hence [`Sc`]-bound for the same reason.
-//! - `root_check` — the host-side acceptance checks on a complete root's public values. Config-free
-//!   (public values are `Kb` under any config), which is what lets combine and embed share them.
+//! - [`chips`] — the recursion chip set, keygen AIR refs, and proving-context construction.
+//! - [`layout`] — stacking layout, constraint-DAG extraction, and VK-layout extraction.
+//! - [`witness`] — WHIR query-index derivation, the proof → witness-stream serializer, and the
+//!   convert and combine setup drivers.
+//! - [`root_check`] — the host-side acceptance checks on a complete root's public values.
+//!   Config-free (public values are `Kb` under any config), which is what lets combine and embed
+//!   share them.
 
 mod chips;
+#[cfg(feature = "cuda-mle")]
+pub mod gpu;
 mod layout;
 mod root_check;
 mod witness;
 
-pub use super::riscv::{Engine, Kb, Pb, Sc};
+// Recursion (Convert / Combine) proves on CPU; `Sc` / `Kb` are shared with riscv.
+pub use super::riscv::{Kb, Sc};
+pub type Engine = pico_mle_cpu::KoalaBearPoseidon2CpuEngine;
+pub type Pb = pico_mle_cpu::CpuBackend<Sc>;
 
 pub use chips::{
     build_proving_ctx, check_recursion_tier, pad_convert_program, pad_recursion_program,
@@ -52,6 +53,19 @@ pub use witness::{
 /// Costs one full serialization of the proof; intended for once-per-run reporting, not a hot path.
 ///
 /// Logged on the `bench` target: the `RUST_LOG` these runs use filters this module's path out.
+/// The proof in `mle-core`'s canonical versioned wire format.
+///
+/// The same encoding [`log_proof_size`] measures, exposed for a caller that has to SHIP the proof
+/// rather than only report its size. Deliberately not the `serde` derive on `Proof`, whose own doc
+/// comment marks it as debug/interop only: bytes that leave this process have to carry the codec's
+/// version, or a later decode has nothing to key on.
+pub fn proof_wire_bytes(
+    proof: &pico_mle_core::protocol::proof::Proof<Sc>,
+) -> std::io::Result<Vec<u8>> {
+    use pico_mle_core::codec::Encode;
+    proof.encode_to_vec()
+}
+
 pub fn log_proof_size(label: &str, proof: &pico_mle_core::protocol::proof::Proof<Sc>) {
     use pico_mle_core::codec::Encode;
 

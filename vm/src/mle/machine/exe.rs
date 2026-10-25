@@ -42,6 +42,25 @@ pub struct RiscvVmVk {
 }
 
 impl RiscvVmVk {
+    /// [`Self::digest`] as `0x` followed by 64 hex characters: the eight field elements in order,
+    /// each as its canonical `u32` in big-endian.
+    ///
+    /// A stable spelling matters more than which spelling. This string is what a submission carries
+    /// as its `verifier_id` and what anyone checking those submissions compares against their own
+    /// build of the guest; upstream schemas do not constrain it and submission paths do not
+    /// validate it, so nothing but this function stops it from drifting. It lives here, beside the
+    /// digest, rather than at the call site, so there is exactly one spelling to drift from.
+    pub fn digest_hex(&self) -> String {
+        use p3_field::PrimeField32;
+        let digest = self.digest();
+        let mut out = String::with_capacity(2 + digest.len() * 8);
+        out.push_str("0x");
+        for element in digest.iter() {
+            out.push_str(&format!("{:08x}", element.as_canonical_u32()));
+        }
+        out
+    }
+
     /// Assemble from the guest program (entry pc + initial memory) and its RISC-V verifying key
     /// (program-table commitment).
     pub fn from_program_and_vk(

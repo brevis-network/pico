@@ -1,0 +1,124 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+package scheduler;
+
+// Global Scheduler service for distributed task assignment
+// Runs on Primary machine - Secondary connects via gRPC
+service Scheduler {
+  // Worker acquires next task from the scheduler
+  rpc AcquireTask(AcquireTaskRequest) returns (AcquireTaskResponse);
+  
+  // Worker reports a completed proof
+  rpc ReportProof(ReportProofRequest) returns (ReportProofResponse);
+  
+  // Primary registers chunk during emulation (only called by Primary's emulator)
+  rpc RegisterChunk(RegisterChunkRequest) returns (google.protobuf.Empty);
+  
+  // Mark emulation as finalized
+  rpc FinalizeEmulation(google.protobuf.Empty) returns (google.protobuf.Empty);
+  
+  // Check if all work is complete
+  rpc CheckComplete(google.protobuf.Empty) returns (CheckCompleteResponse);
+
+
+  // Secondary blocks until Primary stores the next block input (zero-delay)
+  rpc WaitForNextBlockInput(google.protobuf.Empty) returns (WaitForNextBlockInputResponse);
+
+  // Secondary reports its partial cross-chunk GCS digest so the Primary can close the sum.
+  //
+  // Neither machine's chunks sum to zero on their own -- only the total over both does -- so the
+  // host-side memory-consistency check has to be a cross-process reduction. The payload is a
+  // SepticDigest: two septic extension elements, 56 bytes, free next to the proof traffic. Kept
+  // rather than dropped in favour of the root proof's in-circuit closure because it is the cheap
+  // EARLY detector: without it an inconsistency surfaces only after the whole tree is built.
+  rpc ReportGcsDigest(ReportGcsDigestRequest) returns (google.protobuf.Empty);
+}
+
+// Request to acquire a task
+message AcquireTaskRequest {
+  string worker_id = 1;
+  // Block number the worker is currently working on
+  uint64 block_num = 2;
+}
+
+// Response containing the assigned task
+message AcquireTaskResponse {
+  oneof task {
+    ChunkProofTask chunk_task = 1;
+    CombineProofTask combine_task = 2;
+    WaitTask wait_task = 3;
+    CompleteTask complete_task = 4;
+  }
+  // Set of chunk indices that have been proven globally.
+  // Consumers use this to clean up RecordStore entries for chunks
+  // that have already been consumed and proven by some machine.
+  repeated uint64 proven_chunks = 5;
+}
+
+// Task: generate proof for a single chunk
+message ChunkProofTask {
+  uint64 chunk_idx = 1;
+}
+
+// Task: combine two adjacent proofs
+message CombineProofTask {
+  bytes left_proof_data = 1;
+  uint64 left_start = 2;
+  uint64 left_end = 3;
+  bytes right_proof_data = 4;
+  uint64 right_start = 5;
+  uint64 right_end = 6;
+}
+
+// No tasks available - wait and retry
+message WaitTask {}
+
+// All work complete
+message CompleteTask {}
+
+// Request to report a completed proof
+message ReportProofRequest {
+  string worker_id = 1;
+  uint64 start_chunk = 2;
+  uint64 end_chunk = 3;
+  bytes proof_data = 4;
+  // If true, scheduler will NOT queue the generated combine task, 
+  // but return it in response for local execution
+  bool keep_local = 5;
+}
+
+// Response after reporting proof
+message ReportProofResponse {
+}
+
+// Request to register a chunk during emulation
+message RegisterChunkRequest {
+  uint64 chunk_idx = 1;
+}
+
+// A machine's partial cross-chunk global cumulative sum.
+message ReportGcsDigestRequest {
+  // bincode-serialised SepticDigest, to avoid restating the field layout in two places and letting
+  // them drift -- the same reason proofs travel as opaque bytes here.
+  bytes digest = 1;
+  // Which machine sent it, for the error message when the sum does not close.
+  string worker_id = 2;
+}
+
+// Check completion response
+message CheckCompleteResponse {
+  bool completed = 1;
+  // Final proof data if completed
+  bytes final_proof_data = 2;
+  // Block number that was completed
+  uint64 completed_block = 3;
+}
+
+
+// Response for WaitForNextBlockInput (blocking RPC)
+message WaitForNextBlockInputResponse {
+  uint64 block_number = 1;
+  bytes input_data = 2;
+}

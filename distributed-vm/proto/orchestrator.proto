@@ -1,0 +1,26 @@
+syntax = "proto3";
+package orchestrator;
+
+service Orchestrator {
+  rpc RegisterReady(WorkerHello) returns (RegisterReply);
+
+  rpc WaitUntilReady(WaitReq) returns (WaitReadyReply);
+
+  rpc WaitUntilDone(WaitReq) returns (WaitDoneReply);
+}
+
+message WorkerHello {
+  string run_id    = 1;           // block_number
+  string worker_id = 2;           // machine index
+  optional uint32 deferred_index = 3; // deferred_index based on filename
+}
+
+message RegisterReply {
+  bool participate = 1;
+  optional uint32 assigned_idx = 2;     // deferred_index
+  string reason = 3;
+}
+
+message WaitReq          { string run_id = 1; }
+message WaitReadyReply   { bool ready    = 1; }
+message WaitDoneReply    { bool ok       = 1; string message = 2; }

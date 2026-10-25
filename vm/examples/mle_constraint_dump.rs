@@ -7,7 +7,7 @@
 //!
 //! Why this is not `compute_vk_pre_hash`: the lean pre-hash preimage carries `SystemParams`, whose
 //! `n_stack` is a function of `CHUNK_SIZE`, so two branches at different operating points get
-//! different pre-hashes even with byte-identical constraints — and `main` and `gpu-base` are not
+//! different pre-hashes even with byte-identical constraints — and the CPU and GPU provers are not
 //! at the same operating point. See `pico_mle_core::keygen::compute_constraint_dump`.
 //!
 //! The dump itself lives in `pico_vm::mle::machine::riscv::riscv_constraint_dump`, shared with the

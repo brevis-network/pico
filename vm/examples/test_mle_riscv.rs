@@ -48,7 +48,7 @@ use pico_vm::{
         },
     },
     configs::stark_config::KoalaBearPoseidon2,
-    emulator::{opts::EmulatorOpts, riscv::record::EmulationRecord},
+    emulator::riscv::record::EmulationRecord,
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::{logger::setup_logger, septic::SepticDigest},
     mle::machine::riscv::{self, RiscvProof, VerifyRiscvError},
@@ -1157,17 +1157,11 @@ fn main() {
     let compiler = Compiler::new(SourceType::RISCV, elf).expect("failed to parse ELF");
     let program = compiler.compile();
 
-    let emulated = riscv::emulate_with_opts(program.clone(), &stdin, EmulatorOpts::default())
-        .expect("emulation failed");
-    info!(
-        "emulated {} chunk(s) into {} record(s)",
-        emulated.chunks,
-        emulated.records.len()
-    );
-    let records = emulated.records;
+    let records = riscv::emulate(program.clone(), stdin, None);
+    info!("emulated {} chunk(s)", records.len());
 
-    // 22 covers `EmulatorOpts::default`'s chunk, which is clamped to the 2^22 event buffers.
-    // Raising `CHUNK_SIZE` past that needs this raised with it.
+    // 22 covers the default chunk, which `emulate` clamps to the 2^22 event buffers. Raising
+    // `CHUNK_SIZE` past that needs this raised with it.
     riscv::debug_records(program.clone(), &records, 22, false);
     info!("all chunks passed MLE debug (constraints + interactions) ✓");
 

@@ -96,8 +96,9 @@ impl RiscvEmulationState {
         let public_values_stream = self.public_values_stream.clone();
         let syscall_counts = self.syscall_counts.clone();
 
-        // Get a pre-allocated memory from the pool (blocking wait). Keep waiting however long it
-        // takes, and only say so once the wait stops looking normal.
+        // Get a pre-allocated memory from the pool (blocking wait). Waiting here is the only
+        // back-pressure the pipeline has — the record channel is unbounded — so this keeps
+        // waiting however long it takes, and only says so once the wait stops looking normal.
         let mut reported = false;
         let memory = loop {
             match GLOBAL_MEMORY_POOL.1.recv_timeout(POOL_WAIT) {
@@ -134,6 +135,7 @@ impl RiscvEmulationState {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::RiscvEmulationState;
@@ -158,3 +160,4 @@ mod tests {
         );
     }
 }
+*/

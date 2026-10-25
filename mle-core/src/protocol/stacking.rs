@@ -586,7 +586,7 @@ mod tests {
     /// contributes points (`|I| > 0`; a zero-interaction trace injects an empty set). Both must
     /// hold for the round count the verifier reconstructs, or the GKR circuit is mis-shaped.
     #[test]
-    fn present_gkr_shape_satisfies_swirl_injection_bounds() {
+    fn present_gkr_shape_satisfies_logup_injection_bounds() {
         for l_skip in 0..8usize {
             for traces in [
                 vec![(1usize, l_skip)], // total is an exact power of two

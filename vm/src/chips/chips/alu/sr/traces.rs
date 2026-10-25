@@ -2,13 +2,18 @@ use crate::{
     chips::{
         chips::{alu::event::AluEvent, byte::event::ByteRecordBehavior},
         gadgets::msb::U16MSBGadget,
+        trace::TraceData,
         utils::next_power_of_two,
     },
     compiler::{
         riscv::{opcode::Opcode, program::Program},
         word::Word,
     },
-    emulator::riscv::record::EmulationRecord,
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord},
+    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
     iter::{IndexedPicoIterator, PicoIterator, PicoSlice, PicoSliceMut},
     machine::{
         chip::ChipBehavior,
@@ -16,10 +21,19 @@ use crate::{
     },
     primitives::consts::{u64_to_u16_limbs, SR_DATAPAR, WORD_SIZE},
 };
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+use cudart_sys::*;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+use pico_gpu_api::cuda_sr_generate_extra_record_and_main_u64;
 use std::{borrow::BorrowMut, marker::PhantomData};
+use tracing::info;
 
 use super::columns::{ShiftRightValueCols, NUM_SLR_COLS, NUM_SLR_VALUE_COLS};
 
@@ -35,6 +49,7 @@ impl<F: Field> BaseAir<F> for ShiftRightChip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
     type Record = EmulationRecord;
+    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -108,6 +123,78 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
 
     fn local_only(&self) -> bool {
         true
+    }
+
+    fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
+        counter.num_shift_right_events += record.shift_right_events.len();
+    }
+
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        record.event_counter.num_shift_right_events > 0
+    }
+
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        _prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let events = &input.shift_right_events;
+
+        let nrows = events.len().div_ceil(SR_DATAPAR);
+        let log2_nrows = input.shape_chip_size(&self.name());
+        let padded_nrows = match log2_nrows {
+            Some(log2_nrows) => 1 << log2_nrows,
+            None => next_power_of_two(nrows, None),
+        };
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+        // TODO: check error
+        // gpu generate trace
+        let event_size = events.len();
+        let mut d_events =
+            DevicePoolAllocation::<AluEvent>::alloc_from_pool_async(event_size, mem_pool, stream)
+                .unwrap();
+        unsafe {
+            let _ = cudaMemcpyAsync(
+                d_events.as_mut_c_void_ptr(),
+                events.as_ptr() as *const _,
+                event_size * size_of::<AluEvent>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+        }
+        let trace_size = padded_nrows * NUM_SLR_COLS;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+        unsafe {
+            cuda_sr_generate_extra_record_and_main_u64(
+                NUM_SLR_VALUE_COLS,
+                event_size,
+                trace_size,
+                d_events.as_ptr() as *const _,
+                d_trace.as_mut_ptr() as *mut _,
+                d_byte_trace.as_mut_ptr() as *mut _,
+                stream.into(),
+            );
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[slr-chip] generate_extra_record_and_main on GPU");
+
+        TraceData::Gpu(NUM_SLR_COLS, d_trace)
     }
 }
 

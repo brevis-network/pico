@@ -30,12 +30,14 @@ use crate::{
             },
         },
         precompiles::checked_u64_to_u32,
+        trace::TraceData,
         utils::pad_rows_fixed,
     },
     compiler::{riscv::program::Program, word::Word},
     emulator::{
         record::RecordBehavior,
         riscv::{
+            ffi::FFIEmulationRecord,
             record::EmulationRecord,
             syscalls::{
                 precompiles::{edwards::event::EllipticCurveAddEvent, PrecompileEvent},
@@ -43,6 +45,7 @@ use crate::{
             },
         },
     },
+    instances::preparer::{gpu_add_host_byte_lookups, PreallocatedGpuMemory, PreparedGpuEvents},
     machine::{
         builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
@@ -156,7 +159,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
     for EdAddAssignChip<F, E>
 {
     type Record = EmulationRecord;
-
+    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -266,6 +269,41 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
 
     fn local_only(&self) -> bool {
         true
+    }
+
+    /// The GPU prover generates this trace on the host.
+    ///
+    /// `cuda_edwards_add_ed25519_generate_extra_record_and_main` is stale: its kernel writes the
+    /// columns this chip had before its RV64 port (32-bit memory words, no address gadgets, no
+    /// `x3_range`/`y3_range`), so it cannot fill these and is not called. `generate_main` pushes
+    /// exactly the byte lookups `extra_record` would, so its output record is the one source of
+    /// them; they are added to the device byte table here because no kernel puts them there.
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        _device_id: usize,
+        input: &Self::Record,
+        _prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let mut output = EmulationRecord::default();
+        let trace = self.generate_main(input, &mut output);
+        gpu_add_host_byte_lookups(
+            std::mem::take(&mut output.byte_lookups),
+            preallocated_gpu_memory,
+        )
+        .expect("edwards add: adding the byte lookups to the device table failed");
+        TraceData::Cpu(trace)
+    }
+
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            record
+                .event_counter
+                .get_precompile_event_num(SyscallCode::ED_ADD)
+                > 0
+        }
     }
 }
 

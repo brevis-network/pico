@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+package aggregator;
+
+service Aggregator {
+  // schedule to prove with the aggregation input
+  rpc proveAggregation(ProveAggregationRequest) returns (google.protobuf.Empty);
+}
+
+message ProveAggregationRequest {
+  // block number to prove
+  uint64 block_number = 1;
+
+  // total number of subblocks
+  uint32 num_subblocks = 2;
+
+  // bincode serialized subblock public values (original type: Vec<Vec<u8>>)
+  bytes subblock_public_values = 3;
+
+  // bincode serialized stdin builder: final_aggregator_stdin_builder.bin
+  bytes input = 4;
+}

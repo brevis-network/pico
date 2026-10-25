@@ -234,7 +234,7 @@ mod tests {
             public_values: &empty_f,
             failures: Vec::new(),
             scopes: Vec::new(),
-            // Only this branch's folder carries it, so upstream's copy of this test omits it.
+            // Only this folder carries it, so the original copy of this test omits it.
             constraint_count: 0,
         };
 

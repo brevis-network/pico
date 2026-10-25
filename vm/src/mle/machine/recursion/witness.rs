@@ -125,7 +125,7 @@ mod flags {
 
     // `MLE_REC_PARALLEL_CHILDREN` interprets a combine node's two children concurrently
     // (`Runtime::run_split`). **On by default**, `=0` puts the node back on one thread. The
-    // record is the same either way — that is the gate the change is held to, and gpu-base's
+    // record is the same either way — that is the gate the change is held to, and
     // `rec-emulate-replay` checks it by digest on a dumped node. A shipped path, not a
     // measurement: the module header's count of three does not include it.
     flag_on_by_default!(REC_PARALLEL_CHILDREN, "MLE_REC_PARALLEL_CHILDREN");
@@ -374,9 +374,8 @@ fn walker_xcheck(
 /// The trade `walker = true` accepts: the `verify` arm's verdict is thrown away, but reaching it at
 /// all means the host rejected a bad child proof HERE. The walker arm does not, so a prover-side
 /// defect first surfaces at the recursion circuit's in-circuit `assert_f_eq`, which is far harder
-/// to localise. There is no compensating host-side check on this branch: the `MLE_VERIFY=1`
-/// escape hatch this note used to point at lived in the distributed driver, which went with the
-/// FRI multi-machine pipeline.
+/// to localise. `MLE_VERIFY=1` (read in `distributed-vm`) restores a host-side verify of every
+/// chunk proof and is the compensating check when one is wanted.
 fn derive_whir_query_indices_with(
     riscv_vk: &MultiStarkVerifyingKey<Sc>,
     proof: &Proof<Sc>,

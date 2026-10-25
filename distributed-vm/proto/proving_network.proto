@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+
+package proving_network;
+
+service ProvingNetwork {
+  rpc ProveTask(ProveTaskRequest) returns(ProveTaskResponse);
+}
+
+message ProveTaskRequest { repeated string inputs = 1; }
+
+message ProveTaskResponse { string task_id = 1; }

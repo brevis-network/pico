@@ -6,6 +6,8 @@ use crate::{
     },
     compiler::riscv::{instruction::Instruction, opcode::Opcode},
     emulator::riscv::{
+        alu_event_pool::AluEventBuffer,
+        cpu_event_pool::CpuEventBuffer,
         emulator::EmulationError,
         event_types::{RvAddr, RvChunk, RvClk, RvValue},
         record::MemoryAccessRecord,
@@ -21,6 +23,8 @@ use hashbrown::HashMap;
 pub enum RiscvEmulatorMode {
     /// Simple mode for only executing the instructions without trace generation
     Simple,
+    /// Light trace mode for recording without CPU/ALU event generation
+    LightTrace,
     /// Normal trace mode for executing with trace generation
     Trace,
     /// Syscall unconstrained mode
@@ -37,7 +41,14 @@ impl PartialEq for RiscvEmulatorMode {
 }
 
 impl RiscvEmulatorMode {
+    /// Identify if the mode should emit records.
+    #[inline]
+    pub fn is_recording(&self) -> bool {
+        matches!(self, Self::Trace | Self::LightTrace)
+    }
+
     /// Identify if it's the unconstrained mode.
+    #[inline]
     pub fn is_unconstrained(&self) -> bool {
         matches!(self, Self::Unconstrained(_))
     }
@@ -48,6 +59,7 @@ impl RiscvEmulatorMode {
         if let Self::Unconstrained(state) = self {
             let mode_to_restore = match state.prev_mode {
                 EmulatorMode::Trace => Self::Trace,
+                EmulatorMode::LightTrace => Self::LightTrace,
                 EmulatorMode::Simple => Self::Simple,
             };
 
@@ -64,6 +76,7 @@ impl RiscvEmulatorMode {
     }
 
     /// Emit a CPU event.
+    #[inline]
     #[allow(clippy::too_many_arguments)]
     pub fn emit_cpu(
         &self,
@@ -78,8 +91,8 @@ impl RiscvEmulatorMode {
         instruction: Instruction,
         memory_record: MemoryAccessRecord,
         memory_store_value: Option<RvValue>,
-        events: &mut Vec<CpuEvent>,
-        mem_read_write: &mut Vec<usize>,
+        cpu_events: &mut CpuEventBuffer,
+        memory_read_write_event_indices: &mut Vec<usize>,
     ) {
         // TODO: Remove Self::Simple
         if matches!(self, Self::Trace | Self::Simple) {
@@ -98,13 +111,14 @@ impl RiscvEmulatorMode {
             );
 
             if instruction.is_memory_instruction() {
-                mem_read_write.push(events.len());
+                memory_read_write_event_indices.push(cpu_events.len());
             }
-            events.push(event);
+            cpu_events.push(event).unwrap();
         }
     }
 
     /// Emit a ALU event.
+    #[inline]
     ///
     /// `op_a` is the destination register index. When it is `x0` the result is discarded
     /// by the register file, and the CPU AIR correspondingly does **not** dispatch an ALU
@@ -132,7 +146,43 @@ impl RiscvEmulatorMode {
         }
     }
 
+    /// Emit a ALU event to a pinned memory buffer (for fast H2D transfer).
+    // allow: domain-complex signature; each arg is an independent handle/config
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub fn emit_alu_pinned(
+        &self,
+        op_a: u8,
+        clk: RvClk,
+        a: RvValue,
+        b: RvValue,
+        c: RvValue,
+        opcode: Opcode,
+        is_imm: bool,
+        events: &mut AluEventBuffer,
+    ) {
+        // Same `x0` rule as `emit_alu` -- the CPU AIR does not dispatch an ALU lookup when the
+        // destination is `x0`, so an event here would leave the ALU chip supplying a row nobody
+        // looks up. This path feeds the GPU prover, which shares that AIR.
+        if op_a == 0 {
+            return;
+        }
+        if let Self::Trace = self {
+            let event = AluEvent {
+                clk,
+                opcode,
+                a,
+                b,
+                c,
+                is_imm,
+                is_cmp: false,
+            };
+            let _ = events.push_alu(event);
+        }
+    }
+
     /// Add a memory local event.
+    #[inline]
     pub fn add_memory_local_event(
         &self,
         addr: u64,
@@ -141,13 +191,13 @@ impl RiscvEmulatorMode {
         events: &mut HashMap<u64, MemoryLocalEvent>,
     ) {
         // Self::Simple matching only for syscall emulate in simple mode
-        if matches!(self, Self::Trace | Self::Simple) {
+        if matches!(self, Self::Trace | Self::LightTrace | Self::Simple) {
             events
                 .entry(addr)
                 .and_modify(|e| {
                     e.final_mem_access = record;
                 })
-                .or_insert(MemoryLocalEvent {
+                .or_insert_with(|| MemoryLocalEvent {
                     addr,
                     initial_mem_access: prev_record,
                     final_mem_access: record,
@@ -164,7 +214,11 @@ impl RiscvEmulatorMode {
         from: &mut HashMap<u64, MemoryLocalEvent>,
         to: &mut Vec<MemoryLocalEvent>,
     ) {
-        if matches!(self, Self::Trace | Self::Simple) {
+        if matches!(self, Self::Trace | Self::LightTrace | Self::Simple) {
+            // `to` is freshly created here, so reserve the full drained size up front to avoid
+            // repeated grow-and-memmove while pushing (this map can hold hundreds of thousands
+            // of local-memory events at end-of-emulation).
+            to.reserve(from.len());
             for (_, event) in from.drain() {
                 to.push(event);
             }
@@ -172,6 +226,7 @@ impl RiscvEmulatorMode {
     }
 
     /// Init the specified memory access.
+    #[inline]
     pub fn init_memory_access(&self, output: &mut MemoryAccessRecord) {
         if let Self::Trace = self {
             *output = MemoryAccessRecord::default();
@@ -179,6 +234,7 @@ impl RiscvEmulatorMode {
     }
 
     /// Set the specified memory access.
+    #[inline]
     pub fn set_memory_access(
         &self,
         position: MemoryAccessPosition,

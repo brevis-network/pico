@@ -798,7 +798,7 @@ mod tests {
 
     /// The shipped artifact loads under this binary's shape config, and the root file beside it
     /// names the root it carries. A machine or config change that invalidates the whitelist
-    /// fails here, in CI, rather than at a prover's first whitelist lookup.
+    /// fails here rather than at a prover's first whitelist lookup.
     #[test]
     fn the_shipped_artifact_matches_this_binary() {
         use p3_field::PrimeField32;

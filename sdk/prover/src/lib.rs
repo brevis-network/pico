@@ -1,5 +1,8 @@
 //! Take an ELF and an input; get back a verified proof.
 //!
+//! On this branch it proves on the CPU, but the emulator's event buffers are CUDA pinned memory, so
+//! it still needs a CUDA driver.
+//!
 //! ```no_run
 //! use pico_prover::{Prover, Stdin};
 //!
@@ -67,7 +70,7 @@
 //! | `RECURSION_EARLY_EXIT_TS` | recursion emulation | **yes, and it breaks proving**: it truncates the recursion run, and a value that does not parse aborts |
 //! | `MLE_WITNESS_HASH`, `MLE_TRANSCRIPT_PROF`, `MLE_WALKER_XCHECK` | recursion witness generation | **yes**, and deliberately |
 //! | `MLE_REC_PARALLEL_CHILDREN` | recursion node interpretation | **yes**, and deliberately |
-//! | `MEMORY_POOL_SIZE` | the AOT pipeline's memory pool | **yes, with the `aot` feature**: the pool holds this many emulator memories, 16 unset, and so caps the replay workers running at once below `ProverBuilder::emulation_workers`. `0` would leave it empty, so `build` and `execute` refuse it |
+//! | `MEMORY_POOL_SIZE` | the AOT pipeline's memory pool | **yes, with the `aot` feature**: the pool holds this many emulator memories. A replay worker keeps one between its batches, so the run needs one per worker plus one per segment of the batch being cut: unset, it is raised to that, and a smaller value is refused by `build` and `execute` |
 //! | `MEMORY_POOL_EAGER`, `MEMORY_POOL_LOW_WATER`, `MEMORY_RECYCLER_THREADS` | the AOT pipeline's memory pool | **yes, with the `aot` feature**: how the pool is filled and recycled. A setting that leaves the pool empty, or `MEMORY_RECYCLER_THREADS=0`, which never returns a memory to it, is refused by `build` and `execute` |
 //! | `MLE_SPLIT_REPLAY`, `MLE_SPLIT_CHUNKS`, `NUM_THREADS`, `PROVER_COUNT` | the AOT snapshot thread | **yes, with the `aot` feature**: whether the replay of the leading chunks is cut into segments, which the workers fold back into one record per chunk. `NUM_THREADS` and `PROVER_COUNT` cut only together, and neither sets the worker count. A cut into more segments than the pool holds is refused by `build` and `execute` |
 //! | `MLE_RECORD_DIGEST` | the AOT pipeline's workers | with the `aot` feature, as a diagnostic only: `1` logs a digest of every record |

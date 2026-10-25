@@ -1,0 +1,89 @@
+[package]
+name = "distributed-vm"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "mle-single-node"
+path = "bin/mle_single_node.rs"
+
+[[bin]]
+name = "mle-ethproofs-single-node"
+path = "bin/mle_ethproofs_single_node.rs"
+
+[[bin]]
+name = "mle-ethproofs-vk-bundle"
+path = "bin/mle_ethproofs_vk_bundle.rs"
+
+[[bin]]
+name = "ethproofs-client"
+path = "bin/ethproofs_client.rs"
+
+[[bin]]
+name = "proving-network-client"
+path = "bin/proving_network_client.rs"
+
+[[bin]]
+name = "proof-test-server"
+path = "bin/proof_test_server.rs"
+
+[[bin]]
+name = "bearer-token-gen"
+path = "bin/bearer_token_gen.rs"
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+bincode.workspace = true
+clap.workspace = true
+crossbeam.workspace = true
+core_affinity.workspace = true
+cudart.workspace = true
+dashmap.workspace = true
+dotenvy.workspace = true
+log.workspace = true
+object_store = { workspace = true, optional = true }
+p3-field.workspace = true
+p3-koala-bear.workspace = true
+p3-poseidon2.workspace = true
+p3-maybe-rayon.workspace = true
+pico-perf.workspace = true
+pico-sdk.workspace = true
+pico-vm.workspace = true
+pico-aot-runtime = { workspace = true, optional = true }
+pico-aot-dispatch = { path = "../aot-generated", optional = true }
+prost-types.workspace = true
+prost.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
+thiserror.workspace = true
+tokio-stream.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+zstd.workspace = true
+parking_lot = "0.12.4"
+once_cell.workspace = true
+
+[build-dependencies]
+tonic-build.workspace = true
+
+[features]
+gpu = ["pico-vm/gpu"]
+cuda-mle = ["pico-vm/cuda-mle"]
+tcmalloc = ["pico-vm/tcmalloc"]
+jemalloc = ["pico-vm/jemalloc"]
+bigint-rug = ["pico-vm/bigint-rug", "pico-aot-dispatch?/bigint-rug"]
+aot-emulator = ["pico-vm/aot-emulator", "dep:pico-aot-dispatch", "dep:pico-aot-runtime"]
+mmap-memory = ["pico-vm/mmap-memory", "pico-aot-dispatch?/mmap-memory"]
+s3-storage = ["object_store"]
+local_test = []
+# Two-round chunk assignment: Primary 0-7,16-23; Secondary 8-15,24-31; Dynamic 32+
+two-round-chunks = ["pico-vm/two-round-chunks"]
+# Chunk task priority (enabled by default)
+chunk-priority = []
+default = []

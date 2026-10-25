@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+package proof_transfer;
+
+// Service for transferring proofs between Primary and Secondary machines
+// in the two-machine distributed proof system
+service ProofTransfer {
+  // Secondary machine sends sub_final_combine_proof to Primary
+  rpc SendSubFinalCombineProof(SubFinalCombineProofRequest) returns (google.protobuf.Empty);
+}
+
+// Request to send sub_final_combine_proof from Secondary to Primary
+message SubFinalCombineProofRequest {
+  // Task unit index (n=1,3,5... for Secondary machine)
+  uint64 task_unit_index = 1;
+  // First chunk covered by this proof (inclusive)
+  uint64 start_chunk = 2;
+  // Last chunk covered by this proof (inclusive)
+  uint64 end_chunk = 3;
+  // Serialized proof data (bincode serialized MetaProof)
+  bytes proof_data = 4;
+}

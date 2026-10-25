@@ -32,6 +32,7 @@ impl UnconstrainedState {
     pub fn new(rt: &mut RiscvEmulator) -> Self {
         let prev_mode = match &rt.mode {
             RiscvEmulatorMode::Simple => EmulatorMode::Simple,
+            RiscvEmulatorMode::LightTrace => EmulatorMode::LightTrace,
             RiscvEmulatorMode::Trace => EmulatorMode::Trace,
             prev_mode => panic!(
                 "Unsupported previous emulator mode enters the Unconstrained block: {prev_mode:?}",

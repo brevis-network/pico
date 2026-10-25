@@ -7,6 +7,355 @@ pub mod traces;
 #[derive(Default)]
 pub struct MemoryLocalChip<F>(PhantomData<F>);
 
+#[cfg(test)]
+mod tests {
+    use crate::{
+        chips::{
+            chips::{
+                byte::{columns::NUM_BYTE_MULT_COLS, ByteChip},
+                events::{MemoryLocalEvent, MemoryRecord},
+                riscv_memory::{
+                    event::FfiMemoryLocalEvent,
+                    local::{
+                        columns::{NUM_MEMORY_LOCAL_INIT_COLS, NUM_SINGLE_MEMORY_LOCAL_COLS},
+                        MemoryLocalChip,
+                    },
+                },
+            },
+            tests::init_test_stream,
+            trace::TraceData,
+            utils::next_power_of_two,
+        },
+        cuda_adaptor::resource_pool::mem_pool::get_global_mem_pool,
+        emulator::riscv::record::EmulationRecord,
+        instances::{
+            compiler::shapes::riscv_shape::RiscvPadShape,
+            preparer::{
+                gpu_allocate_and_copy_global_events, gpu_allocate_byte_trace,
+                gpu_finalize_byte_trace, precompute_event_size, verify_global_events, EventCounter,
+                PreallocatedGpuMemory, PreparedGpuEvents,
+            },
+        },
+        machine::chip::ChipBehavior,
+        primitives::consts::LOCAL_MEMORY_DATAPAR,
+    };
+    use cudart::{memory_pools::DevicePoolAllocation, stream::CudaStream};
+    use cudart_sys::{cudaMemcpyAsync, cudaMemsetAsync, CudaMemoryCopyKind};
+    use p3_field::PrimeCharacteristicRing;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::dense::RowMajorMatrix;
+    use pico_gpu_api::cuda_memory_local_generate_extra_record_and_main_u64;
+    use rand::{rng, RngExt};
+    use std::{mem::size_of, sync::LazyLock, time::Instant};
+
+    type F = KoalaBear;
+
+    static GPU_TEST_RECORD: LazyLock<EmulationRecord> = LazyLock::new(|| generate_record(1 << 16));
+
+    /// Random entries at addresses outside the (empty) default image; every fourth one starts
+    /// at zero and so is fresh (`has_initial = 0`, one Global event instead of two), which is
+    /// what exercises the kernel's `global_slot` placement against the host's layout.
+    fn generate_record(size: usize) -> EmulationRecord {
+        let mut rng = rng();
+        let events: Vec<MemoryLocalEvent> = (0..size)
+            .map(|i| {
+                let addr = (i as u64 + 1) * 8 + 0x100;
+                MemoryLocalEvent {
+                    addr,
+                    initial_mem_access: MemoryRecord {
+                        chunk: 0,
+                        timestamp: 0,
+                        value: if i % 4 == 3 { 0 } else { rng.random() },
+                    },
+                    final_mem_access: MemoryRecord {
+                        chunk: 0,
+                        timestamp: (size as u32) + (i as u32),
+                        value: rng.random(),
+                    },
+                }
+            })
+            .collect();
+
+        let mut record = EmulationRecord::default();
+        record.cpu_local_memory_access = events;
+        record
+    }
+
+    fn cpu_generate_main(chip: &MemoryLocalChip<F>, input: &EmulationRecord) -> RowMajorMatrix<F> {
+        chip.generate_main(input, &mut EmulationRecord::default())
+    }
+
+    fn gpu_generate_extra_record_and_main(
+        chip: &MemoryLocalChip<F>,
+        input: &EmulationRecord,
+        event_counter: &EventCounter,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+        stream: &CudaStream,
+    ) -> RowMajorMatrix<F> {
+        let prepared_gpu_events = PreparedGpuEvents::new(input, event_counter.clone());
+
+        let trace = chip.gpu_generate_extra_record_and_main(
+            0,
+            input,
+            &prepared_gpu_events,
+            preallocated_gpu_memory,
+        );
+        trace.to_host(stream)
+    }
+
+    #[test]
+    fn test_memory_local_gpu_generate_extra_record_and_main() {
+        let original_record = LazyLock::force(&GPU_TEST_RECORD).clone();
+
+        assert!(
+            !original_record.cpu_local_memory_access.is_empty(),
+            "No memory local events generated"
+        );
+
+        let chip = MemoryLocalChip::<F>::default();
+
+        let mut complete_record = original_record.clone();
+        chip.extra_record(&original_record, &mut complete_record);
+
+        let mut counted_record = original_record.clone();
+        let mut event_counter = precompute_event_size::<F>(&mut counted_record);
+        event_counter.num_poseidon2_events = complete_record.poseidon2_events.len();
+        event_counter.assert_event_counts_match(&complete_record);
+
+        let log_rows = 15;
+        complete_record.shape = Some(RiscvPadShape::default());
+        complete_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), log_rows);
+        let cpu_trace = cpu_generate_main(&chip, &complete_record);
+
+        // Generate CPU byte trace for comparison
+        let byte_chip = ByteChip::<F>::default();
+        let cpu_byte_trace =
+            byte_chip.generate_main(&complete_record, &mut EmulationRecord::default());
+
+        counted_record.shape = Some(RiscvPadShape::default());
+        counted_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), log_rows);
+
+        let stream = init_test_stream();
+        let prepared_gpu_events = PreparedGpuEvents::new(&counted_record, event_counter.clone());
+        let mut preallocated_gpu_memory = PreallocatedGpuMemory {
+            d_global_events: gpu_allocate_and_copy_global_events(
+                &stream,
+                0,
+                &counted_record,
+                &prepared_gpu_events,
+            )
+            .unwrap(),
+            d_byte_trace: gpu_allocate_byte_trace(&stream, 0).unwrap(),
+            ..Default::default()
+        };
+        let gpu_trace = gpu_generate_extra_record_and_main(
+            &chip,
+            &counted_record,
+            &event_counter,
+            &mut preallocated_gpu_memory,
+            &stream,
+        );
+
+        let non_zero_main = cpu_trace.values.iter().filter(|&&v| v != F::ZERO).count();
+        assert!(
+            !cpu_trace.values.is_empty(),
+            "CPU trace should not be empty"
+        );
+        assert!(non_zero_main > 0, "CPU trace should not be all zeros");
+
+        assert_eq!(cpu_trace, gpu_trace, "CPU and GPU traces do not match");
+
+        verify_global_events(
+            &preallocated_gpu_memory.d_global_events,
+            &complete_record,
+            &stream,
+            0,
+            event_counter.num_global_lookup_events,
+        );
+
+        // Verify byte trace (GPU == CPU)
+        gpu_finalize_byte_trace(&stream, &mut preallocated_gpu_memory).unwrap();
+        stream.synchronize().unwrap();
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.take().unwrap();
+        let host_gpu_byte_trace =
+            TraceData::<F>::Gpu(NUM_BYTE_MULT_COLS, d_byte_trace).to_host(&stream);
+        assert_eq!(
+            host_gpu_byte_trace.values, cpu_byte_trace.values,
+            "CPU and GPU byte traces do not match"
+        );
+
+        let non_zero_byte = cpu_byte_trace
+            .values
+            .iter()
+            .filter(|&&v| v != F::ZERO)
+            .count();
+        assert!(
+            non_zero_byte > 0,
+            "byte trace is all zeros — both CPU and GPU may be broken"
+        );
+
+        println!(
+            "memory_local: main trace non-zero: {}/{}, byte trace non-zero: {}/{}",
+            non_zero_main,
+            cpu_trace.values.len(),
+            non_zero_byte,
+            cpu_byte_trace.values.len(),
+        );
+    }
+
+    #[test]
+    fn bench_memory_local_cpu_vs_gpu() {
+        let warmup_sizes: Vec<usize> = vec![1 << 16];
+        let bench_sizes: Vec<usize> = vec![1 << 16, 1 << 18, 1 << 20, 1 << 22];
+
+        println!("\n{:-<60}", "");
+        println!(
+            "{:<12} {:>12} {:>12} {:>12}",
+            "events", "cpu (ms)", "gpu (ms)", "speedup"
+        );
+        println!("{:-<60}", "");
+
+        for (is_warmup, &n) in warmup_sizes
+            .iter()
+            .map(|n| (true, n))
+            .chain(bench_sizes.iter().map(|n| (false, n)))
+        {
+            let original_record = generate_record(n);
+            let chip = MemoryLocalChip::<F>::default();
+
+            let mut complete_record = original_record.clone();
+            chip.extra_record(&original_record, &mut complete_record);
+            let mut counted_record = original_record.clone();
+            let mut event_counter = precompute_event_size::<F>(&mut counted_record);
+            event_counter.num_poseidon2_events = complete_record.poseidon2_events.len();
+
+            let log2 = (n as f64).log2().ceil() as usize + 1;
+            complete_record.shape = Some(RiscvPadShape::default());
+            complete_record
+                .shape
+                .as_mut()
+                .unwrap()
+                .inner
+                .insert(chip.name(), log2);
+            counted_record.shape = Some(RiscvPadShape::default());
+            counted_record
+                .shape
+                .as_mut()
+                .unwrap()
+                .inner
+                .insert(chip.name(), log2);
+
+            let cpu_start = Instant::now();
+            let cpu_trace = cpu_generate_main(&chip, &complete_record);
+            let cpu_ms = cpu_start.elapsed().as_secs_f64() * 1000.0;
+
+            // GPU: alloc + H2D before timer (kernel-only timing, apple-to-apple with CPU)
+            let stream = init_test_stream();
+            let prepared_gpu_events =
+                PreparedGpuEvents::new(&counted_record, event_counter.clone());
+            let sync_mem_pool = get_global_mem_pool(0);
+            let mem_pool = &sync_mem_pool.0;
+            let mut preallocated_gpu_memory = PreallocatedGpuMemory {
+                d_global_events: gpu_allocate_and_copy_global_events(
+                    &stream,
+                    0,
+                    &counted_record,
+                    &prepared_gpu_events,
+                )
+                .unwrap(),
+                d_byte_trace: gpu_allocate_byte_trace(&stream, 0).unwrap(),
+                ..Default::default()
+            };
+            stream.synchronize().unwrap();
+
+            let events = &prepared_gpu_events.memory_local_events;
+            let nb_rows = events.len().div_ceil(LOCAL_MEMORY_DATAPAR);
+            let padded_nb_rows = next_power_of_two(nb_rows, Some(log2));
+            let trace_size = padded_nb_rows * NUM_MEMORY_LOCAL_INIT_COLS;
+            let event_size = events.len();
+            let mut d_trace = DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(
+                trace_size, mem_pool, &stream,
+            )
+            .unwrap();
+            unsafe {
+                let _ = cudaMemsetAsync(
+                    d_trace.as_mut_ptr() as *mut _,
+                    0,
+                    trace_size * size_of::<KoalaBear>(),
+                    stream.into(),
+                );
+            }
+            let mut d_events = DevicePoolAllocation::<FfiMemoryLocalEvent>::alloc_from_pool_async(
+                event_size, mem_pool, &stream,
+            )
+            .unwrap();
+            unsafe {
+                let _ = cudaMemcpyAsync(
+                    d_events.as_mut_ptr() as *mut std::ffi::c_void,
+                    events.as_ptr() as *const std::ffi::c_void,
+                    event_size * size_of::<FfiMemoryLocalEvent>(),
+                    CudaMemoryCopyKind::HostToDevice,
+                    stream.into(),
+                );
+            }
+            stream.synchronize().unwrap();
+
+            let gpu_start = Instant::now();
+            let d_global_events = preallocated_gpu_memory.d_global_events.as_mut().unwrap();
+            let start_index = prepared_gpu_events
+                .event_counter
+                .start_indices
+                .memory_local_extra_global_start_index;
+            let d_byte_trace_alloc = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+            unsafe {
+                cuda_memory_local_generate_extra_record_and_main_u64(
+                    NUM_SINGLE_MEMORY_LOCAL_COLS,
+                    event_size,
+                    trace_size,
+                    d_events.as_ptr() as *const _,
+                    d_trace.as_mut_ptr() as *mut _,
+                    stream.into(),
+                    d_global_events.as_mut_ptr() as *mut _,
+                    start_index,
+                    d_byte_trace_alloc.as_mut_ptr() as *mut _,
+                );
+            }
+            stream.synchronize().unwrap();
+            let gpu_ms = gpu_start.elapsed().as_secs_f64() * 1000.0;
+
+            if is_warmup {
+                println!("{:<12} {:>12} {:>12} {:>12}", n, "warmup", "warmup", "—");
+                continue;
+            }
+
+            let gpu_trace =
+                TraceData::<F>::Gpu(NUM_MEMORY_LOCAL_INIT_COLS, d_trace).to_host(&stream);
+            assert_eq!(
+                cpu_trace.values, gpu_trace.values,
+                "CPU/GPU main trace mismatch at n={}",
+                n
+            );
+
+            let speedup = cpu_ms / gpu_ms;
+            println!(
+                "{:<12} {:>12.2} {:>12.2} {:>11.1}x  ✓",
+                n, cpu_ms, gpu_ms, speedup
+            );
+        }
+        println!("{:-<60}", "");
+    }
+}
+
 /// Tests for the three constraints a forged `MemoryLocal` entry would have to satisfy.
 ///
 /// The chip labels the state a chunk inherits with a `clk` sentinel, and carries the real
@@ -54,13 +403,11 @@ mod normalization_tests {
                 value: 0x5555_6666_7777_8888,
             },
         };
-        let record = EmulationRecord {
-            cpu_local_memory_access: vec![
-                entry(1, 9, 3, 40),               // starts earlier  -> sentinel
-                entry(3, CHUNK_CLK_START, 3, 40), // starts here     -> real clk
-            ],
-            ..Default::default()
-        };
+        let mut record = EmulationRecord::default();
+        record.cpu_local_memory_access = vec![
+            entry(1, 9, 3, 40),               // starts earlier  -> sentinel
+            entry(3, CHUNK_CLK_START, 3, 40), // starts here     -> real clk
+        ];
         MemoryLocalChip::<F>::default().generate_main(&record, &mut EmulationRecord::default())
     }
 
@@ -211,13 +558,11 @@ mod normalization_tests {
                 value: 0x5555_6666_7777_8888,
             },
         };
-        let record = EmulationRecord {
-            cpu_local_memory_access: vec![
-                entry(0, 0, 0),                     // fresh: first touch, starts at zero
-                entry(1, 9, 0x1111_2222_3333_4444), // inherited from chunk 1
-            ],
-            ..Default::default()
-        };
+        let mut record = EmulationRecord::default();
+        record.cpu_local_memory_access = vec![
+            entry(0, 0, 0),                     // fresh: first touch, starts at zero
+            entry(1, 9, 0x1111_2222_3333_4444), // inherited from chunk 1
+        ];
         let trace =
             MemoryLocalChip::<F>::default().generate_main(&record, &mut EmulationRecord::default());
         trace.values[..NUM_MEMORY_LOCAL_INIT_COLS].to_vec()

@@ -11,13 +11,14 @@ use pico_vm::{
         opts::EmulatorOpts,
         record::RecordBehavior,
         riscv::{
-            public_values_compat::encode_public_value_pc_limbs, riscv_emulator::RiscvEmulator,
+            public_values::RecordFinalPvsState, public_values_compat::encode_public_value_pc_limbs,
+            riscv_emulator::RiscvEmulator,
         },
         stdin::EmulatorStdin,
     },
     machine::{field::FieldSpecificPoseidon2Config, logger::setup_logger},
 };
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 use tracing::{debug, info, trace};
 
 #[path = "common/parse_args.rs"]
@@ -35,7 +36,9 @@ where
     let pc_start = program.pc_start;
 
     info!("Creating emulator (at {:?})..", start.elapsed());
-    let mut emulator = RiscvEmulator::new_single::<F>(program, EmulatorOpts::test_opts(), None);
+    let final_pvs_state = Arc::new(RecordFinalPvsState::default());
+    let mut emulator =
+        RiscvEmulator::new_single::<F>(program, final_pvs_state, EmulatorOpts::test_opts(), None);
     info!(
         "Running with chunk size: {}, batch size: {}",
         emulator.opts.chunk_size, emulator.opts.chunk_batch_size

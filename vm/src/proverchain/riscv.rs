@@ -1,46 +1,46 @@
 //! Snapshot-based RISC-V emulation pipeline: a sequencer takes emulator snapshots, worker threads
-//! replay them into `EmulationRecord`s, and the caller consumes the records through a callback. A
-//! chunk's replay can arrive as several segments, folded back here into the one record the unsplit
-//! replay would have produced, so the chunk still proves once.
-//!
+//! replay them into `EmulationRecord`s, and the caller consumes the records through a callback.
 //! The FRI `RiscvProver` that used to drive proving from here was removed with the FRI path (tag
-//! `legacy-fri-last`). `mle::machine::riscv::emulate_with_pipeline` maps a run of it onto the
-//! `EmulationOutput` that `emulate_with_opts` returns, so a prover can take its records; the AOT
-//! validation harness under `perf/aot/` calls it directly.
+//! `legacy-fri-last`); the MLE prover (`mle::machine::riscv`) consumes this pipeline instead, and
+//! `mle::machine::riscv::emulate_with_pipeline` maps a run of it onto the `EmulationOutput` that
+//! `emulate_with_opts` returns, so the host prover can take its records.
 
 #[cfg(feature = "aot-emulator")]
 use crate::emulator::emulator::AotMetaEmulator;
+use crate::emulator::{opts::SnapshotMainMode, riscv::record_merge::merge_segments};
 use crate::{
     compiler::riscv::program::Program,
     configs::config::{StarkGenericConfig, Val},
     emulator::{
         emulator::MetaEmulator,
-        opts::SnapshotMainMode,
         riscv::{
-            emulator::{
-                EmulationDeferredState, EmulationError, RiscvEmulator, SharedDeferredState,
-            },
+            cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
+            emulator::{EmulationDeferredState, EmulationError, SharedDeferredState},
             memory::{
-                memory_pool_capacity, memory_recycler_threads, ContiguousRiscvMemory,
-                GLOBAL_MEMORY_RECYCLER,
+                init_memory_pool, memory_pool_capacity, memory_recycler_threads,
+                raise_pool_size_floor, ContiguousRiscvMemory, GLOBAL_MEMORY_RECYCLER,
             },
+            public_values::RecordFinalPvsState,
             record::EmulationRecord,
-            record_digest::{field_digests, is_compared},
-            record_merge::merge_segments,
+            riscv_emulator::{ParOptions, RiscvEmulator, RiscvEmulatorMode},
             state::RiscvEmulationState,
         },
-        snapshot::SnapshotEmulator,
     },
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::{
         chip::ChipBehavior, field::FieldSpecificPoseidon2Config, report::EmulationReport,
         witness::ProvingWitness,
     },
+    // Lane recording for the MLE figures. Inert unless a driver called `spans::set_origin`, which only
+    // the MLE driver does: with no origin every `open` returns a guard that records nothing.
+    mle::spans::{self, LaneId, Role, WorkKind},
 };
 use alloc::sync::Arc;
 use core_affinity;
 use crossbeam::channel::{bounded, unbounded, Receiver, Sender};
+use cudart::memory::CudaHostAllocFlags;
 use p3_field::PrimeField32;
+use parking_lot::Mutex as ParkingMutex;
 use std::{
     any::Any,
     collections::{BTreeMap, HashMap},
@@ -54,8 +54,6 @@ use std::{
     time::Instant,
 };
 use tracing::{debug, info};
-
-pub type RiscvChips<SC> = RiscvChipType<Val<SC>>;
 
 /// Failures only a test can arrange. Process-wide, so only the child process a test spawns sets
 /// them.
@@ -75,6 +73,8 @@ mod hooks {
     pub(super) static DRAW_POOL_BLOCK_PER_BATCH: AtomicBool = AtomicBool::new(false);
 }
 
+pub type RiscvChips<SC> = RiscvChipType<Val<SC>>;
+
 pub enum Msg {
     Record {
         chunk: u32,
@@ -91,9 +91,11 @@ pub struct Bucket {
     pub(crate) finished: bool,
 }
 
-/// Which segment of which chunk's replay a message is about.
+/// Which segment of which chunk a message carries.
 ///
-/// Three bare `usize` in a row transpose in silence and all three decide what the receiver does.
+/// Three bare `usize` in a row transpose in silence, and all three decide what the receiver does
+/// with the record: which chunk it belongs to, whether it may close that chunk, and how many
+/// siblings the fold is waiting for.
 #[derive(Clone, Copy, Debug)]
 struct SegmentId {
     batch: usize,
@@ -113,11 +115,6 @@ impl SegmentId {
     }
 }
 
-/// `MLE_RECORD_DIGEST=1` logs a per-field digest of every replayed record, so two runs can be
-/// diffed. Read once: a schedule that changed mid-run would make the diff meaningless.
-static RECORD_DIGEST: std::sync::LazyLock<bool> =
-    std::sync::LazyLock::new(|| std::env::var("MLE_RECORD_DIGEST").is_ok_and(|v| v == "1"));
-
 /// Send one record on, logging its digests first when the equivalence gate is armed.
 fn emit_record(
     tx: &crossbeam::channel::Sender<Msg>,
@@ -126,13 +123,10 @@ fn emit_record(
     done: bool,
 ) {
     if *RECORD_DIGEST {
-        for (field, len, hash) in field_digests(&record) {
+        for (field, len, hash) in crate::emulator::riscv::record_digest::field_digests(&record) {
             // Say which rows are allowed to differ, or whoever diffs two runs chases one that is.
-            let note = if is_compared(field) {
-                ""
-            } else {
-                " reported-only"
-            };
+            let compared = crate::emulator::riscv::record_digest::is_compared(field);
+            let note = if compared { "" } else { " reported-only" };
             info!(
                 target: "bench",
                 "[recdigest] chunk={batch_idx} {field} len={len} hash={hash:#018x}{note}"
@@ -144,13 +138,16 @@ fn emit_record(
         rec: Arc::new(record),
         done,
     })
-    .expect("the sequencer receives until every worker is gone");
+    .unwrap();
 }
 
 /// Holds a chunk's segment records until every segment is in, then folds them into one.
+///
+/// Only the chunk's own record is held: the deferred and precompile records a segment splits out
+/// stand on their own and go straight through.
 #[derive(Default)]
 struct SegmentCollector {
-    pending: Mutex<HashMap<usize, PendingChunk>>,
+    pending: ParkingMutex<HashMap<usize, PendingChunk>>,
 }
 
 #[derive(Default)]
@@ -161,6 +158,11 @@ struct PendingChunk {
 }
 
 impl SegmentCollector {
+    /// Drops every segment still waiting for its siblings.
+    fn clear(&self) {
+        self.pending.lock().clear();
+    }
+
     /// Hand in one segment. `Some` once the whole chunk is in — the folded record, or `None`
     /// inside it if no segment produced a chunk record at all.
     fn submit(
@@ -169,10 +171,9 @@ impl SegmentCollector {
         record: Option<EmulationRecord>,
     ) -> Option<Option<EmulationRecord>> {
         let complete = {
-            // Recovered rather than propagated. Every point below that can panic leaves the map
-            // completable — the assertions precede the writes, and a fresh entry trips neither —
-            // so `expect` here would only bury the first panic's message under one per worker.
-            let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+            // `parking_lot`, so a panic below does not poison the lock and bury its own message
+            // under every peer's "poisoned".
+            let mut pending = self.pending.lock();
             let chunk = pending
                 .entry(segment.batch)
                 .or_insert_with(|| PendingChunk {
@@ -212,6 +213,17 @@ impl SegmentCollector {
         let ordered: Vec<EmulationRecord> = complete.records.into_iter().flatten().collect();
         Some((!ordered.is_empty()).then(|| merge_segments(ordered)))
     }
+}
+
+/// `MLE_RECORD_DIGEST=1` logs a per-field digest of every replayed record, so two runs can be
+/// diffed. Read once: a schedule that changed mid-run would make the diff meaningless.
+static RECORD_DIGEST: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| std::env::var("MLE_RECORD_DIGEST").is_ok_and(|v| v == "1"));
+
+#[derive(Clone, Copy, Debug)]
+pub enum TraceKind {
+    Full,
+    Light,
 }
 
 /// One replay snapshot as the snapshot thread queues it: which segment, the state to start from,
@@ -270,16 +282,34 @@ impl RunControl {
     }
 }
 
-/// A replay's emulator, whose snapshot memory is released however the replay ends. If a replay
-/// unwound with a pool block, a snapshot thread waiting on the pool for it would never wake.
+type WorkerEmulator<SC, C> = MetaEmulator<SC, C, Program, Vec<u8>, RiscvEmulator>;
+
+/// A worker's emulator for the length of one replay, whose memory is released if the replay does
+/// not hand it back. If a replay unwound with a pool block, a snapshot thread waiting on the pool
+/// for it would never wake.
 struct Replay<'a, SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>,
 {
-    emu: MetaEmulator<SC, C, Program, Vec<u8>, RiscvEmulator>,
+    emu: Option<WorkerEmulator<SC, C>>,
     run: &'a RunControl,
     pooled: bool,
+}
+
+impl<SC, C> Replay<'_, SC, C>
+where
+    SC: StarkGenericConfig,
+    C: ChipBehavior<Val<SC>>,
+{
+    fn emu(&mut self) -> &mut WorkerEmulator<SC, C> {
+        self.emu.as_mut().expect("held until the replay ends")
+    }
+
+    /// The emulator back for the worker's next batch.
+    fn finish(mut self) -> Option<WorkerEmulator<SC, C>> {
+        self.emu.take()
+    }
 }
 
 impl<SC, C> Drop for Replay<'_, SC, C>
@@ -293,7 +323,7 @@ where
         if thread::panicking() {
             self.run.abort();
         }
-        if let Some(emulator) = self.emu.emulator.take() {
+        if let Some(emulator) = self.emu.take().and_then(|mut emu| emu.emulator.take()) {
             release(emulator.state.memory, self.pooled);
         }
     }
@@ -314,14 +344,24 @@ impl Drop for DrainOnDrop<'_> {
     }
 }
 
-fn run_snapshot_main_loop<E: SnapshotEmulator>(
+// allow: domain-complex signature; each arg is an independent handle/config
+#[allow(clippy::too_many_arguments)]
+fn run_snapshot_main_loop<E, NextBatch, Cycles, PvStream>(
     emu: &mut E,
-    snap_tx: &crossbeam::channel::Sender<Snapshot>,
+    mut next_batch: NextBatch,
+    cycles: Cycles,
+    mut pv_stream: PvStream,
+    snap_tx: &Sender<Snapshot>,
     emu_result: &mut Result<(), EmulationError>,
     total_cycles: &mut u64,
     output_pv_stream: &mut Vec<u8>,
     run: &RunControl,
-) {
+) where
+    NextBatch:
+        FnMut(&mut E) -> Result<(Vec<(RiscvEmulationState, u64)>, EmulationReport), EmulationError>,
+    Cycles: Fn(&E) -> u64,
+    PvStream: FnMut(&mut E) -> Vec<u8>,
+{
     let mut batch_idx = 0;
     loop {
         // A failed run returns no more memory, so every further batch is a step towards a pool
@@ -330,28 +370,37 @@ fn run_snapshot_main_loop<E: SnapshotEmulator>(
             break;
         }
         let t_batch_start = Instant::now();
-        let (segments, report) = match emu.next_state_batch_segments() {
-            Ok(res) => res,
-            Err(err) => {
-                *emu_result = Err(err);
-                break;
+        let (segments, report) = {
+            let _b = spans::busy(WorkKind::Snapshot, Some(batch_idx as u32));
+            match next_batch(emu) {
+                Ok(res) => res,
+                Err(err) => {
+                    *emu_result = Err(err);
+                    break;
+                }
             }
         };
         let done = report.done;
         let batch_dur = t_batch_start.elapsed();
 
         let t_send_start = Instant::now();
-        let emu_cycles = emu.cycles();
-        let count = segments.len();
-        for (index, (snapshot, target)) in segments.into_iter().enumerate() {
-            let segment = SegmentId {
-                batch: batch_idx,
-                index,
-                count,
-            };
-            snap_tx
-                .send((segment, snapshot, done, target))
-                .expect("the pipeline holds the queue's receiver until the snapshot thread ends");
+        let emu_cycles = cycles(emu);
+        {
+            // Blocked here means the replay workers have not drained the queue: capacity someone else
+            // holds, so `Wait`, not idleness. Normally zero — a non-zero figure means the queue filled,
+            // which is a memory-pressure signal.
+            let _w = spans::wait(WorkKind::Snapshot, Some(batch_idx as u32));
+            let count = segments.len();
+            for (index, (snapshot, target)) in segments.into_iter().enumerate() {
+                let segment = SegmentId {
+                    batch: batch_idx,
+                    index,
+                    count,
+                };
+                snap_tx.send((segment, snapshot, done, target)).expect(
+                    "the pipeline holds the queue's receiver until the snapshot thread ends",
+                );
+            }
         }
         let send_dur = t_send_start.elapsed();
         #[cfg(test)]
@@ -369,30 +418,44 @@ fn run_snapshot_main_loop<E: SnapshotEmulator>(
             cycles = emu_cycles,
             emulate_ms = batch_dur.as_secs_f64() * 1e3,
             send_ms    = send_dur.as_secs_f64() * 1e3,
-            "batch finished"
+            "snapshot batch finished"
+        );
+        info!(
+            target: "bench",
+            "[bench][emulator-0](chunk-{batch_idx}) simple_emulator: running={:.3} ms",
+            batch_dur.as_secs_f64() * 1e3,
         );
 
         if done {
             *total_cycles = emu_cycles;
-            *output_pv_stream = emu.get_pv_stream();
+            *output_pv_stream = pv_stream(emu);
             break;
         }
         batch_idx += 1;
     }
 }
 
-/// Batch from which the deferred pool starts being split out. gpu-base doubles this under its
-/// `two-round-chunks` feature, which this branch does not declare.
+/// A record's public values the sequencer still has to fold in after emitting it out of order:
+/// `is_cpu_chunk`, `start_pc`, `next_pc`, `exit_code`, `committed_value_digest`,
+/// `deferred_proofs_digest`.
+type OooPvs = (bool, [u32; 3], [u32; 3], u32, [u32; 8], [u32; 8]);
+
+/// Batch from which the deferred pool starts being split out under [`DeferredSplit::FromChunk16`].
+#[cfg(feature = "two-round-chunks")]
+const DYNAMIC_CHUNK_START: u32 = 32;
+#[cfg(not(feature = "two-round-chunks"))]
 const DYNAMIC_CHUNK_START: u32 = 16;
 
 /// Where the sequencer starts splitting the deferred pool into records of their own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeferredSplit {
-    /// From chunk 16 on, and at the end: the chunk sequence gpu-base's pipeline produces, which
+    /// From chunk 16 on (32 under `two-round-chunks`), and at the end, with the chunks before it
+    /// handed out as they finish: the prover pipeline's schedule, which
     /// [`emulate_snapshot_pipeline`] keeps.
     FromChunk16,
-    /// After every chunk, as `emulate_with_opts` splits, so a block that fills early comes out at
-    /// the same place and the run's records can stand in for the interpreter's in a proof.
+    /// After every chunk and in chunk order, as `emulate_with_opts` splits, so a block that fills
+    /// early comes out at the same place and the run's records can stand in for the interpreter's
+    /// in a proof.
     AfterEveryChunk,
 }
 
@@ -416,6 +479,10 @@ pub fn max_pipeline_workers() -> usize {
 /// does before any thread starts: more workers than [`max_pipeline_workers`], or a memory pool, as
 /// the `MEMORY_POOL_*` and `MEMORY_RECYCLER_THREADS` variables and the AOT split size it, that the
 /// snapshot thread would wait on forever. Public so that a caller can refuse before work of its own.
+///
+/// A pooled run with `MEMORY_POOL_SIZE` unset raises the pool to what the run needs instead, as
+/// long as the pool is not yet built: each worker keeps a pool memory between its batches, so the
+/// default cannot serve a run with a worker per core.
 pub fn check_pipeline(
     workers: NonZeroUsize,
     snapshot_main: SnapshotMainMode,
@@ -427,28 +494,47 @@ pub fn check_pipeline(
             cores,
         });
     }
-    // Only the AOT snapshot thread cuts a chunk into segments.
-    #[cfg(feature = "aot-emulator")]
-    let segments = (snapshot_main == SnapshotMainMode::Aot
-        && crate::emulator::aot::split_chunks() > 0)
-        .then(|| crate::emulator::aot::split_segments() as usize);
-    #[cfg(not(feature = "aot-emulator"))]
-    let segments = {
-        let _ = snapshot_main;
-        None
-    };
-    match memory_pool_refusal(memory_pool_capacity(), memory_recycler_threads(), segments) {
+    let segments = pooled_segments(snapshot_main);
+    let pooled = segments.map(|segments| (workers.get(), segments));
+    if let Some((workers, segments)) = pooled {
+        raise_pool_size_floor(workers + segments);
+    }
+    match memory_pool_refusal(memory_pool_capacity(), memory_recycler_threads(), pooled) {
         Some(reason) => Err(EmulationError::PipelineMemoryPool(reason)),
         None => Ok(()),
     }
 }
 
+/// How many pool memories each batch of a run takes, if its snapshot memories come from the pool:
+/// only the AOT snapshot thread hands them out, one per segment it cuts.
+fn pooled_segments(snapshot_main: SnapshotMainMode) -> Option<usize> {
+    #[cfg(feature = "aot-emulator")]
+    let segments = (snapshot_main == SnapshotMainMode::Aot).then(|| {
+        if crate::emulator::aot::split_chunks() > 0 {
+            crate::emulator::aot::split_segments() as usize
+        } else {
+            1
+        }
+    });
+    #[cfg(not(feature = "aot-emulator"))]
+    let segments = {
+        let _ = snapshot_main;
+        None
+    };
+    #[cfg(test)]
+    let segments = segments.or(hooks::DRAW_POOL_BLOCK_PER_BATCH
+        .load(Ordering::Relaxed)
+        .then_some(1));
+    segments
+}
+
 /// Why a pool that ever holds `capacity` memories, with `recyclers` threads returning them, can
-/// never serve a run whose AOT batches are cut into `segments`, if it cannot.
+/// never serve a run, if it cannot. `pooled` is the replay workers and the segments per batch of
+/// a run whose snapshot memories come from the pool.
 fn memory_pool_refusal(
     capacity: usize,
     recyclers: usize,
-    segments: Option<usize>,
+    pooled: Option<(usize, usize)>,
 ) -> Option<String> {
     // Either snapshot thread takes a pool memory per batch, and only a recycler puts one back.
     if capacity == 0 {
@@ -461,18 +547,20 @@ fn memory_pool_refusal(
     if recyclers == 0 {
         return Some("MEMORY_RECYCLER_THREADS=0 never puts a memory back".into());
     }
-    // A batch cut into segments holds one memory for each until it has cut them all.
-    match segments {
-        Some(segments) if segments > capacity => Some(format!(
-            "the AOT snapshot thread cuts a chunk into {segments} segments and holds a memory for \
-             each, and the pool never holds more than {capacity}"
+    // A worker keeps its last batch's memory until it is handed the next one, so once every
+    // worker holds one, the batch being cut needs a memory for each of its segments on top.
+    match pooled {
+        Some((workers, segments)) if workers + segments > capacity => Some(format!(
+            "each of the {workers} replay workers keeps a memory until its next batch and the \
+             AOT snapshot thread holds {segments} for the batch it cuts, and the pool never \
+             holds more than {capacity}"
         )),
         _ => None,
     }
 }
 
 /// [`emulate_snapshot_pipeline_with`], with the worker count read from `NUM_THREADS` (unset or
-/// `0`: one).
+/// `0`: one) and the prover pipeline's deferred split.
 pub fn emulate_snapshot_pipeline<SC, C, F>(
     witness: &ProvingWitness<SC, C, Vec<u8>>,
     handle_record: F,
@@ -481,21 +569,18 @@ where
     SC: 'static + StarkGenericConfig + Send + Sync,
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config,
     C: 'static + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
-    F: Fn(EmulationRecord, bool) + Send + Sync + 'static,
+    F: Fn(EmulationRecord, bool) + Send + Sync,
 {
-    let workers = std::env::var("NUM_THREADS")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .and_then(NonZeroUsize::new)
+    let workers = crate::mle::env_u32("NUM_THREADS")
+        .and_then(|n| NonZeroUsize::new(n as usize))
         .unwrap_or(NonZeroUsize::MIN);
     emulate_snapshot_pipeline_with(witness, workers, DeferredSplit::FromChunk16, handle_record)
 }
 
 /// Emulate `witness` with one snapshot thread, the interpreter or AOT code as
 /// `witness.opts.snapshot_main` says, and `workers` interpreters replaying its snapshots into
-/// records. `handle_record` gets them in chunk order, each with the run's `done` flag; the result
-/// is the reports in the order the workers finished, the snapshot thread's cycle count and the
-/// committed bytes.
+/// records. `handle_record` gets them with the run's `done` flag; the result is the reports in the
+/// order the workers finished, the snapshot thread's cycle count and the committed bytes.
 ///
 /// `deferred_split` says where the deferred pool starts being split into records of their own.
 /// A run [`check_pipeline`] refuses is refused with its error before any thread starts.
@@ -519,6 +604,26 @@ where
     C: 'static + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
     F: Fn(EmulationRecord, bool) + Send + Sync,
 {
+    emulate_snapshot_pipeline_with_selector(witness, workers, deferred_split, handle_record, |_| {
+        TraceKind::Full
+    })
+}
+
+/// [`emulate_snapshot_pipeline_with`], with `trace_selector` choosing each batch's trace mode.
+pub fn emulate_snapshot_pipeline_with_selector<SC, C, F, S>(
+    witness: &ProvingWitness<SC, C, Vec<u8>>,
+    workers: NonZeroUsize,
+    deferred_split: DeferredSplit,
+    handle_record: F,
+    trace_selector: S,
+) -> Result<(Vec<EmulationReport>, u64, Vec<u8>), EmulationError>
+where
+    SC: 'static + StarkGenericConfig + Send + Sync,
+    SC::Val: PrimeField32 + FieldSpecificPoseidon2Config,
+    C: 'static + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
+    F: Fn(EmulationRecord, bool) + Send + Sync,
+    S: Fn(usize) -> TraceKind + Send + Sync,
+{
     let opts = witness.opts.as_ref().expect("witness.opts not set");
     let split_opts = opts.split_opts;
     // A batch of more than one chunk drops most of its own precompile events without a word
@@ -529,24 +634,27 @@ where
     );
     check_pipeline(workers, opts.snapshot_main)?;
 
+    init_memory_pool();
+    if !is_pool_initialized() {
+        init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+    }
+
     let num_threads = workers.get();
     info!("Emulator snapshot worker threads: {}", num_threads);
 
-    // Only the AOT snapshot thread hands out pool memories for the workers to return.
-    #[cfg(not(test))]
-    let pooled = opts.snapshot_main == SnapshotMainMode::Aot;
-    #[cfg(test)]
-    let pooled = opts.snapshot_main == SnapshotMainMode::Aot
-        || hooks::DRAW_POOL_BLOCK_PER_BATCH.load(Ordering::Relaxed);
+    let pooled = pooled_segments(opts.snapshot_main).is_some();
 
     let (snap_tx, snap_rx) = bounded::<Snapshot>(256);
     let (snapshot_msg_tx, snapshot_msg_rx) = unbounded::<Msg>();
 
+    let final_pvs_state = Arc::new(RecordFinalPvsState::default());
     let program = witness.program.as_ref().unwrap();
-    let shared_ds: SharedDeferredState =
-        Arc::new(Mutex::new(EmulationDeferredState::new(program.clone())));
+    let shared_ds: SharedDeferredState = Arc::new(ParkingMutex::new(EmulationDeferredState::new(
+        program.clone(),
+        final_pvs_state.clone(),
+    )));
 
-    // Holds a split chunk's segment records until the last one lands.
+    // Shared so that whichever worker finishes a split chunk last can fold its segments.
     let collector = SegmentCollector::default();
 
     let mut emu_result = Ok(());
@@ -555,37 +663,69 @@ where
     let reports = Mutex::new(Vec::new());
     let run = RunControl::default();
 
+    // One batch on worker `tid`. The emulator in `slot` is reused across batches; the replay owns
+    // it meanwhile and only hands it back if the batch completes.
     let replay_one = |tid: usize,
-                      (segment, snapshot, done, target_clk): Snapshot,
+                      slot: &mut Option<WorkerEmulator<SC, C>>,
+                      (segment, snapshot, done, global_clk): Snapshot,
                       snapshot_msg_tx: &Sender<Msg>,
                       shared_ds: &SharedDeferredState| {
         let batch_idx = segment.batch;
         let t_recover_and_emu = Instant::now();
+        // The whole batch, not just the replay: the mode switch, the report push and the
+        // completion send are this worker's work too, and the outer span is an idle one, so
+        // anything left outside here would read as waiting for input.
+        let _batch = spans::busy(WorkKind::Emulate, Some(batch_idx as u32));
         let mut replay = Replay {
-            emu: MetaEmulator::recover_riscv(
-                witness,
-                snapshot,
-                None,
-                shared_ds.clone(),
-                target_clk,
-                segment.is_final(),
-            ),
+            emu: slot.take(),
             run: &run,
             pooled,
         };
+        {
+            // Per-batch setup, kept apart from the replay it precedes: the pipeline's head
+            // bubble is where that difference is worth having.
+            let _b = spans::busy(WorkKind::EmulateRecover, Some(batch_idx as u32));
+            match replay.emu.as_mut() {
+                Some(emu) => {
+                    let previous = emu.recover_riscv_in_place(
+                        snapshot,
+                        shared_ds.clone(),
+                        global_clk,
+                        segment.is_final(),
+                    );
+                    release(previous, pooled);
+                }
+                None => {
+                    replay.emu = Some(MetaEmulator::recover_riscv(
+                        witness,
+                        snapshot,
+                        Some(ParOptions {
+                            thread_id: tid as u32,
+                            num_threads: num_threads as u32,
+                        }),
+                        shared_ds.clone(),
+                        global_clk,
+                        segment.is_final(),
+                    ));
+                }
+            }
+        }
         #[cfg(test)]
         if hooks::PANIC_IN_FIRST_REPLAY.swap(false, Ordering::Relaxed) {
             panic!("injected replay panic");
         }
+        if let Some(emulator) = replay.emu().emulator.as_mut() {
+            emulator.mode = match trace_selector(batch_idx) {
+                TraceKind::Full => RiscvEmulatorMode::Trace,
+                TraceKind::Light => RiscvEmulatorMode::LightTrace,
+            };
+            emulator.update_mode_deps();
+        }
         let t_record_batch = Instant::now();
         let mut chunk_record = None;
-        let replayed = replay.emu.try_next_record_batch(&mut |rec| {
-            // Every record a replay hands back here is the chunk's own: the deferred and
-            // precompile ones are split out downstream, in the sequencer. So a split
-            // chunk holds all of them, and a segment can produce at most one — a segment
-            // that produced none is normal, and the collector counts hand-ins for it. The
-            // `is_cpu_chunk` test therefore always holds here; it says what the fold is
-            // about, and keeps a deferred record out of it should one ever arrive.
+        let replayed = replay.emu().try_next_record_batch(&mut |rec| {
+            // A split chunk's own record waits for its siblings; the deferred and precompile
+            // records a segment splits out stand alone and go now.
             if segment.is_split() && rec.is_cpu_chunk {
                 assert!(
                     chunk_record.replace(rec).is_none(),
@@ -608,22 +748,23 @@ where
                 return;
             }
         };
+        *slot = replay.finish();
         let record_batch_ms = t_record_batch.elapsed().as_secs_f64() * 1000.0;
         info!(
-            target = "bench",
+            target: "bench",
             "[bench][emulator-{tid}](chunk-{batch_idx}) emulator: running={record_batch_ms:.3} ms"
         );
-        // One report per chunk, as before the replay could be split: a middle segment's
-        // report describes a piece of a chunk, and the consumers count on there being
-        // exactly one per chunk.
+        // One report per chunk, as before the replay could be split: a middle segment's report
+        // describes a piece of a chunk, and the consumers count on there being exactly one per
+        // chunk.
         if segment.is_final() {
             reports
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(report);
         }
-        // The chunk is finished once every segment is in — which is not necessarily the
-        // last one to start, so whichever completes the fold announces it.
+        // The batch is finished once every segment is in — which is not necessarily the last one
+        // to start, so the segment that completes the fold announces it.
         let batch_finished = if segment.is_split() {
             match collector.submit(segment, chunk_record) {
                 Some(folded) => {
@@ -653,39 +794,63 @@ where
     };
 
     // Workers are threads of their own, not rayon jobs: a worker waits on the snapshot queue, and
-    // the snapshot thread's memory restore is a rayon job, so workers holding every rayon thread
-    // would leave that job nowhere to run. A worker outlives a failed replay and keeps draining
-    // the queue: the snapshots on it hold pool memories that the snapshot thread may be waiting on.
+    // the sequencer's deferred split and the snapshot thread's memory restore are rayon jobs, so
+    // workers holding every rayon thread would leave those nowhere to run. A worker outlives a
+    // failed replay and keeps draining the queue: the snapshots on it hold pool memories that the
+    // snapshot thread may be waiting on.
     let replay_snapshots = |tid: usize,
                             snap_rx: Receiver<Snapshot>,
                             snapshot_msg_tx: Sender<Msg>,
                             shared_ds: SharedDeferredState| {
+        spans::bind_lane(LaneId::new(Role::Emulate, tid));
+        // Held for the thread's life, so a worker that waited through the run without being fed
+        // still produces a row — that idleness is the finding — and the span's start says when
+        // it started.
+        let _lane = spans::idle(WorkKind::Unattributed);
+        let mut slot = None;
         while let Ok(snapshot) = snap_rx.recv() {
             if run.is_aborted() {
                 release(snapshot.1.memory, pooled);
                 continue;
             }
-            run.guard(|| replay_one(tid, snapshot, &snapshot_msg_tx, &shared_ds));
+            run.guard(|| replay_one(tid, &mut slot, snapshot, &snapshot_msg_tx, &shared_ds));
+        }
+        if let Some(emulator) = slot.and_then(|mut emu| emu.emulator.take()) {
+            release(emulator.state.memory, pooled);
         }
     };
 
+    let t_emu = std::time::Instant::now();
     thread::scope(|s| {
         // sequencer
-        s.spawn({
+        //
+        // Named because the snapshot pass and the replay pool run concurrently: with every lane
+        // anonymous a `perf --per-thread` profile cannot tell one from the other.
+        spawn_named(s, "mle-sequencer", {
             let shared_ds = Arc::clone(&shared_ds);
             let run = &run;
             let handle_record = &handle_record;
+            let collector = &collector;
             move || {
                 let mut stash: BTreeMap<u32, Bucket> = BTreeMap::new();
                 let mut next = 0u32;
+
+                // OOO state: saved PV fields for deferred accumulation
+                let mut ooo_saved: BTreeMap<u32, Vec<OooPvs>> = BTreeMap::new();
 
                 // Received to the end even after a failure, so a live worker's send never fails,
                 // but nothing more reaches the caller: the run's result is the failure.
                 while let Ok(msg) = snapshot_msg_rx.recv() {
                     if run.is_aborted() {
+                        // Held records keep fixed-pool pinned buffers that a worker still
+                        // replaying may be blocked on, so let them go rather than wait to exit.
+                        stash.clear();
+                        ooo_saved.clear();
+                        collector.clear();
                         continue;
                     }
                     run.guard(|| {
+                        let is_snapshot_done = matches!(&msg, Msg::SnapShotDone { .. });
                         match msg {
                             Msg::Record { chunk, rec, done } => {
                                 stash
@@ -709,30 +874,123 @@ where
                             }
                         }
 
-                        // TODO: handle disorder records (get pvs by snapshot main)
-                        while let Some(bkt) = stash.get(&next) {
-                            if !bkt.finished {
-                                break;
+                        // === OOO emission for first DYNAMIC_CHUNK_START batches ===
+                        // Only scan on SnapShotDone — Record messages alone can't trigger emission
+                        // since a batch must be fully finished before it can be emitted OOO.
+                        // `AfterEveryChunk` emits in chunk order, so it never takes this path.
+                        if is_snapshot_done && deferred_split == DeferredSplit::FromChunk16 {
+                            let mut to_emit_ooo: Vec<u32> = Vec::new();
+                            for (&batch, bkt) in stash.iter() {
+                                if batch < DYNAMIC_CHUNK_START
+                                    && bkt.finished
+                                    && !ooo_saved.contains_key(&batch)
+                                {
+                                    // Check if any record has done_flag (total chunks < threshold)
+                                    let has_done = bkt.recs.iter().any(|(_, done)| *done);
+                                    if !has_done {
+                                        to_emit_ooo.push(batch);
+                                    }
+                                }
                             }
+
+                            for batch in to_emit_ooo {
+                                let Bucket { mut recs, .. } = stash.remove(&batch).unwrap();
+                                let mut saved_fields = Vec::new();
+
+                                for (mut rec, _done_flag) in recs.drain(..) {
+                                    let rec_mut = Arc::make_mut(&mut rec);
+                                    let orig_pvs = rec_mut.public_values;
+
+                                    // Save fields for deferred PV accumulation
+                                    saved_fields.push((
+                                        rec_mut.is_cpu_chunk,
+                                        orig_pvs.start_pc,
+                                        orig_pvs.next_pc,
+                                        orig_pvs.exit_code,
+                                        orig_pvs.committed_value_digest,
+                                        orig_pvs.deferred_proofs_digest,
+                                    ));
+
+                                    // Compute standalone PVs from default (matching sequential)
+                                    // Key: flag_active starts TRUE in EmulationDeferredState::new,
+                                    // so update_public_values increments exec_chunk from the start.
+                                    use crate::emulator::riscv::{
+                                        public_values::PublicValues,
+                                        public_values_compat::encode_public_value_chunk_counter,
+                                    };
+                                    let counter = encode_public_value_chunk_counter(batch + 1);
+                                    let pvs = PublicValues::<u32, u32> {
+                                        chunk: counter,
+                                        execution_chunk: counter,
+                                        start_pc: orig_pvs.start_pc,
+                                        next_pc: orig_pvs.next_pc,
+                                        exit_code: orig_pvs.exit_code,
+                                        committed_value_digest: orig_pvs.committed_value_digest,
+                                        deferred_proofs_digest: orig_pvs.deferred_proofs_digest,
+                                        ..Default::default()
+                                    };
+                                    // addr_limbs + empty stay at default (zero) — matching
+                                    // sequential
+
+                                    rec_mut.public_values = pvs;
+
+                                    // Emit immediately (no splits for first DYNAMIC_CHUNK_START,
+                                    // not done_flag)
+                                    handle_record(Arc::try_unwrap(rec).unwrap(), false);
+                                }
+
+                                ooo_saved.insert(batch, saved_fields);
+                            }
+                        } // end if SnapShotDone (OOO scan guard)
+
+                        // === Sequential drain (PV accumulation + batch >= DYNAMIC_CHUNK_START
+                        // emission) ===
+                        loop {
+                            // First check: was this batch already emitted OOO?
+                            if let Some(saved) = ooo_saved.remove(&next) {
+                                // Already emitted OOO — just accumulate PVs for deferred state
+                                let mut ds = shared_ds.lock();
+                                for (is_cpu, spc, npc, ec, cvd, dpd) in saved {
+                                    ds.accumulate_pvs_only(is_cpu, spc, npc, ec, cvd, dpd);
+                                }
+                                next += 1;
+                                continue;
+                            }
+
+                            // Second check: is there a finished batch in the stash?
+                            match stash.get(&next) {
+                                Some(bkt) if bkt.finished => {} // proceed below
+                                _ => break,                     // not ready yet
+                            }
+
+                            // Standard sequential processing (batch >= DYNAMIC_CHUNK_START or
+                            // done_flag batches)
                             let Bucket { mut recs, .. } = stash.remove(&next).unwrap();
 
                             for (mut rec, done_flag) in recs.drain(..) {
                                 let rec_mut = Arc::make_mut(&mut rec);
-                                let mut ds = shared_ds.lock().unwrap();
+                                let mut ds = shared_ds.lock();
                                 ds.update_public_values(done_flag, rec_mut);
 
                                 handle_record(Arc::try_unwrap(rec).unwrap(), done_flag);
 
-                                // Before that batch the events stay in the pool: an early batch
-                                // would otherwise emit a tail record of its own, and the chunk
-                                // sequence would stop matching the one gpu-base produces.
-                                let splits = if deferred_split.splits_after(next) || done_flag {
+                                let mut splits = if deferred_split.splits_after(next) || done_flag {
                                     ds.take_split_records(done_flag, split_opts, next)
                                 } else {
                                     Vec::new()
                                 };
 
-                                for mut split_rec in splits {
+                                if !splits.is_empty() {
+                                    let count = splits.len();
+                                    let eid = 99usize;
+
+                                    info!(
+                                        target: "bench",
+                                        "[bench][split-burst][emulator-{eid}] count={count} ms=0",
+                                    );
+                                }
+
+                                for mut split_rec in splits.drain(..) {
                                     ds.update_public_values(done_flag, &mut split_rec);
                                     handle_record(split_rec, done_flag);
                                 }
@@ -745,7 +1003,7 @@ where
         });
 
         // snapshot main thread
-        s.spawn({
+        spawn_named(s, "mle-snapshot", {
             let run = &run;
             let emu_result = &mut emu_result;
             let total_cycles = &mut total_cycles;
@@ -753,13 +1011,23 @@ where
             move || {
                 run.guard(|| {
                     let t_snapshot_main = Instant::now();
-
+                    // One lane for the whole thread, so bind it outright.
+                    spans::bind_lane(LaneId::new(Role::Snapshot, 0));
+                    // Busy, not idle, for its whole life: this thread produces snapshots and never
+                    // waits for input, and the one thing that does block it — a full queue — is
+                    // `Wait` in the loop.
+                    let _lane = spans::busy(WorkKind::Snapshot, None);
                     let run_interp =
                         |emu_result: &mut _, total_cycles: &mut _, pv_stream: &mut _| {
-                            let mut emu = MetaEmulator::setup_riscv(witness, None);
-                            emu.set_cost_estimator(false);
+                            info!("[Snapshot Main] mode=Interpreter");
+                            let mut emu =
+                                MetaEmulator::setup_riscv(witness, final_pvs_state.clone(), None);
+                            emu.disable_cost_estimator_for_snapshot();
                             run_snapshot_main_loop(
                                 &mut emu,
+                                |emu| emu.next_state_batch_segments(true, &mut |_| {}),
+                                |emu| emu.cycles(),
+                                |emu| emu.get_pv_stream(),
                                 &snap_tx,
                                 emu_result,
                                 total_cycles,
@@ -767,17 +1035,33 @@ where
                                 run,
                             );
                         };
-
                     #[cfg(feature = "aot-emulator")]
                     match witness.opts.expect("witness.opts not set").snapshot_main {
                         SnapshotMainMode::Aot => {
+                            info!("[AOT] snapshot-main = AotMetaEmulator (running AOT-compiled chunks)");
+                            // Both knobs default to the shape of the run rather than a constant,
+                            // so say what they came out as. On the `bench` target because that is
+                            // the one a run at the shipped log level keeps, and here because this
+                            // is the only path that reads them.
                             info!(
-                                "[AOT] snapshot-main = AotMetaEmulator (running AOT-compiled \
-                                 chunks)"
+                                target: "bench",
+                                "[split-replay] {} segment(s) on each of the first {} chunk(s)",
+                                crate::emulator::aot::split_segments(),
+                                crate::emulator::aot::split_chunks(),
                             );
-                            let mut emu = AotMetaEmulator::<SC, C>::setup_riscv(witness);
+                            let t_aot_setup = Instant::now();
+                            let mut emu =
+                                AotMetaEmulator::setup_riscv(witness, final_pvs_state, None);
+                            emu.disable_cost_estimator_for_snapshot();
+                            info!(
+                                "[Snapshot Main] AOT setup done in {:.3}s",
+                                t_aot_setup.elapsed().as_secs_f64()
+                            );
                             run_snapshot_main_loop(
                                 &mut emu,
+                                |emu| emu.next_state_batch_segments(),
+                                |emu| emu.cycles(),
+                                |emu| emu.get_pv_stream(),
                                 &snap_tx,
                                 emu_result,
                                 total_cycles,
@@ -800,7 +1084,6 @@ where
                         );
                         run_interp(emu_result, total_cycles, pv_stream);
                     }
-
                     info!(
                         "[Thread Snapshot] Done in {:.3}s",
                         t_snapshot_main.elapsed().as_secs_f64()
@@ -821,12 +1104,9 @@ where
                 let snap_rx = snap_rx.clone();
                 let snapshot_msg_tx = snapshot_msg_tx.clone();
                 let shared_ds = shared_ds.clone();
-                thread::Builder::new()
-                    .name(format!("snapshot-replay-{tid}"))
-                    .spawn_scoped(s, move || {
-                        replay_snapshots(tid, snap_rx, snapshot_msg_tx, shared_ds)
-                    })
-                    .expect("spawn a replay worker")
+                spawn_named(s, &format!("mle-replay-{tid}"), move || {
+                    replay_snapshots(tid, snap_rx, snapshot_msg_tx, shared_ds)
+                })
             })
             .collect();
         drop(snapshot_msg_tx);
@@ -837,6 +1117,9 @@ where
             }
         }
     });
+
+    let emu_ms = t_emu.elapsed().as_secs_f64() * 1000.0;
+    info!(target: "bench", "EMULATION_TOTAL = {emu_ms:.3} ms");
 
     let RunControl {
         panic: first_panic,
@@ -861,6 +1144,23 @@ where
         total_cycles,
         pv_stream,
     ))
+}
+
+/// `Scope::spawn` with a thread name, so `perf --per-thread`, `top -H` and panic messages can tell
+/// the pipeline's lanes apart. Panics only if the OS refuses the thread, same as `Scope::spawn`.
+fn spawn_named<'scope, 'env, F, T>(
+    scope: &'scope thread::Scope<'scope, 'env>,
+    name: &str,
+    f: F,
+) -> thread::ScopedJoinHandle<'scope, T>
+where
+    F: FnOnce() -> T + Send + 'scope,
+    T: Send + 'scope,
+{
+    thread::Builder::new()
+        .name(name.to_string())
+        .spawn_scoped(scope, f)
+        .expect("failed to spawn pipeline thread")
 }
 
 #[cfg(test)]
@@ -973,9 +1273,10 @@ mod tests {
     /// error. Before them, interpreter runs leave the pool's recycler idle: their snapshot memories
     /// are their own allocations, and a full pool would keep each one waiting for good.
     ///
-    /// The pool is one memory. In the failing runs the snapshot thread draws it the way the AOT
-    /// thread does, so the run moves in lockstep with its one worker and a memory a failed replay
-    /// kept stops it for good.
+    /// The pool is two memories, the least `check_pipeline` lets a pooled run with one worker
+    /// start on: the worker keeps one until its next batch. In the failing runs the snapshot
+    /// thread draws a memory per batch the way the AOT thread does, so the run moves in lockstep
+    /// with its one worker and a memory a failed replay kept stops it for good.
     #[test]
     fn every_failure_reaches_the_caller_without_a_hang() {
         const CHILD_VAR: &str = "PICO_PIPELINE_FAILURE_PROBE";
@@ -1041,7 +1342,7 @@ mod tests {
         in_child(
             "proverchain::riscv::tests::every_failure_reaches_the_caller_without_a_hang",
             CHILD_VAR,
-            &[("MEMORY_POOL_SIZE", "1")],
+            &[("MEMORY_POOL_SIZE", "2")],
             Duration::from_secs(180),
             "the pipeline hung on a failure",
             MARKER,
@@ -1052,14 +1353,18 @@ mod tests {
     fn a_pool_that_can_never_serve_the_run_is_named() {
         assert_eq!(memory_pool_refusal(16, 4, None), None);
         assert_eq!(
-            memory_pool_refusal(16, 4, Some(16)),
+            memory_pool_refusal(16, 4, Some((8, 8))),
             None,
             "exactly full is served"
         );
         assert!(memory_pool_refusal(0, 4, None).is_some_and(|r| r.contains("never holds")));
         assert!(memory_pool_refusal(16, 0, None)
             .is_some_and(|r| r.contains("MEMORY_RECYCLER_THREADS=0")));
-        assert!(memory_pool_refusal(8, 4, Some(9)).is_some_and(|r| r.contains("9 segments")));
+        // Either side alone can tip it.
+        assert!(memory_pool_refusal(16, 4, Some((8, 9))).is_some_and(|r| r.contains("9 for")));
+        assert!(memory_pool_refusal(16, 4, Some((16, 1))).is_some());
+        // A pool sized the way the launch scripts size it has room for the whole clamp range.
+        assert_eq!(memory_pool_refusal(140, 4, Some((12, 16))), None);
     }
 
     /// As many workers as the rayon pool has threads must still finish. The snapshot thread's

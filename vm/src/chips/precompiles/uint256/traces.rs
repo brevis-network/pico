@@ -7,22 +7,39 @@ use crate::{
             checked_u64_to_u32,
             uint256::{Uint256MulChip, UINT256_NUM_WORDS},
         },
-        utils::pad_rows_fixed,
+        trace::TraceData,
+        utils::{next_power_of_two, pad_rows_fixed},
     },
     compiler::riscv::program::Program,
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::riscv::{
+        ffi::FFIEmulationRecord,
         record::EmulationRecord,
-        syscalls::{precompiles::PrecompileEvent, SyscallCode},
+        syscalls::{
+            precompiles::{uint256::event::FfiUint256MulEvent, PrecompileEvent},
+            SyscallCode,
+        },
     },
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::chip::ChipBehavior,
 };
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+use cudart_sys::cudaMemcpyAsync;
 use num::{BigUint, One, Zero};
 use p3_field::PrimeField32;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+use pico_gpu_api::cuda_precompile_uint256_generate_extra_record_and_main;
 use std::borrow::BorrowMut;
+use tracing::info;
 
 impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
     type Record = EmulationRecord;
+    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -231,5 +248,74 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                 .get_precompile_events(SyscallCode::UINT256_MUL)
                 .is_empty()
         }
+    }
+
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            !record.uint256_mul_events.is_empty()
+        }
+    }
+
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let events = prepared_gpu_events.uint256_mul_events.as_slice();
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let event_size = events.len();
+        let mut d_events = DevicePoolAllocation::<FfiUint256MulEvent>::alloc_from_pool_async(
+            event_size, mem_pool, stream,
+        )
+        .unwrap();
+        unsafe {
+            let _ = cudaMemcpyAsync(
+                d_events.as_mut_c_void_ptr(),
+                events.as_c_void_ptr(),
+                std::mem::size_of_val(events),
+                cudart_sys::CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+        }
+
+        let num_cols_per_row = NUM_UINT256_MUL_COLS;
+        let log_rows = input.shape_chip_size(&self.name());
+        let num_total_rows = next_power_of_two(events.len(), log_rows);
+        let trace_size = num_total_rows * num_cols_per_row;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+        unsafe {
+            cuda_precompile_uint256_generate_extra_record_and_main(
+                num_cols_per_row,
+                event_size,
+                trace_size,
+                d_events.as_ptr() as *const _,
+                d_trace.as_mut_ptr() as *mut _,
+                d_byte_trace.as_mut_ptr() as *mut _,
+                stream.into(),
+            );
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[precompile-uint256-mul-chip] generate_extra_record_and_main on GPU");
+
+        TraceData::Gpu(NUM_UINT256_MUL_COLS, d_trace)
     }
 }

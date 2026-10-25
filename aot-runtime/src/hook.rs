@@ -278,7 +278,10 @@ mod tests {
         compiler::riscv::program::Program,
         emulator::{
             opts::EmulatorOpts,
-            riscv::{hook as interpreter_hook, riscv_emulator::RiscvEmulator},
+            riscv::{
+                hook as interpreter_hook, public_values::RecordFinalPvsState,
+                riscv_emulator::RiscvEmulator,
+            },
         },
     };
 
@@ -314,8 +317,12 @@ mod tests {
     fn every_hook_answers_what_the_interpreter_hook_does() {
         let program = test_program();
         let aot = AotEmulatorCore::new(program.clone(), Vec::new());
-        let interpreter =
-            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
+        let interpreter = RiscvEmulator::new_single::<KoalaBear>(
+            program,
+            Arc::new(RecordFinalPvsState::default()),
+            EmulatorOpts::default(),
+            None,
+        );
 
         let aot_hooks = default_hook_map();
         let interpreter_hooks = interpreter_hook::default_hook_map();

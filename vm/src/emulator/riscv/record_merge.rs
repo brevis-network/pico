@@ -5,24 +5,27 @@
 //!
 //! One field makes that more than a concatenation, and it is silent when wrong:
 //! `memory_read_write_event_indices` index into `cpu_events`, so they move with it.
-//! [`RecordBehavior::append`] concatenates them as they are, which is right for every other
-//! caller — they append records whose `cpu_events` is empty, so there is nothing to shift by —
-//! and wrong here.
+//! [`RecordBehavior::append`] concatenates them as they are — correct for its own caller
+//! (precompile-only records, whose `cpu_events` is empty) and wrong here.
 //!
-//! `cpu_local_memory_access` is concatenated, not re-aggregated by address: an unsplit chunk
-//! already carries several windows per address, so folding them by address destroys ones it
-//! keeps and the memory bus goes unbalanced. A split only adds the one window that spans the
-//! cut, and the two chain, so the global cumulative sum still closes.
+//! `cpu_local_memory_access` looked like it needed re-aggregating by address, since an entry
+//! holds an address's first and last access. Measuring says no: an unsplit chunk already carries
+//! well over one entry per address, so folding by address destroys windows the unsplit replay
+//! keeps — which it did, and the proof failed on an unbalanced memory bus. What a split does
+//! change is that an address live across a cut gets two chained windows where the unsplit replay
+//! had one; the address set is identical either way, and the global cumulative sum still closes.
 //!
-//! The equivalence gate in [`super::record_digest`] is what says the fold is right.
+//! The equivalence gate in [`super::record_digest`] is what says the fold is right; run it
+//! before trusting a measurement.
 
-use super::record::EmulationRecord;
 use crate::emulator::record::RecordBehavior;
 
 /// `MLE_SPLIT_CHECK=1` logs what each fold saw. Read once: a value that changed mid-run would
 /// make the numbers it prints incomparable.
 static SPLIT_CHECK: std::sync::LazyLock<bool> =
     std::sync::LazyLock::new(|| std::env::var("MLE_SPLIT_CHECK").is_ok_and(|value| value == "1"));
+
+use super::record::EmulationRecord;
 
 /// Fold `segments` — a chunk's replay segments, in clock order — into a single record.
 ///
@@ -69,12 +72,14 @@ pub fn merge_segments(mut segments: Vec<EmulationRecord>) -> EmulationRecord {
         merged.append(&mut segment);
     }
 
-    // The fold owes the caller every event it was handed; losing one proves the chunk short,
-    // which is silent. Cheap to state, so state it.
+    // `append` funnels the CPU events through `add_cpu_events`, which returns how many it took
+    // and drops the rest when the pinned buffer is full — and its caller ignores that. A chunk's
+    // events fit the buffer by construction, but only just (measured: 692 spare on a full one),
+    // so say so loudly rather than prove a chunk short.
     assert_eq!(
         merged.cpu_events.len(),
         cpu_lens.iter().sum::<usize>(),
-        "the fold dropped CPU events"
+        "the fold dropped CPU events: the pinned buffer was too small for the merged chunk"
     );
 
     if *SPLIT_CHECK {
@@ -105,8 +110,13 @@ mod tests {
             riscv_memory::event::{MemoryLocalEvent, MemoryRecord},
         },
         compiler::riscv::opcode::ByteOpcode,
-        emulator::riscv::record_digest::first_difference,
+        emulator::riscv::{
+            cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
+            record_digest::first_difference,
+        },
     };
+    use cudart::memory::CudaHostAllocFlags;
+    use std::sync::{Mutex, MutexGuard, PoisonError};
 
     /// One window over `addr`: entered from the chunk's entry record, closed at `timestamp`. An
     /// entry that opens and closes on the same access is not a state the AIR admits, so no
@@ -123,11 +133,27 @@ mod tests {
         }
     }
 
+    /// CPU events live in a pinned pool buffer, and with no pool `add_cpu_events` silently adds
+    /// nothing (it returns `Ok(0)`) — so a test that needs real ones has to bring the pool up.
+    /// The pool blocks when empty, so the tests holding buffers take turns behind the guard.
+    fn ensure_cpu_event_pool() -> MutexGuard<'static, ()> {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        static TURN: Mutex<()> = Mutex::new(());
+        ONCE.call_once(|| {
+            if !is_pool_initialized() {
+                // The size every other test site passes: the pool is process-wide.
+                init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+            }
+        });
+        TURN.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     fn with_cpu_events(count: usize) -> EmulationRecord {
-        EmulationRecord {
-            cpu_events: vec![CpuEvent::default(); count],
-            ..Default::default()
-        }
+        let mut record = EmulationRecord::default();
+        let events = vec![CpuEvent::default(); count];
+        let added = record.add_cpu_events(&events).expect("add cpu events");
+        assert_eq!(added, count, "the pool did not hand out a buffer");
+        record
     }
 
     #[test]
@@ -146,6 +172,7 @@ mod tests {
     /// the first segment's event count. `append` alone leaves them pointing at the wrong events.
     #[test]
     fn indices_are_rebased_onto_the_merged_cpu_events() {
+        let _turn = ensure_cpu_event_pool();
         let mut head = with_cpu_events(4);
         head.memory_read_write_event_indices = vec![1, 3];
         let mut tail = with_cpu_events(3);
@@ -158,18 +185,14 @@ mod tests {
     }
 
     /// Both segments' windows survive: an unsplit chunk already carries more than one window
-    /// per address, so folding them by address would destroy information. A split only adds the
-    /// one window that spans the cut.
+    /// per address, so folding them by address would destroy information (measured: 1.6 entries
+    /// per address). A split only adds the one window that spans the cut.
     #[test]
     fn both_segments_windows_survive() {
-        let head = EmulationRecord {
-            cpu_local_memory_access: vec![local_event(0x100, 1, 10), local_event(0x200, 2, 11)],
-            ..Default::default()
-        };
-        let tail = EmulationRecord {
-            cpu_local_memory_access: vec![local_event(0x100, 9, 42), local_event(0x300, 3, 43)],
-            ..Default::default()
-        };
+        let mut head = EmulationRecord::default();
+        head.cpu_local_memory_access = vec![local_event(0x100, 1, 10), local_event(0x200, 2, 11)];
+        let mut tail = EmulationRecord::default();
+        tail.cpu_local_memory_access = vec![local_event(0x100, 9, 42), local_event(0x300, 3, 43)];
 
         let merged = merge_segments(vec![head, tail]);
 
@@ -220,6 +243,7 @@ mod tests {
     /// still pass.
     #[test]
     fn indices_are_rebased_against_everything_merged_so_far() {
+        let _turn = ensure_cpu_event_pool();
         let mut first = with_cpu_events(2);
         first.memory_read_write_event_indices = vec![0];
         let mut second = with_cpu_events(3);
@@ -238,14 +262,10 @@ mod tests {
     /// at the first cut.
     #[test]
     fn the_tail_decides_where_the_chunk_ends() {
-        let head = EmulationRecord {
-            is_last: false,
-            ..Default::default()
-        };
-        let tail = EmulationRecord {
-            is_last: true,
-            ..Default::default()
-        };
+        let mut head = EmulationRecord::default();
+        head.is_last = false;
+        let mut tail = EmulationRecord::default();
+        tail.is_last = true;
 
         assert!(merge_segments(vec![head, tail]).is_last);
     }

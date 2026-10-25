@@ -1,5 +1,6 @@
 mod columns;
 mod constraints;
+pub mod ffi;
 #[cfg(test)]
 mod tests;
 mod traces;

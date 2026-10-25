@@ -1,0 +1,58 @@
+[package]
+name = "cuda-mle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+links = "cuda-mle"
+
+# GPU prover (CUDA) for MLE/WHIR STARK proofs. The device runtime lives in `src/runtime`, the
+# nvcc build helper in `build.rs`, and the protocol types come from `mle-core`. KoalaBear is the
+# only field with kernels.
+
+[dependencies]
+# The core crate is `pico-mle-core` (KoalaBear-only). Alias it back to the
+# `mle_core` extern name so the cuda-mle sources resolve `mle_core::…`.
+# For DEP_PICO_GPU_ROOT. Kernels this crate compiles now live in that repository, and build.rs
+# needs its path to find them. The crate itself is a shim that exports the path and nothing
+# else, so this edge carries no code -- and pico-gpu depends on nothing here, which is
+# what keeps the two repositories acyclic.
+pico-gpu.workspace = true
+mle-core = { package = "pico-mle-core", path = "../mle-core" }
+
+rayon.workspace = true
+itertools.workspace = true
+derive-new.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+getset.workspace = true
+rustc-hash.workspace = true
+rand.workspace = true
+serde.workspace = true
+# `air_data_gpu_cached`'s key: the same encoding the vk pre-hash uses for these DAGs.
+postcard.workspace = true
+
+# used by the device runtime (src/runtime)
+lazy_static.workspace = true
+metrics.workspace = true
+bytesize = "2.0"
+ctor = "0.5"
+
+# p3
+p3-field.workspace = true
+p3-koala-bear.workspace = true
+p3-dft.workspace = true
+p3-util.workspace = true
+p3-symmetric.workspace = true
+
+[build-dependencies]
+cc = { version = "1.0", features = ["parallel"] }
+glob = "0.3.2"
+
+[dev-dependencies]
+# `test-utils` exposes mle_core::test_utils to tests (cfg(test) doesn't fire for a dependency).
+mle-core = { package = "pico-mle-core", path = "../mle-core", features = ["test-utils"] }
+test-case = "3" # #[test_case] parameterized tests
+
+[features]
+touchemall = []
+strict = []

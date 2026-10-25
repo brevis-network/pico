@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+package subblock;
+
+service Subblock {
+  // schedule to prove with an indexed subblock input
+  rpc proveSubblock(ProveSubblockRequest) returns (google.protobuf.Empty);
+}
+
+message ProveSubblockRequest {
+  // block number to prove
+  uint64 block_number = 1;
+
+  // total number of subblocks
+  uint32 num_subblocks = 2;
+
+  // block number to prove
+  uint32 subblock_index = 3;
+
+  // bincode serialized stdin builder: subblock_stdin_builder_INDEX.bin
+  bytes input = 4;
+}

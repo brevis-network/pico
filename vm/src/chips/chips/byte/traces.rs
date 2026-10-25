@@ -1,23 +1,56 @@
 use super::{
     columns::{ByteMultCols, BytePreprocessedCols, NUM_BYTE_MULT_COLS, NUM_BYTE_PREPROCESSED_COLS},
+    event::ByteLookupEvent,
     utils::shr_carry,
     ByteChip,
 };
 use crate::{
+    chips::trace::TraceData,
     compiler::riscv::{opcode::ByteOpcode, program::Program},
-    emulator::riscv::record::EmulationRecord,
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord},
     machine::chip::ChipBehavior,
+};
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::CudaSliceMut,
+    stream::{CudaStream, CudaStreamCreateFlags},
 };
 use itertools::Itertools;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
+use pico_gpu_api::cuda_byte_generate_preprocessed;
 use std::borrow::BorrowMut;
+use tracing::info;
 
 pub const NUM_ROWS: usize = 1 << 17;
 
+/// The row of the byte table a lookup's multiplicity is counted on.
+///
+/// Every producer of the table has to agree on it: [`ByteChip::generate_main`], the device
+/// kernels (`handle_byte_lookup_event` / `handle_bit_range_check_event` in pico-gpu's
+/// `src/tracegen/riscv/byte.cuh`) and the host lookups `gpu_add_host_byte_lookups` adds to the
+/// device table. A lookup counted on another row than the preprocessed one it asserts leaves the
+/// byte bus unbalanced.
+///
+/// Rows `0..2^16` are the `(b << 8) | c` operand pairs, shared by every opcode and by `BitRange`
+/// at 16 bits. `BitRange` below 16 bits lives in the second half, at `2^16 + a + 2^bits` with
+/// `a = (b << 8) | c`, so each width owns the rows `2^16 + [2^bits, 2^(bits + 1))`.
+pub fn byte_lookup_row(lookup: &ByteLookupEvent) -> usize {
+    let pair = ((lookup.b as usize) << 8) | lookup.c as usize;
+    if lookup.opcode == ByteOpcode::BitRange && lookup.a2 < 16 {
+        (1 << 16) + pair + (1 << lookup.a2)
+    } else {
+        pair
+    }
+}
+
 impl<F: PrimeField32> ChipBehavior<F> for ByteChip<F> {
     type Record = EmulationRecord;
+    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -44,22 +77,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ByteChip<F> {
             .enumerate()
             .for_each(|(row_idx, row)| {
                 for (lookup, mult) in lookups.iter() {
-                    let row_index: usize =
-                        if lookup.opcode == ByteOpcode::BitRange && lookup.a2 == 16 {
-                            // U16Range: row = (b << 8) | c
-                            ((lookup.b as usize) << 8) + lookup.c as usize
-                        } else if lookup.opcode == ByteOpcode::BitRange && lookup.a2 < 16 {
-                            // BitRange: row = 65536 + (b << 8) | c + (1 << bits)
-                            let base = 1usize << 16;
-                            base + ((lookup.b as usize) << 8)
-                                + lookup.c as usize
-                                + (1usize << lookup.a2 as usize)
-                        } else {
-                            // Other byte ops: row = (b << 8) | c
-                            ((lookup.b as usize) << 8) + lookup.c as usize
-                        };
-
-                    if row_idx == row_index {
+                    if row_idx == byte_lookup_row(lookup) {
                         let cols: &mut ByteMultCols<F> = row.borrow_mut();
                         let index = lookup.opcode as usize;
                         cols.multiplicities[index] += F::from_usize(**mult);
@@ -72,6 +90,45 @@ impl<F: PrimeField32> ChipBehavior<F> for ByteChip<F> {
 
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
+    }
+
+    fn gpu_generate_preprocessed(
+        &self,
+        device_id: usize,
+        _program: &Self::Program,
+    ) -> Option<TraceData<'_, F>> {
+        use p3_koala_bear::KoalaBear;
+
+        let padded_nb_rows = NUM_ROWS;
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        // get current memory pool
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let trace_size = padded_nb_rows * self.preprocessed_width();
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        // no need to memset generate_main writes every column of every row
+        unsafe {
+            cuda_byte_generate_preprocessed(
+                d_trace.as_mut_ptr() as *mut _,
+                self.preprocessed_width(),
+                stream.into(),
+            );
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[byte-chip] generate_preprocessed on GPU");
+
+        Some(TraceData::Gpu(self.preprocessed_width(), d_trace))
     }
 }
 
