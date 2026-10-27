@@ -29,7 +29,7 @@ use crate::{
     },
     compiler::riscv::{opcode::Opcode, program::Program},
     emulator::riscv::record::EmulationRecord,
-    iter::{IntoPicoRefIterator, PicoSlice, PicoSliceMut},
+    iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSlice, PicoSliceMut},
     machine::{
         chip::ChipBehavior,
         estimator::{EventCapture, EventSizeCapture},
@@ -53,7 +53,6 @@ use pico_gpu_api::{
     cuda_memory_read_write_generate_extra_record_and_main_u64,
     cuda_memory_read_write_generate_extra_record_and_main_u64_packed,
 };
-use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::borrow::BorrowMut;
 #[cfg(feature = "cuda")]
 use tracing::info;
@@ -95,7 +94,6 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
         // Calculate actual population length and handle type conversion
         let populate_len = events.len() * NUM_MEMORY_CHIP_VALUE_COLS;
 
-        // Use rayon's parallel slice operations for better chunk handling
         values[..populate_len]
             .pico_chunks_mut(NUM_MEMORY_CHIP_VALUE_COLS)
             .zip_eq(events.pico_iter())

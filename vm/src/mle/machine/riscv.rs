@@ -242,7 +242,7 @@ pub fn prepare_chunk(record: EmulationRecord) -> PreparedChunk {
 /// asserts the shapes agree.
 pub fn prepare_chunk_shaped(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
-    mut record: EmulationRecord,
+    #[cfg_attr(not(feature = "cuda"), allow(unused_mut))] mut record: EmulationRecord,
     bucket: bool,
 ) -> PreparedChunk {
     #[cfg(feature = "cuda")]
@@ -284,11 +284,11 @@ pub fn prepare_chunk_shaped(
         }
         PreparedChunk { record, prepared }
     }
+    // The CPU build leaves the shape to `build_ctx`, which picks it from the augmented record
+    // it builds anyway.
     #[cfg(not(feature = "cuda"))]
     {
-        if bucket {
-            shape_record(chips, &mut record);
-        }
+        let _ = (chips, bucket);
         PreparedChunk { record }
     }
 }
@@ -1818,6 +1818,7 @@ impl RiscvMachine {
 
     /// [`Self::prove_chunk`] returning the failure instead of panicking. `index` names the chunk
     /// in the error only.
+    #[cfg(feature = "cuda")]
     fn try_prove_chunk(
         &self,
         chunk: &PreparedChunk,
@@ -1996,8 +1997,19 @@ impl RiscvMachine {
                 .par_iter()
                 .enumerate()
                 .map(|(j, record)| {
-                    let chunk = self.prepare_chunk_shaped(record.clone());
-                    let proof = self.try_prove_chunk(&chunk, base + j, false)?;
+                    // Only the GPU staging needs the record owned; the CPU build proves it borrowed.
+                    #[cfg(feature = "cuda")]
+                    let proof = self.try_prove_chunk(
+                        &self.prepare_chunk_shaped(record.clone()),
+                        base + j,
+                        false,
+                    )?;
+                    #[cfg(not(feature = "cuda"))]
+                    let proof = self.try_prove_ctx(
+                        ctx_to_engine(build_ctx(&self.chips, record, self.bucket)),
+                        base + j,
+                        false,
+                    )?;
                     tracing::info!("chunk {}: MLE prove OK", base + j);
                     Ok(proof)
                 })

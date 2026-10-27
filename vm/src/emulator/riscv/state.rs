@@ -135,7 +135,6 @@ impl RiscvEmulationState {
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use super::RiscvEmulationState;
@@ -160,4 +159,3 @@ mod tests {
         );
     }
 }
-*/

@@ -45,13 +45,13 @@ use crate::{
         },
     },
     instances::compiler::shapes::riscv_shape::RiscvPadShape,
+    iter::{PicoBridge, PicoIterator},
     primitives::consts::{KoalaBearConfig, LOCAL_MEMORY_DATAPAR, RISCV_POSEIDON2_DATAPAR},
 };
 #[cfg(feature = "cuda")]
 use cudart::slice::CudaSlice;
 use hashbrown::HashMap;
 use p3_field::PrimeCharacteristicRing;
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     env,
@@ -578,11 +578,14 @@ static PROVER_HARDWARE_CONFIG: OnceLock<ProverHardwareConfig> = OnceLock::new();
 
 pub fn get_prover_hardware_config() -> &'static ProverHardwareConfig {
     PROVER_HARDWARE_CONFIG.get_or_init(|| {
-        // Detect Tier
-        let val = env::var("PICO_GPU_MEM").unwrap_or_else(|_| "4090".to_string());
-        let tier = match val.to_lowercase().as_str() {
-            "5090" | "32gb" | "high" => GpuMemoryTier::Tier32GB,
-            _ => GpuMemoryTier::Tier24GB,
+        // Unset means the 32 GB tier, the one the release is calibrated on; the CPU build has no
+        // card to size for and keeps that default too.
+        let tier = match env::var("PICO_GPU_MEM")
+            .map(|v| v.to_lowercase())
+            .as_deref()
+        {
+            Err(_) | Ok("5090" | "32gb" | "high") => GpuMemoryTier::Tier32GB,
+            Ok(_) => GpuMemoryTier::Tier24GB,
         };
 
         let config = ProverHardwareConfig { tier };
@@ -939,7 +942,7 @@ impl EmulationRecord {
         let per_syscall = self
             .precompile_events
             .iter_mut()
-            .par_bridge()
+            .pico_bridge()
             .map(|(syscall_code, events)| {
                 let mut local_records = Vec::new();
                 if events.is_empty() {

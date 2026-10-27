@@ -29,7 +29,7 @@ use crate::{
     },
     compiler::riscv::program::Program,
     emulator::riscv::record::EmulationRecord,
-    iter::PicoIterator,
+    iter::{IndexedPicoIterator, PicoIterator, PicoSlice, PicoSliceMut},
     machine::{
         chip::ChipBehavior,
         estimator::{EventCapture, EventSizeCapture},
@@ -51,10 +51,6 @@ use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 #[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_memory_local_generate_extra_record_and_main_u64;
-use rayon::{
-    iter::IndexedParallelIterator,
-    slice::{ParallelSlice, ParallelSliceMut},
-};
 #[cfg(feature = "cuda")]
 use tracing::info;
 
@@ -146,9 +142,8 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
         let padded_nb_rows = next_power_of_two(nb_rows, log_rows);
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MEMORY_LOCAL_INIT_COLS);
 
-        // Parallelize the main computation using par_chunks_mut
         values[..nb_rows * NUM_MEMORY_LOCAL_INIT_COLS]
-            .par_chunks_mut(NUM_MEMORY_LOCAL_INIT_COLS)
+            .pico_chunks_mut(NUM_MEMORY_LOCAL_INIT_COLS)
             .enumerate()
             .for_each(|(row_idx, row)| {
                 let base_event_idx = row_idx * LOCAL_MEMORY_DATAPAR;
@@ -207,7 +202,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
         let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);
 
         let (global_events, blu_batches): (Vec<_>, Vec<_>) = local_mem_events
-            .par_chunks(chunk_size * LOCAL_MEMORY_DATAPAR)
+            .pico_chunks(chunk_size * LOCAL_MEMORY_DATAPAR)
             .map(|events| {
                 let mut global_events = vec![];
                 let mut blu = vec![];
