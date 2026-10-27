@@ -1240,7 +1240,7 @@ pub fn mle_natural_heights(record: &EmulationRecord) -> BTreeMap<String, usize> 
 /// per-kind event and local-memory counts; Global and Poseidon2, the two heights extra-record
 /// output feeds, come from the counter in every family. `MLE_SHAPE_CROSSCHECK=1` asserts the
 /// equality on every chunk (`prepare_chunk_shaped`).
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub fn mle_natural_heights_from_counter(
     record: &EmulationRecord,
     counter: &crate::instances::preparer::EventCounter,

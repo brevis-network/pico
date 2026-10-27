@@ -48,6 +48,7 @@ fn test_poseidon2_packed_preprocessed_dimensions() {
 /// Poseidon2ValueCols (the permutation trace reuses the recursion poseidon2 kernel); events carry a
 /// correct permutation output (the CPU populate_perm asserts it). KoalaBear-only; needs a CUDA
 /// device.
+#[cfg(feature = "cuda")]
 mod gpu {
     use crate::{
         chips::{
@@ -59,7 +60,10 @@ mod gpu {
             types::{Address, Poseidon2Event, Poseidon2PackedInstr},
         },
         emulator::recursion::emulator::RecursionRecord,
-        machine::{chip::ChipBehavior, field::FieldSpecificPoseidon2Config},
+        machine::{
+            chip::{ChipBehavior, GpuChipBehavior},
+            field::FieldSpecificPoseidon2Config,
+        },
         primitives::consts::PERMUTATION_WIDTH,
     };
     use p3_field::PrimeCharacteristicRing;
@@ -104,7 +108,7 @@ mod gpu {
         record.poseidon2_packed_events = sample_events(n);
         let cpu = chip.generate_main(&record, &mut RecursionRecord::default());
         let gpu = chip
-            .gpu_generate_main(0, &record, &mut RecursionRecord::default(), None)
+            .gpu_generate_main(0, &record, &mut RecursionRecord::default())
             .to_host(stream);
         assert_eq!(cpu.values, gpu.values, "main parity failed for {n} events");
     }

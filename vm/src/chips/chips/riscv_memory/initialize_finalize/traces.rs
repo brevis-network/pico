@@ -3,21 +3,13 @@ use super::{
     MemoryChipType, MemoryInitializeFinalizeChip,
 };
 use crate::{
-    chips::{
-        chips::{
-            byte::event::{ByteLookupEvent, ByteRecordBehavior},
-            riscv_global::event::GlobalInteractionEvent,
-            riscv_memory::event::MemoryInitializeFinalizeEvent,
-        },
-        trace::TraceData,
-        utils::next_power_of_two,
+    chips::chips::{
+        byte::event::{ByteLookupEvent, ByteRecordBehavior},
+        riscv_global::event::GlobalInteractionEvent,
+        riscv_memory::event::MemoryInitializeFinalizeEvent,
     },
     compiler::{riscv::program::Program, word::Word},
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
-    },
-    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord},
-    instances::preparer::{EventCounter, PreparedGpuEvents},
+    emulator::riscv::record::EmulationRecord,
     iter::{IntoPicoIterator, PicoIterator},
     machine::{
         chip::ChipBehavior,
@@ -27,22 +19,35 @@ use crate::{
     },
     primitives::consts::u64_to_u16_limbs,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{trace::TraceData, utils::next_power_of_two},
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{EventCounter, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
 use p3_field::PrimeField32;
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_memory_initialize_finalize_generate_extra_record_and_main_u64;
 use std::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
 use tracing::info;
 
 impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -257,7 +262,10 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
     fn lookup_scope(&self) -> LookupScope {
         LookupScope::Regional
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
     fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
         counter.num_memory_initialize_events += record.memory_initialize_events.len();
         counter.num_memory_finalize_events += record.memory_finalize_events.len();

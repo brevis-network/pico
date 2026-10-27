@@ -3,22 +3,24 @@
 //! removed with the FRI proving path (tag `legacy-fri-last`); the chip tests that were built on
 //! them went with it and are to be rewritten on the MLE engine.
 
+#[cfg(feature = "cuda")]
+use crate::cuda_adaptor::resource_pool::{
+    mem_pool::create_ctx,
+    stream_pool::{create_stream, get_global_stream_pool},
+};
 use crate::{
     compiler::riscv::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
     configs::stark_config::KoalaBearPoseidon2,
-    cuda_adaptor::resource_pool::{
-        mem_pool::create_ctx,
-        stream_pool::{create_stream, get_global_stream_pool},
-    },
     emulator::{
         emulator::MetaEmulator,
         opts::EmulatorOpts,
         record::RecordBehavior,
         riscv::{
-            emulator::RiscvEmulator, public_values::RecordFinalPvsState, record::EmulationRecord,
+            emulator::RiscvEmulator, event_pool::HostAllocFlags,
+            public_values::RecordFinalPvsState, record::EmulationRecord,
         },
         stdin::EmulatorStdin,
     },
@@ -28,7 +30,8 @@ use crate::{
         witness::ProvingWitness,
     },
 };
-use cudart::{memory::CudaHostAllocFlags, stream::CudaStream};
+#[cfg(feature = "cuda")]
+use cudart::stream::CudaStream;
 use p3_koala_bear::KoalaBear;
 use std::{fs, path::PathBuf, sync::Arc};
 
@@ -41,7 +44,7 @@ use std::{fs, path::PathBuf, sync::Arc};
 fn init_cpu_event_pool_once() {
     use crate::emulator::riscv::cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized};
     if !is_pool_initialized() {
-        init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+        init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
     }
 }
 
@@ -185,6 +188,7 @@ impl TestInput {
     }
 }
 
+#[cfg(feature = "cuda")]
 pub(crate) fn init_test_stream() -> &'static CudaStream {
     create_ctx(0);
     create_stream(0);

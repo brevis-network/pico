@@ -1,3 +1,4 @@
+#[cfg(feature = "cuda")]
 use super::{
     columns::{
         RISCV_NUM_POSEIDON2_COLS, RISCV_NUM_POSEIDON2_VALUE_COLS, RISCV_POSEIDON2_NUM_INPUTS,
@@ -5,38 +6,56 @@ use super::{
     dummy_row::RISCV_DUMMY_ROW_KB,
     Poseidon2ChipP3,
 };
+#[cfg(feature = "cuda")]
 use crate::{
     chips::{chips::riscv_poseidon2::Poseidon2Event, tests::init_test_stream, trace::TraceData},
     cuda_adaptor::resource_pool::mem_pool::get_global_mem_pool,
     emulator::riscv::{
         cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
+        event_pool::HostAllocFlags,
         record::EmulationRecord,
     },
-    machine::{chip::ChipBehavior, field::FieldSpecificPoseidon2Config},
+    machine::{
+        chip::{ChipBehavior, GpuChipBehavior},
+        field::FieldSpecificPoseidon2Config,
+    },
     primitives::consts::{KoalaBearConfig, PERMUTATION_WIDTH},
 };
+#[cfg(feature = "cuda")]
 use cudart::{
-    memory::CudaHostAllocFlags,
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
+#[cfg(feature = "cuda")]
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use p3_symmetric::Permutation;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_riscv_poseidon2_generate_main;
+#[cfg(feature = "cuda")]
 use rand::{rng, RngExt};
+#[cfg(feature = "cuda")]
 use std::{sync::LazyLock, time::Instant};
 
+#[cfg(feature = "cuda")]
 type F = KoalaBear;
+#[cfg(feature = "cuda")]
 type LinearLayers = <F as FieldSpecificPoseidon2Config>::RiscvLinearLayers;
+#[cfg(feature = "cuda")]
 type Config = KoalaBearConfig;
 
+#[cfg(feature = "cuda")]
 // Not a multiple of the 4-slot row: the last real row carries dummy slots and the trace is padded
 // with dummy rows, so `RISCV_DUMMY_ROW_KB` / `pad_dummy_rows_kernel` are exercised too.
 static SHARD: LazyLock<EmulationRecord> = LazyLock::new(|| make_shard((1 << 10) + 3));
 
+#[cfg(feature = "cuda")]
 fn cpu_generate_main(
     chip: &Poseidon2ChipP3<F, LinearLayers, Config>,
     input: &EmulationRecord,
@@ -44,18 +63,20 @@ fn cpu_generate_main(
     chip.generate_main(input, &mut EmulationRecord::default())
 }
 
+#[cfg(feature = "cuda")]
 fn gpu_generate_main(
     chip: &Poseidon2ChipP3<F, LinearLayers, Config>,
     input: &EmulationRecord,
 ) -> RowMajorMatrix<F> {
     let stream = init_test_stream();
-    let trace = chip.gpu_generate_main(0, input, &mut EmulationRecord::default(), None);
+    let trace = chip.gpu_generate_main(0, input, &mut EmulationRecord::default());
     trace.to_host(stream)
 }
 
+#[cfg(feature = "cuda")]
 fn make_shard(num_iters: usize) -> EmulationRecord {
     if !is_pool_initialized() {
-        init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+        init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
     }
 
     let mut rec = EmulationRecord::default();
@@ -85,6 +106,7 @@ fn make_shard(num_iters: usize) -> EmulationRecord {
     rec
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn test_riscv_poseidon2_gpu_generate_main() {
     let chunk = LazyLock::force(&SHARD);
@@ -111,10 +133,11 @@ fn test_riscv_poseidon2_gpu_generate_main() {
     );
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn bench_riscv_poseidon2_cpu_vs_gpu() {
     if !is_pool_initialized() {
-        init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+        init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
     }
 
     let warmup_sizes: Vec<usize> = vec![1 << 14];

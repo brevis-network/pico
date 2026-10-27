@@ -3,15 +3,19 @@ use super::{
     columns::{MemoryCols, NUM_MEM_INIT_COLS, NUM_MEM_PREPROCESSED_INIT_COLS},
     MemoryVarChip,
 };
+#[cfg(feature = "cuda")]
 use crate::{
     chips::{trace::TraceData, utils::next_power_of_two},
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
+use crate::{
     compiler::recursion::{
         instruction::{
             HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
         },
         program::RecursionProgram,
     },
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::recursion::emulator::RecursionRecord,
     iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSliceMut},
     machine::{
@@ -21,23 +25,27 @@ use crate::{
     primitives::consts::VAR_MEM_DATAPAR,
 };
 use core::{borrow::BorrowMut, iter::zip};
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_recursion_mem_var_generate_main, cuda_recursion_mem_var_generate_preprocessed,
 };
+#[cfg(feature = "cuda")]
 use tracing::debug;
 
 impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
     type Record = RecursionRecord<F>;
-    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -134,6 +142,10 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
     fn local_only(&self) -> bool {
         true
     }
+}
+
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for MemoryVarChip<F> {
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -241,7 +253,6 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         use p3_koala_bear::KoalaBear;
 

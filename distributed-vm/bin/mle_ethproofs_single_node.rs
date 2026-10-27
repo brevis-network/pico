@@ -1,4 +1,4 @@
-//! EthProofs single-node MLE/WHIR prover (KoalaBear; GPU with `cuda-mle`).
+//! EthProofs single-node MLE/WHIR prover (KoalaBear; GPU with `cuda`).
 //!
 //! Blocks arrive over gRPC from RSP; see `distributed_vm::mle::ethproofs`.
 

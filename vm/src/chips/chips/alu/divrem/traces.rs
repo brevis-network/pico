@@ -1,4 +1,13 @@
 use super::{columns::NUM_DIVREM_COLS, DivRemChip};
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
 use crate::{
     chips::{
         chips::{
@@ -8,27 +17,20 @@ use crate::{
                     utils::{
                         get_msb, get_quotient_and_remainder, is_signed_64bit_operation,
                         is_signed_word_operation, is_unsigned_64bit_operation,
-                        is_unsigned_word_operation, is_word_operation,
+                        is_unsigned_word_operation, is_word_operation, DivremExtraEventIndices,
                     },
                 },
                 event::AluEvent,
             },
             byte::event::{ByteLookupEvent, ByteRecordBehavior},
         },
-        trace::TraceData,
         utils::next_power_of_two,
     },
     compiler::{
         riscv::{opcode::Opcode, program::Program},
         word::Word,
     },
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
-    },
-    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord},
-    instances::preparer::{
-        DivremExtraEventIndices, EventCounter, PreallocatedGpuMemory, PreparedGpuEvents,
-    },
+    emulator::riscv::record::EmulationRecord,
     iter::{PicoIterator, PicoSlice},
     machine::{
         chip::ChipBehavior,
@@ -37,22 +39,27 @@ use crate::{
     primitives::consts::{DIVREM_DATAPAR, LONG_WORD_SIZE},
 };
 use core::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_divrem_generate_extra_record_and_main, cuda_divrem_generate_extra_record_and_main_packed,
 };
 use std::num::Wrapping;
+#[cfg(feature = "cuda")]
 use tracing::info;
 
 impl<F: Field> BaseAir<F> for DivRemChip<F> {
@@ -63,7 +70,6 @@ impl<F: Field> BaseAir<F> for DivRemChip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -447,7 +453,10 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
     fn local_only(&self) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for DivRemChip<F> {
     fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
         counter.num_divrem_events += record.divrem_events.len();
         if counter.num_divrem_events == 0 {

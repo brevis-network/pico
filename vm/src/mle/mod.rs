@@ -19,9 +19,9 @@ pub use pico_mle_core::proof;
 // depending on pico-mle-core directly.
 pub use pico_mle_core::config::recursion_params_with_100_bits_security;
 // Re-exported for the same reason: `distributed-vm` enables the GPU backend only through
-// `pico-vm/cuda-mle` and has no direct dependency on the crate, so the per-chunk
+// `pico-vm/cuda` and has no direct dependency on the crate, so the per-chunk
 // `MLE_BREAKDOWN` reporting in its worker loop reaches it as `pico_vm::mle::cuda_mle`.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub use cuda_mle;
 
 /// Read an env var as an opt-**out**: only `0` / `off` / `no` / `false` disable it, everything else

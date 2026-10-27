@@ -38,7 +38,7 @@ bincode.workspace = true
 clap.workspace = true
 crossbeam.workspace = true
 core_affinity.workspace = true
-cudart.workspace = true
+cudart = { workspace = true, optional = true }
 dashmap.workspace = true
 dotenvy.workspace = true
 log.workspace = true
@@ -73,8 +73,7 @@ once_cell.workspace = true
 tonic-build.workspace = true
 
 [features]
-gpu = ["pico-vm/gpu"]
-cuda-mle = ["pico-vm/cuda-mle"]
+cuda = ["pico-vm/cuda", "dep:cudart"]
 tcmalloc = ["pico-vm/tcmalloc"]
 jemalloc = ["pico-vm/jemalloc"]
 bigint-rug = ["pico-vm/bigint-rug", "pico-aot-dispatch?/bigint-rug"]

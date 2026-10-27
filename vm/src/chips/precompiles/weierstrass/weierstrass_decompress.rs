@@ -33,38 +33,41 @@ use crate::{
             },
         },
         precompiles::checked_u64_to_u32,
-        trace::TraceData,
-        utils::{next_power_of_two, pad_rows_fixed},
+        utils::pad_rows_fixed,
     },
     compiler::{riscv::program::Program, word::Word},
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
-    },
     emulator::riscv::{
-        ffi::FFIEmulationRecord,
         record::EmulationRecord,
-        syscalls::{
-            precompiles::{ec::event::EllipticCurveDecompressEventFFI, PrecompileEvent},
-            SyscallCode,
-        },
+        syscalls::{precompiles::PrecompileEvent, SyscallCode},
     },
-    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
     },
     primitives::consts::u64_to_u16_limbs,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{trace::TraceData, utils::next_power_of_two},
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    emulator::riscv::syscalls::precompiles::ec::event::EllipticCurveDecompressEventFFI,
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
 use core::{
     borrow::{Borrow, BorrowMut},
     marker::PhantomData,
     mem::size_of,
 };
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
 use hybrid_array::Array;
 use num::{BigUint, One, Zero};
@@ -72,12 +75,14 @@ use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use pico_derive::AlignedBorrow;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_weierstrass_decompress_bls12381_generate_extra_record_and_main,
     cuda_weierstrass_decompress_secp256k1_generate_extra_record_and_main,
     cuda_weierstrass_decompress_secp256r1_generate_extra_record_and_main,
 };
 use std::fmt::Debug;
+#[cfg(feature = "cuda")]
 use tracing::{debug, info};
 use typenum::Unsigned;
 
@@ -226,7 +231,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
     for WeierstrassDecompressChip<F, E>
 {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -432,7 +436,12 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
     fn local_only(&self) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> GpuChipBehavior<F>
+    for WeierstrassDecompressChip<F, E>
+{
     fn gpu_generate_extra_record_and_main(
         &self,
         device_id: usize,
@@ -939,6 +948,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "cuda")]
     use crate::{
         chips::{
             chips::{
@@ -966,16 +976,23 @@ mod tests {
                 PreallocatedGpuMemory, PreparedGpuEvents,
             },
         },
-        machine::chip::ChipBehavior,
+        machine::chip::{ChipBehavior, GpuChipBehavior},
     };
+    #[cfg(feature = "cuda")]
     use alloy_primitives::hex;
+    #[cfg(feature = "cuda")]
     use p3_koala_bear::KoalaBear;
+    #[cfg(feature = "cuda")]
     use p3_matrix::dense::RowMajorMatrix;
+    #[cfg(feature = "cuda")]
     use rand::RngExt;
 
+    #[cfg(feature = "cuda")]
     type Chip<F, P> = super::WeierstrassDecompressChip<F, P>;
+    #[cfg(feature = "cuda")]
     type F = KoalaBear;
 
+    #[cfg(feature = "cuda")]
     fn cpu_generate_main<P: EllipticCurve + WeierstrassParameters>(
         chip: &Chip<F, P>,
         input: &EmulationRecord,
@@ -983,6 +1000,7 @@ mod tests {
         chip.generate_main(input, &mut EmulationRecord::default())
     }
 
+    #[cfg(feature = "cuda")]
     fn gpu_generate_extra_record_and_main<E: EllipticCurve + WeierstrassParameters>(
         chip: &Chip<F, E>,
         input: &EmulationRecord,
@@ -1001,6 +1019,7 @@ mod tests {
 
     // TODO: add test_secp256r1_decompress_generate_extra_record_and_main
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn test_secp256k1_decompress_generate_extra_record_and_main() {
         use crate::{
@@ -1201,6 +1220,7 @@ mod tests {
         assert_eq!(host_gpu_byte_trace.values, cpu_byte_trace.values);
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn test_bls12381_decompress_generate_extra_record_and_main() {
         use crate::{
@@ -1393,6 +1413,7 @@ mod tests {
         assert_eq!(host_gpu_byte_trace.values, cpu_byte_trace.values);
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn bench_weierstrass_decompress_cpu_vs_gpu() {
         use std::{mem::size_of, time::Instant};

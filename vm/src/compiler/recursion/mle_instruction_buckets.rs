@@ -134,6 +134,7 @@ pub struct MleInstructionBuckets {
     /// ever names a bucket by anything but its variant.
     positions: [Box<[u32]>; MleVariant::COUNT],
     /// The program length these positions were classified from; checked by [`Candidates::new`].
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     n_instructions: usize,
 }
 
@@ -193,6 +194,7 @@ impl<'a, F> Candidates<'a, F> {
     /// `instructions` — the one stale-bucket case that would otherwise quietly yield fewer rows.
     /// A position out of range panics on indexing in either profile, rather than reading a
     /// neighbouring instruction.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub(crate) fn new(
         instructions: &'a [Instruction<F>],
         buckets: Option<Arc<MleInstructionBuckets>>,

@@ -1,9 +1,81 @@
 use crossbeam::channel::{bounded, Receiver, Sender};
-use cudart::{
-    memory::{CudaHostAllocFlags, HostAllocation},
-    slice::CudaSlice,
-};
+#[cfg(feature = "cuda")]
+use cudart::{memory::HostAllocation, slice::CudaSlice};
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Allocation flags for event buffers: CUDA's pinned-host flags in the GPU build, a placeholder
+/// in the CPU build, where buffers are ordinary heap memory.
+#[cfg(feature = "cuda")]
+pub use cudart::memory::CudaHostAllocFlags as HostAllocFlags;
+
+#[cfg(not(feature = "cuda"))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HostAllocFlags;
+
+#[cfg(not(feature = "cuda"))]
+impl HostAllocFlags {
+    pub const DEFAULT: Self = Self;
+}
+
+/// Heap stand-in for `HostAllocation` in the CPU build: same uninitialized-slots contract.
+#[cfg(not(feature = "cuda"))]
+#[derive(Debug)]
+struct HostAllocation<T>(Box<[std::mem::MaybeUninit<T>]>);
+
+#[cfg(not(feature = "cuda"))]
+impl<T> HostAllocation<T> {
+    fn alloc(capacity: usize, _flags: HostAllocFlags) -> Result<Self, &'static str> {
+        Ok(Self(Box::new_uninit_slice(capacity)))
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn as_ptr(&self) -> *const T {
+        self.0.as_ptr() as *const T
+    }
+
+    fn as_mut_ptr(&mut self) -> *mut T {
+        self.0.as_mut_ptr() as *mut T
+    }
+}
+
+#[cfg(not(feature = "cuda"))]
+impl<T> std::ops::Index<std::ops::RangeTo<usize>> for HostAllocation<T> {
+    type Output = [T];
+
+    /// Callers only index the initialized prefix `..len`.
+    fn index(&self, range: std::ops::RangeTo<usize>) -> &[T] {
+        assert!(range.end <= self.len());
+        unsafe { std::slice::from_raw_parts(self.as_ptr(), range.end) }
+    }
+}
+
+#[cfg(not(feature = "cuda"))]
+impl<T> std::ops::IndexMut<std::ops::RangeTo<usize>> for HostAllocation<T> {
+    fn index_mut(&mut self, range: std::ops::RangeTo<usize>) -> &mut [T] {
+        assert!(range.end <= self.len());
+        unsafe { std::slice::from_raw_parts_mut(self.as_mut_ptr(), range.end) }
+    }
+}
+
+#[cfg(not(feature = "cuda"))]
+impl<T> std::ops::Index<usize> for HostAllocation<T> {
+    type Output = T;
+
+    /// Callers only index the initialized prefix.
+    fn index(&self, i: usize) -> &T {
+        &self[..i + 1][i]
+    }
+}
+
+#[cfg(not(feature = "cuda"))]
+impl<T> std::ops::IndexMut<usize> for HostAllocation<T> {
+    fn index_mut(&mut self, i: usize) -> &mut T {
+        &mut self[..i + 1][i]
+    }
+}
 
 /// When set, buffers do not come from the pools: each starts small and grows as events arrive, and
 /// is freed when returned. For callers that hold every record of a run (the host prover): fixed
@@ -20,22 +92,26 @@ pub fn use_growable_event_buffers() {
     GROWABLE.store(true, Ordering::Relaxed);
 }
 
+/// Always on in the CPU build: without a GPU pipeline there is no backpressure to keep, and
+/// fixed pools would reserve a chunk's worth of memory per buffer up front.
 #[inline]
 pub(crate) fn growable() -> bool {
-    GROWABLE.load(Ordering::Relaxed)
+    cfg!(not(feature = "cuda")) || GROWABLE.load(Ordering::Relaxed)
 }
 
-/// A generic pool of reusable, pinned memory buffers for any event type.
+/// A generic pool of reusable event buffers (pinned memory in the GPU build).
 #[derive(Debug)]
 pub struct EventPool<T> {
     sender: Sender<PinnedEventBuffer<T>>,
     receiver: Receiver<PinnedEventBuffer<T>>,
     buffer_capacity: usize,
-    flags: CudaHostAllocFlags,
+    flags: HostAllocFlags,
 }
 
 impl<T: std::fmt::Debug> EventPool<T> {
-    pub fn new(pool_size: usize, buffer_capacity: usize, flags: CudaHostAllocFlags) -> Self {
+    pub fn new(pool_size: usize, buffer_capacity: usize, flags: HostAllocFlags) -> Self {
+        // The CPU build's buffers never come from the pool, so there is nothing to preallocate.
+        let pool_size = if cfg!(feature = "cuda") { pool_size } else { 0 };
         // Create a bounded channel with the same size as the pool
         let (sender, receiver) = bounded(pool_size);
 
@@ -104,7 +180,7 @@ pub struct PinnedEventBuffer<T> {
     len: usize,
     /// Made by a pool, and goes back to it; a growable buffer is freed instead.
     pooled: bool,
-    flags: CudaHostAllocFlags,
+    flags: HostAllocFlags,
 }
 
 // SAFETY: The buffer contains elements of type T. It is only sound to move the
@@ -113,8 +189,8 @@ unsafe impl<T: Send> Send for PinnedEventBuffer<T> {}
 unsafe impl<T: Sync> Sync for PinnedEventBuffer<T> {}
 
 impl<T> PinnedEventBuffer<T> {
-    fn new(capacity: usize, flags: CudaHostAllocFlags) -> Result<Self, cudart_sys::CudaError> {
-        let host = HostAllocation::alloc(capacity, flags)?;
+    fn new(capacity: usize, flags: HostAllocFlags) -> Result<Self, String> {
+        let host = HostAllocation::alloc(capacity, flags).map_err(|e| format!("{e:?}"))?;
         Ok(Self {
             host,
             len: 0,
@@ -261,6 +337,7 @@ impl<T> Drop for PinnedEventBuffer<T> {
 }
 
 // Implement CudaSlice for PinnedEventBuffer to enable proper host->device transfer
+#[cfg(feature = "cuda")]
 impl<T> CudaSlice<T> for PinnedEventBuffer<T> {
     unsafe fn as_slice(&self) -> &[T] {
         std::slice::from_raw_parts(self.host.as_ptr(), self.len)
@@ -443,6 +520,7 @@ impl<T> EventBuffer<T> {
 }
 
 // Implement CudaSlice for EventBuffer to enable proper host->device transfer
+#[cfg(feature = "cuda")]
 impl<T> CudaSlice<T> for EventBuffer<T> {
     unsafe fn as_slice(&self) -> &[T] {
         match self {
@@ -457,7 +535,7 @@ impl<T> CudaSlice<T> for EventBuffer<T> {
 
 /// A trait for managing global event pools
 pub trait EventPoolManager<T> {
-    fn init_pool(pool_size: usize, flags: CudaHostAllocFlags);
+    fn init_pool(pool_size: usize, flags: HostAllocFlags);
     fn get_buffer() -> Option<EventBuffer<T>>;
     fn return_buffer(buffer: EventBuffer<T>);
     fn shutdown_pool();
@@ -484,7 +562,10 @@ macro_rules! create_event_pool_manager {
         pub struct $name;
 
         impl $crate::emulator::riscv::event_pool::EventPoolManager<$event_type> for $name {
-            fn init_pool(pool_size: usize, flags: cudart::memory::CudaHostAllocFlags) {
+            fn init_pool(
+                pool_size: usize,
+                flags: $crate::emulator::riscv::event_pool::HostAllocFlags,
+            ) {
                 let event_pool_capacity = *$capacity;
                 tracing::info!(
                     "initializing event pool {} with capacity {event_pool_capacity}",

@@ -171,11 +171,11 @@ N="${MLE_N:-188}"
 # an explicit MLE_STEP wins.
 export MLE_STEP="${MLE_STEP:-combine}"
 
-# Default GPU path (`cuda-mle`) + `aot-emulator`. Override FEATURES for
+# Default GPU path (`cuda`) + `aot-emulator`. Override FEATURES for
 # CPU-only. NOTE: aot-emulator requires the per-ELF AOT dispatch crate to be generated first:
 #   cargo run -r -p pico-aot-codegen --bin generate_crates -- perf/bench_data/rv64/reth-elf
 # (run once per ELF; without it the `aot-generated` crate is a stub and the build fails).
-FEATURES="${FEATURES:-bigint-rug tcmalloc mmap-memory aot-emulator cuda-mle}"
+FEATURES="${FEATURES:-bigint-rug tcmalloc mmap-memory aot-emulator cuda}"
 
 CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-8}" cargo build --bin mle-single-node --release --features "$FEATURES"
 

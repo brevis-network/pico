@@ -6,7 +6,6 @@
 
 use aot::AotEmulatorCore;
 use aot_common::{compare_reports, compare_snapshots, recycle_snapshot_memory, AotRun};
-use cudart::memory::CudaHostAllocFlags;
 use pico_vm::{
     compiler::riscv::{
         compiler::{Compiler, SourceType},
@@ -18,6 +17,7 @@ use pico_vm::{
         riscv::{
             cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
             emulator::RiscvEmulator,
+            event_pool::HostAllocFlags,
             public_values::RecordFinalPvsState,
         },
         stdin::EmulatorStdin,
@@ -38,7 +38,7 @@ fn run_and_compare_chunks(
     use p3_koala_bear::KoalaBear;
 
     if !is_pool_initialized() {
-        init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+        init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
     }
 
     let opts = EmulatorOpts::test_opts();

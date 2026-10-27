@@ -1,3 +1,4 @@
+#[cfg(feature = "cuda")]
 use crate::{
     chips::{
         chips::{
@@ -16,23 +17,33 @@ use crate::{
             verify_poseidon2_events, PreallocatedGpuMemory, PreparedGpuEvents,
         },
     },
-    machine::{chip::ChipBehavior, field::FieldSpecificPoseidon2Config},
+    machine::{
+        chip::{ChipBehavior, GpuChipBehavior},
+        field::FieldSpecificPoseidon2Config,
+    },
 };
+#[cfg(feature = "cuda")]
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
+#[cfg(feature = "cuda")]
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use rand::{rng, RngExt};
+#[cfg(feature = "cuda")]
 use std::{sync::LazyLock, time::Instant};
 
 type F = KoalaBear;
 
+#[cfg(feature = "cuda")]
 static GPU_TEST_RECORD: LazyLock<EmulationRecord> =
     LazyLock::new(|| generate_gpu_test_record(1 << 20));
 
+#[cfg(feature = "cuda")]
 fn cpu_generate_main(chip: &GlobalChip<F>, input: &EmulationRecord) -> RowMajorMatrix<F> {
     chip.generate_main(input, &mut EmulationRecord::default())
 }
 
+#[cfg(feature = "cuda")]
 fn generate_gpu_test_record(event_count: usize) -> EmulationRecord {
     let rng = &mut rng();
 
@@ -58,6 +69,7 @@ fn generate_gpu_test_record(event_count: usize) -> EmulationRecord {
     record
 }
 
+#[cfg(feature = "cuda")]
 fn setup_gpu_memory<'a>(
     stream: &'a cudart::stream::CudaStream,
     counted_record: &'a EmulationRecord,
@@ -83,6 +95,7 @@ fn setup_gpu_memory<'a>(
     }
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn test_riscv_global_gpu_generate_extra_record_and_main() {
     let original_record = LazyLock::force(&GPU_TEST_RECORD);
@@ -171,6 +184,7 @@ fn test_riscv_global_gpu_generate_extra_record_and_main() {
     );
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn bench_riscv_global_cpu_vs_gpu() {
     let warmup_sizes: Vec<usize> = vec![1 << 16];

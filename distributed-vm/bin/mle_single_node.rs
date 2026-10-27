@@ -1,4 +1,4 @@
-//! Single-node MLE/WHIR prover (KoalaBear; GPU with `cuda-mle`).
+//! Single-node MLE/WHIR prover (KoalaBear; GPU with `cuda`).
 
 use clap::Parser;
 use distributed_vm::mle::{self, config::MleSingleNodeConfig};

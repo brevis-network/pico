@@ -2,52 +2,63 @@ use super::{
     columns::{CpuCols, CPU_COL_MAP, NUM_CPU_COLS},
     CpuChip,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
 use crate::{
     chips::{
         chips::{
             alu::event::AluEvent,
             byte::event::ByteRecordBehavior,
-            riscv_cpu::event::CpuEvent,
+            riscv_cpu::event::{CpuEvent, CpuExtraEventIndices},
             riscv_memory::{event::MemoryRecordEnum, read_write::columns::MemoryLiteCols},
         },
         ffi::FfiOption,
-        trace::TraceData,
     },
     compiler::{
         addr::Pc,
         riscv::{opcode::Opcode, program::Program},
         word::Word,
     },
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
-    },
-    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord, syscalls::SyscallCode},
-    instances::{
-        compiler::shapes::riscv_shape::RiscvPadShape,
-        preparer::{CpuExtraEventIndices, EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
-    },
+    emulator::riscv::{record::EmulationRecord, syscalls::SyscallCode},
+    instances::compiler::shapes::riscv_shape::RiscvPadShape,
     iter::{IntoPicoRefMutIterator, PicoBridge, PicoIterator, PicoSlice},
     machine::{
         chip::ChipBehavior,
         estimator::{EventCapture, EventSizeCapture},
     },
 };
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
 use hashbrown::HashMap;
 use p3_air::BaseAir;
-use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+#[cfg(feature = "cuda")]
+use p3_field::PrimeCharacteristicRing;
+use p3_field::{Field, PrimeField32};
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_cpu_generate_extra_record_and_main_u64,
     cuda_cpu_generate_extra_record_and_main_u64_packed, cuda_cpu_pad_trace_u64,
 };
-use std::{borrow::BorrowMut, mem::size_of};
+use std::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
+use std::mem::size_of;
+#[cfg(feature = "cuda")]
 use tracing::info;
 
 impl<F: Field> BaseAir<F> for CpuChip<F> {
@@ -62,7 +73,6 @@ impl<F: Field> BaseAir<F> for CpuChip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     /// This name is now hard-coded and is related to MachineBehavior
@@ -142,7 +152,10 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
     fn is_active(&self, record: &Self::Record) -> bool {
         !record.cpu_events.is_empty()
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for CpuChip<F> {
     fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
         counter.num_cpu_events += record.cpu_events.len();
         if counter.num_cpu_events == 0 {

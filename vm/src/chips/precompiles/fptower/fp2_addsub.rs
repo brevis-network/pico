@@ -1,4 +1,6 @@
-use super::{ffi::FfiFp2AddSubEvent, words_to_bytes_le_slice};
+#[cfg(feature = "cuda")]
+use super::ffi::FfiFp2AddSubEvent;
+use super::words_to_bytes_le_slice;
 use crate::{
     chips::{
         chips::{
@@ -7,7 +9,6 @@ use crate::{
         },
         gadgets::{
             addr_add::AddrAddGadget,
-            curves::weierstrass::{bls381::Bls381BaseField, bn254::Bn254BaseField},
             field::{
                 field_lt::FieldLtCols,
                 field_op::{FieldOpCols, FieldOperation},
@@ -18,27 +19,37 @@ use crate::{
                     generate_limbs_from_read_cols_u8, generate_limbs_from_write_cols_u8,
                     limbs_to_words,
                 },
-                field_params::{FieldType, FpOpField, NumLimbs, NumWords},
+                field_params::{FieldType, FpOpField, NumLimbs},
                 limbs::Limbs,
                 polynomial::Polynomial,
             },
         },
         precompiles::checked_u64_to_u32,
-        trace::TraceData,
-        utils::{next_power_of_two, pad_rows_fixed},
+        utils::pad_rows_fixed,
     },
     compiler::{riscv::program::Program, word::Word},
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::riscv::{
-        ffi::FFIEmulationRecord,
         record::EmulationRecord,
         syscalls::{precompiles::PrecompileEvent, SyscallCode},
     },
-    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::{
         builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder, ScopedBuilder},
         chip::ChipBehavior,
     },
+};
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{
+        gadgets::{
+            curves::weierstrass::{bls381::Bls381BaseField, bn254::Bn254BaseField},
+            utils::field_params::NumWords,
+        },
+        trace::TraceData,
+        utils::next_power_of_two,
+    },
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
 };
 use core::{
     borrow::{Borrow, BorrowMut},
@@ -46,25 +57,31 @@ use core::{
     marker::PhantomData,
     mem::size_of,
 };
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
 use hybrid_array::{typenum::Unsigned, Array};
 use itertools::Itertools;
 use num::{BigUint, Zero};
 use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_derive::AlignedBorrow;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_precompile_fp2_add_sub_bls12381_generate_extra_record_and_main,
     cuda_precompile_fp2_add_sub_bn254_generate_extra_record_and_main,
 };
+#[cfg(feature = "cuda")]
 use std::mem::transmute;
+#[cfg(feature = "cuda")]
 use tracing::info;
 
 pub const fn num_fp2_addsub_cols<P>() -> usize
@@ -150,7 +167,6 @@ where
     P: FpOpField,
 {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -278,6 +294,45 @@ where
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         self.generate_main(input, extra);
     }
+
+    fn is_active(&self, input: &Self::Record) -> bool {
+        // All the fp2 sub and add events for a given curve are coalesce to the curve's Add operation. Only retrieve
+        // precompile events for that operation.
+        assert!(
+            input
+                .get_precompile_events(SyscallCode::BN254_FP2_SUB)
+                .is_empty()
+                && input
+                    .get_precompile_events(SyscallCode::BLS12381_FP2_SUB)
+                    .is_empty()
+        );
+
+        if let Some(shape) = input.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            match P::FIELD_TYPE {
+                FieldType::Bn254 => !input
+                    .get_precompile_events(SyscallCode::BN254_FP2_ADD)
+                    .is_empty(),
+                FieldType::Bls381 => !input
+                    .get_precompile_events(SyscallCode::BLS12381_FP2_ADD)
+                    .is_empty(),
+                _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
+            }
+        }
+    }
+
+    fn local_only(&self) -> bool {
+        true
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<F, P> GpuChipBehavior<F> for Fp2AddSubChip<F, P>
+where
+    F: PrimeField32,
+    P: FpOpField,
+{
     fn gpu_generate_extra_record_and_main(
         &self,
         device_id: usize,
@@ -386,33 +441,6 @@ where
         TraceData::Gpu(num_fp2_addsub_cols::<P>(), d_trace)
     }
 
-    fn is_active(&self, input: &Self::Record) -> bool {
-        // All the fp2 sub and add events for a given curve are coalesce to the curve's Add operation. Only retrieve
-        // precompile events for that operation.
-        assert!(
-            input
-                .get_precompile_events(SyscallCode::BN254_FP2_SUB)
-                .is_empty()
-                && input
-                    .get_precompile_events(SyscallCode::BLS12381_FP2_SUB)
-                    .is_empty()
-        );
-
-        if let Some(shape) = input.shape.as_ref() {
-            shape.included::<F, _>(self)
-        } else {
-            match P::FIELD_TYPE {
-                FieldType::Bn254 => !input
-                    .get_precompile_events(SyscallCode::BN254_FP2_ADD)
-                    .is_empty(),
-                FieldType::Bls381 => !input
-                    .get_precompile_events(SyscallCode::BLS12381_FP2_ADD)
-                    .is_empty(),
-                _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
-            }
-        }
-    }
-
     fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
         // All the fp2 sub and add events for a given curve are coalesce to the curve's Add operation. Only retrieve
         // precompile events for that operation.
@@ -427,10 +455,6 @@ where
                 _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
             }
         }
-    }
-
-    fn local_only(&self) -> bool {
-        true
     }
 }
 
@@ -665,13 +689,20 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "cuda")]
     use crate::chips::gadgets::utils::RandBigUint;
+    #[cfg(feature = "cuda")]
     use itertools::Itertools;
+    #[cfg(feature = "cuda")]
     use p3_koala_bear::KoalaBear;
+    #[cfg(feature = "cuda")]
     use p3_matrix::dense::RowMajorMatrix;
+    #[cfg(feature = "cuda")]
     use rand::{rng, rngs::ThreadRng, RngExt};
+    #[cfg(feature = "cuda")]
     use std::sync::LazyLock;
 
+    #[cfg(feature = "cuda")]
     use crate::{
         chips::{
             chips::{
@@ -701,18 +732,22 @@ mod tests {
                 PreallocatedGpuMemory, PreparedGpuEvents,
             },
         },
-        machine::chip::ChipBehavior,
+        machine::chip::{ChipBehavior, GpuChipBehavior},
     };
 
+    #[cfg(feature = "cuda")]
     type F = KoalaBear;
 
+    #[cfg(feature = "cuda")]
     // Lazily initialized record for use across multiple tests (small size for debugging).
     static BN254_SHARD: LazyLock<EmulationRecord> =
         LazyLock::new(|| generate_record::<Bn254BaseField>(1 << 3));
 
+    #[cfg(feature = "cuda")]
     static BLS12381_SHARD: LazyLock<EmulationRecord> =
         LazyLock::new(|| generate_record::<Bls381BaseField>(1 << 3));
 
+    #[cfg(feature = "cuda")]
     fn cpu_generate_main<P: FpOpField>(
         chip: &Fp2AddSubChip<F, P>,
         input: &EmulationRecord,
@@ -720,6 +755,7 @@ mod tests {
         chip.generate_main(input, &mut EmulationRecord::default())
     }
 
+    #[cfg(feature = "cuda")]
     pub(super) fn generate_record<P: FpOpField>(size: usize) -> EmulationRecord {
         use typenum::Unsigned;
         let mut rng = rng();
@@ -786,6 +822,7 @@ mod tests {
         record
     }
 
+    #[cfg(feature = "cuda")]
     fn random_base_field_elements<P: FpOpField>(rng: &mut ThreadRng) -> Box<[u64]> {
         let x = rng.random_biguint(P::num_bits() as u64) % P::modulus();
         let y = rng.random_biguint(P::num_bits() as u64) % P::modulus();
@@ -806,6 +843,7 @@ mod tests {
         result.into_boxed_slice()
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn test_bn254_fp2_add_sub_generate_extra_record_and_main() {
         type P = Bn254BaseField;
@@ -813,6 +851,7 @@ mod tests {
         test_precompile_fp2_add_sub_generate_extra_record_and_main_helper::<P>(chunk);
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn test_bls12381_fp2_add_sub_generate_extra_record_and_main() {
         type P = Bls381BaseField;
@@ -820,6 +859,7 @@ mod tests {
         test_precompile_fp2_add_sub_generate_extra_record_and_main_helper::<P>(chunk);
     }
 
+    #[cfg(feature = "cuda")]
     fn test_precompile_fp2_add_sub_generate_extra_record_and_main_helper<P: FpOpField>(
         original_record: &EmulationRecord,
     ) {
@@ -887,6 +927,7 @@ mod tests {
         assert_eq!(host_gpu_byte_trace.values, cpu_byte_trace.values);
     }
 
+    #[cfg(feature = "cuda")]
     fn gpu_generate_extra_record_and_main<P: FpOpField>(
         chip: &Fp2AddSubChip<F, P>,
         input: &EmulationRecord,
@@ -903,6 +944,7 @@ mod tests {
         trace.to_host(stream)
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn bench_fp2_add_sub_cpu_vs_gpu() {
         // Initialize CUDA context and global memory pool
@@ -916,6 +958,7 @@ mod tests {
         bench_fp2_add_sub_for_field::<Bls381BaseField>("bls12381");
     }
 
+    #[cfg(feature = "cuda")]
     fn bench_fp2_add_sub_for_field<P: FpOpField>(label: &str) {
         use std::{
             mem::{size_of, transmute},

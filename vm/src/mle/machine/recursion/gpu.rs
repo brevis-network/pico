@@ -52,7 +52,7 @@ use crate::{
     cuda_adaptor::get_global_stream_pool,
     emulator::recursion::emulator::RecursionRecord,
     instances::chiptype::recursion_chiptype::RecursionChipType,
-    machine::chip::{ChipBehavior, MetaChip},
+    machine::chip::{ChipBehavior, GpuChipBehavior, MetaChip},
 };
 use pico_mle_core::{
     poly::matrix::MatrixDimensions,
@@ -269,12 +269,8 @@ pub fn build_ctx_gpu(
         .map(|(air_id, chip)| {
             // gpu_generate_main synchronizes internally (private NON_BLOCKING stream + swap +
             // syncs), so the transpose below can read the allocation immediately.
-            let trace = chip.gpu_generate_main(
-                device_id,
-                record,
-                &mut RecursionRecord::<Kb>::default(),
-                None,
-            );
+            let trace =
+                chip.gpu_generate_main(device_id, record, &mut RecursionRecord::<Kb>::default());
             let matrix = trace_to_col_major(trace, &mut live);
             let ctx = if chip.name() == "PublicValues" {
                 AirProvingContext::simple(matrix, pvs.clone())

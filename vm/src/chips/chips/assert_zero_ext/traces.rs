@@ -1,37 +1,43 @@
 use crate::{
-    chips::{
-        chips::assert_zero_ext::{
-            columns::{
-                AssertZeroExtCols, AssertZeroExtPreprocessedCols, NUM_ASSERT_ZERO_EXT_COLS,
-                NUM_ASSERT_ZERO_EXT_PREPROCESSED_COLS,
-            },
-            AssertZeroExtChip,
+    chips::chips::assert_zero_ext::{
+        columns::{
+            AssertZeroExtCols, AssertZeroExtPreprocessedCols, NUM_ASSERT_ZERO_EXT_COLS,
+            NUM_ASSERT_ZERO_EXT_PREPROCESSED_COLS,
         },
-        trace::TraceData,
+        AssertZeroExtChip,
     },
     compiler::recursion::{
         instruction::Instruction,
-        mle_instruction_buckets::MleVariant,
         program::RecursionProgram,
         types::{AssertZeroExtEvent, AssertZeroExtInstr},
     },
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::recursion::emulator::RecursionRecord,
     machine::{
         chip::{ChipBehavior, PreprocessedRows},
         utils::pad_to_power_of_two,
     },
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    compiler::recursion::mle_instruction_buckets::MleVariant,
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_assert_zero_ext_generate_main, cuda_assert_zero_ext_generate_preprocessed,
 };
@@ -45,7 +51,6 @@ impl<F> BaseAir<F> for AssertZeroExtChip<F> {
 
 impl<F: PrimeField32 + Field> ChipBehavior<F> for AssertZeroExtChip<F> {
     type Record = RecursionRecord<F>;
-    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -119,7 +124,10 @@ impl<F: PrimeField32 + Field> ChipBehavior<F> for AssertZeroExtChip<F> {
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32 + Field> GpuChipBehavior<F> for AssertZeroExtChip<F> {
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -193,7 +201,6 @@ impl<F: PrimeField32 + Field> ChipBehavior<F> for AssertZeroExtChip<F> {
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         use p3_koala_bear::KoalaBear;
 

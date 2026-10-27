@@ -11,7 +11,7 @@
 //! program (e.g. precompiles fire for reth, not fib), and inactive chips are omitted from the
 //! proof and skipped in `complement`.
 //!
-//! The engine is CPU by default and GPU under the `cuda-mle` feature (a compile-time swap of the
+//! The engine is CPU by default and GPU under the `cuda` feature (a compile-time swap of the
 //! [`Engine`] alias). Traces are always built on the host ([`build_ctx`] → [`HostPb`]) and bridged
 //! to the engine backend by [`ctx_to_engine`] (identity on CPU, H2D transport on GPU); the GPU
 //! path additionally offers on-device trace generation via [`build_ctx_gpu`].
@@ -119,12 +119,12 @@ use pico_mle_cpu::{CpuBackend, KoalaBearPoseidon2CpuEngine};
 
 /// Base field for the KoalaBear RISCV proof.
 pub type Kb = KoalaBear;
-/// The MLE engine (KoalaBear + Poseidon2 + WHIR): CPU by default, GPU with the `cuda-mle`
+/// The MLE engine (KoalaBear + Poseidon2 + WHIR): CPU by default, GPU with the `cuda`
 /// feature. Both share the same `StarkProtocolConfig` (`Sc`), so keys/proofs are interchangeable
 /// at the type level; only the prover backend differs.
-#[cfg(not(feature = "cuda-mle"))]
+#[cfg(not(feature = "cuda"))]
 pub type Engine = KoalaBearPoseidon2CpuEngine;
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub type Engine = cuda_mle::KoalaBearPoseidon2GpuEngine;
 /// The `StarkProtocolConfig` of the engine.
 pub type Sc = <Engine as StarkEngine>::SC;
@@ -144,7 +144,7 @@ pub const MLE_GPU_DEVICE: usize = 0;
 /// The device the calling thread is bound to. The machine layer runs on per-card threads (each
 /// bound at spawn), so "current device" is the correct card for trace-gen and keygen — no device
 /// parameter needs threading through the machines.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub(crate) fn bound_device() -> usize {
     // Surfaced rather than defaulted to card 0: proving on one card while allocating against
     // another card's pool surfaces as an unrelated OOM much later. `cudaGetDevice` succeeds
@@ -155,8 +155,8 @@ pub(crate) fn bound_device() -> usize {
 
 /// Bridge a host-built proving context to the engine's backend. Identity on CPU (the backend is
 /// already `HostPb`); the GPU path never builds host contexts — it generates traces on-device via
-/// [`build_ctx_gpu`] — so no `cuda-mle` variant exists.
-#[cfg(not(feature = "cuda-mle"))]
+/// [`build_ctx_gpu`] — so no `cuda` variant exists.
+#[cfg(not(feature = "cuda"))]
 #[inline]
 fn ctx_to_engine(ctx: ProvingContext<HostPb>) -> ProvingContext<Pb> {
     ctx
@@ -168,7 +168,7 @@ fn ctx_to_engine(ctx: ProvingContext<HostPb>) -> ProvingContext<Pb> {
 /// pipeline proves — the pool itself is created once (`create_ctx`'s `OnceLock`); what repeats is
 /// the read-back and the lines below. It must run **before** any MLE prover is constructed
 /// (enforced by an assert in [`RiscvMachine::new`]).
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub fn init_mle_gpu_pool(device_id: usize) {
     crate::cuda_adaptor::create_mem_pool(device_id);
     // The chips' GPU trace-gen path also needs the per-device global stream pool.
@@ -217,21 +217,21 @@ pub fn init_mle_gpu_pool(device_id: usize) {
 /// orchestration layer never needs backend cfg.
 pub struct PreparedChunk {
     pub record: EmulationRecord,
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     pub prepared: crate::instances::preparer::PreparedGpuEvents,
 }
 
 /// Package a record for proving (on GPU: `precompute_event_size` + `PreparedGpuEvents::new` feed
 /// the trace-gen orchestrator; on CPU: pass-through).
 pub fn prepare_chunk(record: EmulationRecord) -> PreparedChunk {
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     {
         use crate::instances::preparer::{precompute_event_size, PreparedGpuEvents};
         let counter = precompute_event_size::<Kb>(&record);
         let prepared = PreparedGpuEvents::new(&record, counter);
         PreparedChunk { record, prepared }
     }
-    #[cfg(not(feature = "cuda-mle"))]
+    #[cfg(not(feature = "cuda"))]
     PreparedChunk { record }
 }
 
@@ -245,7 +245,7 @@ pub fn prepare_chunk_shaped(
     mut record: EmulationRecord,
     bucket: bool,
 ) -> PreparedChunk {
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     {
         use crate::instances::preparer::{precompute_event_size, PreparedGpuEvents};
         // MLE_PREP_PROF=1: one line per chunk with the three steps' times, for the preparer lane.
@@ -284,7 +284,7 @@ pub fn prepare_chunk_shaped(
         }
         PreparedChunk { record, prepared }
     }
-    #[cfg(not(feature = "cuda-mle"))]
+    #[cfg(not(feature = "cuda"))]
     {
         if bucket {
             shape_record(chips, &mut record);
@@ -768,10 +768,16 @@ pub fn emulate_with_opts(
 fn hold_records_in_growable_buffers() {
     use_growable_event_buffers();
     if !is_pool_initialized() {
-        init_cpu_event_buffer_pool(0, cudart::memory::CudaHostAllocFlags::DEFAULT);
+        init_cpu_event_buffer_pool(
+            0,
+            crate::emulator::riscv::event_pool::HostAllocFlags::DEFAULT,
+        );
     }
     if !is_alu_pool_initialized() {
-        init_alu_event_buffer_pool(0, cudart::memory::CudaHostAllocFlags::DEFAULT);
+        init_alu_event_buffer_pool(
+            0,
+            crate::emulator::riscv::event_pool::HostAllocFlags::DEFAULT,
+        );
     }
 }
 
@@ -1017,7 +1023,7 @@ fn select_shape_for_augmented(
 /// the format `mle_shape_probe` prints -- `[shape] chunk=<i> <air_id>:<log2> ...` over the airs
 /// the chunk activates, plus the Byte and Program tables -- so a ladder can be fitted from a
 /// pipeline run instead of a host emulation of every block.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn log_natural_shape_probe(
     record: &EmulationRecord,
     counter: &crate::instances::preparer::EventCounter,
@@ -1059,7 +1065,7 @@ fn log_natural_shape_probe(
 /// raw record: the canonical core set covers every chip an extra-record pass could activate in a
 /// core chunk, and the chips extra-record output feeds elsewhere (Global, Poseidon2, Byte,
 /// Program) are unconditionally active.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn select_shape_from_counter(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
     record: &EmulationRecord,
@@ -1085,7 +1091,7 @@ fn shape_of(
         crate::mle::machine::shape::select_riscv_shape(&present, natural, record.is_cpu_chunk);
     // The catch-all core shape pads to m = 31 (a 64 GiB GKR leaf buffer): no 32 GB card holds
     // it. A GPU build refuses the chunk here, legibly, instead of dying in a device allocation.
-    if cfg!(feature = "cuda-mle")
+    if cfg!(feature = "cuda")
         && record.is_cpu_chunk
         && crate::mle::machine::shape::is_core_catch_all(&inner)
     {
@@ -1172,7 +1178,7 @@ fn build_ctx_inner(
 ///
 /// `chips` must be in `gpu_generate_extra_record_and_main_chips()` order, not `all_chips()` order:
 /// the orchestrator indexes it by position.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub fn build_ctx_gpu(
     record: &EmulationRecord,
     prepared: &crate::instances::preparer::PreparedGpuEvents,
@@ -1296,7 +1302,7 @@ pub fn build_ctx_gpu(
 /// The permutation-comparison `unit` for a trace: one row, except Poseidon2 packs
 /// `RISCV_NUM_POSEIDON2_VALUE_COLS` slots per row (reordered events repack across row boundaries,
 /// so the sound unit is one slot).
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn trace_compare_unit(id: usize, w: usize) -> usize {
     if id == air_id::POSEIDON2 {
         use crate::{
@@ -1312,7 +1318,7 @@ fn trace_compare_unit(id: usize, w: usize) -> usize {
 /// A GPU-only air (CPU inactive — the family-level GPU activity predicate emitted an all-padding
 /// trace) must be pure padding: every row equals row 0. Padding rows send nothing on the bus, so
 /// this is sound; a non-uniform trace is a real divergence.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn assert_gpu_only_padding(id: usize, host: &[Kb], h: usize, w: usize) {
     let uniform_rows = (1..h).all(|r| (0..w).all(|c| host[c * h + r] == host[c * h]));
     assert!(
@@ -1329,7 +1335,7 @@ fn assert_gpu_only_padding(id: usize, host: &[Kb], h: usize, w: usize) {
 /// other (GPU may emit events in a different order — sound for per-unit constraints + multiset
 /// interactions), or differ only in padding (dummy) rows (GPU bakes `RISCV_DUMMY_ROW_KB`, CPU recomputes
 /// its dummy; both are `is_real = 0`). Otherwise panic with the first-diff location.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn assert_permutation_or_padding_diff(
     id: usize,
     r: usize,
@@ -1423,7 +1429,7 @@ fn assert_permutation_or_padding_diff(
 /// (`build_ctx`) and compare every GPU trace element against it (after undoing the col-major
 /// layout). Reports mismatches at air/row/col granularity — locates trace-bridge bugs that
 /// `verify` would only report as an opaque failure.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn compare_gpu_ctx_against_cpu(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
     record: &EmulationRecord,
@@ -1492,7 +1498,7 @@ fn compare_gpu_ctx_against_cpu(
 /// `records`. Panics on the first failure; returns cleanly when all chunks pass.
 ///
 /// Constraint debugging is a host-side tool (`check_constraints` walks host matrices), so it
-/// always uses the CPU engine regardless of the `cuda-mle` feature. Same `Sc`, so the air
+/// always uses the CPU engine regardless of the `cuda` feature. Same `Sc`, so the air
 /// list is shared.
 pub fn debug_records(
     program: Arc<Program>,
@@ -1625,7 +1631,7 @@ pub enum ProveRiscvError {
 }
 
 /// Stateful, reusable RISCV prover/verifier for the MLE/WHIR backend (CPU or GPU per the
-/// `cuda-mle` feature).
+/// `cuda` feature).
 ///
 /// Keygen + device transport run once in [`RiscvMachine::new`]; the engine, device-resident proving
 /// key, verifying key, and chip set are then shared read-only. Each [`Self::prove_chunk`] builds its
@@ -1643,7 +1649,7 @@ pub struct RiscvMachine {
     /// The same chips in the **orchestrator's** ordering — a different permutation from `chips`
     /// above, and the orchestrator indexes by position, so the two are not interchangeable.
     /// Held here because the constructor takes no arguments: its result cannot depend on the chunk.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     orchestrator_chips: Vec<MetaChip<Kb, RiscvChipType<Kb>>>,
     /// Accumulated per-chunk GCS digests — **chunk terms only**; the program's initial cumulative
     /// sum lives in [`Self::initial_gcs`] beside it. Every [`Self::prove_chunk`] pushes here,
@@ -1669,8 +1675,8 @@ pub struct RiscvMachine {
     initial_gcs: std::sync::Mutex<Option<SepticDigest<Kb>>>,
     /// Whitelist-mode shape bucketing (see `shape`); off = natural heights, dynamic shapes.
     /// Read only on the CPU `prove_chunk` path; the GPU path generates traces on-device and does
-    /// not bucket, so the field is unused under `cuda-mle`.
-    #[cfg_attr(feature = "cuda-mle", allow(dead_code))]
+    /// not bucket, so the field is unused under `cuda`.
+    #[cfg_attr(feature = "cuda", allow(dead_code))]
     bucket: bool,
     /// Chunk proving concurrency of [`Self::prove`]; `None` falls back to [`prove_concurrency`].
     concurrency: Option<NonZeroUsize>,
@@ -1716,7 +1722,7 @@ impl RiscvMachine {
         // The GPU prover must share pico's memory pool; pool registration is a process-level
         // concern owned by the entry point — fail loudly instead of silently allocating from the
         // device default pool.
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         assert!(
             cuda_mle::runtime::memory_manager::external_pool_is_set(bound_device()),
             "GPU MLE proving requires the shared pico memory pool; call `init_mle_gpu_pool` \
@@ -1727,16 +1733,12 @@ impl RiscvMachine {
             StarkEngine::new(riscv_params_with_100_bits_security(log_stacked_height));
         // Do not cache the RS codeword: at 2^22 it holds ~9.2GiB resident that would OOM a 32GB
         // card, and WHIR simply recomputes it from the traces (~0.1s/chunk).
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         engine.device_mut().set_cache_rs_code_matrix(false);
         let (pk, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
         admit_production_vk(
             "riscv",
-            if cfg!(feature = "cuda-mle") {
-                "gpu"
-            } else {
-                "cpu"
-            },
+            if cfg!(feature = "cuda") { "gpu" } else { "cpu" },
             &vk,
         )?;
         let d_pk = engine.device().transport_pk_to_device(&pk);
@@ -1744,13 +1746,13 @@ impl RiscvMachine {
         // emulate-pipeline / rayon threads spawn. Lazy JIT compilation from a prove-worker thread
         // mid-proof deadlocks libnvrtc's internal threading in the heavily-threaded prover; warming
         // them in this quiescent context avoids it. No-op when G1_JIT/Z1_JIT are off (no jit_source).
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         cuda_mle::warmup_jit_kernels(&d_pk);
         // These chips are used only for their `ChipBehavior` methods
         // (`name`/`is_active`/`extra_record`/`generate_main`); keygen re-derives everything else.
         let chips = RiscvChipType::<Kb>::all_chips();
         // The orchestrator's ordering, built once here for the same reason `chips` is (see the field).
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         let orchestrator_chips = RiscvChipType::<Kb>::gpu_generate_extra_record_and_main_chips();
 
         Ok(Self {
@@ -1758,7 +1760,7 @@ impl RiscvMachine {
             d_pk,
             vk,
             chips,
-            #[cfg(feature = "cuda-mle")]
+            #[cfg(feature = "cuda")]
             orchestrator_chips,
             gcs_terms: std::sync::Mutex::new(Vec::new()),
             initial_gcs: std::sync::Mutex::new(None),
@@ -1826,9 +1828,9 @@ impl RiscvMachine {
         self.try_prove_ctx(ctx, index, verify)
     }
 
-    /// The chunk's proving context: GPU trace-gen under `cuda-mle`, host `build_ctx` otherwise.
+    /// The chunk's proving context: GPU trace-gen under `cuda`, host `build_ctx` otherwise.
     fn chunk_ctx(&self, chunk: &PreparedChunk) -> ProvingContext<Pb> {
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         {
             // `MLE_BREAKDOWN` times GPU trace-gen here; the other three phases
             // (commit / rap_constraints / openings) record themselves inside `engine.prove`, and
@@ -1840,7 +1842,7 @@ impl RiscvMachine {
             cuda_mle::breakdown::stop_tracegen(_bt);
             ctx
         }
-        #[cfg(not(feature = "cuda-mle"))]
+        #[cfg(not(feature = "cuda"))]
         ctx_to_engine(build_ctx(&self.chips, &chunk.record, self.bucket))
     }
 
@@ -1864,7 +1866,7 @@ impl RiscvMachine {
 
     /// Build a chunk's proving context (GPU trace-gen + bridge), inline from
     /// [`Self::prove_chunk`].
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     pub fn build_chunk_ctx(&self, chunk: &PreparedChunk) -> ProvingContext<Pb> {
         let ctx = build_ctx_gpu(&chunk.record, &chunk.prepared, &self.orchestrator_chips);
         if crate::mle::env_flag("MLE_TRACE_COMPARE") {
@@ -1882,7 +1884,7 @@ impl RiscvMachine {
     ) -> Result<Proof<Sc>, ProveRiscvError> {
         // Phase tag for the shared GPU prove path: the prover thread alternates riscv, convert
         // and combine proves, and the bench spans attribute by it.
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         cuda_mle::set_prove_phase("riscv");
         let proof = self
             .engine
@@ -2410,8 +2412,8 @@ mod tests {
         }
     }
     // The CPU-engine verify tests below (and their fixtures/codec helpers) are compiled out under
-    // `cuda-mle`, leaving several of these imports unused in that configuration only.
-    #[cfg_attr(feature = "cuda-mle", allow(unused_imports))]
+    // `cuda`, leaving several of these imports unused in that configuration only.
+    #[cfg_attr(feature = "cuda", allow(unused_imports))]
     use pico_mle_core::{
         codec::{Decode, Encode},
         keygen::types::{LinearConstraint, MultiStarkVerifyingKey},
@@ -2427,7 +2429,7 @@ mod tests {
     /// before `gcs_from_pvs` ever indexes `public_values[air_id::GLOBAL]`.
     ///
     /// CPU-only: exercises the pure-verify guards, which need no GPU backend.
-    #[cfg(not(feature = "cuda-mle"))]
+    #[cfg(not(feature = "cuda"))]
     fn small_cpu_bundle() -> RiscvProof {
         let engine: Engine = StarkEngine::new(test_system_params_small(2, 5, 3));
         let (vk, proof) = FibFixture::new(0, 1, 1 << 5).keygen_and_prove(&engine);
@@ -2443,7 +2445,7 @@ mod tests {
     /// A bundle whose vk does not match the trusted `expected_vk_pre_hash` is rejected with
     /// `UnexpectedVerifyingKey` before any proof byte is inspected — the guard that stops a
     /// deserialized bundle from shipping a self-consistent vk of the prover's choosing.
-    #[cfg(not(feature = "cuda-mle"))]
+    #[cfg(not(feature = "cuda"))]
     #[test]
     fn verify_riscv_rejects_wrong_vk() {
         let bundle = small_cpu_bundle();
@@ -2459,7 +2461,7 @@ mod tests {
     /// both hold the honest value, but the vk **body** is tampered. `verify_riscv` must recompute
     /// `hash(inner)` and reject — a guard that trusted the self-reported `pre_hash` field alone would
     /// wrongly accept this.
-    #[cfg(not(feature = "cuda-mle"))]
+    #[cfg(not(feature = "cuda"))]
     #[test]
     fn verify_riscv_rejects_vk_body_substitution() {
         let honest = small_cpu_bundle();
@@ -2489,7 +2491,7 @@ mod tests {
     /// `Proof::decode`), then one commitment is perturbed so the proof *shape* stays valid but
     /// Fiat-Shamir no longer agrees. (Raw malformed-byte decode rejection is covered by the codec
     /// tests.)
-    #[cfg(not(feature = "cuda-mle"))]
+    #[cfg(not(feature = "cuda"))]
     #[test]
     fn verify_riscv_rejects_tampered_chunk() {
         let bundle = small_cpu_bundle();
@@ -2628,7 +2630,7 @@ mod tests {
     /// A single dummy AIR through the full production chain: keygen → prove → codec round-trip →
     /// verify on the CPU engine. Pins that a proof survives versioned (de)serialization and still
     /// verifies.
-    #[cfg(not(feature = "cuda-mle"))]
+    #[cfg(not(feature = "cuda"))]
     #[test]
     fn single_air_full_chain_prove_codec_verify() {
         let engine: Engine = StarkEngine::new(test_system_params_small(2, 5, 3));

@@ -44,21 +44,13 @@ use crate::{
             syscalls::{SyscallCode, SyscallEvent},
         },
     },
-    instances::{
-        compiler::shapes::riscv_shape::RiscvPadShape,
-        preparer::{
-            gpu_allocate_and_copy_add_sub_events, gpu_allocate_and_copy_cpu_events,
-            gpu_allocate_and_copy_global_events, gpu_allocate_and_copy_lt_events,
-            gpu_allocate_and_copy_mul_events, gpu_allocate_and_copy_poseidon2_events,
-            gpu_allocate_byte_trace, gpu_allocate_cpu_events, GpuMemoryError, PreparedGpuEvents,
-        },
-    },
+    instances::compiler::shapes::riscv_shape::RiscvPadShape,
     primitives::consts::{KoalaBearConfig, LOCAL_MEMORY_DATAPAR, RISCV_POSEIDON2_DATAPAR},
 };
-use cudart::{memory_pools::DevicePoolAllocation, slice::CudaSlice, stream::CudaStream};
+#[cfg(feature = "cuda")]
+use cudart::slice::CudaSlice;
 use hashbrown::HashMap;
 use p3_field::PrimeCharacteristicRing;
-use p3_koala_bear::KoalaBear;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -1608,82 +1600,6 @@ impl RecordBehavior for EmulationRecord {
     fn chunk_index(&self) -> usize {
         self.public_values.chunk as usize
     }
-
-    fn gpu_allocate_and_copy_cpu_events<'a>(
-        &'a self,
-        stream: &'a CudaStream,
-        device_id: usize,
-        prepared_gpu_events: &'a PreparedGpuEvents,
-    ) -> Result<Option<DevicePoolAllocation<'a, CpuEvent>>, GpuMemoryError> {
-        gpu_allocate_and_copy_cpu_events(stream, device_id, self, prepared_gpu_events)
-    }
-
-    fn gpu_allocate_cpu_events<'a>(
-        &'a self,
-        stream: &'a CudaStream,
-        device_id: usize,
-        prepared_gpu_events: &'a PreparedGpuEvents,
-    ) -> Result<Option<DevicePoolAllocation<'a, CpuEvent>>, GpuMemoryError> {
-        gpu_allocate_cpu_events(stream, device_id, prepared_gpu_events)
-    }
-
-    fn gpu_allocate_and_copy_add_sub_events<'a>(
-        &'a self,
-        stream: &'a CudaStream,
-        device_id: usize,
-        prepared_gpu_events: &'a PreparedGpuEvents,
-    ) -> Result<Option<DevicePoolAllocation<'a, AluEvent>>, GpuMemoryError> {
-        gpu_allocate_and_copy_add_sub_events(stream, device_id, self, prepared_gpu_events)
-    }
-
-    fn gpu_allocate_and_copy_lt_events<'a>(
-        &'a self,
-        stream: &'a CudaStream,
-        device_id: usize,
-        prepared_gpu_events: &'a PreparedGpuEvents,
-    ) -> Result<Option<DevicePoolAllocation<'a, AluEvent>>, GpuMemoryError> {
-        gpu_allocate_and_copy_lt_events(stream, device_id, self, prepared_gpu_events)
-    }
-
-    fn gpu_allocate_and_copy_mul_events<'a>(
-        &'a self,
-        stream: &'a CudaStream,
-        device_id: usize,
-        prepared_gpu_events: &'a PreparedGpuEvents,
-    ) -> Result<Option<DevicePoolAllocation<'a, AluEvent>>, GpuMemoryError> {
-        gpu_allocate_and_copy_mul_events(stream, device_id, self, prepared_gpu_events)
-    }
-
-    fn gpu_allocate_and_copy_global_events<'a>(
-        &'a self,
-        stream: &'a CudaStream,
-        device_id: usize,
-        prepared_gpu_events: &'a PreparedGpuEvents,
-    ) -> Result<Option<DevicePoolAllocation<'a, GlobalInteractionEvent>>, GpuMemoryError> {
-        gpu_allocate_and_copy_global_events(stream, device_id, self, prepared_gpu_events)
-    }
-
-    fn gpu_allocate_and_copy_poseidon2_events<'a>(
-        &'a self,
-        stream: &'a CudaStream,
-        device_id: usize,
-        prepared_gpu_events: &'a PreparedGpuEvents,
-    ) -> Result<Option<DevicePoolAllocation<'a, Poseidon2Event>>, GpuMemoryError> {
-        gpu_allocate_and_copy_poseidon2_events(
-            stream,
-            device_id,
-            &self.poseidon2_events,
-            prepared_gpu_events,
-        )
-    }
-
-    fn gpu_allocate_byte_trace<'a>(
-        &'a self,
-        stream: &'a CudaStream,
-        device_id: usize,
-    ) -> Result<Option<DevicePoolAllocation<'a, KoalaBear>>, GpuMemoryError> {
-        gpu_allocate_byte_trace(stream, device_id)
-    }
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -1710,17 +1626,19 @@ mod tests {
     use crate::{
         chips::chips::alu::event::AluEvent,
         compiler::riscv::{opcode::Opcode, program::Program},
-        emulator::riscv::alu_event_pool::{init_alu_event_buffer_pool, is_alu_pool_initialized},
+        emulator::riscv::{
+            alu_event_pool::{init_alu_event_buffer_pool, is_alu_pool_initialized},
+            event_pool::HostAllocFlags,
+        },
     };
-    use cudart::memory::CudaHostAllocFlags;
     use hashbrown::HashMap;
     use std::sync::Arc;
 
     #[test]
     fn add_alu_events_accepts_wide_rv64_opcode_families() {
-        // ADD/SUB and SLT land in pinned buffers drawn from this pool.
+        // ADD/SUB and SLT land in buffers drawn from this pool.
         if !is_alu_pool_initialized() {
-            init_alu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+            init_alu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
         }
         let mut record = EmulationRecord::new(Arc::new(Program::default()));
         let mut grouped = HashMap::new();

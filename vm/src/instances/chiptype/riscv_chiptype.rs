@@ -1,8 +1,6 @@
 use crate::{
     chips::precompiles::poseidon2::FieldSpecificPrecompilePoseidon2Chip,
     compiler::riscv::opcode::Opcode,
-    emulator::riscv::ffi::FFIEmulationRecord,
-    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
 };
 use hashbrown::HashSet;
 use p3_air::{Air, BaseAir};
@@ -58,7 +56,6 @@ use crate::{
                 weierstrass_double::WeierstrassDoubleAssignChip,
             },
         },
-        trace::TraceData,
     },
     compiler::riscv::program::Program,
     define_chip_type,

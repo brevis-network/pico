@@ -10,7 +10,13 @@ pub struct MemoryReadWriteChip<F>(PhantomData<F>);
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "cuda")]
     use super::columns::{NUM_MEMORY_CHIP_COLS, NUM_MEMORY_CHIP_VALUE_COLS};
+    #[cfg(feature = "cuda")]
+    use crate::emulator::riscv::event_pool::HostAllocFlags;
+    #[cfg(feature = "cuda")]
+    use crate::machine::chip::GpuChipBehavior;
+    #[cfg(feature = "cuda")]
     use crate::{
         chips::{
             chips::{
@@ -38,20 +44,32 @@ mod tests {
         machine::chip::ChipBehavior,
         primitives::consts::MEMORY_RW_DATAPAR,
     };
-    use cudart::{memory::CudaHostAllocFlags, memory_pools::DevicePoolAllocation};
+    #[cfg(feature = "cuda")]
+    use cudart::memory_pools::DevicePoolAllocation;
+    #[cfg(feature = "cuda")]
     use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
+    #[cfg(feature = "cuda")]
     use hashbrown::HashMap;
+    #[cfg(feature = "cuda")]
     use p3_field::PrimeCharacteristicRing;
+    #[cfg(feature = "cuda")]
     use p3_koala_bear::KoalaBear;
+    #[cfg(feature = "cuda")]
     use p3_matrix::dense::RowMajorMatrix;
+    #[cfg(feature = "cuda")]
     use pico_gpu_api::cuda_memory_read_write_generate_extra_record_and_main_u64;
+    #[cfg(feature = "cuda")]
     use rand::{rng, seq::IndexedRandom, RngExt};
+    #[cfg(feature = "cuda")]
     use std::{mem::size_of, sync::LazyLock, time::Instant};
 
+    #[cfg(feature = "cuda")]
     type F = KoalaBear;
 
+    #[cfg(feature = "cuda")]
     static SHARD: LazyLock<EmulationRecord> = LazyLock::new(|| generate_record(1 << 16));
 
+    #[cfg(feature = "cuda")]
     fn cpu_generate_main(
         chip: &MemoryReadWriteChip<F>,
         input: &EmulationRecord,
@@ -59,13 +77,15 @@ mod tests {
         chip.generate_main(input, &mut EmulationRecord::default())
     }
 
+    #[cfg(feature = "cuda")]
     fn align_u64(addr: u64) -> u64 {
         addr & !7
     }
 
+    #[cfg(feature = "cuda")]
     fn generate_record(size: usize) -> EmulationRecord {
         if !is_pool_initialized() {
-            init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+            init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
         }
 
         let mut rng = rng();
@@ -212,6 +232,7 @@ mod tests {
         record
     }
 
+    #[cfg(feature = "cuda")]
     fn gpu_generate_extra_record_and_main(
         chip: &MemoryReadWriteChip<F>,
         input: &EmulationRecord,
@@ -228,10 +249,11 @@ mod tests {
         trace.to_host(stream)
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn test_memory_read_write_gpu_generate_extra_record_and_main() {
         if !is_pool_initialized() {
-            init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+            init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
         }
 
         let original_record = LazyLock::force(&SHARD);
@@ -307,10 +329,11 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn bench_memory_read_write_cpu_vs_gpu() {
         if !is_pool_initialized() {
-            init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+            init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
         }
 
         let warmup_sizes: Vec<usize> = vec![1 << 16];

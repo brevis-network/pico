@@ -1,5 +1,7 @@
 [workspace]
 members = ["derive", "mle-core", "mle-cpu", "cuda-mle", "vm", "aot-codegen", "aot-runtime", "sdk/*", "gnark/field-ffi", "perf", "distributed-vm", "gpu-api"]
+# `cuda-mle` and `gpu-api` need a CUDA toolkit; they build only through `pico-vm/cuda`.
+default-members = ["derive", "mle-core", "mle-cpu", "vm", "aot-codegen", "aot-runtime", "sdk/*", "gnark/field-ffi", "perf", "distributed-vm"]
 resolver = "2"
 
 [workspace.package]

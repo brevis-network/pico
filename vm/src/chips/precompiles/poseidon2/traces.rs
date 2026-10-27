@@ -1,4 +1,10 @@
 use super::{columns::num_poseidon2_cols, Poseidon2PermuteChip, STATE_NUM_BYTES, STATE_NUM_DWORDS};
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    instances::preparer::{gpu_add_host_byte_lookups, PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
 use crate::{
     chips::{
         chips::{
@@ -7,7 +13,6 @@ use crate::{
         },
         gadgets::poseidon2::traces::populate_perm,
         precompiles::{checked_u64_to_u32, poseidon2::columns::Poseidon2Cols},
-        trace::TraceData,
         utils::pad_rows_fixed,
     },
     compiler::{riscv::program::Program, word::Word},
@@ -15,7 +20,6 @@ use crate::{
     emulator::{
         record::RecordBehavior,
         riscv::{
-            ffi::FFIEmulationRecord,
             record::EmulationRecord,
             syscalls::{
                 precompiles::{poseidon2::event::Poseidon2PermuteEvent, PrecompileEvent},
@@ -23,7 +27,6 @@ use crate::{
             },
         },
     },
-    instances::preparer::{gpu_add_host_byte_lookups, PreallocatedGpuMemory, PreparedGpuEvents},
     iter::{PicoIterator, PicoSlice},
     machine::chip::ChipBehavior,
     primitives::consts::PERMUTATION_WIDTH,
@@ -61,7 +64,6 @@ impl<
     > ChipBehavior<F> for Poseidon2PermuteChip<F, LinearLayers, Config>
 {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -153,7 +155,15 @@ impl<
             }
         }
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<
+        F: PrimeField32,
+        LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
+        Config: Poseidon2Config,
+    > GpuChipBehavior<F> for Poseidon2PermuteChip<F, LinearLayers, Config>
+{
     /// The GPU prover generates this trace on the host.
     ///
     /// `cuda_precompile_poseidon2_generate_extra_record_and_main` is stale: its kernel writes the

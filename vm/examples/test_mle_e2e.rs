@@ -159,7 +159,7 @@ fn main() {
     // pool and refuses to run without it; the single-node driver is what normally sets it up per
     // card. (A verify-only run still touches the device when it builds the engine — what it skips
     // is the pool, not the card.)
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     riscv::init_mle_gpu_pool(riscv::MLE_GPU_DEVICE);
 
     let log_stacked_height: usize = riscv::log_stacked_height_from_env();

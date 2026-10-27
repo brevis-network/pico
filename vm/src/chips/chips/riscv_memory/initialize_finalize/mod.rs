@@ -29,7 +29,9 @@ impl<F> MemoryInitializeFinalizeChip<F> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "cuda")]
     use super::columns::NUM_MEMORY_INITIALIZE_FINALIZE_COLS;
+    #[cfg(feature = "cuda")]
     use crate::{
         chips::{
             chips::{
@@ -50,21 +52,32 @@ mod tests {
                 PreallocatedGpuMemory, PreparedGpuEvents,
             },
         },
-        machine::chip::ChipBehavior,
+        machine::chip::{ChipBehavior, GpuChipBehavior},
     };
+    #[cfg(feature = "cuda")]
     use cudart::memory_pools::DevicePoolAllocation;
+    #[cfg(feature = "cuda")]
     use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
+    #[cfg(feature = "cuda")]
     use p3_field::PrimeCharacteristicRing;
+    #[cfg(feature = "cuda")]
     use p3_koala_bear::KoalaBear;
+    #[cfg(feature = "cuda")]
     use p3_matrix::dense::RowMajorMatrix;
+    #[cfg(feature = "cuda")]
     use pico_gpu_api::cuda_memory_initialize_finalize_generate_extra_record_and_main_u64;
+    #[cfg(feature = "cuda")]
     use rand::{rng, RngExt};
+    #[cfg(feature = "cuda")]
     use std::{mem::size_of, sync::LazyLock, time::Instant};
 
+    #[cfg(feature = "cuda")]
     type F = KoalaBear;
 
+    #[cfg(feature = "cuda")]
     static SHARD: LazyLock<EmulationRecord> = LazyLock::new(|| generate_record(1 << 16));
 
+    #[cfg(feature = "cuda")]
     fn generate_record(size: usize) -> EmulationRecord {
         let mut rng = rng();
         let size = size as u64;
@@ -113,6 +126,7 @@ mod tests {
         record
     }
 
+    #[cfg(feature = "cuda")]
     fn cpu_generate_main(
         chip: &MemoryInitializeFinalizeChip<F>,
         input: &EmulationRecord,
@@ -120,6 +134,7 @@ mod tests {
         chip.generate_main(input, &mut EmulationRecord::default())
     }
 
+    #[cfg(feature = "cuda")]
     fn gpu_generate_extra_record_and_main(
         chip: &MemoryInitializeFinalizeChip<F>,
         input: &EmulationRecord,
@@ -137,6 +152,7 @@ mod tests {
         trace.to_host(stream)
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn test_memory_init_finalize_gpu_generate_extra_record_and_main() {
         let original_record = LazyLock::force(&SHARD).clone();
@@ -253,6 +269,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn bench_memory_init_finalize_cpu_vs_gpu() {
         let warmup_sizes: Vec<usize> = vec![1 << 16];

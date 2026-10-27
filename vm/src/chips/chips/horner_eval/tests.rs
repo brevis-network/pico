@@ -105,6 +105,7 @@ fn test_horner_eval_preprocessed_segmentation() {
 /// device; preprocessed expands each instruction's len/DATAPAR rows on the device via the two-buffer
 /// layout, so this exercises multi-instruction concatenation and multi-row segments. KoalaBear-only;
 /// needs a CUDA device.
+#[cfg(feature = "cuda")]
 mod gpu {
     use crate::{
         chips::{chips::horner_eval::HornerEvalChip, tests::init_test_stream},
@@ -115,7 +116,7 @@ mod gpu {
             types::{Address, HornerEvalEvent, HornerEvalInstr},
         },
         emulator::recursion::emulator::RecursionRecord,
-        machine::chip::ChipBehavior,
+        machine::chip::{ChipBehavior, GpuChipBehavior},
         primitives::consts::HORNER_EVAL_DATAPAR,
     };
     use p3_field::PrimeCharacteristicRing;
@@ -170,7 +171,7 @@ mod gpu {
         record.horner_eval_events = sample_events(n);
         let cpu = chip.generate_main(&record, &mut RecursionRecord::default());
         let gpu = chip
-            .gpu_generate_main(0, &record, &mut RecursionRecord::default(), None)
+            .gpu_generate_main(0, &record, &mut RecursionRecord::default())
             .to_host(stream);
         assert_eq!(cpu.values, gpu.values, "main parity failed for {n} events");
     }

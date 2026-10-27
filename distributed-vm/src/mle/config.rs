@@ -18,7 +18,7 @@ pub enum Step {
 #[derive(Parser, Debug, Clone)]
 #[clap(about = "single-node MLE/WHIR prover (KoalaBear)")]
 pub struct MleSingleNodeConfig {
-    /// Proving step: `riscv` | `convert` | `combine`. The latter two require `cuda-mle`.
+    /// Proving step: `riscv` | `convert` | `combine`. The latter two require `cuda`.
     #[clap(long, value_enum, env = "MLE_STEP", default_value = "riscv")]
     pub step: Step,
 

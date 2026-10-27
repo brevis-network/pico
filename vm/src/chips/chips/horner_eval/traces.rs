@@ -1,22 +1,17 @@
 use crate::{
-    chips::{
-        chips::horner_eval::{
-            columns::{
-                HornerEvalCols, HornerEvalPreprocessedCols, NUM_HORNER_EVAL_COLS,
-                NUM_HORNER_EVAL_PREPROCESSED_COLS,
-            },
-            HornerEvalChip,
+    chips::chips::horner_eval::{
+        columns::{
+            HornerEvalCols, HornerEvalPreprocessedCols, NUM_HORNER_EVAL_COLS,
+            NUM_HORNER_EVAL_PREPROCESSED_COLS,
         },
-        trace::TraceData,
+        HornerEvalChip,
     },
     compiler::recursion::{
         instruction::Instruction,
         ir::Block,
-        mle_instruction_buckets::MleVariant,
         program::RecursionProgram,
-        types::{Address, HornerEvalEvent, HornerEvalInstr},
+        types::{HornerEvalEvent, HornerEvalInstr},
     },
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::recursion::emulator::RecursionRecord,
     machine::{
         chip::{ChipBehavior, PreprocessedRows},
@@ -24,20 +19,33 @@ use crate::{
     },
     primitives::consts::{EXTENSION_DEGREE, HORNER_EVAL_DATAPAR},
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    compiler::recursion::{mle_instruction_buckets::MleVariant, types::Address},
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_air::BaseAir;
 use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{cuda_horner_eval_generate_main, cuda_horner_eval_generate_preprocessed};
 use std::borrow::BorrowMut;
 
+#[cfg(feature = "cuda")]
 /// H2D mirror of the CUDA `HornerEvalPreprocMeta`: per-instruction bookkeeping for the two-buffer
 /// device-side row expansion (the coefficient addresses live in a separate flat buffer).
 #[repr(C)]
@@ -61,7 +69,6 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
     for HornerEvalChip<F>
 {
     type Record = RecursionRecord<F>;
-    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -162,7 +169,12 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> GpuChipBehavior<F>
+    for HornerEvalChip<F>
+{
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -271,7 +283,6 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         let events = &input.horner_eval_events;
 

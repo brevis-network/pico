@@ -1,21 +1,16 @@
 use crate::{
-    chips::{
-        chips::pack_block::{
-            columns::{
-                PackBlockCols, PackBlockPreprocessedCols, PackBlockPreprocessedValueCols,
-                NUM_PACK_BLOCK_COLS, NUM_PACK_BLOCK_PREPROCESSED_COLS,
-            },
-            PackBlockChip,
+    chips::chips::pack_block::{
+        columns::{
+            PackBlockCols, PackBlockPreprocessedCols, PackBlockPreprocessedValueCols,
+            NUM_PACK_BLOCK_COLS, NUM_PACK_BLOCK_PREPROCESSED_COLS,
         },
-        trace::TraceData,
+        PackBlockChip,
     },
     compiler::recursion::{
         instruction::Instruction,
-        mle_instruction_buckets::MleVariant,
         program::RecursionProgram,
         types::{PackBlockEvent, PackBlockInstr},
     },
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::recursion::emulator::RecursionRecord,
     machine::{
         chip::{ChipBehavior, PreprocessedRows},
@@ -23,16 +18,27 @@ use crate::{
     },
     primitives::consts::PACK_BLOCK_DATAPAR,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    compiler::recursion::mle_instruction_buckets::MleVariant,
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_air::BaseAir;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{cuda_pack_block_generate_main, cuda_pack_block_generate_preprocessed};
 use std::borrow::BorrowMut;
 
@@ -44,7 +50,6 @@ impl<F> BaseAir<F> for PackBlockChip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for PackBlockChip<F> {
     type Record = RecursionRecord<F>;
-    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -123,7 +128,10 @@ impl<F: PrimeField32> ChipBehavior<F> for PackBlockChip<F> {
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for PackBlockChip<F> {
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -196,7 +204,6 @@ impl<F: PrimeField32> ChipBehavior<F> for PackBlockChip<F> {
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         use p3_koala_bear::KoalaBear;
 

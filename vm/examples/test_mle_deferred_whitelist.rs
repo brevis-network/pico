@@ -239,7 +239,7 @@ fn vk_root_of(proof: &ProofWithVk) -> [Kb; 8] {
 fn main() {
     setup_logger();
     // The GPU riscv prover allocates from the shared pool; a CPU build has none to set up.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     riscv::init_mle_gpu_pool(riscv::MLE_GPU_DEVICE);
 
     let mut fib_stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();

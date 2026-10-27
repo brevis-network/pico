@@ -2,6 +2,7 @@
 //! (`is_cmp = 1`, `a = lt | gt << 16`) that the Cpu chip emits since the two SLT/SLTU branch
 //! lookups were folded into one.
 
+#[cfg(feature = "cuda")]
 use crate::{
     chips::{
         chips::{
@@ -21,6 +22,7 @@ use crate::{
     compiler::riscv::opcode::Opcode,
     emulator::riscv::{
         alu_event_pool::{init_alu_event_buffer_pool, is_alu_pool_initialized},
+        event_pool::HostAllocFlags,
         record::EmulationRecord,
     },
     instances::{
@@ -30,16 +32,21 @@ use crate::{
             precompute_event_size, verify_lt_events, PreallocatedGpuMemory, PreparedGpuEvents,
         },
     },
-    machine::chip::ChipBehavior,
+    machine::chip::{ChipBehavior, GpuChipBehavior},
 };
-use cudart::memory::CudaHostAllocFlags;
+#[cfg(feature = "cuda")]
 use p3_field::PrimeCharacteristicRing;
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
+#[cfg(feature = "cuda")]
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use rand::{rng, RngExt};
 
+#[cfg(feature = "cuda")]
 type F = KoalaBear;
 
+#[cfg(feature = "cuda")]
 /// One merged branch comparison as the Cpu chip emits it (`populate_branch`).
 fn cmp_event(clk: u64, signed: bool, b: u64, c: u64) -> AluEvent {
     let (lt, gt) = if signed {
@@ -58,6 +65,7 @@ fn cmp_event(clk: u64, signed: bool, b: u64, c: u64) -> AluEvent {
     }
 }
 
+#[cfg(feature = "cuda")]
 /// A plain SLT/SLTU result row as the emulator emits it.
 fn slt_event(clk: u64, signed: bool, b: u64, c: u64, is_imm: bool) -> AluEvent {
     let a = if signed {
@@ -75,11 +83,12 @@ fn slt_event(clk: u64, signed: bool, b: u64, c: u64, is_imm: bool) -> AluEvent {
     )
 }
 
+#[cfg(feature = "cuda")]
 /// Deterministic corner cases first (every (sign, order) class, both row kinds), then a random
 /// mix; returns the record and the indices of the merged rows for the column checks.
 fn generate_gpu_test_record(event_count: u64) -> (EmulationRecord, Vec<usize>) {
     if !is_alu_pool_initialized() {
-        init_alu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+        init_alu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
     }
     let neg1 = u64::MAX; // -1 as i64
     let neg2 = u64::MAX - 1; // -2 as i64
@@ -136,10 +145,12 @@ fn generate_gpu_test_record(event_count: u64) -> (EmulationRecord, Vec<usize>) {
     (record, cmp_rows)
 }
 
+#[cfg(feature = "cuda")]
 fn cpu_generate_main(chip: &LtChip<F>, input: &EmulationRecord) -> RowMajorMatrix<F> {
     chip.generate_main(input, &mut EmulationRecord::default())
 }
 
+#[cfg(feature = "cuda")]
 fn gpu_generate_extra_record_and_main(
     chip: &LtChip<F>,
     input: &EmulationRecord,
@@ -156,6 +167,7 @@ fn gpu_generate_extra_record_and_main(
     trace.to_host(stream)
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn test_lt_gpu_generate_extra_record_and_main() {
     let (original_record, cmp_rows) = generate_gpu_test_record(1 << 16);

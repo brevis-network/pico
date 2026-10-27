@@ -104,6 +104,7 @@ fn test_ext_dot_product_preprocessed_segmentation() {
 /// each preprocessed instruction expands to a data-dependent number of rows (host-side), so this
 /// exercises multi-instruction concatenation and multi-row segments. KoalaBear-only; needs a CUDA
 /// device.
+#[cfg(feature = "cuda")]
 mod gpu {
     use crate::{
         chips::{chips::ext_dot_product::ExtDotProductChip, tests::init_test_stream},
@@ -114,7 +115,7 @@ mod gpu {
             types::{Address, ExtDotProductEvent, ExtDotProductInstr},
         },
         emulator::recursion::emulator::RecursionRecord,
-        machine::chip::ChipBehavior,
+        machine::chip::{ChipBehavior, GpuChipBehavior},
         primitives::consts::{EXT_DOT_PRODUCT_DATAPAR, EXT_DOT_PRODUCT_GROUPS},
     };
     use p3_field::PrimeCharacteristicRing;
@@ -173,7 +174,7 @@ mod gpu {
         record.ext_dot_product_events = sample_events(n);
         let cpu = chip.generate_main(&record, &mut RecursionRecord::default());
         let gpu = chip
-            .gpu_generate_main(0, &record, &mut RecursionRecord::default(), None)
+            .gpu_generate_main(0, &record, &mut RecursionRecord::default())
             .to_host(stream);
         assert_eq!(cpu.values, gpu.values, "main parity failed for {n} events");
     }

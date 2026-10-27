@@ -1,37 +1,43 @@
 use crate::{
-    chips::{
-        chips::frac_fold::{
-            columns::{
-                FracFoldCols, FracFoldPreprocessedCols, NUM_FRAC_FOLD_COLS,
-                NUM_FRAC_FOLD_PREPROCESSED_COLS,
-            },
-            FracFoldChip,
+    chips::chips::frac_fold::{
+        columns::{
+            FracFoldCols, FracFoldPreprocessedCols, NUM_FRAC_FOLD_COLS,
+            NUM_FRAC_FOLD_PREPROCESSED_COLS,
         },
-        trace::TraceData,
+        FracFoldChip,
     },
     compiler::recursion::{
         instruction::Instruction,
-        mle_instruction_buckets::MleVariant,
         program::RecursionProgram,
         types::{FracFoldEvent, FracFoldInstr},
     },
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::recursion::emulator::RecursionRecord,
     machine::{
         chip::{ChipBehavior, PreprocessedRows},
         utils::pad_to_power_of_two,
     },
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    compiler::recursion::mle_instruction_buckets::MleVariant,
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_air::BaseAir;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{cuda_frac_fold_generate_main, cuda_frac_fold_generate_preprocessed};
 use std::borrow::BorrowMut;
 
@@ -43,7 +49,6 @@ impl<F> BaseAir<F> for FracFoldChip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for FracFoldChip<F> {
     type Record = RecursionRecord<F>;
-    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -125,7 +130,10 @@ impl<F: PrimeField32> ChipBehavior<F> for FracFoldChip<F> {
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for FracFoldChip<F> {
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -198,7 +206,6 @@ impl<F: PrimeField32> ChipBehavior<F> for FracFoldChip<F> {
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         use p3_koala_bear::KoalaBear;
 

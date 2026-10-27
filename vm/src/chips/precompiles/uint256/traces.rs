@@ -7,39 +7,44 @@ use crate::{
             checked_u64_to_u32,
             uint256::{Uint256MulChip, UINT256_NUM_WORDS},
         },
-        trace::TraceData,
-        utils::{next_power_of_two, pad_rows_fixed},
+        utils::pad_rows_fixed,
     },
     compiler::riscv::program::Program,
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::riscv::{
-        ffi::FFIEmulationRecord,
         record::EmulationRecord,
-        syscalls::{
-            precompiles::{uint256::event::FfiUint256MulEvent, PrecompileEvent},
-            SyscallCode,
-        },
+        syscalls::{precompiles::PrecompileEvent, SyscallCode},
     },
-    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::chip::ChipBehavior,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{trace::TraceData, utils::next_power_of_two},
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    emulator::riscv::syscalls::precompiles::uint256::event::FfiUint256MulEvent,
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::cudaMemcpyAsync;
 use num::{BigUint, One, Zero};
 use p3_field::PrimeField32;
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_precompile_uint256_generate_extra_record_and_main;
 use std::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
 use tracing::info;
 
 impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -249,7 +254,10 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                 .is_empty()
         }
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for Uint256MulChip<F> {
     fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
         if let Some(shape) = record.shape.as_ref() {
             shape.included::<F, _>(self)

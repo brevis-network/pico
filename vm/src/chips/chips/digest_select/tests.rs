@@ -80,6 +80,7 @@ fn test_digest_select_preprocessed_groups() {
 
 /// GPU trace-gen must be element-wise identical to the CPU path, including datapar packing and
 /// padding rows. KoalaBear-only; needs a CUDA device.
+#[cfg(feature = "cuda")]
 mod gpu {
     use crate::{
         chips::{chips::digest_select::DigestSelectChip, tests::init_test_stream},
@@ -89,7 +90,7 @@ mod gpu {
             types::{Address, DigestSelectEvent, DigestSelectInstr},
         },
         emulator::recursion::emulator::RecursionRecord,
-        machine::chip::ChipBehavior,
+        machine::chip::{ChipBehavior, GpuChipBehavior},
     };
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
@@ -139,7 +140,7 @@ mod gpu {
         record.digest_select_events = sample_events(n);
         let cpu = chip.generate_main(&record, &mut RecursionRecord::default());
         let gpu = chip
-            .gpu_generate_main(0, &record, &mut RecursionRecord::default(), None)
+            .gpu_generate_main(0, &record, &mut RecursionRecord::default())
             .to_host(stream);
         assert_eq!(cpu.values, gpu.values, "main parity failed for {n} events");
     }

@@ -2,37 +2,43 @@ use super::columns::{
     PublicValuesCols, PublicValuesPreprocessedCols, NUM_PUBLIC_VALUES_COLS,
     NUM_PUBLIC_VALUES_PREPROCESSED_COLS,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    compiler::recursion::types::CommitPublicValuesInstr,
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
 use crate::{
     chips::{
         chips::{
             public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
             recursion_memory::MemoryAccessCols,
         },
-        trace::TraceData,
         utils::pad_rows_fixed,
     },
-    compiler::recursion::{
-        instruction::Instruction, program::RecursionProgram, types::CommitPublicValuesInstr,
-    },
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    compiler::recursion::{instruction::Instruction, program::RecursionProgram},
     emulator::recursion::emulator::RecursionRecord,
     machine::chip::{ChipBehavior, PreprocessedRows},
 };
 use core::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{cuda_public_values_generate_main, cuda_public_values_generate_preprocessed};
 
 impl<F: PrimeField32> ChipBehavior<F> for PublicValuesChip<F> {
     type Record = RecursionRecord<F>;
-    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -133,7 +139,10 @@ impl<F: PrimeField32> ChipBehavior<F> for PublicValuesChip<F> {
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for PublicValuesChip<F> {
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -215,7 +224,6 @@ impl<F: PrimeField32> ChipBehavior<F> for PublicValuesChip<F> {
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         use crate::primitives::consts::DIGEST_SIZE;
         use p3_koala_bear::KoalaBear;

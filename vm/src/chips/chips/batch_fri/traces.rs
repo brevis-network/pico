@@ -1,35 +1,39 @@
 use crate::{
-    chips::{
-        chips::batch_fri::{
-            columns::{
-                BatchFRICols, BatchFRIPreprocessedCols, NUM_BATCH_FRI_COLS,
-                NUM_BATCH_FRI_PREPROCESSED_COLS,
-            },
-            BatchFRIChip,
+    chips::chips::batch_fri::{
+        columns::{
+            BatchFRICols, BatchFRIPreprocessedCols, NUM_BATCH_FRI_COLS,
+            NUM_BATCH_FRI_PREPROCESSED_COLS,
         },
-        trace::TraceData,
-        utils::next_power_of_two,
+        BatchFRIChip,
     },
     compiler::recursion::{
-        instruction::Instruction,
-        program::RecursionProgram,
-        types::{preprocess_batch_fri_ffi, BatchFRIInstr},
+        instruction::Instruction, program::RecursionProgram, types::BatchFRIInstr,
     },
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::recursion::emulator::RecursionRecord,
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{trace::TraceData, utils::next_power_of_two},
+    compiler::recursion::types::preprocess_batch_fri_ffi,
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
 use core::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_air::BaseAir;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{cuda_batch_fri_generate_main, cuda_batch_fri_generate_preprocessed};
 
 impl<F> BaseAir<F> for BatchFRIChip<F> {
@@ -40,7 +44,6 @@ impl<F> BaseAir<F> for BatchFRIChip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for BatchFRIChip<F> {
     type Record = RecursionRecord<F>;
-    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -129,7 +132,10 @@ impl<F: PrimeField32> ChipBehavior<F> for BatchFRIChip<F> {
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for BatchFRIChip<F> {
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -265,7 +271,6 @@ impl<F: PrimeField32> ChipBehavior<F> for BatchFRIChip<F> {
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         use p3_koala_bear::KoalaBear;
 

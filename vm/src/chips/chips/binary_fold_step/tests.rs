@@ -95,6 +95,7 @@ fn test_binary_fold_step_preprocessed_dimensions() {
 /// GPU trace-gen must be element-wise identical to the CPU path (device-computed amt/tih, verbatim
 /// out) including padding. Events carry full-Block alpha/v_lo/v_hi with a correctly folded `out`
 /// (the CPU generate_main debug-asserts it). KoalaBear-only; needs a CUDA device.
+#[cfg(feature = "cuda")]
 mod gpu {
     use crate::{
         chips::{chips::binary_fold_step::BinaryFoldStepChip, tests::init_test_stream},
@@ -105,7 +106,7 @@ mod gpu {
             types::{Address, BinaryFoldStepEvent, BinaryFoldStepInstr},
         },
         emulator::recursion::emulator::RecursionRecord,
-        machine::chip::ChipBehavior,
+        machine::chip::{ChipBehavior, GpuChipBehavior},
         primitives::consts::EXTENSION_DEGREE,
     };
     use p3_field::{extension::BinomiallyExtendable, Field, PrimeCharacteristicRing};
@@ -187,7 +188,7 @@ mod gpu {
         record.binary_fold_step_events = sample_events(n);
         let cpu = chip.generate_main(&record, &mut RecursionRecord::default());
         let gpu = chip
-            .gpu_generate_main(0, &record, &mut RecursionRecord::default(), None)
+            .gpu_generate_main(0, &record, &mut RecursionRecord::default())
             .to_host(stream);
         assert_eq!(cpu.values, gpu.values, "main parity failed for {n} events");
     }

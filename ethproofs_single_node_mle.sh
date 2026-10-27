@@ -100,7 +100,7 @@ export MLE_ETHPROOFS_RESULT_CAPACITY="${MLE_ETHPROOFS_RESULT_CAPACITY:-64}"
 # SKIP_BUILD=1 runs the binary that is already there. systemd sets it: a service that compiles
 # on every start turns a broken tree into a restart loop, and turns a cold build into what looks
 # like a hang. Interactive runs still build by default, so the two cannot drift.
-FEATURES="${FEATURES:-bigint-rug tcmalloc mmap-memory aot-emulator cuda-mle}"
+FEATURES="${FEATURES:-bigint-rug tcmalloc mmap-memory aot-emulator cuda}"
 if [ -z "${SKIP_BUILD:-}" ]; then
     CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-8}" \
         cargo build --bin mle-ethproofs-single-node --release --features "$FEATURES"

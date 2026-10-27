@@ -106,7 +106,7 @@ const LOG_STACKED_HEIGHT: usize = 23;
 fn main() {
     setup_logger();
     // The GPU riscv prover allocates from the shared pool; a CPU build has none to set up.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     riscv::init_mle_gpu_pool(riscv::MLE_GPU_DEVICE);
 
     let program = Arc::new(

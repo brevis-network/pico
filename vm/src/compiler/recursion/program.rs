@@ -1,8 +1,8 @@
+#[cfg(feature = "cuda")]
+use super::mle_instruction_buckets::{Candidates, MleVariant};
 use super::{
-    instruction::Instruction,
-    instruction_buckets::InstructionBuckets,
-    mle_instruction_buckets::{Candidates, MleInstructionBuckets, MleVariant},
-    prep_rows::PrepRowCounts,
+    instruction::Instruction, instruction_buckets::InstructionBuckets,
+    mle_instruction_buckets::MleInstructionBuckets, prep_rows::PrepRowCounts,
 };
 use crate::{
     compiler::program::ProgramBehavior,
@@ -63,16 +63,16 @@ pub struct RecursionProgram<F> {
     /// finish clear buckets the second is still reading — correct, but it drops that pass onto the
     /// raw whole-program scan the buckets exist to avoid. Only the LAST scope out restores.
     ///
-    /// Gated with its only reader: without `cuda-mle` there is no `BucketScope`, so an ungated
+    /// Gated with its only reader: without `cuda` there is no `BucketScope`, so an ungated
     /// field here would be written by `Default`/`Clone` and never read — dead code in the
     /// no-CUDA build of this crate, which is compiled under `deny(warnings)`.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     #[serde(skip)]
     pub(crate) bucket_passes: std::sync::Mutex<BucketPasses>,
 }
 
 /// Nesting state for [`RecursionProgram::bucket_for_pass`].
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 #[derive(Debug, Default)]
 pub(crate) struct BucketPasses {
     /// Live scopes over this program.
@@ -97,7 +97,7 @@ impl<F> Default for RecursionProgram<F> {
             instruction_buckets: std::sync::RwLock::new(None),
             prep_row_counts_cache: std::sync::OnceLock::new(),
             mle_instruction_buckets: std::sync::RwLock::new(None),
-            #[cfg(feature = "cuda-mle")]
+            #[cfg(feature = "cuda")]
             bucket_passes: std::sync::Mutex::new(BucketPasses::default()),
         }
     }
@@ -129,7 +129,7 @@ impl<F: Clone> Clone for RecursionProgram<F> {
                 self.mle_instruction_buckets.read().unwrap().clone(),
             ),
             // Scope nesting is per instance, never inherited: a clone has no live scopes.
-            #[cfg(feature = "cuda-mle")]
+            #[cfg(feature = "cuda")]
             bucket_passes: std::sync::Mutex::new(BucketPasses::default()),
         }
     }
@@ -194,7 +194,9 @@ impl<F> RecursionProgram<F> {
     /// [`Self::bucket_for_pass`] has built the MLE buckets, else the whole program.
     ///
     /// Answering with the whole program is always correct — the caller's own `filter_map` is what
-    /// selects payloads — so this needs no feature gate and no fallback logic at the call site.
+    /// selects payloads — so this needs no fallback logic at the call site. Only the GPU
+    /// preprocessed generators call it.
+    #[cfg(feature = "cuda")]
     pub(crate) fn mle_candidates(&self, variant: MleVariant) -> Candidates<'_, F> {
         Candidates::new(
             &self.instructions,
@@ -217,7 +219,7 @@ impl<F: Field> RecursionProgram<F> {
 
     /// Classify the MLE-only instruction variants by position, once. Idempotent, with the same
     /// double-checked locking as [`Self::ensure_bucketed`], so concurrent callers build it once.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     fn ensure_mle_bucketed(&self) {
         if self.mle_instruction_buckets.read().unwrap().is_none() {
             let mut lock = self.mle_instruction_buckets.write().unwrap();
@@ -241,14 +243,14 @@ impl<F: Field> RecursionProgram<F> {
     /// `Serialize`d into `program_cache.bin`, and can therefore arrive already populated from a
     /// cache this pass does not own. A guard that cleared unconditionally would throw that away.
     ///
-    /// Gated on `cuda-mle` because `mle::machine::recursion::gpu` is the sole caller and is itself
+    /// Gated on `cuda` because `mle::machine::recursion::gpu` is the sole caller and is itself
     /// gated, so without the feature this would be dead code rather than merely unused. The reader
     /// side, [`Self::mle_candidates`], is deliberately NOT gated: the chips call it unconditionally
     /// (`ChipBehavior::gpu_generate_preprocessed` is not feature-gated), and without this builder
     /// it simply always answers with the whole program, leaving every chip on its raw scan.
     /// `#[must_use]` because discarding the guard drops the buckets immediately: the pass would
     /// then silently take the raw-scan path it was calling this to avoid.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     #[must_use]
     pub(crate) fn bucket_for_pass(&self) -> BucketScope<'_, F> {
         {
@@ -275,12 +277,12 @@ impl<F: Field> RecursionProgram<F> {
 /// A holder of a [`RecursionProgram::get_buckets`] guard must release it before this falls, since
 /// restoring takes the write lock. MLE readers cannot deadlock against it at all: they hold their
 /// own `Arc`.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub(crate) struct BucketScope<'a, F> {
     program: &'a RecursionProgram<F>,
 }
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 impl<F> Drop for BucketScope<'_, F> {
     fn drop(&mut self) {
         // `unwrap_or_else(into_inner)`, not `unwrap`: a poisoned lock here would mean panicking

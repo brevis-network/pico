@@ -161,6 +161,7 @@ fn test_exp_bits_len_preprocessed_dimensions() {
 /// canonicality flags recomputed per-row on the device. The boundary set exercises the low/high
 /// region split at bit 24, `num_bits` extremes, and all-zero / all-one bit patterns. Needs a CUDA
 /// device (chip is KoalaBear-only).
+#[cfg(feature = "cuda")]
 mod gpu {
     use super::F;
     use crate::{
@@ -171,7 +172,7 @@ mod gpu {
             types::{Address, ExpBitsLenEvent, ExpBitsLenInstr},
         },
         emulator::recursion::emulator::RecursionRecord,
-        machine::chip::ChipBehavior,
+        machine::chip::{ChipBehavior, GpuChipBehavior},
     };
     use p3_field::PrimeCharacteristicRing;
 
@@ -214,7 +215,7 @@ mod gpu {
         record.exp_bits_len_events = events;
         let cpu = chip.generate_main(&record, &mut RecursionRecord::default());
         let gpu: TraceData<'_, F> =
-            chip.gpu_generate_main(0, &record, &mut RecursionRecord::default(), None);
+            chip.gpu_generate_main(0, &record, &mut RecursionRecord::default());
         let gpu = gpu.to_host(stream);
         assert_eq!(cpu.values, gpu.values, "main parity failed");
     }

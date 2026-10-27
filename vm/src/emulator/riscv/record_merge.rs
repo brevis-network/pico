@@ -112,10 +112,10 @@ mod tests {
         compiler::riscv::opcode::ByteOpcode,
         emulator::riscv::{
             cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
+            event_pool::HostAllocFlags,
             record_digest::first_difference,
         },
     };
-    use cudart::memory::CudaHostAllocFlags;
     use std::sync::{Mutex, MutexGuard, PoisonError};
 
     /// One window over `addr`: entered from the chunk's entry record, closed at `timestamp`. An
@@ -142,7 +142,7 @@ mod tests {
         ONCE.call_once(|| {
             if !is_pool_initialized() {
                 // The size every other test site passes: the pool is process-wide.
-                init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+                init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
             }
         });
         TURN.lock().unwrap_or_else(PoisonError::into_inner)

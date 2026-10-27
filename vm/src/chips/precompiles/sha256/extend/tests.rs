@@ -1,3 +1,11 @@
+use crate::emulator::riscv::{
+    record::EmulationRecord,
+    syscalls::{
+        precompiles::{sha256::event::ShaExtendEvent, PrecompileEvent},
+        SyscallCode, SyscallEvent,
+    },
+};
+#[cfg(feature = "cuda")]
 use crate::{
     chips::{
         chips::byte::{columns::NUM_BYTE_MULT_COLS, ByteChip},
@@ -8,24 +16,21 @@ use crate::{
         tests::init_test_stream,
         trace::TraceData,
     },
-    emulator::riscv::{
-        record::EmulationRecord,
-        syscalls::{
-            precompiles::{sha256::event::ShaExtendEvent, PrecompileEvent},
-            SyscallCode, SyscallEvent,
-        },
-    },
     instances::preparer::{
         gpu_allocate_byte_trace, gpu_finalize_byte_trace, precompute_event_size,
         PreallocatedGpuMemory, PreparedGpuEvents,
     },
-    machine::chip::ChipBehavior,
+    machine::chip::{ChipBehavior, GpuChipBehavior},
 };
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use rand::{rng, RngExt};
+#[cfg(feature = "cuda")]
 use std::time::Instant;
 
+#[cfg(feature = "cuda")]
 type Chip<F> = ShaExtendChip<F>;
+#[cfg(feature = "cuda")]
 type F = KoalaBear;
 
 pub fn generate_sha_extend_bench_record(num_events: usize) -> EmulationRecord {
@@ -109,6 +114,7 @@ pub fn generate_sha_extend_bench_record(num_events: usize) -> EmulationRecord {
     record
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn test_sha_extend_gpu_generate_extra_record_and_main() {
     let num_events = 1 << 16;
@@ -191,6 +197,7 @@ fn test_sha_extend_gpu_generate_extra_record_and_main() {
     );
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn bench_sha_extend_cpu_vs_gpu() {
     use crate::{
@@ -317,6 +324,7 @@ fn bench_sha_extend_cpu_vs_gpu() {
     println!("{:-<60}", "");
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn test_sha_extend_control_gpu_generate_extra_record_and_main() {
     let num_events = 1 << 16;
@@ -399,6 +407,7 @@ fn test_sha_extend_control_gpu_generate_extra_record_and_main() {
     );
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn bench_sha_extend_control_cpu_vs_gpu() {
     use crate::{

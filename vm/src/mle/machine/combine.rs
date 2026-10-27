@@ -9,12 +9,12 @@ use std::{collections::HashMap, sync::Arc};
 
 use p3_field::PrimeCharacteristicRing;
 // `Mutex`/`Weak` back the cross-card `PROGRAM_INDEX` and `Instruction` backs `instr_mix`, and all
-// three live behind `#[cfg(feature = "cuda-mle")]` — so their imports must carry the same gate.
+// three live behind `#[cfg(feature = "cuda")]` — so their imports must carry the same gate.
 // `vm/src/lib.rs` sets `#![cfg_attr(feature = "strict", deny(warnings))]`, which turns an unused
 // import into a hard error in every build that omits the feature (`pico-aot-codegen` is one).
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 use crate::compiler::recursion::instruction::Instruction;
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 use std::sync::{Mutex, Weak};
 
 use p3_maybe_rayon::prelude::*;
@@ -618,28 +618,28 @@ impl CombineMachine {
 // GPU-only by design: the only consumer is the MLE single-node driver, which proves on the GPU.
 // The batch [`CombineMachine`] above remains the CPU reference path (the e2e example drives it),
 // and it is also where a GPU-produced root is accepted — see [`CombineMachine::register_shape`]
-// and [`CombineMachine::verify`]. The whole section is `cuda-mle`-gated; there is no CPU path.
+// and [`CombineMachine::verify`]. The whole section is `cuda`-gated; there is no CPU path.
 //
 // Mirrors `convert.rs`'s GPU section: one keygen per distinct shape behind a bounded LRU, and a
 // CPU stage (`prepare_node`) split from the GPU stage (`prove_prepared_node`) so a driver can
 // overlap them. The tree itself is NOT here — the driver drives it (the scheduler's `ProofTree`
 // pairs adjacent proofs); this machine only answers "given these children, prove one node".
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 use std::time::Instant;
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 use crate::mle::machine::recursion::{
     digest_to_u32s,
     gpu::{self, GpuEngineKb, GpuPbKb},
 };
 
 /// The prover-side key handle cached per shape: a device-resident proving key.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 type GpuPk = Arc<pico_mle_core::prover::DeviceMultiStarkProvingKey<GpuPbKb>>;
 
 /// One cached keygen per node shape — `(ordered child layouts, is_complete)`.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 struct GpuCombinePkEntry {
     layouts: Vec<RecursionVkLayout>,
     is_complete: bool,
@@ -671,10 +671,10 @@ struct GpuCombinePkEntry {
 /// what it was; only the host-side CPU work of re-deriving an identical program is skipped.
 ///
 /// Lock order is per-card `cache` -> `PROGRAM_INDEX`, never the reverse.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 static PROGRAM_INDEX: Mutex<Vec<SharedProgram>> = Mutex::new(Vec::new());
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 struct SharedProgram {
     layouts: Vec<RecursionVkLayout>,
     is_complete: bool,
@@ -689,7 +689,7 @@ struct SharedProgram {
 ///
 /// It needs the program ahead of the key, which is what `MLE_COMB_KEYGEN_FAT` turns off, so the
 /// two are mutually exclusive and the fat path wins.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub fn combine_overlap_keygen() -> bool {
     crate::mle::env_opt_out("MLE_COMBINE_OVERLAP_KEYGEN")
 }
@@ -698,7 +698,7 @@ pub fn combine_overlap_keygen() -> bool {
 ///
 /// Dead `Weak`s are dropped as they are passed, so the index self-trims without a sweep of its
 /// own; it is bounded by the live per-card caches (cards x `MLE_COMBINE_PK_CACHE`).
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn shared_program(
     layouts: &[RecursionVkLayout],
     is_complete: bool,
@@ -725,7 +725,7 @@ fn shared_program(
 }
 
 /// Publish a freshly built program so the other cards' misses can skip the rebuild.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn publish_program(
     layouts: &[RecursionVkLayout],
     is_complete: bool,
@@ -747,7 +747,7 @@ fn publish_program(
 /// On the ~570 k-instruction recursion program that is ~34 ms — a third of a combine keygen miss,
 /// on the tree's serial critical path — and it is paid whether or not the line below is enabled,
 /// because the argument is evaluated before the macro decides. These are the same three numbers.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn instr_mix(program: &RecursionProgram<Kb>) -> (usize, usize, usize) {
     let mut base_alu = 0usize;
     let mut ext_alu = 0usize;
@@ -766,7 +766,7 @@ fn instr_mix(program: &RecursionProgram<Kb>) -> (usize, usize, usize) {
 /// There is one record per KEYGEN, not per distinct shape: a shape that was evicted and later
 /// recurs is keygen'd again and gets a second record. The two coincide exactly when
 /// [`ShapeStats::evictions`] is zero.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 #[derive(Clone, Debug)]
 pub struct ShapeRecord {
     pub shape_id: usize,
@@ -800,7 +800,7 @@ pub struct ShapeRecord {
 /// The end-of-run shape picture: one accessor, one renderer, so the counts cannot drift apart.
 ///
 /// Invariant: `keygens + hits == nodes proved` (every node either keygens a shape or hits one).
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 #[derive(Clone, Debug)]
 pub struct ShapeStats {
     /// Keygens performed. Equals the distinct-shape count iff [`Self::distinct_is_exact`].
@@ -814,7 +814,7 @@ pub struct ShapeStats {
     pub records: Vec<ShapeRecord>,
 }
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 impl ShapeStats {
     /// Nodes proved, derived from the two counters rather than counted separately — the driver
     /// asserts this against its own node count.
@@ -829,7 +829,7 @@ impl ShapeStats {
 }
 
 /// The whole summary line, rendered here so its format lives in one place too.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 impl std::fmt::Display for ShapeStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Keygen is paid in `prepare_node`, not in `prove_prepared_node` where `sum(combine)`
@@ -880,7 +880,7 @@ impl std::fmt::Display for ShapeStats {
 /// No `verify` either: the root is handed back to [`CombineMachine`] so the four-step host-side
 /// acceptance exists in exactly one place. Per-node `engine.verify` is available to callers as a
 /// cheap early-failure net, but it is NOT the security check (it lacks the honest-vk substitution).
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub struct GpuCombineMachine {
     pub engine: GpuEngineKb,
     /// Whitelist mode: nodes witness their children's membership paths and take the combine
@@ -912,7 +912,7 @@ pub struct GpuCombineMachine {
 }
 
 /// Output of the CPU stage ([`GpuCombineMachine::prepare_node`]), ready for the GPU stage.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub struct GpuPreparedCombine {
     vk: Arc<MultiStarkVerifyingKey<Sc>>,
     pk: GpuPk,
@@ -926,7 +926,7 @@ pub struct GpuPreparedCombine {
 /// Device-built combine node (ctx resident), output of [`GpuCombineMachine::build_node_ctx`].
 /// Small (recursion-circuit heights), so parking one in a bounded(1) lane is safe — unlike riscv
 /// staged ctxs.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub struct BuiltCombine {
     vk: Arc<MultiStarkVerifyingKey<Sc>>,
     pk: GpuPk,
@@ -939,7 +939,7 @@ pub struct BuiltCombine {
 }
 
 /// One proved combine node.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub struct CombineNode {
     pub proof: ProofWithVk,
     /// The node's ORDERED child layouts. For the root, hand these to
@@ -948,7 +948,7 @@ pub struct CombineNode {
     pub is_complete: bool,
 }
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 impl GpuCombineMachine {
     /// Combine nodes prove under the same params as convert (uniform child-verify cost across the
     /// tree): pass `recursion_params_with_100_bits_security()`.
