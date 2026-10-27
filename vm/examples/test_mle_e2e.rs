@@ -51,10 +51,7 @@
 
 use p3_field::PrimeCharacteristicRing;
 use pico_mle_core::{
-    config::{
-        recursion_params_with_100_bits_security, riscv_params_with_100_bits_security,
-        MAX_RISCV_LOG_STACKED_HEIGHT,
-    },
+    config::{recursion_params_with_100_bits_security, riscv_params_with_100_bits_security},
     StarkEngine,
 };
 use pico_vm::{

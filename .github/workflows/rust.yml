@@ -1,411 +1,612 @@
 on:
-    # `gpu-*` and not `gpu-*-*`: the GPU line's branch, whatever the repository calls it, and not
-    # the feature branches named after it.
-    pull_request:
-        branches:
-            - gpu
-            - "gpu-*"
-            - "!gpu-*-*"
-            - release/v*
-        paths-ignore:
-            - "docs/**"
-            - "README.md"
-            - ".gitignore"
-            - "Makefile"
-            - "tools/**"
-            - "scripts/**"
-            - ".claude/**"
-            - ".agent/**"
-            # Data-only bench blobs (ELF/bins) can't affect clippy/fmt; skip CI when a
-            # PR touches nothing else (mixed code+data PRs still run — paths-ignore only
-            # skips when EVERY changed file matches).
-            - "perf/bench_data/**"
-    push:
-        branches:
-            # Cache scoping: a run may only read caches from its own ref, its base
-            # branch, or the default branch. Without a push trigger on the branch PRs
-            # here target, no shared cache ever exists for them and every new PR's first
-            # run starts cold.
-            - gpu
-            - "gpu-*"
-            - "!gpu-*-*"
-        paths-ignore:
-            - "docs/**"
-            - "README.md"
-            - ".gitignore"
-            - "Makefile"
-            - "tools/**"
-            - "scripts/**"
-            - ".claude/**"
-            - ".agent/**"
-            # Data-only bench blobs (ELF/bins) can't affect clippy/fmt; skip CI when a
-            # PR touches nothing else (mixed code+data PRs still run — paths-ignore only
-            # skips when EVERY changed file matches).
-            - "perf/bench_data/**"
-    # So a run can be retried after an infrastructure failure -- the apt rate-limiting inside the
-    # CUDA container noted in the lint job is the usual cause -- without pushing an empty commit.
-    workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - release/v*
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".gitignore"
+      - "Makefile"
+      - "tools/**"
+      - ".claude/**"
+      - ".agent/**"
+  push:
+    branches:
+      # Cache scoping: a run may only read caches from its own ref, its base branch, or the
+      # default branch. PRs here target `main`, so without a push trigger on it no shared
+      # cache ever exists for them and every new PR's first run starts cold -- which is what
+      # the 1.4-to-11.0-minute spread on `Clippy (workspace)` across five sampled runs was.
+      - main
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".gitignore"
+      - "Makefile"
+      - "tools/**"
+      - ".claude/**"
+      - ".agent/**"
+  # So a bottleneck can be re-measured, or a run retried after an infrastructure failure,
+  # without pushing an empty commit.
+  workflow_dispatch:
 
 name: Check, Test, and Format
 
-# This workflow only reads the repo, and every dependency is public, so it needs no secret.
-# Declared rather than inheriting a repository default that may be write.
+# This workflow only reads the repo; private dependencies authenticate with their own secret, not
+# with GITHUB_TOKEN. Declared rather than left to the repository default, which may be write.
 permissions:
-    contents: read
+  contents: read
 
-# Cancel a superseded run when a new commit is pushed to the same branch/PR,
-# so a re-push doesn't leave the old ~24min GPU-lint run burning a runner.
+# Thirteen jobs at up to 25 minutes each: a re-push that leaves the superseded run going burns a
+# lot of runner time for a result nobody will read.
 concurrency:
-    group: ${{ github.workflow }}-${{ github.ref }}
-    cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
-# No job runs the emulator: its event buffers are CUDA pinned memory, so executing or proving a
-# program needs a GPU, which these runners do not have. Proofs are checked on GPU hosts.
+# Job names carry a `CPU ·` / `GPU ·` / `EVM ·` prefix so the checks list sorts by backend and says
+# what each check validates rather than "Tests" or "Lint". Every `CPU ·` job builds without the
+# `cuda` feature and so needs no CUDA toolkit; the `GPU ·` jobs compile the `cuda` build, but no
+# runner here has a GPU, so nothing runs on one.
+#
+# Shared setup (private-dependency auth, the pinned toolchain, the cargo cache) lives in
+# .github/actions/rust-setup. The toolchain is pinned once, there.
+
 env:
-    VK_VERIFICATION: false
+  VK_VERIFICATION: false
+  # The CPU clippy lane's feature set: every workspace feature except `cuda` / `cuda-mle`.
+  CPU_FEATURES: >-
+    pico-mle-core/metrics,pico-mle-core/multi-field-transcript,pico-mle-core/parallel,
+    pico-mle-core/soundness-bchks25-optimized,pico-mle-core/test-utils,pico-mle-cpu/parallel,
+    pico-vm/aot-emulator,pico-vm/bigint-rug,pico-vm/debug,pico-vm/debug-lookups,pico-vm/jemalloc,
+    pico-vm/metrics,pico-vm/mmap-memory,pico-vm/multi-field-transcript,pico-vm/parallel,
+    pico-vm/rayon,pico-vm/single-threaded,pico-vm/soundness-bchks25-optimized,pico-vm/strict,
+    pico-vm/tcmalloc,pico-vm/test-utils,pico-vm/two-round-chunks,
+    pico-aot-runtime/bigint-rug,pico-aot-runtime/mmap-memory,
+    pico-cli/aot,pico-cli/multi-field-transcript,pico-prover/aot,pico-prover/multi-field-transcript,
+    pico-sdk/coprocessor,pico-sdk/kb,pico-sdk/libm,pico-sdk/prover,pico-perf/aot,pico-perf/jemalloc,
+    pico-aot-dispatch/bigint-rug,pico-aot-dispatch/mmap-memory,
+    distributed-vm/aot-emulator,distributed-vm/bigint-rug,distributed-vm/chunk-priority,
+    distributed-vm/jemalloc,distributed-vm/local_test,distributed-vm/mmap-memory,
+    distributed-vm/object_store,distributed-vm/s3-storage,distributed-vm/tcmalloc,
+    distributed-vm/two-round-chunks
 
 jobs:
-    fmt:
-        name: GPU · Format
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v4
-            - name: Install Rust
-              run: |
-                  rustup toolchain install nightly-2026-09-27 --profile minimal --component rustfmt
-                  rustup override set nightly-2026-09-27
-            # Five workspace roots live here and `--all` only ever sees the one it is run
-            # from, so the other four rotted unnoticed. Each is checked from its own root.
-            - name: Format
-              run: |
-                  set -eux
-                  cargo fmt --all -- --check
-                  for w in examples perf/aot perf/bench_apps vm/examples/patch-testing; do
-                    (cd "$w" && cargo fmt --all -- --check)
-                  done
-            # The two satellite workspaces with a committed lock: `--locked` resolves, which is
-            # the only way to see a lock that no longer matches its manifests.
-            - name: Satellite workspace locks resolve
-              run: |
-                  set -eux
-                  for w in perf/bench_apps vm/examples/patch-testing; do
-                    (cd "$w" && cargo metadata --locked --format-version 1 > /dev/null)
-                  done
+  fmt:
+    name: CPU · Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          components: rustfmt
+          # Formatting resolves no dependencies, so this job neither reads nor writes the cache.
+          cache-save: "false"
+      # Five workspace roots live here and `--all` only ever sees the one it is run from, so the
+      # other four went unchecked. Each is checked from its own root; a sixth root would have to
+      # be added here by hand.
+      - name: Format
+        run: |
+          set -eux
+          cargo fmt --all -- --check
+          for w in examples perf/aot perf/bench_apps vm/examples/patch-testing; do
+            (cd "$w" && cargo fmt --all -- --check)
+          done
 
-    lint-gpu:
-        name: GPU · CUDA build, AOT codegen and clippy
-        runs-on: ubuntu-latest
-        container:
-            image: nvidia/cuda:12.3.1-devel-ubuntu22.04
+  lint:
+    name: CPU · Clippy (workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          components: clippy
+      - name: Clippy (workspace)
+        run: |
+          # `--tests` lints each binary only in its test profile, where `cfg(test)` code is in and
+          # `cfg(not(test))` code is out; `--bins` lints the binary that ships.
+          # Every feature but `cuda` (and its alias), which needs the CUDA toolkit and is linted
+          # by `GPU · CUDA build and clippy`; add a new feature here when one appears.
+          cargo clippy --workspace --exclude cuda-mle --exclude pico-gpu-api \
+            --lib --bins --examples --tests --benches --features "$CPU_FEATURES" --locked -- -D warnings
+      - name: Clippy host prover and CLI without the outer phases
+        run: |
+          # `--all-features` above lints only the build with `multi-field-transcript`; this is the
+          # one without it.
+          cargo clippy -p pico-prover -p pico-cli --no-default-features --lib --bins --tests \
+            --locked -- -D warnings
+      - name: Clippy pico-sdk without coprocessor
+        run: |
+          set -eux
+          # The workspace step lints `pico-sdk` with every feature on. This one lints it with
+          # `coprocessor` off -- the only feature that gates pico-sdk code in a host build -- so an
+          # item that only `coprocessor` uses shows up as an unused-item warning. Both are host
+          # builds: neither compiles the `target_os = "zkvm"` paths a guest runs.
+          cargo clippy -p pico-sdk --features prover,libm --locked -- -D warnings
+
+  # `Tests` was one 39-minute serial job and the critical path of every sampled run, with 67% of
+  # its time in three steps. It is split three ways below, by purpose, so the slowest lane lands
+  # under `EVM · Wrap proof and verifier circuit` (26.3 min) -- which is what the critical path
+  # becomes. No step was dropped: the three lanes partition the sixteen that were here.
+  #
+  # All three build the same `pico-vm` release artifacts, so they share one cache key instead of
+  # the per-job default; `mle-prove` builds the most and is the designated writer. Splitting onto
+  # per-job keys would have tripled the cold build instead of sharing it.
+  mle-prove:
+    name: CPU · MLE prove (fib)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          cache-key: cpu-vm-release
+          cache-save: "true"
+      - name: Cargo run examples
+        run: |
+          # `-p`, so features resolve the same way they do for the `-p pico-vm` steps below.
+          # Without it cargo resolves across every workspace member, and the next step rebuilds
+          # pico-vm and both mle crates under the other resolution. Every `-p pico-vm` step in
+          # this workflow keeps that form, so each lane's target dir stays on one resolution.
+          RUST_LOG=info cargo run --release -p pico-vm --example test_riscv_emulator
+      - name: MLE end to end (fib, combine)
+        run: |
+          RUST_LOG=info cargo run --release -p pico-vm --example test_mle_e2e -- --elf fib --n 10 --field kb --step combine
+      - name: MLE deferred node (fib)
+        run: |
+          # Proves one deferred-verifier node over a complete root and checks both what it
+          # publishes and that its in-circuit chain step matches `hash_deferred_proof` -- the
+          # function the guest runs behind `verify_pico_proof`. Nothing else covers that parity.
+          RUST_LOG=info cargo run --release -p pico-vm --example test_mle_deferred -- --elf fib --n 10 --field kb
+
+  vm-pins:
+    name: CPU · VK whitelist and VM pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          cache-key: cpu-vm-release
+          cache-save: "false"
+      - name: Constraint-surface parity
+        run: |
+          # The pinned dump is this branch's only record of its AIR set, and nothing else in CI
+          # reads it -- without this step a chip change lands green and the artifact goes stale.
+          cargo test --release -p pico-vm --test riscv_constraint_parity
+      - name: Precompile support pins
+        run: |
+          # The syscall map and the MLE air table each refuse nothing today; these pin both, so a
+          # precompile losing support is a reviewed edit rather than a patch case turning red.
+          cargo test --release -p pico-vm --test precompile_support
+      - name: Poseidon2 known answers
+        run: |
+          # The riscv stage's Poseidon2 constants sit in its constraint DAG, so a change to them
+          # moves every vk. These pin the permutation, the gadget-vs-host identity and the two
+          # digests built on it.
+          cargo test --release -p pico-vm --lib primitives::poseidon2_kat
+      - name: Deferred split constants
+        run: |
+          # The tail-merge packing runs off hand-derived per-row interaction counts, and these
+          # tests assert them against real keygen. Undercounting one is invisible on inspection
+          # and repacks every deferred record, so it has to be checked here -- the split itself
+          # is only exercised by runs far larger than this job's.
+          cargo test --release -p pico-vm --lib emulator::riscv::record
+      - name: Uint256 mulmod on operands at or above the modulus
+        run: |
+          # Mainnet reaches the chip with operands at or above the modulus (revm's 256-bit MODEXP
+          # path), which the AIR accepts. A trace-side check stricter than the AIR stops an honest
+          # CPU prover on those blocks, and nothing else runs the chip's trace generation on them.
+          cargo test --release -p pico-vm --lib chips::precompiles::uint256
+      - name: Whitelist artifact against this binary
+        run: |
+          # The shipped vk map is a per-config artifact. Its digest and leaf count must be this
+          # binary's, and the keys this binary derives (the riscv vk, one convert VK per shape
+          # family, a combine node, the deferred node) must be members: a change to the shape
+          # tables, the params or the recursion compiler that leaves the artifact stale fails
+          # here, not at a prover's first lookup; an AIR change is caught by the constraint
+          # parity step above.
+          cargo test --release -p pico-vm --lib mle::machine::vk_map::tests::the_shipped_artifact_matches_this_binary
+
+  # Builds only pico-mle-core, so it shares no target with the VM lanes.
+  soundness:
+    name: CPU · Soundness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+      - name: Soundness calculator, presets and admissibility (default bounds)
+        run: |
+          # Pins every component of every preset, refuses parameter sets the prover cannot run,
+          # and holds the negative fixtures. `differential_ground_truth_table` runs here.
+          cargo test --release -p pico-mle-core --features test-utils
+      - name: Soundness calculator, presets and admissibility (optimized degree bound)
+        run: |
+          # The list-decoding presets score differently under the optimized bound, and the pins
+          # follow it; `differential_ground_truth_table` is ignored here, its values assume the
+          # closed-form bound.
+          cargo test --release -p pico-mle-core --features test-utils,soundness-bchks25-optimized
+
+  compile-ffi:
+    name: CPU · Compile, AOT and FFI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          cache-key: cpu-vm-release
+          cache-save: "false"
+      - name: AOT runtime against the interpreter
+        run: |
+          # The AOT emulator answers hooks and serves syscalls with its own code, and nothing else
+          # here runs it: its ed25519 decompress hook kept a protocol the guest had left, and every
+          # other step stayed green while that guest could not run under AOT. These tests hold each
+          # hook, writes to an fd nothing listens on, and the ed25519 guest end to end, to what the
+          # interpreter does.
+          cargo test --release -p pico-aot-runtime
+      - name: Check single threaded build
+        run: |
+          cargo build -p pico-vm --no-default-features --features=strict
+      - name: Satellite workspace manifests resolve
+        run: |
+          set -eux
+          # Five separate workspaces live here; `--workspace` only ever sees the root one.
+          # `examples` has no committed lock, so it can only be checked for a loadable manifest;
+          # `perf/aot` has none either, and `AOT harnesses compile` resolves it.
+          (cd examples && cargo metadata --no-deps --format-version 1 > /dev/null)
+          # The other two do. `--locked` resolves, which is the only way to see a lock that no
+          # longer matches its manifests — `--no-deps` would pass on one pinned to an older
+          # Plonky3, or missing a dependency the root workspace just gained.
+          for w in perf/bench_apps vm/examples/patch-testing; do
+            (cd "$w" && cargo metadata --locked --format-version 1 > /dev/null)
+          done
+      - name: Examples compile
+        run: |
+          set -eux
+          # The step above only parses `examples/`'s manifests. This compiles the guests and their
+          # libraries for the host. The two provers are left out: they rebuild pico-prover in this
+          # workspace's own target, which costs minutes.
+          (cd examples && cargo check --workspace --all-targets \
+            --exclude fibonacci-prover --exclude tendermint-prover)
+      - name: AOT harnesses compile
+        run: |
+          (cd perf/aot && cargo check --all-targets)
+      - name: Compile field ffi so
+        run: |
+          cargo build --release --package field-ffi
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: gnark/go.mod
+          cache-dependency-path: gnark/go.sum
+      - name: Vet and test the Go bindings
+        run: |
+          set -eux
+          # Nothing else compiles the Go tree, so a reference to a helper deleted on either side
+          # of the FFI boundary lands green.
+          (cd gnark && go vet ./...)
+          # And run the Poseidon2 pins, which is what actually catches a constant table that
+          # moved on one side of the FFI boundary only. Needs the field-ffi archive built above.
+          # `-rpath` as well as `-L`: the test binary loads libfield_ffi.so at run time, and
+          # the linker path alone does not survive into the process.
+          # The utils tests read a proof file back and verify it, which is what `-cmd verify` and a
+          # verifier contract do with the file `-cmd prove` writes.
+          (cd gnark && CGO_LDFLAGS="-L$GITHUB_WORKSPACE/target/release -Wl,-rpath,$GITHUB_WORKSPACE/target/release" \
+            go test ./poseidon2/... ./utils/...)
+
+  # Its proofs cost minutes each, so it runs as its own job beside the VM lanes.
+  carrier:
+    name: CPU · MLE carrier tie
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+      - name: MLE carrier tie (fib)
+        run: |
+          # Doctors every riscv public-value copy but Ecall's; the recursion tree must reject it.
+          RUST_LOG=info cargo run --release -p pico-vm --example test_carrier_tie
+
+  # The only job that runs AOT code generated from an ELF, and the only one that builds the
+  # prover's `aot` feature; `AOT harnesses compile` builds `perf/aot` against the committed stub.
+  # The generated crates compile in `perf/aot`'s own target, which is why it runs as its own job
+  # beside the VM lanes, on its own cache key.
+  aot-parity:
+    name: CPU · AOT records against the interpreter (fib)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          # The root target holds the code generator, `perf/aot`'s the test built on its output.
+          workspaces: |
+            . -> target
+            perf/aot -> target
+      - name: Generate fib's AOT crates and compare its records with the interpreter's
+        run: |
+          # Every record the pipeline emits with the AOT snapshot thread against the interpreter's,
+          # at three chunk sizes, the commit tail across a boundary among them; the test also fails
+          # if the AOT thread entered no compiled block.
+          bash perf/aot/record_parity.sh fib
+      - name: The committed stub is back
+        run: |
+          set -eux
+          git status --porcelain --ignored -- aot-generated
+          test -z "$(git status --porcelain --ignored -- aot-generated)"
+      - name: The prover and cargo pico with the aot feature
+        run: |
+          # No other job builds the feature: `ProverBuilder::aot` proving and verifying fib through
+          # the AOT pipeline, what it refuses, and the errors it shares with the interpreter; and
+          # `cargo pico`'s `--aot` plumbing against a stand-in cargo. One test at a time: the proof
+          # peaks near 8 GB.
+          cargo test --release -p pico-prover --features aot -- --test-threads=1 tests::aot::
+          cargo test --release -p pico-cli --features aot --lib --test aot
+
+  # The patch harness imports pico-vm and pico-prover internals, and no other job compiles it. It
+  # has its own workspace and so its own target, which is why it runs beside the VM lanes. The
+  # guests are left out: they build for the zkVM target, off CI.
+  patch-harness:
+    name: CPU · Patch harness clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          components: clippy
+          workspaces: vm/examples/patch-testing -> target
+      - name: Clippy on the harness and every prover
+        working-directory: vm/examples/patch-testing
+        run: |
+          set -eux
+          pkgs=$(cargo metadata --no-deps --locked --format-version 1 \
+            | jq -r '.packages[] | select(.manifest_path | test("/(common|prover)/Cargo.toml$")) | "-p " + .name')
+          cargo clippy $pkgs --all-targets --locked -- -D warnings
+
+  # The host prover crate's tests prove the chain, so they run beside the VM lanes rather than
+  # after them, split by module across three jobs so none outlasts the rest of the workflow.
+  prover:
+    name: CPU · Host prover (core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+      - name: Host prover crate
+        run: |
+          # The `chunks` tests prove across chunk boundaries at the chain's operating point and would
+          # keep this job running well past the wrap proof. A plain run includes them. `chain` runs
+          # in the `prover-chain` job, the precompile guests in `prover-precompiles`, and the wrap
+          # test in the `wrap` job.
+          # One test at a time: each proof already uses every core, and several peak at 6-8 GB, so
+          # side by side they can exceed the runner's memory. `free` records what it has.
+          nproc && free -g
+          cargo test --release -p pico-prover -- --test-threads=1 --skip tests::chunks:: \
+            --skip tests::chain:: --skip tests::precompiles:: \
+            --skip tests::evm::a_wrap_proof_gives_the_program_id_and_the_bundle_the_circuits_public_inputs
+      - name: The commit tail stays in one chunk
+        run: |
+          # The two `chunks` tests that only emulate: they guard the emulator's commit-tail hold.
+          cargo test --release -p pico-prover -- --exact \
+            tests::chunks::the_emulator_keeps_the_commit_in_one_chunk \
+            tests::chunks::a_commit_split_across_chunks_is_backfilled
+      - name: Host prover crate without its default features
+        run: |
+          # The build without `multi-field-transcript`: it must compile, and name the two outer
+          # phases as missing rather than lack them.
+          cargo test --release -p pico-prover --no-default-features -- \
+            tests::options::the_outer_phases_can_be_named_and_report_themselves_missing
+
+  prover-chain:
+    name: CPU · Host prover chain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+      - name: The facade against the direct chain
+        run: |
+          # `--test-threads=1`: the facade test alone peaks near 8 GB.
+          set -o pipefail
+          cargo test --release -p pico-prover -- --test-threads=1 tests::chain:: | tee chain-test.log
+          grep -qE "test result: ok\. [1-9][0-9]* passed" chain-test.log
+
+  prover-precompiles:
+    name: CPU · Host prover precompiles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+      - name: The precompile guests prove
+        run: |
+          # Their own process: after the rest of the crate's tests the ed25519 guest's peak lands
+          # at the runner's memory limit.
+          set -o pipefail
+          cargo test --release -p pico-prover -- --test-threads=1 tests::precompiles:: | tee precompiles-test.log
+          grep -qE "test result: ok\. [1-9][0-9]* passed" precompiles-test.log
+
+  cli:
+    name: CPU · CLI prove and verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+      - name: cargo pico prove and execute
+        run: |
+          # Drives the binary, and verifies the proof file it writes in a process that proved nothing.
+          cargo test --release -p pico-cli
+
+  # The wrap proof is the longest single proof here and nothing else waits on it, so it runs beside
+  # the VM lanes. The gnark step that reads its two artifacts moves with it, which is why no
+  # artifact has to cross a job boundary.
+  #
+  # At 26.3 min median this is the critical path once the VM lanes are split, and so the next
+  # thing to look at to shorten CI.
+  wrap:
+    name: EVM · Wrap proof and verifier circuit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+      - name: Wrap proof (fib), and the EVM bundle against the wrap circuit
         env:
-            DEBIAN_FRONTEND: noninteractive
-            # build.rs respects empty GPU_TARGET_ARCHS → JIT path, which skips
-            # arch-specific codegen we don't need for linting on a GPU-less runner.
-            GPU_TARGET_ARCHS: ""
-            # This job builds in the dev profile so the AOT-generation step can share one
-            # target dir with clippy, and dev debuginfo for a workspace this size is tens of
-            # GB — enough to exhaust the runner while archiving pico-vm's rlib. Nothing here
-            # is debugged, so drop it. Set as job env rather than in `[profile.dev]` so
-            # local development keeps its debuginfo.
-            CARGO_PROFILE_DEV_DEBUG: "0"
-        steps:
-            # This job runs out of disk, so report the budget instead of guessing at it. Two
-            # things were already ruled out by measurement: the usual runner-image trick
-            # (/usr/share/dotnet, /usr/local/lib/android, $AGENT_TOOLSDIRECTORY) cannot help,
-            # because those are host paths and every step here runs inside the container; and
-            # deleting the CUDA image's Nsight profilers and doc trees freed exactly 0 of the
-            # 8 GB that were available at job start. Whatever is holding the other 64 GB is
-            # what a future fix has to target, so print it rather than delete blind.
-            - name: Report disk budget
-              run: |
-                  df -h /
-                  du -sh /usr/local/cuda* /github/home /__w 2>/dev/null | sort -h | tail -8 || true
+          # The test writes the bundle's two files here for the gnark step below.
+          PICO_PROVER_WRAP_OUT: ${{ github.workspace }}/wrap-out
+        run: |
+          # `--exact` and the count: a renamed test would otherwise run nothing and pass.
+          set -o pipefail
+          cargo test --release -p pico-prover -- --exact \
+            tests::evm::a_wrap_proof_gives_the_program_id_and_the_bundle_the_circuits_public_inputs \
+            | tee wrap-test.log
+          grep -q "test result: ok. 1 passed" wrap-test.log
+      - name: Compile field ffi so
+        run: |
+          cargo build --release --package field-ffi
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: gnark/go.mod
+          cache-dependency-path: gnark/go.sum
+      - name: Groth16 verifier circuit solves the wrap proof
+        run: |
+          set -eux
+          # The test reads these two names out of its own directory.
+          cp wrap-out/wrap_constraints.json gnark/koalabear_verifier/constraints.json
+          cp wrap-out/wrap_groth16_witness.json gnark/koalabear_verifier/groth16_witness.json
+          (cd gnark && CGO_LDFLAGS="-L$GITHUB_WORKSPACE/target/release -Wl,-rpath,$GITHUB_WORKSPACE/target/release" \
+            go test -timeout 600s -run TestSolveVerifierCircuit ./koalabear_verifier/)
+      - name: Tampered wrap witnesses do not solve
+        run: |
+          set -eux -o pipefail
+          # One witness value changed per case, each of which must leave the circuit
+          # unsatisfiable, after the honest witness solves as the control. The test skips without
+          # the two files above, so the PASS line is what says it ran.
+          (cd gnark && CGO_LDFLAGS="-L$GITHUB_WORKSPACE/target/release -Wl,-rpath,$GITHUB_WORKSPACE/target/release" \
+            go test -timeout 1800s -v -run '^TestTamperedWitnessIsUnsatisfiable$' ./koalabear_verifier/) \
+            | tee tamper-test.log
+          grep -q -- "--- PASS: TestTamperedWitnessIsUnsatisfiable" tamper-test.log
+      - name: The wrap circuit fits the Groth16 domain
+        run: |
+          set -eux -o pipefail
+          # Compiles the circuit, which nothing above does, and needs at most 2^23 constraints.
+          # This is the dev-mode circuit CI proves to; the whitelist-mode one a verifier is set up
+          # for has less headroom (7.6% under, against 24.7% here), and is checked
+          # the same way on a machine that can prove it, before a setup.
+          (cd gnark && CGO_LDFLAGS="-L$GITHUB_WORKSPACE/target/release -Wl,-rpath,$GITHUB_WORKSPACE/target/release" \
+            go test -timeout 900s -v -run '^TestCircuitFitsGroth16Domain$' ./koalabear_verifier/) \
+            | tee fits-test.log
+          grep -q -- "--- PASS: TestCircuitFitsGroth16Domain" fits-test.log
 
-            - name: Install apt deps
-              run: |
-                  apt-get update
-                  apt-get install -y --no-install-recommends \
-                    curl unzip ca-certificates build-essential pkg-config libssl-dev \
-                    cmake git openssh-client llvm-dev libclang-dev g++-11 \
-                    binutils m4 file google-perftools libgoogle-perftools-dev
-                  rm -rf /var/lib/apt/lists/*
+  # The verifier contracts, against the proofs committed in contracts/test/fixtures. Foundry only:
+  # nothing here proves.
+  contracts:
+    name: EVM · Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+      - name: forge fmt and test
+        working-directory: contracts
+        run: |
+          set -eux
+          forge fmt --check
+          forge test -vvv
 
-            # Install protoc from the official release so tonic-build finds
-            # google/protobuf/*.proto under /usr/local/include. The apt
-            # protobuf-compiler package omits those includes.
-            - name: Install protoc (official release)
-              run: |
-                  curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-linux-x86_64.zip
-                  unzip -o protoc-21.12-linux-x86_64.zip -d /usr/local
-                  rm protoc-21.12-linux-x86_64.zip
+  # The build without a CUDA toolkit on macOS: what a fresh clone on a Mac gets.
+  macos:
+    name: CPU · macOS build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+      - name: Install protoc
+        run: brew install protobuf
+      - name: Build, constraint parity and a fib prove
+        run: |
+          set -eux
+          cargo build --release --locked
+          cargo test --release --locked -p pico-vm --test riscv_constraint_parity
+          RUST_LOG=info cargo run --release --locked -p pico-vm --example test_mle_e2e -- \
+            --elf fib --n 10 --field kb --step riscv
 
-            # --all-features activates pico-vm's tcmalloc feature, whose tcmalloc
-            # crate looks for libtcmalloc.so (the apt package only ships .so.4).
-            - name: Symlink libtcmalloc.so
-              run: |
-                  ln -sf /usr/lib/x86_64-linux-gnu/libtcmalloc.so.4 /usr/lib/x86_64-linux-gnu/libtcmalloc.so
+  # The `cuda` build. No runner has a GPU, so this compiles and lints only; `CUDA_ARCH` stands in
+  # for the card `nvidia-smi` would otherwise report.
+  cuda:
+    name: GPU · CUDA build and clippy
+    runs-on: ubuntu-latest
+    container:
+      image: nvidia/cuda:12.3.1-devel-ubuntu22.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      CUDA_ARCH: "89"
+      # Dev debuginfo for a workspace this size is tens of GB, enough to exhaust the runner.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - name: Install apt deps
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            curl unzip ca-certificates build-essential pkg-config libssl-dev \
+            cmake git openssh-client llvm-dev libclang-dev g++-11 \
+            binutils m4 file google-perftools libgoogle-perftools-dev
+          rm -rf /var/lib/apt/lists/*
+      # The apt protobuf-compiler omits google/protobuf/*.proto, which tonic-build needs.
+      - name: Install protoc (official release)
+        run: |
+          curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-linux-x86_64.zip
+          unzip -o protoc-21.12-linux-x86_64.zip -d /usr/local
+          rm protoc-21.12-linux-x86_64.zip
+      - name: Configure git
+        run: git config --global --add safe.directory '*'
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+          . "$HOME/.cargo/env"
+          rustup toolchain install nightly-2026-09-27 --profile minimal --component clippy
+          rustup override set nightly-2026-09-27
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-cuda12.3"
+          save-if: ${{ github.event_name == 'push' }}
+      # Capped at warn as before the merge: `strict` still turns compiler warnings into errors.
+      - name: Clippy with `cuda`
+        run: |
+          cargo clippy --workspace --lib --bins --tests --exclude pico-sdk \
+            --features pico-vm/cuda,distributed-vm/cuda --locked --message-format=short \
+            -- --cap-lints=warn
 
-            - name: Configure git
-              run: |
-                  git config --global --add safe.directory '*'
-
-            - uses: actions/checkout@v4
-
-            - name: Install Rust toolchain
-              run: |
-                  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
-                  . "$HOME/.cargo/env"
-                  rustup toolchain install nightly-2026-09-27 --profile minimal --component clippy
-                  rustup override set nightly-2026-09-27
-                  echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-            - uses: Swatinem/rust-cache@v2
-              with:
-                  prefix-key: "v1-cuda12.3"
-                  # Each entry is ~940MB against a 10GB repo quota, and a PR-scoped
-                  # cache is unreadable from any other PR. Saving on PR refs therefore
-                  # stores the same content many times over and evicts the branch cache
-                  # that every PR could have shared. Save only on the branches whose
-                  # caches are actually visible downstream: the pushes this workflow runs on.
-                  save-if: ${{ github.event_name == 'push' }}
-
-            # The CUDA objects are keyed on their sources, but a miss is cheap rather
-            # than fatal: restore-keys pull the newest batch we have, and the build
-            # script re-fingerprints every source against nvcc's own dependency list,
-            # so it rebuilds exactly what changed and reuses the rest. That also means
-            # the globs below only have to be roughly right — correctness comes from
-            # the fingerprints, not from this key.
-            - name: Cache CUDA objects
-              uses: actions/cache@v4
-              with:
-                  path: target/cuda-objs
-                  # pico-gpu's sources enter through the revision Cargo.lock pins.
-                  key: cuda-objs-v2-${{ hashFiles('gpu-api/cuda/**', 'Cargo.lock') }}
-                  restore-keys: |
-                      cuda-objs-v1-
-
-            # aot-generated/ is a path dependency of distributed-vm living inside the
-            # workspace directory, so Cargo makes it (and, once generated, its chunk
-            # crates) an automatic workspace member that `--workspace` lints. That
-            # compile check is the reason this generation runs at all — but building the
-            # generator costs ~10min to produce crates that take ~10s to check, so cache
-            # the output instead.
-            #
-            # The generated code is a function of the ELF and the generator, and
-            # elf_parser.rs decodes through pico-vm's RISC-V frontend, so the key must
-            # cover that frontend too. No restore-keys: a prefix fallback would restore
-            # arbitrary stale output and silently weaken the check.
-            #
-            # Restore and save are separate so that saving is visibly conditional. The
-            # generator wipes aot-generated/ up front (compiler.rs remove_dir_all) and
-            # only writes the dispatch manifest at the end, so a crash in between leaves
-            # a directory that has chunks but no Cargo.toml. Caching that would make the
-            # assertion below fail on every later run under an unchanged key. The save
-            # must therefore never run on a failed job, and stating it here beats relying
-            # on the combined action's internal `post-if`.
-            #
-            # One key expression, referenced twice: if restore and save could drift apart
-            # the cache would simply stop ever being hit, with nothing to notice it.
-            - name: Compute the AOT cache key
-              id: aot-key
-              run: |
-                  echo "key=aot-v1-${{ hashFiles('perf/bench_data/rv64/fib-elf', 'aot-codegen/**', 'vm/src/compiler/riscv/**') }}" >> "$GITHUB_OUTPUT"
-
-            - name: Restore generated AOT crates
-              id: aot-cache
-              uses: actions/cache/restore@v4
-              with:
-                  path: aot-generated
-                  key: ${{ steps.aot-key.outputs.key }}
-
-            # Overwrites the bootstrap stub with the real pico-aot-dispatch manifest and
-            # its chunk crates. Runs in the dev profile so it shares one target dir (and
-            # therefore one CUDA build) with the clippy steps below; the binary itself
-            # runs in well under a second, so an optimized build buys nothing.
-            - name: Generate AOT crates (fib-elf)
-              if: steps.aot-cache.outputs.cache-hit != 'true'
-              run: |
-                  cargo run -p pico-aot-codegen --bin generate_crates -- perf/bench_data/rv64/fib-elf
-
-            # Fails fast if aot-generated/ is still the bootstrap stub — otherwise clippy
-            # would pass while silently linting nothing. The manifest check is the load-
-            # bearing one: chunk crates only become workspace members, and thus only get
-            # checked, if the dispatch manifest lists them as path dependencies.
-            - name: Assert generated AOT crates are real, not the stub
-              run: |
-                  set -eux
-                  grep -q 'pico-aot-chunk' aot-generated/Cargo.toml
-                  ls aot-generated/chunks | grep -q chunk_
-
-            # Only after the assertion has vouched for the directory. `success()` is
-            # spelled out because any `if:` replaces the implicit success gate, and
-            # skipping on a hit avoids the "cache already exists" warning.
-            - name: Save generated AOT crates
-              if: success() && steps.aot-cache.outputs.cache-hit != 'true'
-              uses: actions/cache/save@v4
-              with:
-                  path: aot-generated
-                  key: ${{ steps.aot-key.outputs.key }}
-
-            # Lint libs only; tests/examples/benches still have API drift.
-            # Cap lints at warn (vm's `strict` feature enables deny(warnings));
-            # --all-features avoided: tcmalloc + jemalloc both register #[global_allocator].
-            # cuda-mle is excluded: its build.rs detects the GPU arch via nvidia-smi, which this
-            # GPU-less container lacks; it is built + linked manually on a GPU host.
-            - name: Clippy (workspace libs, default features, exclude pico-sdk + cuda-mle)
-              run: |
-                  cargo clippy --workspace --lib --exclude pico-sdk --exclude cuda-mle \
-                    --message-format=short -- --cap-lints=warn
-
-            # The lint above is --lib only, so the generate_crates binary goes unchecked
-            # whenever the cache hit skips running it. Capped at warn, this is effectively
-            # a compile check — which is the signal that would otherwise be lost.
-            - name: Clippy pico-aot-codegen binaries
-              run: |
-                  cargo clippy -p pico-aot-codegen --bins \
-                    --message-format=short -- --cap-lints=warn
-
-            # Same reason as above, for pico-vm's own binary: --lib never compiles it, so
-            # without this it can stop building and nothing says so.
-            - name: Clippy pico-vm binaries
-              run: |
-                  cargo clippy -p pico-vm --bins \
-                    --message-format=short -- --cap-lints=warn
-
-            # No step above runs a test, and none of these needs a GPU. Dev profile, so they share
-            # the target dir the AOT generation already built pico-vm into.
-            - name: Constraint-surface parity
-              run: |
-                  # The pinned dump is shared with the CPU line; without this step a chip change
-                  # here lands green against a dump only the other line checks.
-                  cargo test -p pico-vm --test riscv_constraint_parity
-            - name: Precompile support pins
-              run: |
-                  cargo test -p pico-vm --test precompile_support
-
-            # `perf/aot` is a separate workspace, so nothing above compiles its Rust at all —
-            # which is how its AOT harnesses drifted through several API changes unnoticed.
-            #
-            # `perf/aot/target` is a second target dir that nothing caches, and the note at the
-            # top of this job says disk is what runs out here, so drop it again on the way past.
-            - name: AOT harnesses compile
-              run: |
-                  set -eux
-                  (cd perf/aot && cargo check --all-targets)
-                  rm -rf perf/aot/target
-
-            # `pico-perf`'s AOT factory glue. The lint above runs on default features, and `aot`
-            # is not one of them, so nothing else compiles this file.
-            - name: AOT glue compiles
-              run: |
-                  cargo check -p pico-perf --features aot
-
-            # pico-sdk is excluded from the workspace lint above and linted on its own with its
-            # prover feature, which still needs the CUDA toolchain (pico-vm → cudart-sys).
-            - name: Clippy pico-sdk
-              run: |
-                  cargo clippy -p pico-sdk --features prover,libm \
-                    --locked --message-format=short -- -D warnings
-
-            # The host prover and the CLI, with and without the outer (embed, wrap) phases. Their
-            # tests need a CUDA driver, which this container lacks, so they are only linted here.
-            - name: Clippy host prover and CLI
-              run: |
-                  set -eux
-                  cargo clippy -p pico-prover -p pico-cli --lib --bins --tests \
-                    --locked --message-format=short -- -D warnings
-                  cargo clippy -p pico-prover -p pico-cli --no-default-features --lib --bins \
-                    --tests --locked --message-format=short -- -D warnings
-
-            # The SDK examples' guests and libraries; the provers would rebuild pico-prover in
-            # this workspace's own target.
-            - name: Examples compile
-              run: |
-                  set -eux
-                  (cd examples && cargo check --workspace --all-targets \
-                    --exclude fibonacci-prover --exclude tendermint-prover --exclude aggregator-prover)
-                  rm -rf examples/target
-
-    # pico-mle-core compiles no CUDA, so its tests run on the plain runner. They pin every preset's
-    # soundness and refuse parameter sets the prover cannot run, under both degree bounds.
-    soundness:
-        name: GPU · Soundness
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v4
-            - name: Install Rust
-              run: |
-                  rustup toolchain install nightly-2026-09-27 --profile minimal
-                  rustup override set nightly-2026-09-27
-            - name: Soundness calculator, presets and admissibility (default bounds)
-              run: |
-                  cargo test --release -p pico-mle-core --features test-utils
-            - name: Soundness calculator, presets and admissibility (optimized degree bound)
-              run: |
-                  # `differential_ground_truth_table` is ignored here: its values assume the
-                  # closed-form bound.
-                  cargo test --release -p pico-mle-core --features test-utils,soundness-bchks25-optimized
-
-    # The launchers' own tests, against a stub nvidia-smi, fake inputs and canned prover logs: no
-    # GPU, no build. A wrong card split or a parser that drifted from the prover's headline would
-    # otherwise only show up in a real run.
-    scripts:
-        name: GPU · Launcher script tests
-        runs-on: ubuntu-latest
-        timeout-minutes: 10
-        steps:
-            - uses: actions/checkout@v4
-            - name: The sweep CSV path
-              run: bash ci/test_sweep_csv.sh
-            - name: The sweep launcher
-              run: bash ci/test_sweep_launcher.sh
-            - name: The two-machine launcher
-              run: bash ci/test_two_machine_launcher.sh
-
-    # The gnark half of the EVM path. Nothing else compiles the Go tree, so a reference to a helper
-    # deleted on either side of the FFI boundary would land green; the unit tests pin the Poseidon2
-    # constants against the Rust ones and read a proof file back. The tests that need a wrap proof
-    # (`koalabear_verifier`) skip here: no job on this branch proves one.
-    gnark:
-        name: GPU · Gnark bindings
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v4
-            # field-ffi compiles no CUDA, so the plain runner builds it; cargo still resolves the
-            # whole workspace's (public) git dependencies.
-            - name: Install Rust
-              run: |
-                  rustup toolchain install nightly-2026-09-27 --profile minimal
-                  rustup override set nightly-2026-09-27
-            - name: Compile field ffi so
-              run: |
-                  cargo build --release --locked --package field-ffi
-            - uses: actions/setup-go@v5
-              with:
-                  go-version-file: gnark/go.mod
-                  cache-dependency-path: gnark/go.sum
-            - name: Vet and test the Go bindings
-              run: |
-                  set -eux
-                  (cd gnark && go vet ./...)
-                  # `-rpath` as well as `-L`: the test binary loads libfield_ffi.so at run time,
-                  # and the linker path alone does not survive into the process.
-                  (cd gnark && CGO_LDFLAGS="-L$GITHUB_WORKSPACE/target/release -Wl,-rpath,$GITHUB_WORKSPACE/target/release" \
-                    go test ./poseidon2/... ./utils/...)
-
-    # The verifier contracts, against the proofs committed in contracts/test/fixtures. Foundry only:
-    # nothing here proves.
-    contracts:
-        name: EVM · Contracts
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v4
-            - uses: foundry-rs/foundry-toolchain@v1
-              with:
-                  version: v1.5.1
-            - name: forge fmt and test
-              working-directory: contracts
-              run: |
-                  set -eux
-                  forge fmt --check
-                  forge test -vvv
+  # No build. A wrong card split or a parser that drifted from the prover's headline would
+  # otherwise only show up in a real run.
+  scripts:
+    name: GPU · Launcher script tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: The sweep CSV path
+        run: bash ci/test_sweep_csv.sh
+      - name: The sweep launcher
+        run: bash ci/test_sweep_launcher.sh
+      - name: The two-machine launcher
+        run: bash ci/test_two_machine_launcher.sh
+      - name: CUDA detection
+        run: bash ci/test_detect_cuda.sh

@@ -522,7 +522,10 @@ fn main() {
     ];
 
     // STEP 2.3: Handle GPU architecture targeting
-    if let Ok(archs_str) = env::var("GPU_TARGET_ARCHS") {
+    // `CUDA_ARCH` is the switch `cuda-mle` reads too; `GPU_TARGET_ARCHS` is its old name here.
+    println!("cargo:rerun-if-env-changed=CUDA_ARCH");
+    println!("cargo:rerun-if-env-changed=GPU_TARGET_ARCHS");
+    if let Ok(archs_str) = env::var("CUDA_ARCH").or_else(|_| env::var("GPU_TARGET_ARCHS")) {
         println!(
             "cargo:warning=[CUDA Build] GPU target architectures: {}",
             archs_str

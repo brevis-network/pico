@@ -1,0 +1,67 @@
+# Shared Rust setup for every job in rust.yml.
+#
+# Before this existed the four steps below were copy-pasted into nine jobs, so the pinned
+# toolchain appeared ten times and a change to private-dependency auth was nine edits. The
+# toolchain pin now lives in exactly one place: `default` on the `toolchain` input.
+#
+# Requires `actions/checkout` to have run first — a local composite action is loaded from the
+# checked-out tree. The git `insteadOf` rewrite is for cargo fetching private dependencies during
+# the build, not for the checkout itself, so ordering it after checkout is correct.
+name: Rust setup
+description: Private-dependency auth, the pinned toolchain, and the shared cargo cache.
+
+inputs:
+  token:
+    description: Token used to fetch private cargo dependencies over https.
+    required: true
+  toolchain:
+    description: Rust toolchain. The single pin for the whole workflow.
+    required: false
+    default: nightly-2026-09-27
+  components:
+    description: Space-separated extra rustup components, e.g. "clippy".
+    required: false
+    default: ""
+  cache-key:
+    description: >
+      `shared-key` for Swatinem/rust-cache. Jobs that build the same crates should pass the same
+      value so a split does not multiply cold build cost; leave empty for the per-job default.
+    required: false
+    default: ""
+  cache-save:
+    description: >
+      Whether this job writes the cache. With a shared key exactly one job should save, otherwise
+      the lanes race to overwrite each other's entry.
+    required: false
+    default: "true"
+  workspaces:
+    description: Passed through to rust-cache for non-root workspaces.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Authenticate private cargo dependencies
+      shell: bash
+      run: |
+        git config --global url."https://${{ inputs.token }}:@github.com/".insteadOf "https://github.com/"
+
+    - name: Install Rust ${{ inputs.toolchain }}
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: ${{ inputs.toolchain }}
+        override: true
+
+    - name: Add rustup components
+      if: inputs.components != ''
+      shell: bash
+      run: rustup component add ${{ inputs.components }}
+
+    - name: Cargo cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ inputs.cache-key }}
+        save-if: ${{ inputs.cache-save == 'true' }}
+        workspaces: ${{ inputs.workspaces }}

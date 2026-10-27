@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# EthProofs single-node MLE/WHIR prover (KoalaBear, GPU via cuda-mle).
+# EthProofs single-node MLE/WHIR prover (KoalaBear, GPU via `cuda`).
 #
 # A LONG-RUNNING SERVICE, not a benchmark run: it binds the PicoProver gRPC port and proves
 # whatever RSP sends, one block at a time, until killed. Run from the repo root on a CUDA box;
@@ -100,6 +100,15 @@ export MLE_ETHPROOFS_RESULT_CAPACITY="${MLE_ETHPROOFS_RESULT_CAPACITY:-64}"
 # SKIP_BUILD=1 runs the binary that is already there. systemd sets it: a service that compiles
 # on every start turns a broken tree into a restart loop, and turns a cold build into what looks
 # like a hang. Interactive runs still build by default, so the two cannot drift.
+# GPU only: without a CUDA toolkit and a GPU this stops (see detect_cuda.sh), unless FEATURES is set.
+if [ -z "${FEATURES:-}" ] && [ -z "${SKIP_BUILD:-}" ]; then
+    . "$(dirname "$0")/detect_cuda.sh"
+    pico_cuda_detect
+    if [ "$PICO_BACKEND" != cuda ]; then
+        echo "ethproofs_single_node_mle.sh: GPU only; needs a CUDA toolkit and a GPU, and not PICO_CUDA=0" >&2
+        exit 1
+    fi
+fi
 FEATURES="${FEATURES:-bigint-rug tcmalloc mmap-memory aot-emulator cuda}"
 if [ -z "${SKIP_BUILD:-}" ]; then
     CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-8}" \

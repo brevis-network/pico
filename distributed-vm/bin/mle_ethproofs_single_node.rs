@@ -1,4 +1,4 @@
-//! EthProofs single-node MLE/WHIR prover (KoalaBear; GPU with `cuda`).
+//! EthProofs single-node MLE/WHIR prover (KoalaBear; GPU with the `cuda` feature).
 //!
 //! Blocks arrive over gRPC from RSP; see `distributed_vm::mle::ethproofs`.
 
@@ -8,6 +8,7 @@ use pico_vm::machine::logger::setup_logger;
 
 fn main() {
     setup_logger();
+    distributed_vm::announce_backend();
     // A panicked worker thread would otherwise hang the run silently: the remaining stages block
     // on channels/barriers that the dead thread can no longer feed. Print the panic, then take the
     // whole process down so the failure is loud and immediate.

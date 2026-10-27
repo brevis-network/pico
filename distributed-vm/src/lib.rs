@@ -3,6 +3,20 @@
 // larger than `result_large_err` allows, and generated code is not ours to box.
 #![allow(clippy::result_large_err)]
 
+/// `--version` of the prover binaries: the crate version and the backend it was built for.
+pub const VERSION: &str = if cfg!(feature = "cuda") {
+    concat!(env!("CARGO_PKG_VERSION"), " [cuda]")
+} else {
+    concat!(env!("CARGO_PKG_VERSION"), " [cpu]")
+};
+
+/// Logs the build's backend and, in a `cuda` build, exits unless a CUDA device is visible.
+pub fn announce_backend() {
+    tracing::info!("pico {VERSION}");
+    #[cfg(feature = "cuda")]
+    pico_vm::cuda_adaptor::require_cuda_device();
+}
+
 #[cfg(feature = "aot-emulator")]
 mod aot;
 pub mod common;
