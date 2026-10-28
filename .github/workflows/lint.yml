@@ -104,6 +104,13 @@ jobs:
       - uses: ./.github/actions/rust-setup
         with:
           components: clippy
+      # distributed-vm's build script runs protoc. The apt protobuf-compiler omits
+      # google/protobuf/*.proto, which tonic-build needs.
+      - name: Install protoc (official release)
+        run: |
+          curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-linux-x86_64.zip
+          sudo unzip -o protoc-21.12-linux-x86_64.zip -d /usr/local
+          rm protoc-21.12-linux-x86_64.zip
       - name: Clippy (workspace)
         run: |
           # `--tests` lints each binary only in its test profile, where `cfg(test)` code is in and
