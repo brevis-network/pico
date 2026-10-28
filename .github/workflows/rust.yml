@@ -32,8 +32,8 @@ on:
 
 name: Check, Test, and Format
 
-# This workflow only reads the repo; private dependencies authenticate with their own secret, not
-# with GITHUB_TOKEN. Declared rather than left to the repository default, which may be write.
+# This workflow only reads the repo. Declared rather than left to the repository default, which
+# may be write.
 permissions:
   contents: read
 
@@ -48,7 +48,7 @@ concurrency:
 # `cuda` feature and so needs no CUDA toolkit; the `GPU ·` jobs compile the `cuda` build, but no
 # runner here has a GPU, so nothing runs on one.
 #
-# Shared setup (private-dependency auth, the pinned toolchain, the cargo cache) lives in
+# Shared setup (the pinned toolchain, the cargo cache) lives in
 # .github/actions/rust-setup. The toolchain is pinned once, there.
 
 env:
@@ -78,7 +78,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
         with:
-          token: ${{ secrets.GH_TOKEN }}
           components: rustfmt
           # Formatting resolves no dependencies, so this job neither reads nor writes the cache.
           cache-save: "false"
@@ -100,7 +99,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
         with:
-          token: ${{ secrets.GH_TOKEN }}
           components: clippy
       - name: Clippy (workspace)
         run: |
@@ -140,7 +138,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
         with:
-          token: ${{ secrets.GH_TOKEN }}
           cache-key: cpu-vm-release
           cache-save: "true"
       - name: Cargo run examples
@@ -167,7 +164,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
         with:
-          token: ${{ secrets.GH_TOKEN }}
           cache-key: cpu-vm-release
           cache-save: "false"
       - name: Constraint-surface parity
@@ -216,8 +212,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
-        with:
-          token: ${{ secrets.GH_TOKEN }}
       - name: Soundness calculator, presets and admissibility (default bounds)
         run: |
           # Pins every component of every preset, refuses parameter sets the prover cannot run,
@@ -237,7 +231,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
         with:
-          token: ${{ secrets.GH_TOKEN }}
           cache-key: cpu-vm-release
           cache-save: "false"
       - name: AOT runtime against the interpreter
@@ -304,8 +297,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
-        with:
-          token: ${{ secrets.GH_TOKEN }}
       - name: MLE carrier tie (fib)
         run: |
           # Doctors every riscv public-value copy but Ecall's; the recursion tree must reject it.
@@ -322,7 +313,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
         with:
-          token: ${{ secrets.GH_TOKEN }}
           # The root target holds the code generator, `perf/aot`'s the test built on its output.
           workspaces: |
             . -> target
@@ -357,7 +347,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
         with:
-          token: ${{ secrets.GH_TOKEN }}
           components: clippy
           workspaces: vm/examples/patch-testing -> target
       - name: Clippy on the harness and every prover
@@ -376,8 +365,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
-        with:
-          token: ${{ secrets.GH_TOKEN }}
       - name: Host prover crate
         run: |
           # The `chunks` tests prove across chunk boundaries at the chain's operating point and would
@@ -409,8 +396,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
-        with:
-          token: ${{ secrets.GH_TOKEN }}
       - name: The facade against the direct chain
         run: |
           # `--test-threads=1`: the facade test alone peaks near 8 GB.
@@ -424,8 +409,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
-        with:
-          token: ${{ secrets.GH_TOKEN }}
       - name: The precompile guests prove
         run: |
           # Their own process: after the rest of the crate's tests the ed25519 guest's peak lands
@@ -440,8 +423,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
-        with:
-          token: ${{ secrets.GH_TOKEN }}
       - name: cargo pico prove and execute
         run: |
           # Drives the binary, and verifies the proof file it writes in a process that proved nothing.
@@ -459,8 +440,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
-        with:
-          token: ${{ secrets.GH_TOKEN }}
       - name: Wrap proof (fib), and the EVM bundle against the wrap circuit
         env:
           # The test writes the bundle's two files here for the gnark step below.
@@ -534,8 +513,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
-        with:
-          token: ${{ secrets.GH_TOKEN }}
       - name: Install protoc
         run: brew install protobuf
       - name: Build, constraint parity and a fib prove
