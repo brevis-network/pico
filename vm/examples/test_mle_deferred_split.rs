@@ -55,7 +55,10 @@ use pico_vm::{
         deferred::DeferredMachine,
         exe::RiscvVmVk,
         recursion::{recursion_public_values, Kb},
-        riscv::{self, air_id, build_ctx, mle_riscv_air_refs, Engine, RISCV_APP_PREP_AIR_IDS},
+        riscv::{
+            self, air_id, build_ctx, ctx_to_engine, mle_riscv_air_refs, Engine,
+            RISCV_APP_PREP_AIR_IDS,
+        },
     },
     primitives::consts::{DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
 };
@@ -191,7 +194,9 @@ impl Riscv {
                         air_ctx.public_values[at..at + DIGEST_SIZE].copy_from_slice(&forged);
                     }
                 }
-                self.engine.prove(&self.d_pk, ctx).expect("riscv prove")
+                self.engine
+                    .prove(&self.d_pk, ctx_to_engine(ctx))
+                    .expect("riscv prove")
             })
             .collect()
     }
@@ -253,6 +258,9 @@ fn report(name: &str, ok: bool, detail: &str) -> bool {
 
 fn main() {
     setup_logger();
+    // The GPU riscv prover allocates from the shared pool; a CPU build has none to set up.
+    #[cfg(feature = "cuda")]
+    riscv::init_mle_gpu_pool(riscv::MLE_GPU_DEVICE);
     let patched = match env::var("SPLIT_EXPECT")
         .unwrap_or_else(|_| "patched".into())
         .as_str()
