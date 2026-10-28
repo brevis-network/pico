@@ -5,7 +5,7 @@ default-members = ["derive", "mle-core", "mle-cpu", "vm", "aot-codegen", "aot-ru
 resolver = "2"
 
 [workspace.package]
-version = "3.1.0-gpu.1"
+version = "3.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 keywords = ["zkvm", "plonky3", "stark", "whir"]

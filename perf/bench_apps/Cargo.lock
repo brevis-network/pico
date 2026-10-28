@@ -3512,7 +3512,7 @@ dependencies = [
 
 [[package]]
 name = "pico-derive"
-version = "3.1.0-gpu.1"
+version = "3.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3521,7 +3521,7 @@ dependencies = [
 
 [[package]]
 name = "pico-mle-core"
-version = "3.1.0-gpu.1"
+version = "3.1.0"
 dependencies = [
  "cfg-if",
  "derivative",
@@ -3552,7 +3552,7 @@ dependencies = [
 
 [[package]]
 name = "pico-mle-cpu"
-version = "3.1.0-gpu.1"
+version = "3.1.0"
 dependencies = [
  "cfg-if",
  "derive-new",
@@ -3569,7 +3569,7 @@ dependencies = [
 
 [[package]]
 name = "pico-patch-libs"
-version = "3.1.0-gpu.1"
+version = "3.1.0"
 dependencies = [
  "bincode",
  "elliptic-curve",
@@ -3578,7 +3578,7 @@ dependencies = [
 
 [[package]]
 name = "pico-sdk"
-version = "3.1.0-gpu.1"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3604,7 +3604,7 @@ dependencies = [
 
 [[package]]
 name = "pico-vm"
-version = "3.1.0-gpu.1"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "arrayref",
