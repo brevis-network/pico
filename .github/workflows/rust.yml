@@ -353,9 +353,13 @@ jobs:
         working-directory: vm/examples/patch-testing
         run: |
           set -eux
-          pkgs=$(cargo metadata --no-deps --locked --format-version 1 \
-            | jq -r '.packages[] | select(.manifest_path | test("/(common|prover)/Cargo.toml$")) | "-p " + .name')
-          cargo clippy $pkgs --all-targets --locked -- -D warnings
+          names=$(cargo metadata --no-deps --locked --format-version 1 \
+            | jq -r '.packages[] | select(.manifest_path | test("/(common|prover)/Cargo.toml$")) | .name')
+          # An empty list would run clippy on the whole workspace, guests included.
+          test -n "$names"
+          pkgs=()
+          while read -r name; do pkgs+=(-p "$name"); done <<< "$names"
+          cargo clippy "${pkgs[@]}" --all-targets --locked -- -D warnings
 
   # The host prover crate's tests prove the chain, so they run beside the VM lanes rather than
   # after them, split by module across three jobs so none outlasts the rest of the workflow.
