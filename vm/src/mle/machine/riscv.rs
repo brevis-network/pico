@@ -154,12 +154,19 @@ pub(crate) fn bound_device() -> usize {
 }
 
 /// Bridge a host-built proving context to the engine's backend. Identity on CPU (the backend is
-/// already `HostPb`); the GPU path never builds host contexts — it generates traces on-device via
-/// [`build_ctx_gpu`] — so no `cuda` variant exists.
+/// already `HostPb`).
 #[cfg(not(feature = "cuda"))]
 #[inline]
-fn ctx_to_engine(ctx: ProvingContext<HostPb>) -> ProvingContext<Pb> {
+pub fn ctx_to_engine(ctx: ProvingContext<HostPb>) -> ProvingContext<Pb> {
     ctx
+}
+
+/// Bridge a host-built proving context to the engine's backend: an upload to the GPU. The prover
+/// generates traces on-device via [`build_ctx_gpu`]; this is for harnesses that edit a host
+/// context before proving it.
+#[cfg(feature = "cuda")]
+pub fn ctx_to_engine(ctx: ProvingContext<HostPb>) -> ProvingContext<Pb> {
+    cuda_mle::transport_row_major_ctx_to_device(ctx).expect("upload host proving context to GPU")
 }
 
 /// Initialize process-wide GPU memory-pool sharing for MLE proving: create pico's global memory

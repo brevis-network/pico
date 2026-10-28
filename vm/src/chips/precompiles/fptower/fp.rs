@@ -713,8 +713,6 @@ mod tests {
     use std::sync::LazyLock;
 
     #[cfg(feature = "cuda")]
-    use itertools::Itertools;
-    #[cfg(feature = "cuda")]
     use num::BigUint;
     #[cfg(feature = "cuda")]
     use p3_field::PrimeField32;
@@ -758,6 +756,7 @@ mod tests {
             },
         },
         machine::chip::{ChipBehavior, GpuChipBehavior},
+        primitives::consts::CHUNK_CLK_START,
     };
     #[cfg(feature = "cuda")]
     use typenum::Unsigned;
@@ -863,13 +862,15 @@ mod tests {
             let x_dwords = u32_digits_to_u64_dwords(&fp_x.to_u32_digits(), num_dwords);
             let y_dwords = u32_digits_to_u64_dwords(&fp_y.to_u32_digits(), num_dwords);
 
+            // Each access follows one in an earlier chunk, so its predecessor clk is the
+            // sentinel 0 and the diff is the clk itself: keep clks inside the 25-bit chunk-clk
+            // budget that `populate_timestamp_diff` asserts, as real execution does.
             let timestamps = (0..=num_dwords)
-                .map(|_| rng.random::<u32>() % (KoalaBear::ORDER_U32 - 1))
-                .sorted()
+                .map(|_| CHUNK_CLK_START + rng.random::<u32>() % ((1 << 25) - CHUNK_CLK_START))
                 .collect::<Vec<_>>();
-            let chunks = (0..=num_dwords)
-                .map(|_| rng.random::<u32>() % (KoalaBear::ORDER_U32 - 1))
-                .sorted()
+            let first_chunk = rng.random::<u32>() % (KoalaBear::ORDER_U32 - 1 - num_dwords as u32);
+            let chunks = (0..=num_dwords as u32)
+                .map(|i| first_chunk + i)
                 .collect::<Vec<_>>();
             let memory_write_records = (0..num_dwords)
                 .map(|i| MemoryWriteRecord {

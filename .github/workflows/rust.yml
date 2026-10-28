@@ -590,7 +590,7 @@ jobs:
       # Capped at warn as before the merge: `strict` still turns compiler warnings into errors.
       - name: Clippy with `cuda`
         run: |
-          cargo clippy --workspace --lib --bins --tests --exclude pico-sdk \
+          cargo clippy --workspace --lib --bins --examples --tests --exclude pico-sdk \
             --features pico-vm/cuda,distributed-vm/cuda --locked --message-format=short \
             -- --cap-lints=warn
 

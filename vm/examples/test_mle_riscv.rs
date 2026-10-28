@@ -529,6 +529,7 @@ fn reject_forged_memory_witness(program: Arc<Program>, records: &[EmulationRecor
 
         // The debug check panics on a violation; silence the hook so the expected failure does not
         // print a backtrace, then restore it.
+        let ctx = riscv::ctx_to_engine(ctx);
         let hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
         let rejected =
@@ -690,6 +691,7 @@ fn reject_pc_limb_shift(program: Arc<Program>, records: &[EmulationRecord]) {
     // The debug check panics on a violation; silence the hook so the expected failure does not
     // print a backtrace, then restore it. `check_logup` still prints the offending bus tuples on
     // stdout, which is the useful half of the diagnostic.
+    let ctx = riscv::ctx_to_engine(ctx);
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let outcome =
@@ -780,6 +782,7 @@ fn reject_jump_return_carry_shift(program: Arc<Program>, records: &[EmulationRec
         )
     });
 
+    let ctx = riscv::ctx_to_engine(ctx);
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let outcome =
@@ -864,6 +867,7 @@ fn reject_jalr_lsb_slide(program: Arc<Program>, records: &[EmulationRecord]) {
         )
     });
 
+    let ctx = riscv::ctx_to_engine(ctx);
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let outcome =
@@ -939,6 +943,7 @@ fn reject_pc_carry_off_table(program: Arc<Program>, records: &[EmulationRecord])
         )
     });
 
+    let ctx = riscv::ctx_to_engine(ctx);
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let outcome =
@@ -1144,6 +1149,9 @@ fn run_negative_test(program: Arc<Program>, records: &[EmulationRecord]) {
 
 fn main() {
     setup_logger();
+    // The GPU riscv prover allocates from the shared pool; a CPU build has none to set up.
+    #[cfg(feature = "cuda")]
+    riscv::init_mle_gpu_pool(riscv::MLE_GPU_DEVICE);
     let (elf, stdin, args) = parse_args::parse_args::<KoalaBearPoseidon2>();
     // kb-only by design: the MLE backend ships only a KoalaBear engine
     // (`KoalaBearPoseidon2CpuEngine`); no other field is vendored.

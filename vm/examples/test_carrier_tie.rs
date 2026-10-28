@@ -52,7 +52,7 @@ use pico_vm::{
         convert::ConvertMachine,
         exe::RiscvVmVk,
         riscv::{
-            self, air_id, build_ctx, mle_riscv_air_refs, Engine, Kb, RiscvProof,
+            self, air_id, build_ctx, ctx_to_engine, mle_riscv_air_refs, Engine, Kb, RiscvProof,
             RISCV_APP_PREP_AIR_IDS,
         },
     },
@@ -105,6 +105,9 @@ impl Case {
 
 fn main() {
     setup_logger();
+    // The GPU riscv prover allocates from the shared pool; a CPU build has none to set up.
+    #[cfg(feature = "cuda")]
+    riscv::init_mle_gpu_pool(riscv::MLE_GPU_DEVICE);
     let patched = match env::var("TIE_EXPECT")
         .unwrap_or_else(|_| "patched".into())
         .as_str()
@@ -167,7 +170,9 @@ fn main() {
                         }
                     }
                 }
-                engine.prove(&d_pk, ctx).expect("riscv prove failed")
+                engine
+                    .prove(&d_pk, ctx_to_engine(ctx))
+                    .expect("riscv prove failed")
             })
             .collect();
         // Without a COMMIT the Ecall constraints are vacuous and this harness tests nothing.

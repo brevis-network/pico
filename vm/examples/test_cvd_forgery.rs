@@ -52,7 +52,7 @@ use pico_vm::{
     mle::machine::{
         air::GCS_DIGEST_LEN,
         riscv::{
-            self, air_id, build_ctx, mle_riscv_air_refs, Engine, Kb, RiscvProof,
+            self, air_id, build_ctx, ctx_to_engine, mle_riscv_air_refs, Engine, Kb, RiscvProof,
             RISCV_APP_PREP_AIR_IDS,
         },
     },
@@ -175,7 +175,7 @@ fn run_case(
                         doctor.apply(&mut air_ctx.public_values, base);
                     }
                 }
-                ctx
+                ctx_to_engine(ctx)
             })
             .collect()
     };
@@ -198,8 +198,11 @@ fn run_case(
     .is_ok();
 
     // --- signal 2: real prove + real verify ---
+    // Built outside the unwind guard: a failed upload must abort, not read as a rejected forgery.
+    drop(debug_ctxs);
+    let prove_ctxs = make_ctxs();
     let proved = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        make_ctxs()
+        prove_ctxs
             .into_iter()
             .map(|ctx| engine.prove(d_pk, ctx).expect("prove failed"))
             .collect::<Vec<_>>()
@@ -237,6 +240,9 @@ fn run_case(
 
 fn main() {
     setup_logger();
+    // The GPU riscv prover allocates from the shared pool; a CPU build has none to set up.
+    #[cfg(feature = "cuda")]
+    riscv::init_mle_gpu_pool(riscv::MLE_GPU_DEVICE);
 
     let patched = match env::var("CVD_EXPECT")
         .unwrap_or_else(|_| "unpatched".into())
