@@ -1,4 +1,4 @@
-# Shared Rust setup for every job in rust.yml.
+# Shared Rust setup for the Rust jobs in .github/workflows.
 #
 # The toolchain pin for every job that uses this action is `default` on the `toolchain` input.
 #
@@ -9,7 +9,7 @@ description: The pinned toolchain and the shared cargo cache.
 
 inputs:
   toolchain:
-    description: Rust toolchain. The single pin for the whole workflow.
+    description: Rust toolchain. build-cuda.yml, which runs in a container, pins its own.
     required: false
     default: nightly-2026-09-27
   components:

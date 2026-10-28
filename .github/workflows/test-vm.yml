@@ -1,0 +1,272 @@
+# Triggers, permissions, concurrency and job naming are explained in lint.yml.
+on:
+  pull_request:
+    branches:
+      - main
+      - release/v*
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".gitignore"
+      - "Makefile"
+      - "tools/**"
+      - ".claude/**"
+      - ".agent/**"
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".gitignore"
+      - "Makefile"
+      - "tools/**"
+      - ".claude/**"
+      - ".agent/**"
+  workflow_dispatch:
+
+name: Test VM
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VK_VERIFICATION: false
+
+jobs:
+  # `mle-prove`, `vm-pins` and `compile-ffi` build the same `pico-vm` release artifacts, so they
+  # share one cache key instead of the per-job default; `mle-prove` builds the most and is the
+  # designated writer. Per-job keys would triple the cold build instead of sharing it.
+  mle-prove:
+    name: CPU · MLE prove (fib)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-vm-release
+          cache-save: "true"
+      - name: Cargo run examples
+        run: |
+          # `-p`, so features resolve the same way they do for the `-p pico-vm` steps below.
+          # Without it cargo resolves across every workspace member, and the next step rebuilds
+          # pico-vm and both mle crates under the other resolution. Every `-p pico-vm` step in
+          # this workflow keeps that form, so each lane's target dir stays on one resolution.
+          RUST_LOG=info cargo run --release -p pico-vm --example test_riscv_emulator
+      - name: MLE end to end (fib, combine)
+        run: |
+          RUST_LOG=info cargo run --release -p pico-vm --example test_mle_e2e -- --elf fib --n 10 --field kb --step combine
+      - name: MLE deferred node (fib)
+        run: |
+          # Proves one deferred-verifier node over a complete root and checks both what it
+          # publishes and that its in-circuit chain step matches `hash_deferred_proof` -- the
+          # function the guest runs behind `verify_pico_proof`. Nothing else covers that parity.
+          RUST_LOG=info cargo run --release -p pico-vm --example test_mle_deferred -- --elf fib --n 10 --field kb
+
+  vm-pins:
+    name: CPU · VK whitelist and VM pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-vm-release
+          cache-save: "false"
+      - name: Constraint-surface parity
+        run: |
+          # The pinned dump is this branch's only record of its AIR set, and nothing else in CI
+          # reads it -- without this step a chip change lands green and the artifact goes stale.
+          cargo test --release -p pico-vm --test riscv_constraint_parity
+      - name: Precompile support pins
+        run: |
+          # The syscall map and the MLE air table each refuse nothing today; these pin both, so a
+          # precompile losing support is a reviewed edit rather than a patch case turning red.
+          cargo test --release -p pico-vm --test precompile_support
+      - name: Poseidon2 known answers
+        run: |
+          # The riscv stage's Poseidon2 constants sit in its constraint DAG, so a change to them
+          # moves every vk. These pin the permutation, the gadget-vs-host identity and the two
+          # digests built on it.
+          cargo test --release -p pico-vm --lib primitives::poseidon2_kat
+      - name: Deferred split constants
+        run: |
+          # The tail-merge packing runs off hand-derived per-row interaction counts, and these
+          # tests assert them against real keygen. Undercounting one is invisible on inspection
+          # and repacks every deferred record, so it has to be checked here -- the split itself
+          # is only exercised by runs far larger than this job's.
+          cargo test --release -p pico-vm --lib emulator::riscv::record
+      - name: Uint256 mulmod on operands at or above the modulus
+        run: |
+          # Mainnet reaches the chip with operands at or above the modulus (revm's 256-bit MODEXP
+          # path), which the AIR accepts. A trace-side check stricter than the AIR stops an honest
+          # CPU prover on those blocks, and nothing else runs the chip's trace generation on them.
+          cargo test --release -p pico-vm --lib chips::precompiles::uint256
+      - name: Whitelist artifact against this binary
+        run: |
+          # The shipped vk map is a per-config artifact. Its digest and leaf count must be this
+          # binary's, and the keys this binary derives (the riscv vk, one convert VK per shape
+          # family, a combine node, the deferred node) must be members: a change to the shape
+          # tables, the params or the recursion compiler that leaves the artifact stale fails
+          # here, not at a prover's first lookup; an AIR change is caught by the constraint
+          # parity step above.
+          cargo test --release -p pico-vm --lib mle::machine::vk_map::tests::the_shipped_artifact_matches_this_binary
+
+  compile-ffi:
+    name: CPU · Compile, AOT and FFI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-vm-release
+          cache-save: "false"
+      - name: AOT runtime against the interpreter
+        run: |
+          # The AOT emulator answers hooks and serves syscalls with its own code, and nothing else
+          # here runs it: its ed25519 decompress hook kept a protocol the guest had left, and every
+          # other step stayed green while that guest could not run under AOT. These tests hold each
+          # hook, writes to an fd nothing listens on, and the ed25519 guest end to end, to what the
+          # interpreter does.
+          cargo test --release -p pico-aot-runtime
+      - name: Check single threaded build
+        run: |
+          cargo build -p pico-vm --no-default-features --features=strict
+      - name: Satellite workspace manifests resolve
+        run: |
+          set -eux
+          # Five separate workspaces live here; `--workspace` only ever sees the root one.
+          # `examples` has no committed lock, so it can only be checked for a loadable manifest;
+          # `perf/aot` has none either, and `AOT harnesses compile` resolves it.
+          (cd examples && cargo metadata --no-deps --format-version 1 > /dev/null)
+          # The other two do. `--locked` resolves, which is the only way to see a lock that no
+          # longer matches its manifests — `--no-deps` would pass on one pinned to an older
+          # Plonky3, or missing a dependency the root workspace just gained.
+          for w in perf/bench_apps vm/examples/patch-testing; do
+            (cd "$w" && cargo metadata --locked --format-version 1 > /dev/null)
+          done
+      - name: Examples compile
+        run: |
+          set -eux
+          # The step above only parses `examples/`'s manifests. This compiles the guests and their
+          # libraries for the host. The two provers are left out: they rebuild pico-prover in this
+          # workspace's own target, which costs minutes.
+          (cd examples && cargo check --workspace --all-targets \
+            --exclude fibonacci-prover --exclude tendermint-prover)
+      - name: AOT harnesses compile
+        run: |
+          (cd perf/aot && cargo check --all-targets)
+      - name: Compile field ffi so
+        run: |
+          cargo build --release --package field-ffi
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: gnark/go.mod
+          cache-dependency-path: gnark/go.sum
+      - name: Vet and test the Go bindings
+        run: |
+          set -eux
+          # Nothing else compiles the Go tree, so a reference to a helper deleted on either side
+          # of the FFI boundary lands green.
+          (cd gnark && go vet ./...)
+          # And run the Poseidon2 pins, which is what actually catches a constant table that
+          # moved on one side of the FFI boundary only. Needs the field-ffi archive built above.
+          # `-rpath` as well as `-L`: the test binary loads libfield_ffi.so at run time, and
+          # the linker path alone does not survive into the process.
+          # The utils tests read a proof file back and verify it, which is what `-cmd verify` and a
+          # verifier contract do with the file `-cmd prove` writes.
+          (cd gnark && CGO_LDFLAGS="-L$GITHUB_WORKSPACE/target/release -Wl,-rpath,$GITHUB_WORKSPACE/target/release" \
+            go test ./poseidon2/... ./utils/...)
+
+  # Builds only pico-mle-core, so it shares no target with the VM lanes.
+  soundness:
+    name: CPU · Soundness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: Soundness calculator, presets and admissibility (default bounds)
+        run: |
+          # Pins every component of every preset, refuses parameter sets the prover cannot run,
+          # and holds the negative fixtures. `differential_ground_truth_table` runs here.
+          cargo test --release -p pico-mle-core --features test-utils
+      - name: Soundness calculator, presets and admissibility (optimized degree bound)
+        run: |
+          # The list-decoding presets score differently under the optimized bound, and the pins
+          # follow it; `differential_ground_truth_table` is ignored here, its values assume the
+          # closed-form bound.
+          cargo test --release -p pico-mle-core --features test-utils,soundness-bchks25-optimized
+
+  # Its proofs cost minutes each, so it runs as its own job beside the VM lanes.
+  carrier:
+    name: CPU · MLE carrier tie
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: MLE carrier tie (fib)
+        run: |
+          # Doctors every riscv public-value copy but Ecall's; the recursion tree must reject it.
+          RUST_LOG=info cargo run --release -p pico-vm --example test_carrier_tie
+
+  # The only job that runs AOT code generated from an ELF, and the only one that builds the
+  # prover's `aot` feature; `AOT harnesses compile` builds `perf/aot` against the committed stub.
+  # The generated crates compile in `perf/aot`'s own target, which is why it runs as its own job
+  # beside the VM lanes, on its own cache key.
+  aot-parity:
+    name: CPU · AOT records against the interpreter (fib)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          # The root target holds the code generator, `perf/aot`'s the test built on its output.
+          workspaces: |
+            . -> target
+            perf/aot -> target
+      - name: Generate fib's AOT crates and compare its records with the interpreter's
+        run: |
+          # Every record the pipeline emits with the AOT snapshot thread against the interpreter's,
+          # at three chunk sizes, the commit tail across a boundary among them; the test also fails
+          # if the AOT thread entered no compiled block.
+          bash perf/aot/record_parity.sh fib
+      - name: The committed stub is back
+        run: |
+          set -eux
+          git status --porcelain --ignored -- aot-generated
+          test -z "$(git status --porcelain --ignored -- aot-generated)"
+      - name: The prover and cargo pico with the aot feature
+        run: |
+          # No other job builds the feature: `ProverBuilder::aot` proving and verifying fib through
+          # the AOT pipeline, what it refuses, and the errors it shares with the interpreter; and
+          # `cargo pico`'s `--aot` plumbing against a stand-in cargo. One test at a time: the proof
+          # peaks near 8 GB.
+          cargo test --release -p pico-prover --features aot -- --test-threads=1 tests::aot::
+          cargo test --release -p pico-cli --features aot --lib --test aot
+
+  # The patch harness imports pico-vm and pico-prover internals, and no other job compiles it. It
+  # has its own workspace and so its own target, which is why it runs beside the VM lanes. The
+  # guests are left out: they build for the zkVM target, off CI.
+  patch-harness:
+    name: CPU · Patch harness clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          components: clippy
+          workspaces: vm/examples/patch-testing -> target
+      - name: Clippy on the harness and every prover
+        working-directory: vm/examples/patch-testing
+        run: |
+          set -eux
+          names=$(cargo metadata --no-deps --locked --format-version 1 \
+            | jq -r '.packages[] | select(.manifest_path | test("/(common|prover)/Cargo.toml$")) | .name')
+          # An empty list would run clippy on the whole workspace, guests included.
+          test -n "$names"
+          pkgs=()
+          while read -r name; do pkgs+=(-p "$name"); done <<< "$names"
+          cargo clippy "${pkgs[@]}" --all-targets --locked -- -D warnings

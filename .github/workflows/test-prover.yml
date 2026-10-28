@@ -1,0 +1,187 @@
+# Triggers, permissions, concurrency and job naming are explained in lint.yml.
+on:
+  pull_request:
+    branches:
+      - main
+      - release/v*
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".gitignore"
+      - "Makefile"
+      - "tools/**"
+      - ".claude/**"
+      - ".agent/**"
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".gitignore"
+      - "Makefile"
+      - "tools/**"
+      - ".claude/**"
+      - ".agent/**"
+  workflow_dispatch:
+
+name: Test prover
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VK_VERIFICATION: false
+
+jobs:
+  # The host prover crate's tests prove the chain, so they run beside the VM lanes (test-vm.yml)
+  # rather than after them, split by module across three jobs so none outlasts the rest of CI.
+  prover:
+    name: CPU · Host prover (core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: Host prover crate
+        run: |
+          # The `chunks` tests prove across chunk boundaries at the chain's operating point and would
+          # keep this job running well past the wrap proof. A plain run includes them. `chain` runs
+          # in the `prover-chain` job, the precompile guests in `prover-precompiles`, and the wrap
+          # test in the `wrap` job.
+          # One test at a time: each proof already uses every core, and several peak at 6-8 GB, so
+          # side by side they can exceed the runner's memory. `free` records what it has.
+          nproc && free -g
+          cargo test --release -p pico-prover -- --test-threads=1 --skip tests::chunks:: \
+            --skip tests::chain:: --skip tests::precompiles:: \
+            --skip tests::evm::a_wrap_proof_gives_the_program_id_and_the_bundle_the_circuits_public_inputs
+      - name: The commit tail stays in one chunk
+        run: |
+          # The two `chunks` tests that only emulate: they guard the emulator's commit-tail hold.
+          cargo test --release -p pico-prover -- --exact \
+            tests::chunks::the_emulator_keeps_the_commit_in_one_chunk \
+            tests::chunks::a_commit_split_across_chunks_is_backfilled
+      - name: Host prover crate without its default features
+        run: |
+          # The build without `multi-field-transcript`: it must compile, and name the two outer
+          # phases as missing rather than lack them.
+          cargo test --release -p pico-prover --no-default-features -- \
+            tests::options::the_outer_phases_can_be_named_and_report_themselves_missing
+
+  prover-chain:
+    name: CPU · Host prover chain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: The facade against the direct chain
+        run: |
+          # `--test-threads=1`: the facade test alone peaks near 8 GB.
+          set -o pipefail
+          cargo test --release -p pico-prover -- --test-threads=1 tests::chain:: | tee chain-test.log
+          grep -qE "test result: ok\. [1-9][0-9]* passed" chain-test.log
+
+  prover-precompiles:
+    name: CPU · Host prover precompiles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: The precompile guests prove
+        run: |
+          # Their own process: after the rest of the crate's tests the ed25519 guest's peak lands
+          # at the runner's memory limit.
+          set -o pipefail
+          cargo test --release -p pico-prover -- --test-threads=1 tests::precompiles:: | tee precompiles-test.log
+          grep -qE "test result: ok\. [1-9][0-9]* passed" precompiles-test.log
+
+  cli:
+    name: CPU · CLI prove and verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: cargo pico prove and execute
+        run: |
+          # Drives the binary, and verifies the proof file it writes in a process that proved nothing.
+          cargo test --release -p pico-cli
+
+  # The wrap proof is the longest single proof here and nothing else waits on it, so it runs beside
+  # the VM lanes (test-vm.yml). The gnark step that reads its two artifacts moves with it, which is why no
+  # artifact has to cross a job boundary.
+  #
+  # It is the longest job in CI, so the next thing to look at to shorten it.
+  wrap:
+    name: EVM · Wrap proof and verifier circuit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: Wrap proof (fib), and the EVM bundle against the wrap circuit
+        env:
+          # The test writes the bundle's two files here for the gnark step below.
+          PICO_PROVER_WRAP_OUT: ${{ github.workspace }}/wrap-out
+        run: |
+          # `--exact` and the count: a renamed test would otherwise run nothing and pass.
+          set -o pipefail
+          cargo test --release -p pico-prover -- --exact \
+            tests::evm::a_wrap_proof_gives_the_program_id_and_the_bundle_the_circuits_public_inputs \
+            | tee wrap-test.log
+          grep -q "test result: ok. 1 passed" wrap-test.log
+      - name: Compile field ffi so
+        run: |
+          cargo build --release --package field-ffi
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: gnark/go.mod
+          cache-dependency-path: gnark/go.sum
+      - name: Groth16 verifier circuit solves the wrap proof
+        run: |
+          set -eux
+          # The test reads these two names out of its own directory.
+          cp wrap-out/wrap_constraints.json gnark/koalabear_verifier/constraints.json
+          cp wrap-out/wrap_groth16_witness.json gnark/koalabear_verifier/groth16_witness.json
+          (cd gnark && CGO_LDFLAGS="-L$GITHUB_WORKSPACE/target/release -Wl,-rpath,$GITHUB_WORKSPACE/target/release" \
+            go test -timeout 600s -run TestSolveVerifierCircuit ./koalabear_verifier/)
+      - name: Tampered wrap witnesses do not solve
+        run: |
+          set -eux -o pipefail
+          # One witness value changed per case, each of which must leave the circuit
+          # unsatisfiable, after the honest witness solves as the control. The test skips without
+          # the two files above, so the PASS line is what says it ran.
+          (cd gnark && CGO_LDFLAGS="-L$GITHUB_WORKSPACE/target/release -Wl,-rpath,$GITHUB_WORKSPACE/target/release" \
+            go test -timeout 1800s -v -run '^TestTamperedWitnessIsUnsatisfiable$' ./koalabear_verifier/) \
+            | tee tamper-test.log
+          grep -q -- "--- PASS: TestTamperedWitnessIsUnsatisfiable" tamper-test.log
+      - name: The wrap circuit fits the Groth16 domain
+        run: |
+          set -eux -o pipefail
+          # Compiles the circuit, which nothing above does, and needs at most 2^23 constraints.
+          # This is the dev-mode circuit CI proves to; the whitelist-mode one a verifier is set up
+          # for has less headroom (7.6% under, against 24.7% here), and is checked
+          # the same way on a machine that can prove it, before a setup.
+          (cd gnark && CGO_LDFLAGS="-L$GITHUB_WORKSPACE/target/release -Wl,-rpath,$GITHUB_WORKSPACE/target/release" \
+            go test -timeout 900s -v -run '^TestCircuitFitsGroth16Domain$' ./koalabear_verifier/) \
+            | tee fits-test.log
+          grep -q -- "--- PASS: TestCircuitFitsGroth16Domain" fits-test.log
+
+  # The verifier contracts, against the proofs committed in contracts/test/fixtures. Foundry only:
+  # nothing here proves.
+  contracts:
+    name: EVM · Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+      - name: forge fmt and test
+        working-directory: contracts
+        run: |
+          set -eux
+          forge fmt --check
+          forge test -vvv

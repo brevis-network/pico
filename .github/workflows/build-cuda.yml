@@ -1,0 +1,113 @@
+# Triggers, permissions, concurrency and job naming are explained in lint.yml.
+on:
+  pull_request:
+    branches:
+      - main
+      - release/v*
+    paths:
+      # Everything `cargo clippy --workspace` compiles: the members, what they path-depend on, and
+      # the build config.
+      - "derive/**"
+      - "mle-core/**"
+      - "mle-cpu/**"
+      - "cuda-mle/**"
+      - "vm/**"
+      - "aot-codegen/**"
+      - "aot-runtime/**"
+      - "aot-generated/**"
+      - "sdk/**"
+      - "gnark/field-ffi/**"
+      - "contracts/test/dev/manifest.json"
+      - "perf/**"
+      - "distributed-vm/**"
+      - "gpu-api/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "rust-toolchain"
+      - ".github/workflows/build-cuda.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "derive/**"
+      - "mle-core/**"
+      - "mle-cpu/**"
+      - "cuda-mle/**"
+      - "vm/**"
+      - "aot-codegen/**"
+      - "aot-runtime/**"
+      - "aot-generated/**"
+      - "sdk/**"
+      - "gnark/field-ffi/**"
+      - "contracts/test/dev/manifest.json"
+      - "perf/**"
+      - "distributed-vm/**"
+      - "gpu-api/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "rust-toolchain"
+      - ".github/workflows/build-cuda.yml"
+  workflow_dispatch:
+
+name: Build CUDA
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VK_VERIFICATION: false
+
+jobs:
+  # The `cuda` build. No runner has a GPU, so this compiles and lints only; `CUDA_ARCH` stands in
+  # for the card `nvidia-smi` would otherwise report.
+  cuda:
+    name: GPU · CUDA build and clippy
+    runs-on: ubuntu-latest
+    container:
+      image: nvidia/cuda:12.3.1-devel-ubuntu22.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      CUDA_ARCH: "89"
+      # Dev debuginfo for a workspace this size is tens of GB, enough to exhaust the runner.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - name: Install apt deps
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            curl unzip ca-certificates build-essential pkg-config libssl-dev \
+            cmake git openssh-client llvm-dev libclang-dev g++-11 \
+            binutils m4 file google-perftools libgoogle-perftools-dev
+          rm -rf /var/lib/apt/lists/*
+      # The apt protobuf-compiler omits google/protobuf/*.proto, which tonic-build needs.
+      - name: Install protoc (official release)
+        run: |
+          curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-linux-x86_64.zip
+          unzip -o protoc-21.12-linux-x86_64.zip -d /usr/local
+          rm protoc-21.12-linux-x86_64.zip
+      - name: Configure git
+        run: git config --global --add safe.directory '*'
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+          . "$HOME/.cargo/env"
+          rustup toolchain install nightly-2026-09-27 --profile minimal --component clippy
+          rustup override set nightly-2026-09-27
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-cuda12.3"
+          save-if: ${{ github.event_name == 'push' }}
+      # Capped at warn as before the merge: `strict` still turns compiler warnings into errors.
+      - name: Clippy with `cuda`
+        run: |
+          cargo clippy --workspace --lib --bins --examples --tests --exclude pico-sdk \
+            --features pico-vm/cuda,distributed-vm/cuda --locked --message-format=short \
+            -- --cap-lints=warn
