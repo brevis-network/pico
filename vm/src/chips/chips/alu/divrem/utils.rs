@@ -87,3 +87,12 @@ pub fn get_quotient_and_remainder(b: u64, c: u64, opcode: Opcode) -> (u64, u64) 
 pub const fn get_msb(a: u64) -> u8 {
     ((a >> 63) & 1) as u8
 }
+
+/// ALU events one DivRem event adds. Shared with the GPU kernels, which index the ALU buffers
+/// by it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct DivremExtraEventIndices {
+    pub add: usize,
+    pub lt: usize,
+}

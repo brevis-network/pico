@@ -1,9 +1,8 @@
 use crate::{
     chips::chips::alu::event::AluEvent,
     create_event_pool_manager,
-    emulator::riscv::event_pool::{growable, EventBuffer, EventPoolManager},
+    emulator::riscv::event_pool::{growable, EventBuffer, EventPoolManager, HostAllocFlags},
 };
-use cudart::memory::CudaHostAllocFlags;
 use once_cell::sync::Lazy;
 use std::{env, fmt};
 
@@ -38,7 +37,7 @@ create_event_pool_manager!(
 /// Initializes the global ALU event buffer pool.
 /// This function should be called once at application startup.
 /// It will panic if called more than once.
-pub fn init_alu_event_buffer_pool(pool_size: usize, flags: CudaHostAllocFlags) {
+pub fn init_alu_event_buffer_pool(pool_size: usize, flags: HostAllocFlags) {
     AluEventPoolManager::init_pool(pool_size, flags);
 }
 

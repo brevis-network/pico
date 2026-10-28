@@ -1,22 +1,17 @@
 use crate::{
-    chips::{
-        chips::gkr_sumcheck_round::{
-            columns::{
-                GkrSumcheckRoundCols, GkrSumcheckRoundPreprocessedCols,
-                NUM_GKR_SUMCHECK_ROUND_COLS, NUM_GKR_SUMCHECK_ROUND_PREPROCESSED_COLS,
-            },
-            GkrSumcheckRoundChip,
+    chips::chips::gkr_sumcheck_round::{
+        columns::{
+            GkrSumcheckRoundCols, GkrSumcheckRoundPreprocessedCols, NUM_GKR_SUMCHECK_ROUND_COLS,
+            NUM_GKR_SUMCHECK_ROUND_PREPROCESSED_COLS,
         },
-        trace::TraceData,
+        GkrSumcheckRoundChip,
     },
     compiler::recursion::{
         instruction::Instruction,
         ir::Block,
-        mle_instruction_buckets::MleVariant,
         program::RecursionProgram,
         types::{GkrSumcheckRoundEvent, GkrSumcheckRoundInstr},
     },
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::recursion::emulator::RecursionRecord,
     machine::{
         chip::{ChipBehavior, PreprocessedRows},
@@ -24,16 +19,27 @@ use crate::{
     },
     primitives::consts::EXTENSION_DEGREE,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    compiler::recursion::mle_instruction_buckets::MleVariant,
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_air::BaseAir;
 use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_gkr_sumcheck_round_generate_main, cuda_gkr_sumcheck_round_generate_preprocessed,
 };
@@ -49,7 +55,6 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
     for GkrSumcheckRoundChip<F>
 {
     type Record = RecursionRecord<F>;
-    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -155,7 +160,12 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> GpuChipBehavior<F>
+    for GkrSumcheckRoundChip<F>
+{
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -228,7 +238,6 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         use p3_koala_bear::KoalaBear;
 

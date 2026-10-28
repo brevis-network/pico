@@ -34,6 +34,7 @@ extern crate core;
 pub mod chips;
 pub mod compiler;
 pub mod configs;
+#[cfg(feature = "cuda")]
 pub mod cuda_adaptor;
 pub mod emulator;
 pub mod instances;

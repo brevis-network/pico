@@ -1,3 +1,4 @@
+#[cfg(feature = "cuda")]
 use crate::{
     chips::{
         chips::byte::{columns::NUM_BYTE_MULT_COLS, ByteChip},
@@ -19,15 +20,21 @@ use crate::{
         gpu_allocate_byte_trace, gpu_finalize_byte_trace, precompute_event_size,
         PreallocatedGpuMemory, PreparedGpuEvents,
     },
-    machine::chip::ChipBehavior,
+    machine::chip::{ChipBehavior, GpuChipBehavior},
 };
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
+#[cfg(feature = "cuda")]
 use rand::{rng, RngExt};
+#[cfg(feature = "cuda")]
 use std::time::Instant;
 
+#[cfg(feature = "cuda")]
 type Chip<F> = ShaCompressChip<F>;
+#[cfg(feature = "cuda")]
 type F = KoalaBear;
 
+#[cfg(feature = "cuda")]
 pub fn generate_sha_compress_bench_record(num_events: usize) -> EmulationRecord {
     let mut rng = rng();
     let mut events = Vec::with_capacity(num_events);
@@ -108,6 +115,7 @@ pub fn generate_sha_compress_bench_record(num_events: usize) -> EmulationRecord 
     record
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn test_sha_compress_gpu_generate_extra_record_and_main() {
     // Generate 2^16 synthetic events for correctness test
@@ -194,6 +202,7 @@ fn test_sha_compress_gpu_generate_extra_record_and_main() {
     );
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn bench_sha_compress_cpu_vs_gpu() {
     use crate::{
@@ -327,6 +336,7 @@ fn bench_sha_compress_cpu_vs_gpu() {
     println!("{:-<60}", "");
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn test_sha_compress_control_gpu_generate_extra_record_and_main() {
     let chip = ShaCompressControlChip::<F>::default();
@@ -372,6 +382,7 @@ fn test_sha_compress_control_gpu_generate_extra_record_and_main() {
     );
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn bench_sha_compress_control_cpu_vs_gpu() {
     use crate::{

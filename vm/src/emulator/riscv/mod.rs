@@ -4,7 +4,6 @@ pub mod cpu_event_pool;
 pub mod emulator;
 pub mod event_pool;
 pub mod event_types;
-pub mod ffi;
 pub mod hook;
 pub mod memory;
 pub mod public_values;

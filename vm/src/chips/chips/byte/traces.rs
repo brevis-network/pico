@@ -4,15 +4,20 @@ use super::{
     utils::shr_carry,
     ByteChip,
 };
+#[cfg(feature = "cuda")]
 use crate::{
     chips::trace::TraceData,
-    compiler::riscv::{opcode::ByteOpcode, program::Program},
     cuda_adaptor::resource_pool::{
         mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
     },
-    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord},
+    machine::chip::GpuChipBehavior,
+};
+use crate::{
+    compiler::riscv::{opcode::ByteOpcode, program::Program},
+    emulator::riscv::record::EmulationRecord,
     machine::chip::ChipBehavior,
 };
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::CudaSliceMut,
@@ -22,8 +27,10 @@ use itertools::Itertools;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_byte_generate_preprocessed;
 use std::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
 use tracing::info;
 
 pub const NUM_ROWS: usize = 1 << 17;
@@ -50,7 +57,6 @@ pub fn byte_lookup_row(lookup: &ByteLookupEvent) -> usize {
 
 impl<F: PrimeField32> ChipBehavior<F> for ByteChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -91,7 +97,10 @@ impl<F: PrimeField32> ChipBehavior<F> for ByteChip<F> {
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for ByteChip<F> {
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,

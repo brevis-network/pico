@@ -56,6 +56,19 @@ pub const MIN_MAIN_MEMORY_ADDR: u64 = 0x100;
 
 pub type SharedDeferredState = Arc<ParkingMutex<EmulationDeferredState>>;
 
+/// `CHUNK_SPLIT_DEBUG=1`: the chunk counter a tail record ends up proving under.
+///
+/// The probe in `EmulationRecord::split` cannot print this — it sees the records before their
+/// public values exist. The records reach here in the order that probe listed them.
+fn maybe_debug_tail_chunk_pv(record: &EmulationRecord) {
+    if !record.is_cpu_chunk && chunk_split::split_debug() {
+        tracing::info!(
+            "[chunk-split] tail-chunk pvs.chunk={}",
+            record.public_values.chunk
+        );
+    }
+}
+
 /// The state for saving deferred information
 pub struct EmulationDeferredState {
     flag_active: bool,
@@ -211,6 +224,7 @@ impl EmulationDeferredState {
         }
 
         record.public_values = self.pvs;
+        maybe_debug_tail_chunk_pv(record);
         debug!(
             "riscv record index: {:?}, record.public_values.deferred_proofs_digest: {:?}",
             record.chunk_index(),
@@ -244,6 +258,7 @@ impl EmulationDeferredState {
         self.pvs.last_finalize_addr_limbs = record.public_values.last_finalize_addr_limbs;
 
         record.public_values = self.pvs;
+        maybe_debug_tail_chunk_pv(record);
         debug!(
             "riscv record index: {:?}, record.public_values.deferred_proofs_digest: {:?}",
             record.chunk_index(),
@@ -304,6 +319,7 @@ impl EmulationDeferredState {
         }
 
         record.public_values = self.pvs;
+        maybe_debug_tail_chunk_pv(record);
         debug!(
             "riscv record index: {:?}, record.public_values.deferred_proofs_digest: {:?}",
             record.chunk_index(),
@@ -657,12 +673,12 @@ impl RiscvEmulator {
                 alu_event_pool::{init_alu_event_buffer_pool, is_alu_pool_initialized},
                 cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
             };
-            use cudart::memory::CudaHostAllocFlags;
+            use crate::emulator::riscv::event_pool::HostAllocFlags;
             if !is_pool_initialized() {
-                init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+                init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
             }
             if !is_alu_pool_initialized() {
-                init_alu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+                init_alu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
             }
         }
 

@@ -1,3 +1,4 @@
+#[cfg(feature = "cuda")]
 use crate::{
     chips::{
         chips::{
@@ -14,6 +15,11 @@ use crate::{
         trace::TraceData,
     },
     compiler::riscv::opcode::Opcode,
+    emulator::riscv::{
+        alu_event_pool::{init_alu_event_buffer_pool, is_alu_pool_initialized},
+        event_pool::HostAllocFlags,
+        record::EmulationRecord,
+    },
     instances::{
         compiler::shapes::riscv_shape::RiscvPadShape,
         preparer::{
@@ -21,34 +27,41 @@ use crate::{
             precompute_event_size, PreallocatedGpuMemory, PreparedGpuEvents,
         },
     },
-    machine::chip::ChipBehavior,
+    machine::chip::{ChipBehavior, GpuChipBehavior},
 };
-use cudart::{memory::CudaHostAllocFlags, memory_pools::DevicePoolAllocation, slice::CudaSliceMut};
+#[cfg(feature = "cuda")]
+use cudart::{memory_pools::DevicePoolAllocation, slice::CudaSliceMut};
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use p3_field::PrimeCharacteristicRing;
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
+#[cfg(feature = "cuda")]
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_bitwise_generate_extra_record_and_main_u64;
+#[cfg(feature = "cuda")]
 use rand::{rng, RngExt};
+#[cfg(feature = "cuda")]
 use std::{sync::LazyLock, time::Instant};
 
-use crate::emulator::riscv::{
-    alu_event_pool::{init_alu_event_buffer_pool, is_alu_pool_initialized},
-    record::EmulationRecord,
-};
-
+#[cfg(feature = "cuda")]
 type F = KoalaBear;
 
+#[cfg(feature = "cuda")]
 static GPU_TEST_RECORD: LazyLock<EmulationRecord> =
     LazyLock::new(|| generate_gpu_test_record(1 << 20));
 
+#[cfg(feature = "cuda")]
 fn cpu_generate_main(chip: &BitwiseChip<F>, input: &EmulationRecord) -> RowMajorMatrix<F> {
     chip.generate_main(input, &mut EmulationRecord::default())
 }
 
+#[cfg(feature = "cuda")]
 fn generate_gpu_test_record(event_count: u64) -> EmulationRecord {
     if !is_alu_pool_initialized() {
-        init_alu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+        init_alu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
     }
 
     let rng = &mut rng();
@@ -73,6 +86,7 @@ fn generate_gpu_test_record(event_count: u64) -> EmulationRecord {
     record
 }
 
+#[cfg(feature = "cuda")]
 fn gpu_generate_extra_record_and_main(
     chip: &BitwiseChip<F>,
     input: &EmulationRecord,
@@ -89,6 +103,7 @@ fn gpu_generate_extra_record_and_main(
     trace.to_host(stream)
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn test_bitwise_gpu_generate_extra_record_and_main() {
     let original_record = LazyLock::force(&GPU_TEST_RECORD);
@@ -173,10 +188,11 @@ fn test_bitwise_gpu_generate_extra_record_and_main() {
     );
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn bench_bitwise_cpu_vs_gpu() {
     if !is_alu_pool_initialized() {
-        init_alu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+        init_alu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
     }
 
     let warmup_sizes: Vec<u64> = vec![1 << 16];

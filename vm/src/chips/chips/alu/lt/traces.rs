@@ -1,24 +1,29 @@
 use super::columns::{LtValueCols, NUM_LT_COLS, NUM_LT_VALUE_COLS};
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
 use crate::{
     chips::{
         chips::{alu::event::AluEvent, byte::event::ByteRecordBehavior},
-        trace::TraceData,
         utils::next_power_of_two,
     },
     compiler::{
         riscv::{opcode::Opcode, program::Program},
         word::Word,
     },
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
-    },
-    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord},
-    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    emulator::riscv::record::EmulationRecord,
     iter::{IndexedPicoIterator, PicoIterator, PicoSlice, PicoSliceMut},
     machine::chip::ChipBehavior,
     primitives::consts::{u64_to_u16_limbs, LT_DATAPAR},
 };
 use core::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::CudaSliceMut,
@@ -26,11 +31,14 @@ use cudart::{
 };
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_lt_generate_extra_record_and_main_u64, cuda_lt_generate_extra_record_and_main_u64_packed,
 };
+#[cfg(feature = "cuda")]
 use tracing::info;
 
 /// Lt Chip for proving U32/U64 Signed/Unsigned b < c
@@ -45,7 +53,6 @@ impl<F: Field> BaseAir<F> for LtChip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -108,7 +115,10 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
     fn local_only(&self) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for LtChip<F> {
     fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
         counter.num_lt_events += record.lt_events.len();
     }

@@ -374,7 +374,7 @@ mod builder {
         }
 
         /// Target SMs: the builder's own list, else the comma-separated `CUDA_ARCH`, else the
-        /// GPU found by `nvidia-smi`.
+        /// GPU found by `nvidia-smi`, else [`DEFAULT_ARCHS`] (a build host without a GPU).
         fn resolve_archs(&self) -> Vec<String> {
             if !self.arch_override.is_empty() {
                 return self.arch_override.clone();
@@ -386,7 +386,17 @@ mod builder {
                     .filter(|entry| !entry.is_empty())
                     .collect();
             }
-            vec![detect_cuda_arch()]
+            match detect_cuda_arch() {
+                Some(arch) => vec![arch],
+                None => {
+                    println!(
+                        "cargo:warning=no GPU visible to nvidia-smi; building for GPU architectures sm_{} \
+                         (set CUDA_ARCH to choose)",
+                        DEFAULT_ARCHS.join(", sm_")
+                    );
+                    DEFAULT_ARCHS.iter().map(|arch| arch.to_string()).collect()
+                }
+            }
         }
 
         /// ptxas level: the builder's own value, else `CUDA_OPT_LEVEL`, else "3".
@@ -429,27 +439,28 @@ mod builder {
         Command::new("nvcc").arg("--version").output().is_ok()
     }
 
+    /// SMs built when neither `CUDA_ARCH` nor a visible GPU says which: RTX 4090 and RTX 5090.
+    pub const DEFAULT_ARCHS: [&str; 2] = ["89", "120"];
+
     /// Asks `nvidia-smi` for the first GPU's compute capability and returns it without the dot
     /// ("8.9" -> "89"); the value is also exported as `CUDA_ARCH` to rustc and to this process.
-    pub fn detect_cuda_arch() -> String {
+    /// `None` when `nvidia-smi` is missing or lists no GPU.
+    pub fn detect_cuda_arch() -> Option<String> {
         let smi_result = Command::new("nvidia-smi")
             .args(["--query-gpu=compute_cap", "--format=csv,noheader"])
             .output()
-            .expect("Failed to run nvidia-smi - make sure NVIDIA drivers are installed");
+            .ok()
+            .filter(|output| output.status.success())?;
 
-        let smi_text =
-            String::from_utf8(smi_result.stdout).expect("nvidia-smi output is not valid UTF-8");
-
-        let compute_cap = smi_text
-            .lines()
-            .next()
-            .expect("nvidia-smi failed to return compute capability")
-            .trim()
-            .replace('.', "");
+        let smi_text = String::from_utf8(smi_result.stdout).ok()?;
+        let compute_cap = smi_text.lines().next()?.trim().replace('.', "");
+        if compute_cap.is_empty() {
+            return None;
+        }
 
         println!("cargo:rustc-env=CUDA_ARCH={}", compute_cap);
         env::set_var("CUDA_ARCH", &compute_cap);
-        compute_cap
+        Some(compute_cap)
     }
 
     /// nvcc `-t<N>` flag: `NVCC_THREADS` when it parses, else the host's available parallelism

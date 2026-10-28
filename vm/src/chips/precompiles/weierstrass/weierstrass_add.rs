@@ -6,16 +6,10 @@ use crate::{
         },
         gadgets::{
             addr_add::AddrAddGadget,
-            curves::{
-                weierstrass::secp256r1::Secp256r1BaseField, AffinePoint, CurveType, EllipticCurve,
-                EllipticCurveParameters,
-            },
+            curves::{AffinePoint, CurveType, EllipticCurve},
             field::{
-                bls381::Bls381BaseField,
-                bn254::Bn254BaseField,
                 field_lt::FieldLtCols,
                 field_op::{FieldOpCols, FieldOperation},
-                secp256k1::Secp256k1BaseField,
             },
             syscall_addr::SyscallAddrGadget,
             utils::{
@@ -29,52 +23,70 @@ use crate::{
             },
         },
         precompiles::checked_u64_to_u32,
-        trace::TraceData,
-        utils::{next_power_of_two, pad_rows_fixed},
+        utils::pad_rows_fixed,
     },
     compiler::{riscv::program::Program, word::Word},
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
-    },
     emulator::riscv::{
-        ffi::FFIEmulationRecord,
         record::EmulationRecord,
-        syscalls::{
-            precompiles::{edwards::event::EllipticCurveAddEventFFI, PrecompileEvent},
-            SyscallCode,
-        },
+        syscalls::{precompiles::PrecompileEvent, SyscallCode},
     },
-    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::{
         builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
     },
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{
+        gadgets::{
+            curves::{weierstrass::secp256r1::Secp256r1BaseField, EllipticCurveParameters},
+            field::{
+                bls381::Bls381BaseField, bn254::Bn254BaseField, secp256k1::Secp256k1BaseField,
+            },
+        },
+        trace::TraceData,
+        utils::next_power_of_two,
+    },
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    emulator::riscv::syscalls::precompiles::edwards::event::EllipticCurveAddEventFFI,
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
 use hybrid_array::Array;
 use num::{BigUint, One, Zero};
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_derive::AlignedBorrow;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_weierstrass_add_bls12381_generate_extra_record_and_main,
     cuda_weierstrass_add_bn254_generate_extra_record_and_main,
     cuda_weierstrass_add_secp256k1_generate_extra_record_and_main,
     cuda_weierstrass_add_secp256r1_generate_extra_record_and_main,
 };
-use std::{fmt::Debug, marker::PhantomData, mem::transmute};
-use tracing::{debug, info};
+#[cfg(feature = "cuda")]
+use std::mem::transmute;
+use std::{fmt::Debug, marker::PhantomData};
+use tracing::debug;
+#[cfg(feature = "cuda")]
+use tracing::info;
 use typenum::Unsigned;
 
 pub const fn num_weierstrass_add_cols<P: FieldParameters + NumWords>() -> usize {
@@ -218,7 +230,6 @@ impl<F: PrimeField32, E: EllipticCurve> WeierstrassAddAssignChip<F, E> {
 
 impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssignChip<F, E> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -377,7 +388,10 @@ impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssign
     fn local_only(&self) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32, E: EllipticCurve> GpuChipBehavior<F> for WeierstrassAddAssignChip<F, E> {
     fn gpu_generate_extra_record_and_main(
         &self,
         device_id: usize,
@@ -808,14 +822,21 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "cuda")]
     use std::sync::LazyLock;
 
+    #[cfg(feature = "cuda")]
     use crate::chips::gadgets::utils::RandBigUint;
+    #[cfg(feature = "cuda")]
     use itertools::Itertools;
+    #[cfg(feature = "cuda")]
     use p3_koala_bear::KoalaBear;
+    #[cfg(feature = "cuda")]
     use p3_matrix::dense::RowMajorMatrix;
+    #[cfg(feature = "cuda")]
     use rand::{rng, rngs::ThreadRng, RngExt};
 
+    #[cfg(feature = "cuda")]
     use crate::{
         chips::{
             chips::{
@@ -847,27 +868,33 @@ mod tests {
                 PreallocatedGpuMemory, PreparedGpuEvents,
             },
         },
-        machine::chip::ChipBehavior,
+        machine::chip::{ChipBehavior, GpuChipBehavior},
     };
 
+    #[cfg(feature = "cuda")]
     type F = KoalaBear;
 
+    #[cfg(feature = "cuda")]
     /// Lazily initialized record for use across multiple tests.
     static SECP256K1_SHARD: LazyLock<EmulationRecord> = LazyLock::new(|| {
         generate_record::<SwCurve<Secp256k1Parameters>, 16>(1 << 4, CurveType::Secp256k1)
     });
 
+    #[cfg(feature = "cuda")]
     static SECP256R1_SHARD: LazyLock<EmulationRecord> = LazyLock::new(|| {
         generate_record::<SwCurve<Secp256r1Parameters>, 16>(1 << 4, CurveType::Secp256r1)
     });
 
+    #[cfg(feature = "cuda")]
     static BN254_SHARD: LazyLock<EmulationRecord> =
         LazyLock::new(|| generate_record::<SwCurve<Bn254Parameters>, 16>(1 << 4, CurveType::Bn254));
 
+    #[cfg(feature = "cuda")]
     static BLS12381_SHARD: LazyLock<EmulationRecord> = LazyLock::new(|| {
         generate_record::<SwCurve<Bls12381Parameters>, 24>(1 << 4, CurveType::Bls12381)
     });
 
+    #[cfg(feature = "cuda")]
     fn cpu_generate_main<E: EllipticCurve>(
         chip: &WeierstrassAddAssignChip<F, E>,
         input: &EmulationRecord,
@@ -875,6 +902,7 @@ mod tests {
         chip.generate_main(input, &mut EmulationRecord::default())
     }
 
+    #[cfg(feature = "cuda")]
     fn generate_record<E: EllipticCurve, const WORDS_CURVE_POINT: usize>(
         size: usize,
         curve_type: CurveType,
@@ -973,6 +1001,7 @@ mod tests {
         record
     }
 
+    #[cfg(feature = "cuda")]
     fn random_point<E: EllipticCurve>(rng: &mut ThreadRng) -> Vec<u64> {
         let base = E::ec_generator();
         let point = rng.random_biguint(E::nb_scalar_bits() as u64);
@@ -989,6 +1018,7 @@ mod tests {
             .collect()
     }
 
+    #[cfg(feature = "cuda")]
     fn gpu_generate_extra_record_and_main<E: EllipticCurve>(
         chip: &WeierstrassAddAssignChip<F, E>,
         input: &EmulationRecord,
@@ -1005,6 +1035,7 @@ mod tests {
         trace.to_host(stream)
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn test_secp256k1_addassign_generate_extra_record_and_main() {
         let original_record = LazyLock::force(&SECP256K1_SHARD);
@@ -1075,6 +1106,7 @@ mod tests {
         assert_eq!(host_gpu_byte_trace.values, cpu_byte_trace.values);
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn test_secp256r1_addassign_generate_extra_record_and_main() {
         let original_record = LazyLock::force(&SECP256R1_SHARD);
@@ -1145,6 +1177,7 @@ mod tests {
         assert_eq!(host_gpu_byte_trace.values, cpu_byte_trace.values);
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn test_bn254_addassign_generate_extra_record_and_main() {
         let original_record = LazyLock::force(&BN254_SHARD);
@@ -1215,6 +1248,7 @@ mod tests {
         assert_eq!(host_gpu_byte_trace.values, cpu_byte_trace.values);
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn test_bls12381_addassign_generate_extra_record_and_main() {
         let original_record = LazyLock::force(&BLS12381_SHARD);
@@ -1285,6 +1319,7 @@ mod tests {
         assert_eq!(host_gpu_byte_trace.values, cpu_byte_trace.values);
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn bench_weierstrass_add_cpu_vs_gpu() {
         use std::time::Instant;

@@ -16,9 +16,9 @@ pub enum Step {
 ///
 /// The MLE backend is KoalaBear-only by design, so there is no `--field` knob.
 #[derive(Parser, Debug, Clone)]
-#[clap(about = "single-node MLE/WHIR prover (KoalaBear)")]
+#[clap(about = "single-node MLE/WHIR prover (KoalaBear)", version = crate::VERSION)]
 pub struct MleSingleNodeConfig {
-    /// Proving step: `riscv` | `convert` | `combine`. The latter two require `cuda-mle`.
+    /// Proving step: `riscv` | `convert` | `combine`. The latter two require `cuda`.
     #[clap(long, value_enum, env = "MLE_STEP", default_value = "riscv")]
     pub step: Step,
 

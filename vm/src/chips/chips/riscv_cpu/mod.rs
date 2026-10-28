@@ -19,6 +19,11 @@ pub struct CpuChip<F>(PhantomData<F>);
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "cuda")]
+    use crate::emulator::riscv::event_pool::HostAllocFlags;
+    #[cfg(feature = "cuda")]
+    use crate::machine::chip::GpuChipBehavior;
+    #[cfg(feature = "cuda")]
     use crate::{
         chips::{
             chips::{
@@ -47,18 +52,26 @@ mod tests {
         machine::chip::ChipBehavior,
         primitives::consts::MEMORY_RW_DATAPAR,
     };
-    use cudart::{memory::CudaHostAllocFlags, stream::CudaStream};
+    #[cfg(feature = "cuda")]
+    use cudart::stream::CudaStream;
+    #[cfg(feature = "cuda")]
     use p3_field::PrimeCharacteristicRing;
+    #[cfg(feature = "cuda")]
     use p3_koala_bear::KoalaBear;
+    #[cfg(feature = "cuda")]
     use p3_matrix::dense::RowMajorMatrix;
+    #[cfg(feature = "cuda")]
     use std::sync::{Arc, Mutex, PoisonError};
 
+    #[cfg(feature = "cuda")]
     type F = KoalaBear;
 
+    #[cfg(feature = "cuda")]
     fn cpu_generate_main(chip: &CpuChip<F>, input: &EmulationRecord) -> RowMajorMatrix<F> {
         chip.generate_main(input, &mut EmulationRecord::default())
     }
 
+    #[cfg(feature = "cuda")]
     fn gpu_generate_extra_record_and_main(
         chip: &CpuChip<F>,
         input: &EmulationRecord,
@@ -75,15 +88,16 @@ mod tests {
         trace.to_host(stream)
     }
 
+    #[cfg(feature = "cuda")]
     /// The real-program fixture the parity tests share: one Fib chunk, replicated. Returns the
     /// record and its number of branch rows.
     #[allow(clippy::field_reassign_with_default)]
     fn fib_fixture() -> (EmulationRecord, usize) {
         if !is_pool_initialized() {
-            init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+            init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
         }
         if !is_alu_pool_initialized() {
-            init_alu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+            init_alu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
         }
         // Fib's loop is driven by branches over the counter, so a < b, a > b and a = b all
         // occur with both taken and not-taken outcomes. Replicated x3 to cross the GPU slice
@@ -124,23 +138,26 @@ mod tests {
         (original_record, n_branches)
     }
 
+    #[cfg(feature = "cuda")]
     /// The packed pools below hold one buffer each and the test harness runs tests concurrently,
     /// so a second stage taken while another test still holds its stage would find the pools
     /// exhausted and fall back to the fat path. Every test that stages holds this for its whole
     /// body (the stage returns its buffers on drop, at the end of the test).
     static PACKED_STAGE_SERIAL: Mutex<()> = Mutex::new(());
 
+    #[cfg(feature = "cuda")]
     /// Stage the packed event mirror for `record` regardless of `MLE_PACKED_EVENTS`; the pools
     /// are sized for one chunk (idempotent init).
     fn force_packed_stage(
         record: &EmulationRecord,
         prepared: &PreparedGpuEvents,
     ) -> PackedEventStage {
-        init_packed_event_pools(1, CudaHostAllocFlags::DEFAULT);
+        init_packed_event_pools(1, HostAllocFlags::DEFAULT);
         try_stage_forced(record, &prepared.event_counter)
             .expect("the Fib fixture satisfies every packing invariant")
     }
 
+    #[cfg(feature = "cuda")]
     /// The buffers the prover hands the Cpu chip: an empty cpu-event allocation (the chip uploads
     /// the stream itself, fat or packed) and the ALU event buffers filled by the same functions
     /// the prover uses, which copy the packed prefix instead when a stage is present.
@@ -160,6 +177,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "cuda")]
     /// CPU / GPU parity of the Cpu chip on a real program, including the extra ALU events it
     /// emits: one merged SLT/SLTU comparison per branch (`is_cmp`, both bits in `a`); the JALR
     /// target is proven in-row, so no add events. `verify_lt_events` compares the GPU-written
@@ -172,6 +190,7 @@ mod tests {
         cpu_parity(false);
     }
 
+    #[cfg(feature = "cuda")]
     /// The same check through the packed event mirror (`MLE_PACKED_EVENTS=1`, the production
     /// default): the packed Cpu kernel runs on the staged 80 B stream and must produce the same
     /// main and byte traces. Production only ever runs this path, so without it a packed kernel
@@ -181,6 +200,7 @@ mod tests {
         cpu_parity(true);
     }
 
+    #[cfg(feature = "cuda")]
     fn cpu_parity(packed: bool) {
         let _serial = packed.then(|| {
             PACKED_STAGE_SERIAL
@@ -305,6 +325,7 @@ mod tests {
         assert_eq!(host_gpu_byte_trace.values, cpu_byte_trace.values);
     }
 
+    #[cfg(feature = "cuda")]
     /// The MemoryReadWrite chip through the packed mirror. Its kernel indexes the packed cpu
     /// stream the Cpu chip uploaded and reads the dense `MemRecordPacked` side stream, so run
     /// the Cpu chip first exactly as the prover does, then compare this chip's main and byte

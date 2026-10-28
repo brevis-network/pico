@@ -13,7 +13,7 @@ The root workspace (`Cargo.toml`) has these members:
 | `vm` | `pico-vm` | the zkVM: compiler, emulator, chips, and the machines of every phase (see below) |
 | `mle-core` | `pico-mle-core` | the MLE/WHIR STARK backend core (KoalaBear only): config, transcript, symbolic AIR, interactions, PCS / sumcheck / LogUp / WHIR prover and verifier, reference device, `StarkEngine`, and the soundness calculator |
 | `mle-cpu` | `pico-mle-cpu` | the row-major CPU device backend (`CpuBackend`, `CpuDevice`) for `pico-mle-core` |
-| `cuda-mle` | `cuda-mle` | the GPU device backend for `pico-mle-core`: LogUp-GKR, zerocheck, stacked reduction and WHIR on CUDA. Built into `pico-vm` by its `cuda-mle` feature |
+| `cuda-mle` | `cuda-mle` | the GPU device backend for `pico-mle-core`: LogUp-GKR, zerocheck, stacked reduction and WHIR on CUDA. Built into `pico-vm` by its `cuda` feature |
 | `gpu-api` | `pico-gpu-api` | GPU trace generation for the RISC-V, precompile and recursion chips, and the CUDA bindings `pico-vm` calls. Compiled with `nvcc` on every build |
 | `distributed-vm` | `distributed-vm` | the GPU proving entry points: `mle-single-node` (one host, one or more cards; also the two-machine split), `mle-ethproofs-single-node` and `mle-ethproofs-vk-bundle`, and the gRPC proving-network and ethproofs clients. See [`distributed-vm/README.md`](../distributed-vm/README.md) |
 | `aot-codegen` | `pico-aot-codegen` | ahead-of-time compilation of a guest's RISC-V code to Rust crates (`cargo pico aot`, `bin/generate_crates`) |

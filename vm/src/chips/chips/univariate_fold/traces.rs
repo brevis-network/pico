@@ -1,22 +1,16 @@
 use crate::{
-    chips::{
-        chips::univariate_fold::{
-            columns::{
-                UnivariateFoldCols, UnivariateFoldPreprocessedCols, NUM_UNIVARIATE_FOLD_COLS,
-                NUM_UNIVARIATE_FOLD_PREPROCESSED_COLS,
-            },
-            UnivariateFoldChip, MAX_COEFFS,
+    chips::chips::univariate_fold::{
+        columns::{
+            UnivariateFoldCols, UnivariateFoldPreprocessedCols, NUM_UNIVARIATE_FOLD_COLS,
+            NUM_UNIVARIATE_FOLD_PREPROCESSED_COLS,
         },
-        trace::TraceData,
+        UnivariateFoldChip, MAX_COEFFS,
     },
     compiler::recursion::{
         instruction::Instruction,
-        ir::Block,
-        mle_instruction_buckets::MleVariant,
         program::RecursionProgram,
-        types::{Address, UnivariateFoldEvent, UnivariateFoldInstr},
+        types::{UnivariateFoldEvent, UnivariateFoldInstr},
     },
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::recursion::emulator::RecursionRecord,
     machine::{
         chip::{ChipBehavior, PreprocessedRows},
@@ -24,21 +18,33 @@ use crate::{
     },
     primitives::consts::EXTENSION_DEGREE,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    compiler::recursion::{ir::Block, mle_instruction_buckets::MleVariant, types::Address},
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_air::BaseAir;
 use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_univariate_fold_generate_main, cuda_univariate_fold_generate_preprocessed,
 };
 use std::borrow::BorrowMut;
 
+#[cfg(feature = "cuda")]
 /// H2D mirror of the CUDA `UnivariateFoldFlatEvent`: the `Vec<Block>` coefficients padded to a
 /// fixed `MAX_COEFFS` array so the event copies to the device with a raw memcpy.
 #[repr(C)]
@@ -50,6 +56,7 @@ struct UnivariateFoldFlatEvent<F: Copy> {
     next_sum: Block<F>,
 }
 
+#[cfg(feature = "cuda")]
 /// H2D mirror of the CUDA `UnivariateFoldInstr`: the `Vec<Address>` coefficient addresses padded to
 /// `MAX_COEFFS` plus the active `num_coeffs` count.
 #[repr(C)]
@@ -73,7 +80,6 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
     for UnivariateFoldChip<F>
 {
     type Record = RecursionRecord<F>;
-    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -207,7 +213,12 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> GpuChipBehavior<F>
+    for UnivariateFoldChip<F>
+{
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -297,7 +308,6 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         use p3_koala_bear::KoalaBear;
 

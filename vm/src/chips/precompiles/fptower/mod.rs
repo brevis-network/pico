@@ -1,3 +1,4 @@
+#[cfg(feature = "cuda")]
 mod dummy_row;
 pub mod ffi;
 pub mod fp;

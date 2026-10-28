@@ -10,9 +10,14 @@ use crate::{
     },
     configs::config::StarkGenericConfig,
     cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
-    emulator::record::RecordBehavior,
-    instances::preparer::{gpu_finalize_byte_trace, PreallocatedGpuMemory, PreparedGpuEvents},
-    machine::chip::{ChipBehavior, MetaChip},
+    emulator::{record::RecordBehavior, riscv::record::EmulationRecord},
+    instances::preparer::{
+        gpu_allocate_and_copy_add_sub_events, gpu_allocate_and_copy_global_events,
+        gpu_allocate_and_copy_lt_events, gpu_allocate_and_copy_mul_events,
+        gpu_allocate_and_copy_poseidon2_events, gpu_allocate_byte_trace, gpu_allocate_cpu_events,
+        gpu_finalize_byte_trace, PreallocatedGpuMemory, PreparedGpuEvents,
+    },
+    machine::chip::{ChipBehavior, GpuChipBehavior, MetaChip},
 };
 use cudart::{
     memory_pools::DevicePoolAllocation,
@@ -50,7 +55,8 @@ impl<SC, C> BaseProver<SC, C> {
     }
 }
 
-impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C>
+impl<SC: StarkGenericConfig, C: GpuChipBehavior<SC::Val, Record = EmulationRecord>>
+    BaseProver<SC, C>
 where
     SC: StarkGenericConfig + 'static,
 {
@@ -119,19 +125,17 @@ where
         let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
 
         // Allocate byte trace, CPU event, AddSub event, and Lt event memories.
-        let d_cpu_events = record
-            .gpu_allocate_cpu_events(stream, device_id, prepared_gpu_events)
-            .unwrap();
+        let d_cpu_events = gpu_allocate_cpu_events(stream, device_id, prepared_gpu_events).unwrap();
 
-        let d_add_sub_events = record
-            .gpu_allocate_and_copy_add_sub_events(stream, device_id, prepared_gpu_events)
-            .unwrap();
+        let d_add_sub_events =
+            gpu_allocate_and_copy_add_sub_events(stream, device_id, record, prepared_gpu_events)
+                .unwrap();
 
-        let d_lt_events = record
-            .gpu_allocate_and_copy_lt_events(stream, device_id, prepared_gpu_events)
-            .unwrap();
+        let d_lt_events =
+            gpu_allocate_and_copy_lt_events(stream, device_id, record, prepared_gpu_events)
+                .unwrap();
 
-        let d_byte_trace = record.gpu_allocate_byte_trace(stream, device_id).unwrap();
+        let d_byte_trace = gpu_allocate_byte_trace(stream, device_id).unwrap();
 
         let mut preallocated_gpu_memory = PreallocatedGpuMemory {
             d_cpu_events,
@@ -225,9 +229,9 @@ where
         preallocated_gpu_memory.d_cpu_events = None;
 
         // Allocate Mul event memories.
-        preallocated_gpu_memory.d_mul_events = record
-            .gpu_allocate_and_copy_mul_events(stream, device_id, prepared_gpu_events)
-            .unwrap();
+        preallocated_gpu_memory.d_mul_events =
+            gpu_allocate_and_copy_mul_events(stream, device_id, record, prepared_gpu_events)
+                .unwrap();
         stream.synchronize().unwrap();
 
         // Divrem chip
@@ -372,9 +376,9 @@ where
         snap_after!(MUL_CHIP_INDEX);
         preallocated_gpu_memory.d_mul_events = None;
 
-        preallocated_gpu_memory.d_global_events = record
-            .gpu_allocate_and_copy_global_events(stream, device_id, prepared_gpu_events)
-            .unwrap();
+        preallocated_gpu_memory.d_global_events =
+            gpu_allocate_and_copy_global_events(stream, device_id, record, prepared_gpu_events)
+                .unwrap();
         stream.synchronize().unwrap();
 
         // Batch 2
@@ -383,9 +387,13 @@ where
             snap_after!(chip_index);
         }
 
-        preallocated_gpu_memory.d_poseidon2_events = record
-            .gpu_allocate_and_copy_poseidon2_events(stream, device_id, prepared_gpu_events)
-            .unwrap();
+        preallocated_gpu_memory.d_poseidon2_events = gpu_allocate_and_copy_poseidon2_events(
+            stream,
+            device_id,
+            &record.poseidon2_events,
+            prepared_gpu_events,
+        )
+        .unwrap();
         stream.synchronize().unwrap();
 
         // Global chip

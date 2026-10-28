@@ -1,11 +1,16 @@
 use crate::{
+    chips::chips::syscall::SyscallChunkKind,
+    emulator::riscv::{record::EmulationRecord, syscalls::SyscallEvent},
+    machine::chip::ChipBehavior,
+};
+#[cfg(feature = "cuda")]
+use crate::{
     chips::{
-        chips::syscall::{SyscallChip, SyscallChunkKind, NUM_SYSCALL_COLS},
+        chips::syscall::{SyscallChip, NUM_SYSCALL_COLS},
         tests::init_test_stream,
         trace::TraceData,
     },
     cuda_adaptor::resource_pool::mem_pool::get_global_mem_pool,
-    emulator::riscv::{record::EmulationRecord, syscalls::SyscallEvent},
     instances::{
         compiler::shapes::riscv_shape::RiscvPadShape,
         preparer::{
@@ -13,26 +18,37 @@ use crate::{
             verify_global_events, PreallocatedGpuMemory, PreparedGpuEvents,
         },
     },
-    machine::chip::ChipBehavior,
+    machine::chip::GpuChipBehavior,
 };
+#[cfg(feature = "cuda")]
 use cudart::{memory_pools::DevicePoolAllocation, slice::CudaSliceMut};
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
+#[cfg(feature = "cuda")]
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_syscall_generate_extra_record_and_main_u64;
+#[cfg(feature = "cuda")]
 use rand::{rng, RngExt};
+#[cfg(feature = "cuda")]
 use std::{sync::LazyLock, time::Instant};
 
+#[cfg(feature = "cuda")]
 type F = KoalaBear;
 
+#[cfg(feature = "cuda")]
 static GPU_TEST_RECORD: LazyLock<EmulationRecord> =
     LazyLock::new(|| generate_gpu_test_record(1 << 20));
 
+#[cfg(feature = "cuda")]
 fn cpu_generate_main(chip: &SyscallChip<F>, input: &EmulationRecord) -> RowMajorMatrix<F> {
     chip.generate_main(input, &mut EmulationRecord::default())
 }
 
+#[cfg(feature = "cuda")]
 fn generate_gpu_test_record(event_count: usize) -> EmulationRecord {
     let rng = &mut rng();
     let events: Vec<SyscallEvent> = (0..event_count)
@@ -50,6 +66,7 @@ fn generate_gpu_test_record(event_count: usize) -> EmulationRecord {
     record
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn test_syscall_gpu_generate_extra_record_and_main() {
     let original_record = LazyLock::force(&GPU_TEST_RECORD);
@@ -128,6 +145,7 @@ fn test_syscall_gpu_generate_extra_record_and_main() {
     );
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn bench_syscall_cpu_vs_gpu() {
     let warmup_sizes: Vec<usize> = vec![1 << 16];

@@ -1,21 +1,16 @@
 use crate::{
-    chips::{
-        chips::ext_dot_product::{
-            columns::{
-                ExtDotProductCols, ExtDotProductPreprocessedCols, NUM_EXT_DOT_PRODUCT_COLS,
-                NUM_EXT_DOT_PRODUCT_PREPROCESSED_COLS,
-            },
-            ExtDotProductChip,
+    chips::chips::ext_dot_product::{
+        columns::{
+            ExtDotProductCols, ExtDotProductPreprocessedCols, NUM_EXT_DOT_PRODUCT_COLS,
+            NUM_EXT_DOT_PRODUCT_PREPROCESSED_COLS,
         },
-        trace::TraceData,
+        ExtDotProductChip,
     },
     compiler::recursion::{
         instruction::Instruction,
-        mle_instruction_buckets::MleVariant,
         program::RecursionProgram,
-        types::{Address, ExtDotProductEvent, ExtDotProductInstr},
+        types::{ExtDotProductEvent, ExtDotProductInstr},
     },
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::recursion::emulator::RecursionRecord,
     machine::{
         chip::{ChipBehavior, PreprocessedRows},
@@ -23,21 +18,33 @@ use crate::{
     },
     primitives::consts::{EXT_DOT_PRODUCT_DATAPAR, EXT_DOT_PRODUCT_GROUPS},
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    compiler::recursion::{mle_instruction_buckets::MleVariant, types::Address},
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_air::BaseAir;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_ext_dot_product_generate_main, cuda_ext_dot_product_generate_preprocessed,
 };
 use std::borrow::BorrowMut;
 
+#[cfg(feature = "cuda")]
 /// H2D mirror of the CUDA `ExtDotProductPreprocMeta`: per-instruction bookkeeping for the two-buffer
 /// device-side row expansion (the mu/val addresses live in separate flat buffers).
 #[repr(C)]
@@ -59,7 +66,6 @@ impl<F> BaseAir<F> for ExtDotProductChip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for ExtDotProductChip<F> {
     type Record = RecursionRecord<F>;
-    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -155,7 +161,10 @@ impl<F: PrimeField32> ChipBehavior<F> for ExtDotProductChip<F> {
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for ExtDotProductChip<F> {
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -284,7 +293,6 @@ impl<F: PrimeField32> ChipBehavior<F> for ExtDotProductChip<F> {
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         use p3_koala_bear::KoalaBear;
 

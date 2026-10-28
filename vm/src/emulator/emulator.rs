@@ -59,13 +59,13 @@ where
             use crate::emulator::riscv::{
                 alu_event_pool::{init_alu_event_buffer_pool, is_alu_pool_initialized},
                 cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
+                event_pool::HostAllocFlags,
             };
-            use cudart::memory::CudaHostAllocFlags;
             if !is_pool_initialized() {
-                init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+                init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
             }
             if !is_alu_pool_initialized() {
-                init_alu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+                init_alu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
             }
         }
 

@@ -12,32 +12,42 @@ use crate::{
             },
             recursion_memory::MemoryAccessCols,
         },
-        trace::TraceData,
-        utils::{next_power_of_two, pad_rows_fixed},
+        utils::pad_rows_fixed,
     },
     compiler::recursion::{
         instruction::Instruction,
-        mle_instruction_buckets::MleVariant,
         program::RecursionProgram,
         types::{Address, ExpBitsLenInstr},
     },
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::recursion::emulator::RecursionRecord,
     machine::chip::{ChipBehavior, PreprocessedRows},
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{trace::TraceData, utils::next_power_of_two},
+    compiler::recursion::mle_instruction_buckets::MleVariant,
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_field::PrimeField32;
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{cuda_exp_bits_len_generate_main, cuda_exp_bits_len_generate_preprocessed};
 use std::borrow::BorrowMut;
 
+#[cfg(feature = "cuda")]
 /// H2D mirror of the CUDA `ExpBitsLenFlatEvent`: `bit_src` is pre-reduced to its canonical u32 so
 /// the kernel does its bit logic on a plain integer (base stays a field element for the ladder).
 #[repr(C)]
@@ -48,6 +58,7 @@ struct ExpBitsLenFlatEvent<F: Copy> {
     num_bits: u32,
 }
 
+#[cfg(feature = "cuda")]
 /// H2D mirror of the CUDA `ExpBitsLenPreprocMeta`: per-instruction bookkeeping for the two-buffer
 /// expansion (the per-row bit outputs live in a flat `MemoryAccessCols` side buffer).
 #[repr(C)]
@@ -142,7 +153,6 @@ fn padding_row<F: PrimeField32>() -> [F; NUM_EXP_BITS_LEN_COLS] {
 
 impl<F: PrimeField32> ChipBehavior<F> for ExpBitsLenChip<F> {
     type Record = RecursionRecord<F>;
-    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -251,7 +261,10 @@ impl<F: PrimeField32> ChipBehavior<F> for ExpBitsLenChip<F> {
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for ExpBitsLenChip<F> {
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -366,7 +379,6 @@ impl<F: PrimeField32> ChipBehavior<F> for ExpBitsLenChip<F> {
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         assert_koalabear_field::<F>();
 

@@ -1,46 +1,54 @@
+#[cfg(feature = "cuda")]
+use super::dummy_row::RISCV_DUMMY_ROW_KB;
 use super::{
     columns::{
         RiscvLastFullRound, RiscvPoseidon2ValueCols, RISCV_NUM_POSEIDON2_COLS,
         RISCV_NUM_POSEIDON2_VALUE_COLS, RISCV_POSEIDON2_NUM_INPUTS, RISCV_POSEIDON2_NUM_OUTPUTS,
     },
-    dummy_row::RISCV_DUMMY_ROW_KB,
     Poseidon2ChipP3,
+};
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{chips::riscv_poseidon2::Poseidon2Event, trace::TraceData},
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
 };
 use crate::{
     chips::{
-        chips::riscv_poseidon2::Poseidon2Event,
         gadgets::poseidon2::{
             columns::{FullRound, PartialRound},
             constants::RoundConstants,
             traces::{populate_full_round, populate_partial_round, populate_sbox},
         },
-        trace::TraceData,
         utils::next_power_of_two,
     },
     compiler::riscv::program::Program,
     configs::config::Poseidon2Config,
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
-    },
-    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord},
-    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
+    emulator::riscv::record::EmulationRecord,
     iter::{join, IndexedPicoIterator, IntoPicoIterator, PicoIterator, PicoSliceMut},
     machine::{chip::ChipBehavior, field::same_field},
     primitives::consts::{PERMUTATION_WIDTH, RISCV_POSEIDON2_DATAPAR},
 };
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
 use hybrid_array::Array;
 use p3_field::{PrimeField, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_riscv_poseidon2_generate_main;
 use std::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
 use tracing::info;
 use typenum::Unsigned;
 
@@ -144,7 +152,6 @@ impl<
     > ChipBehavior<F> for Poseidon2ChipP3<F, LinearLayers, Config>
 {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -227,13 +234,20 @@ impl<
     fn local_only(&self) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<
+        F: PrimeField32,
+        LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
+        Config: Poseidon2Config,
+    > GpuChipBehavior<F> for Poseidon2ChipP3<F, LinearLayers, Config>
+{
     fn gpu_generate_main(
         &self,
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         let events = &input.poseidon2_events;
 

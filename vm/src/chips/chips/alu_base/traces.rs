@@ -1,33 +1,40 @@
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
 use crate::{
     chips::{
         chips::alu_base::{columns::*, BaseAluChip},
-        trace::TraceData,
         utils::next_power_of_two,
     },
     compiler::recursion::{
         instruction::Instruction, program::RecursionProgram, types::BaseAluInstr,
     },
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::recursion::emulator::{BaseAluOpcode, RecursionRecord},
     iter::{IndexedPicoIterator, PicoIterator, PicoSliceMut},
     machine::chip::{ChipBehavior, PreprocessedRows},
     primitives::consts::BASE_ALU_DATAPAR,
 };
 use core::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{cuda_alu_base_generate_main, cuda_alu_base_generate_preprocessed};
 
 impl<F: PrimeField32> ChipBehavior<F> for BaseAluChip<F> {
     type Record = RecursionRecord<F>;
-    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -122,7 +129,10 @@ impl<F: PrimeField32> ChipBehavior<F> for BaseAluChip<F> {
     fn local_only(&self) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for BaseAluChip<F> {
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -202,7 +212,6 @@ impl<F: PrimeField32> ChipBehavior<F> for BaseAluChip<F> {
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         use p3_koala_bear::KoalaBear;
 

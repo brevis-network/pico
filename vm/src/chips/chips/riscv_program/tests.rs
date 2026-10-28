@@ -1,18 +1,21 @@
 use crate::{
-    chips::{
-        chips::riscv_program::{
-            columns::{
-                ProgramPreprocessedCols, NUM_PROGRAM_MULT_COLS, NUM_PROGRAM_PREPROCESSED_COLS,
-            },
-            ProgramChip,
-        },
-        tests::init_test_stream,
-        trace::TraceData,
+    chips::chips::riscv_program::{
+        columns::{ProgramPreprocessedCols, NUM_PROGRAM_PREPROCESSED_COLS},
+        ProgramChip,
     },
     compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program},
+    machine::chip::ChipBehavior,
+};
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{
+        chips::riscv_program::columns::NUM_PROGRAM_MULT_COLS, tests::init_test_stream,
+        trace::TraceData,
+    },
     cuda_adaptor::resource_pool::mem_pool::get_global_mem_pool,
     emulator::riscv::{
         cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
+        event_pool::HostAllocFlags,
         record::EmulationRecord,
     },
     instances::{
@@ -22,33 +25,42 @@ use crate::{
             PreparedGpuEvents,
         },
     },
-    machine::chip::ChipBehavior,
+    machine::chip::GpuChipBehavior,
 };
-use cudart::{memory::CudaHostAllocFlags, memory_pools::DevicePoolAllocation, slice::CudaSliceMut};
+#[cfg(feature = "cuda")]
+use cudart::{memory_pools::DevicePoolAllocation, slice::CudaSliceMut};
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
+#[cfg(feature = "cuda")]
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_riscv_program_generate_main_u64;
+#[cfg(feature = "cuda")]
 use rand::{rng, RngExt};
+use std::borrow::Borrow;
+#[cfg(feature = "cuda")]
 use std::{
-    borrow::Borrow,
     sync::{Arc, LazyLock},
     time::Instant,
 };
 
 type F = KoalaBear;
 
+#[cfg(feature = "cuda")]
 static GPU_TEST_RECORD: LazyLock<EmulationRecord> =
     LazyLock::new(|| generate_gpu_test_record(1 << 20));
 
+#[cfg(feature = "cuda")]
 fn cpu_generate_main(chip: &ProgramChip<F>, input: &EmulationRecord) -> RowMajorMatrix<F> {
     chip.generate_main(input, &mut EmulationRecord::default())
 }
 
+#[cfg(feature = "cuda")]
 fn generate_gpu_test_record(event_count: usize) -> EmulationRecord {
     if !is_pool_initialized() {
-        init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+        init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
     }
 
     let num_instrs = 1 << 16;
@@ -77,6 +89,7 @@ fn generate_gpu_test_record(event_count: usize) -> EmulationRecord {
     record
 }
 
+#[cfg(feature = "cuda")]
 fn gpu_generate_extra_record_and_main(
     chip: &ProgramChip<F>,
     input: &EmulationRecord,
@@ -93,12 +106,14 @@ fn gpu_generate_extra_record_and_main(
     trace.to_host(stream)
 }
 
+#[cfg(feature = "cuda")]
 fn gpu_generate_preprocessed(chip: &ProgramChip<F>, program: &Program) -> RowMajorMatrix<F> {
     let stream = init_test_stream();
     let trace = chip.gpu_generate_preprocessed(0, program).unwrap();
     trace.to_host(stream)
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn test_riscv_program_gpu_generate_preprocessed() {
     let original_record = LazyLock::force(&GPU_TEST_RECORD);
@@ -127,6 +142,7 @@ fn test_riscv_program_gpu_generate_preprocessed() {
     );
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn test_riscv_program_gpu_generate_extra_record_and_main() {
     let original_record = LazyLock::force(&GPU_TEST_RECORD);
@@ -217,10 +233,11 @@ fn test_riscv_program_gpu_generate_extra_record_and_main() {
     );
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn bench_riscv_program_cpu_vs_gpu() {
     if !is_pool_initialized() {
-        init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+        init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
     }
 
     let warmup_sizes: Vec<usize> = vec![1 << 16];
@@ -382,6 +399,7 @@ fn preprocessed_table_writes_row_zero_for_trap_instructions() {
     assert!(!Opcode::ADD.is_trap() && !Opcode::ECALL.is_trap() && !Opcode::JAL.is_trap());
 }
 
+#[cfg(feature = "cuda")]
 /// The CUDA kernel applies the trap rule by opcode value; the two tables must agree cell by cell
 /// or the app preprocessed commitments differ.
 #[test]

@@ -44,7 +44,7 @@ use tree::build_tree;
 fn main() {
     setup_logger();
     // The GPU riscv prover allocates from the shared pool; a CPU build has none to set up.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     riscv::init_mle_gpu_pool(riscv::MLE_GPU_DEVICE);
     let (elf, stdin, args) = parse_args::parse_args::<KoalaBearPoseidon2>();
     assert_eq!(

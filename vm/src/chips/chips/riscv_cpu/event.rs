@@ -160,6 +160,15 @@ impl CpuEvent {
     }
 }
 
+/// ALU events one CPU row adds (see `CpuChip::count_cpu_event`). Shared with the GPU kernels,
+/// which index the ALU buffers by it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct CpuExtraEventIndices {
+    pub add: usize,
+    pub lt: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::CpuEvent;

@@ -29,7 +29,10 @@ fn event(i: usize) -> AluEvent {
 fn growable_buffers() {
     std::env::set_var("ALU_EVENT_BUFFER_SIZE", POOL_CAPACITY.to_string());
     // A size-0 pool, as the host prover makes: anything returned to it blocks unless dropped.
-    init_alu_event_buffer_pool(0, cudart::memory::CudaHostAllocFlags::DEFAULT);
+    init_alu_event_buffer_pool(
+        0,
+        pico_vm::emulator::riscv::event_pool::HostAllocFlags::DEFAULT,
+    );
     use_growable_event_buffers();
 
     // Contents survive every grow, through pushes and extends alike.

@@ -1,8 +1,5 @@
 //! Take an ELF and an input; get back a verified proof.
 //!
-//! On this branch it proves on the CPU, but the emulator's event buffers are CUDA pinned memory, so
-//! it still needs a CUDA driver.
-//!
 //! ```no_run
 //! use pico_prover::{Prover, Stdin};
 //!

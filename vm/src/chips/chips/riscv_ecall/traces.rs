@@ -6,33 +6,45 @@ use crate::{
     chips::{
         chips::{byte::event::ByteRecordBehavior, riscv_cpu::event::CpuEvent},
         gadgets::field_range_check::word_range::FieldWordRangeChecker,
-        trace::TraceData,
-        utils::{next_power_of_two, pad_rows_fixed},
+        utils::pad_rows_fixed,
     },
     compiler::{riscv::program::Program, word::Word},
+    emulator::riscv::{record::EmulationRecord, syscalls::SyscallCode},
+    iter::{IntoPicoIterator, PicoIterator, PicoSlice},
+    machine::chip::ChipBehavior,
+};
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{trace::TraceData, utils::next_power_of_two},
     cuda_adaptor::resource_pool::{
         mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
     },
-    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord, syscalls::SyscallCode},
     instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
-    iter::{IntoPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSlice},
-    machine::chip::ChipBehavior,
+    iter::IntoPicoRefIterator,
+    machine::chip::GpuChipBehavior,
 };
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_ecall_generate_extra_record_and_main_u64,
     cuda_ecall_generate_extra_record_and_main_u64_packed,
 };
-use std::{borrow::BorrowMut, mem::size_of};
+use std::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
+use std::mem::size_of;
+#[cfg(feature = "cuda")]
 use tracing::info;
 
 impl<F: Field> BaseAir<F> for EcallChip<F> {
@@ -262,7 +274,6 @@ impl<F: PrimeField32> EcallChip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for EcallChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -347,7 +358,10 @@ impl<F: PrimeField32> ChipBehavior<F> for EcallChip<F> {
         // GPU activity predicates aligned).
         !record.cpu_events.is_empty()
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for EcallChip<F> {
     fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
         record.event_counter.num_cpu_events > 0
     }

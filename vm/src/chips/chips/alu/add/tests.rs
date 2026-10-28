@@ -1,3 +1,4 @@
+#[cfg(feature = "cuda")]
 use crate::{
     chips::{
         chips::{
@@ -11,6 +12,7 @@ use crate::{
     cuda_adaptor::resource_pool::mem_pool::get_global_mem_pool,
     emulator::riscv::{
         alu_event_pool::{init_alu_event_buffer_pool, is_alu_pool_initialized},
+        event_pool::HostAllocFlags,
         record::EmulationRecord,
     },
     instances::{
@@ -20,26 +22,34 @@ use crate::{
             precompute_event_size, PreallocatedGpuMemory, PreparedGpuEvents,
         },
     },
-    machine::chip::ChipBehavior,
+    machine::chip::{ChipBehavior, GpuChipBehavior},
     primitives::consts::ADD_DATAPAR,
 };
-use cudart::{memory::CudaHostAllocFlags, memory_pools::DevicePoolAllocation, slice::CudaSliceMut};
+#[cfg(feature = "cuda")]
+use cudart::{memory_pools::DevicePoolAllocation, slice::CudaSliceMut};
+#[cfg(feature = "cuda")]
 use p3_field::PrimeCharacteristicRing;
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
+#[cfg(feature = "cuda")]
 use rand::{rng, RngExt};
+#[cfg(feature = "cuda")]
 use std::sync::LazyLock;
 
+#[cfg(feature = "cuda")]
 type F = KoalaBear;
 
+#[cfg(feature = "cuda")]
 /// Random ADD / SUB / ADDW / SUBW events, interleaved, so the partition step in the test has to
 /// pull the ADD rows out of the shared buffer the way the prover does between the DivRem chip
 /// and this one.
 static GPU_TEST_RECORD: LazyLock<EmulationRecord> =
     LazyLock::new(|| generate_gpu_test_record(1 << 20));
 
+#[cfg(feature = "cuda")]
 fn generate_gpu_test_record(event_count: u64) -> EmulationRecord {
     if !is_alu_pool_initialized() {
-        init_alu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+        init_alu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
     }
 
     let rng = &mut rng();
@@ -73,12 +83,14 @@ fn generate_gpu_test_record(event_count: u64) -> EmulationRecord {
     record
 }
 
+#[cfg(feature = "cuda")]
 fn device_base(buffer: &mut Option<DevicePoolAllocation<'_, AluEvent>>) -> *mut std::ffi::c_void {
     buffer
         .as_mut()
         .map_or(std::ptr::null_mut(), |b| b.as_mut_ptr() as *mut _)
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn test_add_sub_gpu_generate_extra_record_and_main() {
     let original_record = LazyLock::force(&GPU_TEST_RECORD);

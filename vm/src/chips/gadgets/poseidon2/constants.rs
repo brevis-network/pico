@@ -4,6 +4,7 @@ use crate::{
 };
 use hybrid_array::Array;
 use p3_field::Field;
+#[cfg(feature = "cuda")]
 use typenum::Unsigned;
 
 /// Round constants for Poseidon2, in a format that's convenient for the AIR.
@@ -24,6 +25,7 @@ impl<F: FieldSpecificPoseidon2Config<Poseidon2Config = Config>, Config: Poseidon
 }
 
 impl<F: Field, Config: Poseidon2Config> RoundConstants<F, Config> {
+    #[cfg(feature = "cuda")]
     /// Flatten into the GPU kernel's round-constant table layout: one `PERMUTATION_WIDTH`-wide row
     /// per round — the beginning half-full rounds, then one row per partial round (the constant in
     /// lane 0, the rest zero — the kernel reads only lane 0), then the ending half-full rounds.

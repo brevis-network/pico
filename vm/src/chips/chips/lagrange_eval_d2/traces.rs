@@ -1,37 +1,43 @@
 use crate::{
-    chips::{
-        chips::lagrange_eval_d2::{
-            columns::{
-                LagrangeEvalD2Cols, LagrangeEvalD2PreprocessedCols, NUM_LAGRANGE_EVAL_D2_COLS,
-                NUM_LAGRANGE_EVAL_D2_PREPROCESSED_COLS,
-            },
-            LagrangeEvalD2Chip,
+    chips::chips::lagrange_eval_d2::{
+        columns::{
+            LagrangeEvalD2Cols, LagrangeEvalD2PreprocessedCols, NUM_LAGRANGE_EVAL_D2_COLS,
+            NUM_LAGRANGE_EVAL_D2_PREPROCESSED_COLS,
         },
-        trace::TraceData,
+        LagrangeEvalD2Chip,
     },
     compiler::recursion::{
         instruction::Instruction,
-        mle_instruction_buckets::MleVariant,
         program::RecursionProgram,
         types::{LagrangeEvalD2Event, LagrangeEvalD2Instr},
     },
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::recursion::emulator::RecursionRecord,
     machine::{
         chip::{ChipBehavior, PreprocessedRows},
         utils::pad_to_power_of_two,
     },
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    compiler::recursion::mle_instruction_buckets::MleVariant,
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_air::BaseAir;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_lagrange_eval_d2_generate_main, cuda_lagrange_eval_d2_generate_preprocessed,
 };
@@ -45,7 +51,6 @@ impl<F> BaseAir<F> for LagrangeEvalD2Chip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for LagrangeEvalD2Chip<F> {
     type Record = RecursionRecord<F>;
-    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -128,7 +133,10 @@ impl<F: PrimeField32> ChipBehavior<F> for LagrangeEvalD2Chip<F> {
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for LagrangeEvalD2Chip<F> {
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -201,7 +209,6 @@ impl<F: PrimeField32> ChipBehavior<F> for LagrangeEvalD2Chip<F> {
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         use p3_koala_bear::KoalaBear;
 

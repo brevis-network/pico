@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Single-node MLE/WHIR prover (KoalaBear, GPU via cuda-mle). Run from the repo root on a CUDA box;
+# Single-node MLE/WHIR prover (KoalaBear, GPU via `cuda`). Run from the repo root on a CUDA box;
 # non-interactive ssh: invoke via `bash -lc ./single_node_mle.sh`. Operating point: CHUNK_SIZE=2^23,
 # MLE_LOG_STACKED_HEIGHT=23.
 set -xe
@@ -171,11 +171,23 @@ N="${MLE_N:-188}"
 # an explicit MLE_STEP wins.
 export MLE_STEP="${MLE_STEP:-combine}"
 
-# Default GPU path (`cuda-mle`) + `aot-emulator`. Override FEATURES for
-# CPU-only. NOTE: aot-emulator requires the per-ELF AOT dispatch crate to be generated first:
+# GPU path (`cuda`) + `aot-emulator`. Without a CUDA toolkit and a GPU this stops, unless
+# PICO_CUDA=0 asks for the CPU prover (see detect_cuda.sh); an explicit FEATURES wins over both.
+# NOTE: aot-emulator requires the per-ELF AOT dispatch crate to be generated first:
 #   cargo run -r -p pico-aot-codegen --bin generate_crates -- perf/bench_data/rv64/reth-elf
 # (run once per ELF; without it the `aot-generated` crate is a stub and the build fails).
-FEATURES="${FEATURES:-bigint-rug tcmalloc mmap-memory aot-emulator cuda-mle}"
+if [ -z "${FEATURES:-}" ]; then
+    . "$(dirname "$0")/detect_cuda.sh"
+    pico_cuda_detect
+    if [ "$PICO_BACKEND" = cuda ]; then
+        FEATURES="bigint-rug tcmalloc mmap-memory aot-emulator cuda"
+    elif [ "${PICO_CUDA:-}" = 0 ]; then
+        FEATURES="bigint-rug tcmalloc mmap-memory aot-emulator"
+    else
+        echo "single_node_mle.sh: no CUDA toolkit or GPU found; PICO_CUDA=0 proves on the CPU" >&2
+        exit 1
+    fi
+fi
 
 CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-8}" cargo build --bin mle-single-node --release --features "$FEATURES"
 

@@ -40,8 +40,5 @@ jemalloc = ["pico-vm/jemalloc"]
 mmap-memory = ["pico-vm/mmap-memory", "pico-aot-dispatch/mmap-memory"]
 
 [dev-dependencies]
-# Same source as the root workspace: a second `cudart` would be a second type, and the pool it
-# hands flags to lives in pico-vm.
-cudart = { git = "https://github.com/brevis-network/era-cuda.git", rev = "4277a3558fce68b5ae48bc80055046bb1d0d6ed4" }
 p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", rev = "da6ca12c" }
 rayon = "1.10"

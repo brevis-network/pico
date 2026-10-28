@@ -7,9 +7,7 @@ keywords.workspace = true
 categories.workspace = true
 
 # Replays one dumped recursion emulation off the box (see `vm/bin/rec_emulate_replay.rs`).
-# Outside `src/bin` so it is declared here rather than auto-discovered. It builds without the
-# `cuda-mle` feature and calls no GPU code, but still needs a CUDA toolchain: `pico-gpu-api` is
-# a non-optional dependency whose build script runs nvcc unconditionally.
+# Outside `src/bin` so it is declared here rather than auto-discovered.
 [[bin]]
 name = "rec-emulate-replay"
 path = "bin/rec_emulate_replay.rs"
@@ -17,13 +15,12 @@ path = "bin/rec_emulate_replay.rs"
 [dependencies]
 # pico
 pico-derive.workspace = true
-pico-gpu-api.workspace = true
+pico-gpu-api = { workspace = true, optional = true }
 # MLE/WHIR protocol core; `parallel` routed via vm's `rayon` feature (see below).
 pico-mle-core = { path = "../mle-core", default-features = false }
 # Row-major CPU device; the engine the MLE RISCV path proves on.
 pico-mle-cpu = { path = "../mle-cpu", default-features = false }
-# GPU CUDA MLE/WHIR backend. Optional: pulled in (and its native kernels linked) only under the
-# `cuda-mle` feature; without it the prover proves on the CPU.
+# GPU CUDA MLE/WHIR backend, pulled in only under the `cuda` feature.
 cuda-mle = { path = "../cuda-mle", optional = true }
 
 # p3
@@ -39,8 +36,8 @@ p3-maybe-rayon = { workspace = true, features = [] }
 p3-bn254.workspace = true
 p3-koala-bear.workspace = true
 
-cudart.workspace = true
-cudart-sys.workspace = true
+cudart = { workspace = true, optional = true }
+cudart-sys = { workspace = true, optional = true }
 
 # misc
 amcl.workspace = true
@@ -130,7 +127,7 @@ memmap2 = { version = "0.9", optional = true }
 libc = { version = "0.2", optional = true }
 
 [features]
-default = ["rayon", "gpu", "strict", "multi-field-transcript"]
+default = ["rayon", "strict", "multi-field-transcript"]
 bigint-rug = ["rug"] # curves
 debug = []
 debug-lookups = []
@@ -138,10 +135,6 @@ tcmalloc = ["dep:tcmalloc"]
 jemalloc = ["dep:tikv-jemallocator"]
 single-threaded = []
 rayon = ["dep:rayon", "dep:rayon-scan", "p3-maybe-rayon/parallel", "parallel"]
-# Kept as an empty feature: `distributed-vm` still names `pico-vm/gpu`. On the pinned
-# Plonky3 fork it disabled packed field arithmetic; upstream 0.5 has no such switch and none of the
-# GPU interop depends on `Packing::WIDTH`.
-gpu = []
 strict = []
 aot-emulator = []
 # Use memory-mapped storage for ContiguousRiscvMemory (Unix only)
@@ -151,9 +144,9 @@ mmap-memory = ["dep:memmap2", "dep:libc"]
 # Two-round chunk assignment: Primary 0-7,16-23; Secondary 8-15,24-31; Dynamic 32+
 two-round-chunks = []
 
-# GPU CUDA MLE/WHIR backend. Links cuda-mle's native kernels; requires a CUDA toolchain + GPU.
-# Off by default, so CI can lint without a GPU (see the `--exclude cuda-mle` CI lint note).
-cuda-mle = ["dep:cuda-mle"]
+# GPU prover: CUDA trace generation and the CUDA MLE/WHIR backend. Needs a CUDA toolkit to build
+# and a GPU to run; off by default, so the default build needs neither.
+cuda = ["dep:cuda-mle", "dep:pico-gpu-api", "dep:cudart", "dep:cudart-sys"]
 
 # Pass-throughs to `pico-mle-core`. All but `multi-field-transcript` are off by default. vm gates
 # two things of its own on them: `multi-field-transcript` the EVM path (the embed and wrap stages
@@ -174,3 +167,8 @@ required-features = ["multi-field-transcript"]
 [[example]]
 name = "mle_soundness_manifest"
 required-features = ["multi-field-transcript"]
+
+# Counts events the way the GPU preparer does.
+[[example]]
+name = "mle_event_stats"
+required-features = ["cuda"]

@@ -1,3 +1,9 @@
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
 use crate::{
     chips::{
         chips::select::{
@@ -8,13 +14,11 @@ use crate::{
             },
             SelectChip,
         },
-        trace::TraceData,
         utils::next_power_of_two,
     },
     compiler::recursion::{
         instruction::Instruction, program::RecursionProgram, types::SelectInstr,
     },
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::recursion::emulator::RecursionRecord,
     iter::{
         current_num_threads, IndexedPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSliceMut,
@@ -23,20 +27,23 @@ use crate::{
     primitives::consts::SELECT_DATAPAR,
 };
 use core::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{cuda_select_generate_main, cuda_select_generate_preprocessed};
 
 impl<F: PrimeField32> ChipBehavior<F> for SelectChip<F> {
     type Record = RecursionRecord<F>;
-    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -120,7 +127,10 @@ impl<F: PrimeField32> ChipBehavior<F> for SelectChip<F> {
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for SelectChip<F> {
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -200,7 +210,6 @@ impl<F: PrimeField32> ChipBehavior<F> for SelectChip<F> {
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         use p3_koala_bear::KoalaBear;
 

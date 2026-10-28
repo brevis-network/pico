@@ -3,6 +3,15 @@ use super::{
     event::GlobalInteractionEvent,
     GlobalChip,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::{chip::GpuChipBehavior, field::FieldSpecificPoseidon2Config},
+};
 use crate::{
     chips::{
         chips::{
@@ -10,15 +19,10 @@ use crate::{
             riscv_poseidon2::Poseidon2Event,
         },
         gadgets::global_interaction::GlobalInteractionOperation,
-        trace::TraceData,
         utils::{next_power_of_two, zeroed_f_vec},
     },
     compiler::riscv::{opcode::ByteOpcode, program::Program},
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
-    },
-    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord},
-    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    emulator::riscv::record::EmulationRecord,
     iter::{
         IndexedPicoIterator, IntoPicoIterator, IntoPicoRefMutIterator, PicoBridge, PicoIterator,
         PicoScanIterator,
@@ -26,29 +30,32 @@ use crate::{
     machine::{
         chip::ChipBehavior,
         estimator::{EventCapture, EventSizeCapture},
-        field::FieldSpecificPoseidon2Config,
         lookup::LookupScope,
         septic::{
             FieldSepticCurve, SepticCurve, SepticCurveComplete, SepticDigest, SepticExtension,
         },
     },
 };
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
 use p3_field::PrimeField32;
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_riscv_global_generate_extra_record_and_main;
 use std::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
 use tracing::info;
 
 impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -227,7 +234,10 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
     fn lookup_scope(&self) -> LookupScope {
         LookupScope::Global
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for GlobalChip<F> {
     fn count_extra_records(_record: &Self::Record, counter: &mut EventCounter) {
         // counter.num_global_lookup_events += record.global_lookup_events.len();
         counter.num_poseidon2_events += counter.num_global_lookup_events;

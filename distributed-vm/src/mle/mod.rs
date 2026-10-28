@@ -27,7 +27,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use cudart::memory::CudaHostAllocFlags;
 use dashmap::DashMap;
 use p3_koala_bear::KoalaBear;
 use pico_vm::{
@@ -42,6 +41,7 @@ use pico_vm::{
         riscv::{
             alu_event_pool::{init_alu_event_buffer_pool, is_alu_pool_initialized},
             cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
+            event_pool::HostAllocFlags,
             record::EmulationRecord,
         },
         stdin::EmulatorStdin,
@@ -59,8 +59,8 @@ use pico_vm::{
 };
 use tracing::{info, warn};
 
-// The streaming convert stage is GPU-only (no CPU path); its types exist only under `cuda-mle`.
-#[cfg(feature = "cuda-mle")]
+// The streaming convert stage is GPU-only (no CPU path); its types exist only under `cuda`.
+#[cfg(feature = "cuda")]
 use pico_vm::mle::machine::{
     apex::MleApexVerifier,
     convert::GpuConvertMachine,
@@ -81,13 +81,13 @@ use crate::common::{
 };
 // The combine-preparer feed names the task type; on CPU builds the dispatcher's combine arm is
 // `unreachable!` and never names it.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 use crate::common::global_scheduler::CombineTask;
 // Reached only from the convert/combine reporting arms, which are GPU-only.
-#[cfg(feature = "cuda-mle")]
-use crate::common::mle_scheduler_singleton::mle_report_proof;
-#[cfg(feature = "cuda-mle")]
-use crate::gateway::handler::proof_tree::IndexedProof;
+#[cfg(feature = "cuda")]
+use crate::{
+    common::mle_scheduler_singleton::mle_report_proof, gateway::handler::proof_tree::IndexedProof,
+};
 use config::{MleSingleNodeConfig, Step};
 
 /// The RISCV chunk proof type. It flows to the convert stage over a channel; it never enters the
@@ -98,7 +98,7 @@ type MleProof = pico_vm::mle::proof::Proof<pico_vm::mle::machine::riscv::Sc>;
 ///
 /// `proof` is the `Arc` the scheduler's `IndexedProof` already wraps, so stashing it costs a
 /// refcount rather than a deep copy of the proof.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 struct RootRecord {
     proof: Arc<SchedulerProof>,
     /// The root node's ORDERED child layouts — required to register its shape on the CPU
@@ -231,7 +231,7 @@ fn vk_verification() -> bool {
 /// The whitelist artifact (`MLE_VK_MAP`, checked against `MLE_VK_ROOT` by the loader). The GPU
 /// pipeline has no self-map fallback: it keygens convert VKs as chunks arrive, so the whitelist
 /// must exist before the first proof.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn whitelist_map() -> Arc<MleVkMap> {
     let path = std::env::var("MLE_VK_MAP")
         .expect("VK_VERIFICATION=true needs MLE_VK_MAP, the whitelist artifact");
@@ -333,7 +333,7 @@ fn recursion_lane_from(raw: Option<&str>) -> bool {
 /// Same allow-list treatment as [`recursion_lane_from`], and for the same reason: this default is
 /// ON, so an unrecognised value would silently leave the new path running under someone who asked
 /// for the old one while they were trying to bisect a regression. An empty value reads as unset.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn convert_prebuild_enabled() -> bool {
     convert_prebuild_from(std::env::var("MLE_CONVERT_PREBUILD").ok().as_deref())
 }
@@ -348,7 +348,7 @@ fn convert_prebuild_enabled() -> bool {
 ///
 /// Ungated so the tests below can reach it without CUDA — the double draw it exists to prevent is
 /// a property of the counter and the map, not of any device.
-#[cfg_attr(not(feature = "cuda-mle"), allow(dead_code))]
+#[cfg_attr(not(feature = "cuda"), allow(dead_code))]
 fn convert_card_for(
     chunk_idx: usize,
     claimed: &DashMap<usize, usize>,
@@ -371,7 +371,7 @@ fn convert_card_for(
 /// Same allow-list treatment as [`convert_prebuild_from`], and for the same reason: the default is
 /// ON, so an unrecognised value must not silently leave the new path running under someone who
 /// asked for the old one.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn convert_prebuild_pk_enabled() -> bool {
     convert_prebuild_from(std::env::var("MLE_CONVERT_PREBUILD_PK").ok().as_deref())
 }
@@ -382,7 +382,7 @@ fn convert_prebuild_pk_enabled() -> bool {
 /// Ungated so `cargo test -p distributed-vm` runs its tests without CUDA, exactly as the sibling
 /// `recursion_lane_from` does — the word lists are this flag's whole user interface, and a
 /// mistyped value silently keeping the new path on is what they exist to catch.
-#[cfg_attr(not(feature = "cuda-mle"), allow(dead_code))]
+#[cfg_attr(not(feature = "cuda"), allow(dead_code))]
 fn convert_prebuild_from(raw: Option<&str>) -> bool {
     let Some(raw) = raw else { return true };
     match raw.trim().to_ascii_lowercase().as_str() {
@@ -538,17 +538,17 @@ enum ProverItem {
 /// here were built on card `k`), and the lane id is what every span this thread records is keyed
 /// on -- two threads sharing one would record over each other.
 fn bind_prover_lane(k: usize, role: Role) {
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     pico_vm::mle::cuda_mle::runtime::context::set_device(k as i32)
         .unwrap_or_else(|e| panic!("{}-{k} could not bind card {k}: {e:?}", role.as_str()));
     spans::bind_lane(LaneId::new(role, k));
 }
 
 /// What the riscv lane's hook sends a pre-build worker: the chunk and its per-air heights.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 type PrebuildTx = crossbeam::channel::Sender<(usize, Vec<Option<usize>>)>;
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 impl Drop for ConvertPrebuild {
     /// The backstop for the early returns between the explicit shutdown and the end of the
     /// pipeline: the machines outlive this pool, so no worker may still be keygening into them.
@@ -583,7 +583,7 @@ impl Drop for ConvertPrebuild {
 /// Under `MLE_CONVERT_PREBUILD_PK` a worker additionally warms the device proving key, and then
 /// the card stops being irrelevant: a key lives on one card, so the worker claims the chunk's card
 /// from the counter the preparers draw from and leaves it in the map for the preparer to follow.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 struct ConvertPrebuild {
     /// Taken by [`Self::shutdown`]: dropping the last sender is what wakes the workers out of
     /// `recv`, so it cannot live on as a field while the shutdown waits for them.
@@ -593,7 +593,7 @@ struct ConvertPrebuild {
     workers: std::sync::Mutex<Vec<thread::JoinHandle<()>>>,
 }
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 impl ConvertPrebuild {
     /// `MLE_CONVERT_PREBUILD` gates the whole mechanism — **default ON**, `=0` is the kill switch.
     /// `MLE_CONVERT_PREBUILDERS` overrides the pool width. Returns `None` when disabled, in which
@@ -727,7 +727,7 @@ struct RiscvLane {
     /// pre-build reads only `riscv_vk` (identical on every card) and writes into a
     /// PROCESS-GLOBAL program cache, so which card's machine backs it is irrelevant — which is
     /// exactly what makes the hoist survive the convert preparers picking a card round-robin.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     convert_prebuild: Option<Arc<ConvertPrebuild>>,
 }
 
@@ -746,7 +746,7 @@ impl RiscvLane {
         // The hook fires the moment trace-gen has fixed this chunk's committed heights and
         // before commit starts, so the convert program build overlaps the remaining ~505 ms of
         // this very prove. `send` on an unbounded channel is the only work done on this thread.
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         // One look at the sender, not two: it can be taken by the pool's shutdown at any moment,
         // and a `None` here just means this chunk proves without a pre-build, as it did before.
         let proof = match self.convert_prebuild.as_ref().and_then(|pb| pb.sender()) {
@@ -761,7 +761,7 @@ impl RiscvLane {
             }
             None => chunk.prove(&self.prover, self.verify),
         };
-        #[cfg(not(feature = "cuda-mle"))]
+        #[cfg(not(feature = "cuda"))]
         let proof = chunk.prove(&self.prover, self.verify);
         let elapsed = t.elapsed();
         self.prove_nanos
@@ -777,7 +777,7 @@ impl RiscvLane {
         // `MLE_BREAKDOWN` one-line per-chunk phase split (us), mirroring the FRI prover's
         // `(Prep/Commit/...)` line. `residual = total - sum(measured)` captures un-instrumented
         // glue (H2D / transcript / alloc). zerocheck is folded into rap_constraints.
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         if pico_vm::mle::cuda_mle::breakdown::enabled() {
             let (tracegen, commit, rap, openings) = pico_vm::mle::cuda_mle::breakdown::take();
             let total = elapsed.as_micros() as u64;
@@ -824,7 +824,7 @@ impl RiscvLane {
 ///
 /// Unlike [`RiscvLane`] it may be held by more than one thread at a time: it owns no sender, so a
 /// spare handle keeps no channel open.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 struct CardRecursion {
     convert: Option<Arc<GpuConvertMachine>>,
     combine: Option<Arc<pico_vm::mle::machine::combine::GpuCombineMachine>>,
@@ -837,7 +837,7 @@ struct CardRecursion {
     with_combine: bool,
 }
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 impl CardRecursion {
     /// Prove one convert off this card's ready lane. `worker_id` is the calling lane's, so the
     /// `[bench]` line names the thread that did the work rather than the card.
@@ -1014,12 +1014,12 @@ impl VramWatch {
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(0);
         let stop = Arc::new(AtomicBool::new(false));
-        // Only the `cuda-mle` build pushes into these.
-        #[cfg_attr(not(feature = "cuda-mle"), allow(unused_mut))]
+        // Only the `cuda` build pushes into these.
+        #[cfg_attr(not(feature = "cuda"), allow(unused_mut))]
         let mut peaks = Vec::new();
-        #[cfg_attr(not(feature = "cuda-mle"), allow(unused_mut))]
+        #[cfg_attr(not(feature = "cuda"), allow(unused_mut))]
         let mut threads = Vec::new();
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         if poll_ms > 0 {
             for k in 0..prover_count {
                 let peak = Arc::new(AtomicUsize::new(0));
@@ -1045,7 +1045,7 @@ impl VramWatch {
                 );
             }
         }
-        #[cfg(not(feature = "cuda-mle"))]
+        #[cfg(not(feature = "cuda"))]
         let _ = (poll_ms, prover_count);
         Self {
             stop,
@@ -1081,23 +1081,23 @@ impl Drop for VramWatch {
 /// precedes the blocking send, so every preparer blocked on the bounded(1) lane holds a built ctx
 /// of its own — up to `MLE_CONVERT_PREPARERS` + 1 per card. That residency is what sizes the pool
 /// (see `preparer_pool`); twelve of them is what a single card cannot afford.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 struct ConvertWork(pico_vm::mle::machine::convert::BuiltConvert);
 /// CPU build: uninhabited — the ready lane closes without ever carrying an item, and the prover's
 /// match arm is `match work {}`.
-#[cfg(not(feature = "cuda-mle"))]
+#[cfg(not(feature = "cuda"))]
 enum ConvertWork {}
 
 /// Combine work arriving at the prover slot: a node ctx already built on its preparer. Same size
 /// and same bound as [`ConvertWork`], with `MLE_COMBINE_PREPARERS` setting it here.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 struct CombineWork {
     start_chunk: usize,
     end_chunk: usize,
     built: pico_vm::mle::machine::combine::BuiltCombine,
 }
 /// CPU build: uninhabited, exactly like [`ConvertWork`].
-#[cfg(not(feature = "cuda-mle"))]
+#[cfg(not(feature = "cuda"))]
 enum CombineWork {}
 
 const RV64_DIR: &str = "./perf/bench_data/rv64";
@@ -1221,7 +1221,7 @@ fn recv_idle<T>(rx: &crossbeam::channel::Receiver<T>, work: WorkKind) -> Option<
 /// `MLE_VRAM_CENSUS` (cached): the block-boundary census. Cached because the alternative is an
 /// environment read per boundary, and because a switch that could change mid-process would make
 /// the rows it produces incomparable with each other.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn vram_census_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| env_flag("MLE_VRAM_CENSUS"))
@@ -1236,7 +1236,7 @@ fn vram_census_enabled() -> bool {
 /// sweep also put driver reads, a device rebind and a manager lock inside every block's measured
 /// window -- and `d_malloc` holds that same lock across its OOM self-heal, so a probe could stall
 /// the thread it was measuring. Off, what the window pays is one atomic load per point.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn vram_probe_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| env_flag("MLE_VRAM_PROBE"))
@@ -1251,7 +1251,7 @@ enum CensusPhase {
     Post,
 }
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 impl CensusPhase {
     fn as_str(self) -> &'static str {
         match self {
@@ -1264,10 +1264,10 @@ impl CensusPhase {
 /// Restores the calling thread's CUDA device when the census leaves, including out of a panic in
 /// one of the caches it reads. Leaving the thread bound to the last card walked would silently
 /// move where the next block's keygen lands.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 struct DeviceBinding(Option<i32>);
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 impl Drop for DeviceBinding {
     fn drop(&mut self) {
         if let Some(dev) = self.0 {
@@ -1317,7 +1317,7 @@ impl Drop for DeviceBinding {
 ///
 /// A card that could not be read emits a `vram_census_note:` line instead of a census row, so a
 /// `vram_census:` row is always one per card per boundary with every field present.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn vram_census(phase: CensusPhase, epoch: usize, block: u32, cards: usize) {
     use pico_vm::mle::cuda_mle::runtime::{context, memory_manager as mm, stream};
     if !vram_census_enabled() {
@@ -1428,7 +1428,7 @@ fn vram_census(phase: CensusPhase, epoch: usize, block: u32, cards: usize) {
 /// with no lock between them and the pool figures first: a pool trimmed in between
 /// clamps `out_of_pool` to 0.00, which reads identically to "nothing outside the pools", while one
 /// growing in between overstates it.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn vram_probe(at: &str, epoch: usize, cards: usize) {
     use pico_vm::mle::cuda_mle::runtime::{context, memory_manager as mm};
     // First statement, and a cached load: ten of the thirteen call sites are inside the window
@@ -1462,11 +1462,11 @@ fn vram_probe(at: &str, epoch: usize, cards: usize) {
     }
 }
 
-#[cfg(not(feature = "cuda-mle"))]
+#[cfg(not(feature = "cuda"))]
 fn vram_probe(_at: &str, _epoch: usize, _cards: usize) {}
 
 /// The census is GPU-only; the CPU build keeps the call sites rather than cfg-ing them.
-#[cfg(not(feature = "cuda-mle"))]
+#[cfg(not(feature = "cuda"))]
 fn vram_census(_phase: CensusPhase, _epoch: usize, _block: u32, _cards: usize) {}
 
 /// Single-node entry: dispatch on the requested proving step. `riscv` and `convert` are wired
@@ -1530,14 +1530,14 @@ pub fn run_step(
 ) -> BlockOutcome {
     match cfg.step {
         Step::Riscv => run_pipeline(cfg, false, false, iteration, job),
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         Step::Convert => run_pipeline(cfg, true, false, iteration, job),
-        #[cfg(not(feature = "cuda-mle"))]
-        Step::Convert => panic!("--step convert requires the `cuda-mle` feature"),
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(not(feature = "cuda"))]
+        Step::Convert => panic!("--step convert requires the `cuda` feature"),
+        #[cfg(feature = "cuda")]
         Step::Combine => run_pipeline(cfg, true, true, iteration, job),
-        #[cfg(not(feature = "cuda-mle"))]
-        Step::Combine => panic!("--step combine requires the `cuda-mle` feature"),
+        #[cfg(not(feature = "cuda"))]
+        Step::Combine => panic!("--step combine requires the `cuda` feature"),
     }
 }
 
@@ -1581,20 +1581,20 @@ fn preparer_pool(kind: &str, env: &str, multi_card_size: usize, cards: usize) ->
 struct Resident {
     program: Arc<Program>,
     provers: Vec<Arc<RiscvMachine>>,
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     converts: Vec<Arc<GpuConvertMachine>>,
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     riscv_vm_vk: Option<RiscvVmVk>,
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     combines: Vec<Arc<pico_vm::mle::machine::combine::GpuCombineMachine>>,
     /// The whitelist, in whitelist mode: the root verify reads it after the tree; the apex holds
     /// its own reference.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     vk_map: Option<Arc<MleVkMap>>,
     /// The standalone apex verifier, in whitelist mode with a combine stage: built once, against
     /// the deployment's pinned root (`MLE_VK_ROOT`, else the artifact's own), and reused for every
     /// block's root.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     apex: Option<Arc<MleApexVerifier>>,
     /// Reported once, in `setup.csv`. A resident process pays it on block 1 and never again, so
     /// carrying it in the per-block table would describe a cost that is not there.
@@ -1667,7 +1667,7 @@ fn run_pipeline(
     // calling thread.
     let prover_count = cfg.prover_count.max(1);
     assert!(
-        cfg!(feature = "cuda-mle") || prover_count == 1,
+        cfg!(feature = "cuda") || prover_count == 1,
         "prover_count={prover_count}: the CPU build has no multi-card path"
     );
     // Read here and never again -- see `recursion_lane_enabled` for why a second read is a hang
@@ -1692,7 +1692,7 @@ fn run_pipeline(
     // GPU proving shares pico's memory pool: initialize one per card at process entry (an invalid
     // card index fails loudly here, before any thread spawns). Process-level resources, so the
     // provers below need no pool setup of their own.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     for k in 0..prover_count {
         pico_vm::mle::machine::riscv::init_mle_gpu_pool(k);
     }
@@ -1759,15 +1759,16 @@ fn run_pipeline(
         .unwrap_or(256);
     let t_pools = Instant::now();
     if !is_pool_initialized() {
-        init_cpu_event_buffer_pool(pool_size, CudaHostAllocFlags::DEFAULT);
+        init_cpu_event_buffer_pool(pool_size, HostAllocFlags::DEFAULT);
     }
     if !is_alu_pool_initialized() {
-        init_alu_event_buffer_pool(pool_size, CudaHostAllocFlags::DEFAULT);
+        init_alu_event_buffer_pool(pool_size, HostAllocFlags::DEFAULT);
     }
     // MLE_PACKED_EVENTS=1: pinned staging pools for the packed FFI event mirror. The buffers live
     // only from the preparers packing to that chunk's upload, so a small pool suffices. Its own
     // `initialized` check, not the alu pool's: nesting it there would silently leave packing off
-    // for a run that found the alu pool already up.
+    // for a run that found the alu pool already up. GPU build only: the CPU build has no preparer.
+    #[cfg(feature = "cuda")]
     if pico_vm::instances::preparer::packed_events_enabled()
         && !pico_vm::instances::preparer::packed_pools_initialized()
     {
@@ -1785,7 +1786,7 @@ fn run_pipeline(
             .unwrap_or(pool_size);
         pico_vm::instances::preparer::init_packed_event_pools(
             packed_pool_size,
-            CudaHostAllocFlags::DEFAULT,
+            HostAllocFlags::DEFAULT,
         );
     }
     info!(
@@ -1816,15 +1817,15 @@ fn run_pipeline(
             t_compile.elapsed().as_secs_f64()
         );
         let vk_on = vk_verification();
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         let vk_map: Option<Arc<MleVkMap>> = vk_on.then(whitelist_map);
         let t_keygen = Instant::now();
         let mut provers: Vec<Arc<RiscvMachine>> = Vec::with_capacity(prover_count);
         for k in 0..prover_count {
-            #[cfg(feature = "cuda-mle")]
+            #[cfg(feature = "cuda")]
             pico_vm::mle::cuda_mle::runtime::context::set_device(k as i32)
                 .unwrap_or_else(|e| panic!("binding the main thread to card {k} failed: {e:?}"));
-            #[cfg(not(feature = "cuda-mle"))]
+            #[cfg(not(feature = "cuda"))]
             let _ = k;
             let machine = RiscvMachine::new(program.clone(), cfg.log_stacked_height, vk_on)
                 .unwrap_or_else(|e| panic!("{e}"));
@@ -1861,11 +1862,11 @@ fn run_pipeline(
         // Convert machine + JIT warmup, STILL on the quiescent main thread (the warmup keygen
         // nvrtc-compiles the recursion kernels; libnvrtc deadlocks once the prover threads exist).
         // GPU-only: the convert stage does not exist in a CPU build.
-        #[cfg(not(feature = "cuda-mle"))]
+        #[cfg(not(feature = "cuda"))]
         let _ = with_convert;
         // `riscv_vm_vk` is kept: combine hands the root back to the CPU `CombineMachine`, whose
         // acceptance pins the root's `riscv_vk_digest` against this trusted identity.
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         let (converts, riscv_vm_vk) = if with_convert {
             let t = Instant::now();
             let riscv_vk = Arc::new(prover.vk().clone());
@@ -1919,7 +1920,7 @@ fn run_pipeline(
         // Combine machines (per card, like convert). Not warmed up: convert's warmup already
         // compiled every cubin combine needs (same chips, same constraint-only JIT sources).
         // Construction is host-side; the pk cache fills lazily on the (bound) preparer threads.
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         let combines: Vec<Arc<pico_vm::mle::machine::combine::GpuCombineMachine>> = if with_combine
         {
             (0..prover_count)
@@ -1948,7 +1949,7 @@ fn run_pipeline(
         } else {
             Vec::new()
         };
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         let apex = match (&vk_map, &riscv_vm_vk) {
             (Some(map), Some(vm_vk)) if with_combine => {
                 let trusted_root = pinned_root_from_env().unwrap_or_else(|| map.root());
@@ -1964,15 +1965,15 @@ fn run_pipeline(
         Resident {
             program,
             provers,
-            #[cfg(feature = "cuda-mle")]
+            #[cfg(feature = "cuda")]
             converts,
-            #[cfg(feature = "cuda-mle")]
+            #[cfg(feature = "cuda")]
             riscv_vm_vk,
-            #[cfg(feature = "cuda-mle")]
+            #[cfg(feature = "cuda")]
             combines,
-            #[cfg(feature = "cuda-mle")]
+            #[cfg(feature = "cuda")]
             vk_map,
-            #[cfg(feature = "cuda-mle")]
+            #[cfg(feature = "cuda")]
             apex,
             keygen_wall,
             shape: (prover_count, with_convert, with_combine),
@@ -1989,15 +1990,15 @@ fn run_pipeline(
     // by the hoist. Every one of these is an `Arc` clone.
     let program = Arc::clone(&resident.program);
     let provers = resident.provers.clone();
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let converts = resident.converts.clone();
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let riscv_vm_vk = resident.riscv_vm_vk.clone();
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let combines = resident.combines.clone();
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let vk_map = resident.vk_map.clone();
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let apex = resident.apex.clone();
     let keygen_wall = resident.keygen_wall;
     // Per-block shape statistics, by snapshot-and-difference rather than by reset.
@@ -2011,7 +2012,7 @@ fn run_pipeline(
     // records leaves block 2's hit on block 1's pk with nothing to credit. `shape_nodes` then comes
     // out short of `nodes` and the assertion below fires on a run that is entirely correct — in
     // exactly the case this design predicts and wants to measure.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let shape_baseline: Vec<(usize, usize, usize)> = combines
         .iter()
         .map(|m| {
@@ -2021,22 +2022,22 @@ fn run_pipeline(
         .collect();
     // Machine construction is done — rebind the main thread to card 0 (it constructed card k's
     // machines while bound to k; everything it does from here on is host-side or card-0).
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     pico_vm::mle::cuda_mle::runtime::context::set_device(0)
         .expect("rebinding the main thread to card 0 failed");
     vram_probe("after_setup", iteration.unwrap_or(0), prover_count);
 
     // The root node's proof + its ordered child layouts, stashed by whichever worker proves the
     // final node. Written exactly once (asserted), read on the main thread after the join.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let root_slot: Arc<std::sync::Mutex<Option<RootRecord>>> =
         Arc::new(std::sync::Mutex::new(None));
     // Combine node timing. Kept OUT of `prove_nanos` / `prove_count` on purpose: those two are the
     // riscv chunk figures the `chunks=` / `sum(prove)` bench fields report, and mixing combine into
     // them would break comparability with the riscv/convert baselines.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let combine_nanos = Arc::new(AtomicU64::new(0));
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let combine_count = Arc::new(AtomicUsize::new(0));
 
     // --- Emulation via the shared snapshot+sequencer pipeline. ---
@@ -2294,20 +2295,20 @@ fn run_pipeline(
         .map(|_| crossbeam::channel::bounded::<(usize, ConvertWork)>(1))
         .unzip();
 
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let convert_prove_nanos = Arc::new(AtomicU64::new(0));
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let convert_done = Arc::new(AtomicUsize::new(0));
     // CPU build: no convert stage — the prover reports terminally (the `None` arm below).
-    #[cfg(not(feature = "cuda-mle"))]
+    #[cfg(not(feature = "cuda"))]
     let convert_tx: Option<crossbeam::channel::Sender<(usize, MleProof)>> = None;
     // Shared by the convert preparers and the pre-build: one round-robin counter so both hand out
     // the same cards, and the map of the cards the pre-build has already claimed.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let convert_card_rr = Arc::new(AtomicUsize::new(0));
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let prebuilt_cards: Arc<DashMap<usize, usize>> = Arc::new(DashMap::new());
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let (convert_tx, convert_stage) = if !converts.is_empty() {
         let (convert_tx, convert_rx) = crossbeam::channel::unbounded::<(usize, MleProof)>();
         let num_preparers = preparer_pool("convert", "MLE_CONVERT_PREPARERS", 12, prover_count);
@@ -2397,15 +2398,15 @@ fn run_pipeline(
     // The dispatcher's combine feed. Unbounded like the convert feed: tasks are Arc'd proof pairs
     // (KiB-scale, host-side), and bounding it would stall the dispatcher — which is also the riscv
     // task pump — on combine backpressure.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let (combine_task_tx, combine_task_rx) =
         crossbeam::channel::unbounded::<CombineTask<SchedulerProof>>();
     // Combine preparers: the CPU stage of each node (layout extraction, shape keygen, PV preflight,
     // recursion emulation) runs here, off the prover slot. What the slot keeps is the prove.
     // Round-robin card assignment for combine nodes, shared across the preparer pool.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let combine_card_seq = Arc::new(AtomicUsize::new(0));
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let combine_stage = if !combines.is_empty() {
         let num_preparers = preparer_pool("combine", "MLE_COMBINE_PREPARERS", 7, prover_count);
         let mut handles = Vec::new();
@@ -2473,7 +2474,7 @@ fn run_pipeline(
     } else {
         Vec::new()
     };
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     drop(combine_task_rx); // preparers hold the only receivers now
 
     // The clones above are the live ends now.
@@ -2535,7 +2536,7 @@ fn run_pipeline(
         let store = Arc::clone(&store);
         let dispatch_id: &'static str =
             Box::leak(format!("{}-mle-dispatch", get_worker_label()).into_boxed_str());
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         let combine_task_tx = combine_task_tx.clone();
         workers.push(
             thread::Builder::new()
@@ -2594,15 +2595,15 @@ fn run_pipeline(
                             // Combine tasks go to the preparer pool, not the prover: the
                             // prover only ever sees prepared nodes on the ready lane.
                             MleAcquireResult::Combine(task) => {
-                                #[cfg(feature = "cuda-mle")]
+                                #[cfg(feature = "cuda")]
                                 combine_task_tx
                                     .send(task)
                                     .expect("combine preparers hung up");
-                                #[cfg(not(feature = "cuda-mle"))]
+                                #[cfg(not(feature = "cuda"))]
                                 {
                                     let _ = task;
                                     unreachable!(
-                                        "CPU build: --step combine requires the `cuda-mle` \
+                                        "CPU build: --step combine requires the `cuda` \
                                              feature"
                                     )
                                 }
@@ -2627,7 +2628,7 @@ fn run_pipeline(
     // `None` only when `MLE_CONVERT_PREBUILD` is set to an off-word or program sharing is off,
     // and then the lanes take the unhooked path (see [`ConvertPrebuild`]). Built here, after the
     // convert machines exist and before any riscv lane is handed out.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let convert_prebuild = (!converts.is_empty())
         .then(|| {
             ConvertPrebuild::new(
@@ -2655,7 +2656,7 @@ fn run_pipeline(
             prove_count: Arc::clone(&prove_count),
             verify,
             with_combine,
-            #[cfg(feature = "cuda-mle")]
+            #[cfg(feature = "cuda")]
             convert_prebuild: convert_prebuild.clone(),
         };
 
@@ -2667,7 +2668,7 @@ fn run_pipeline(
         // to on the lane below.
         // One per card, shared: with the riscv lane joining the ready lanes once its feed is
         // drained, more than one thread proves this card's recursion work.
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         let card_rec = Arc::new(CardRecursion {
             convert: converts.get(k).cloned(),
             combine: combines.get(k).cloned(),
@@ -2688,7 +2689,7 @@ fn run_pipeline(
             // Every card drains the one shared lane; the clone is this card's handle on it.
             let items = items_rx.clone();
             let drain = drain_rx.clone();
-            #[cfg(feature = "cuda-mle")]
+            #[cfg(feature = "cuda")]
             let rec = Arc::clone(&card_rec);
             // Held from the start although nothing is read from them until the drain: the arm
             // that attaches them runs inside the closure, so they have to be captured here. The
@@ -2774,9 +2775,9 @@ fn run_pipeline(
                                 },
                                 recv(rdy) -> m => match m {
                                     Ok((chunk_idx, work)) => {
-                                        #[cfg(feature = "cuda-mle")]
+                                        #[cfg(feature = "cuda")]
                                         rec.prove_convert(chunk_idx, work, &worker_id);
-                                        #[cfg(not(feature = "cuda-mle"))]
+                                        #[cfg(not(feature = "cuda"))]
                                         {
                                             let _ = chunk_idx;
                                             match work {}
@@ -2789,9 +2790,9 @@ fn run_pipeline(
                                 },
                                 recv(comb) -> m => match m {
                                     Ok(work) => {
-                                        #[cfg(feature = "cuda-mle")]
+                                        #[cfg(feature = "cuda")]
                                         rec.prove_combine(work, &worker_id);
-                                        #[cfg(not(feature = "cuda-mle"))]
+                                        #[cfg(not(feature = "cuda"))]
                                         {
                                             match work {}
                                         }
@@ -2810,7 +2811,7 @@ fn run_pipeline(
             );
         }
 
-        #[cfg(feature = "cuda-mle")]
+        #[cfg(feature = "cuda")]
         let rec = Arc::clone(&card_rec);
         let convert_ready_rx = convert_ready_rxs[k].clone();
         let combine_ready_rx = combine_ready_rxs[k].clone();
@@ -2884,9 +2885,9 @@ fn run_pipeline(
                             },
                             recv(ready) -> m => match m {
                                 Ok((chunk_idx, work)) => {
-                                    #[cfg(feature = "cuda-mle")]
+                                    #[cfg(feature = "cuda")]
                                     rec.prove_convert(chunk_idx, work, &worker_id);
-                                    #[cfg(not(feature = "cuda-mle"))]
+                                    #[cfg(not(feature = "cuda"))]
                                     {
                                         let _ = chunk_idx;
                                         match work {}
@@ -2899,9 +2900,9 @@ fn run_pipeline(
                             },
                             recv(combine_ready) -> m => match m {
                                 Ok(work) => {
-                                    #[cfg(feature = "cuda-mle")]
+                                    #[cfg(feature = "cuda")]
                                     rec.prove_combine(work, &worker_id);
-                                    #[cfg(not(feature = "cuda-mle"))]
+                                    #[cfg(not(feature = "cuda"))]
                                     {
                                         match work {}
                                     }
@@ -2927,7 +2928,7 @@ fn run_pipeline(
     drop(convert_ready_rxs);
     // Same for the combine chain: the dispatcher holds the live task sender (it drops it on
     // `Complete`), and the provers hold the live ready receivers.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     drop(combine_task_tx);
     drop(combine_ready_rxs);
 
@@ -3035,14 +3036,14 @@ fn run_pipeline(
 
     // The pre-build pool is speculative and unjoined by the channel alone — its `tx` lives in the
     // riscv lanes' hooks — so it is stopped here, before the resident machines serve another block.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     if let Some(pb) = convert_prebuild.as_ref() {
         pb.shutdown();
     }
 
     // Convert stage drain: the workers' exits dropped the last `convert_tx` senders, so the
     // preparer/prover pools run dry and exit; joining them means every convert proof is done.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     if !converts.is_empty() {
         for h in convert_stage {
             h.join().expect("convert stage thread panicked");
@@ -3082,7 +3083,7 @@ fn run_pipeline(
     // runs dry and exits; joining it propagates any preparer panic. An arity-2 reduction of N
     // leaves has exactly N-1 internal nodes, so the count check doubles as an engagement check —
     // a dead ready lane could not have produced them.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     if !combines.is_empty() {
         for h in combine_stage {
             h.join().expect("combine preparer thread panicked");
@@ -3116,14 +3117,14 @@ fn run_pipeline(
     // device idleness.
     let e2e_wall = t_e2e.elapsed();
     // Starts where the window ended, so the two meet exactly and leave no unattributed sliver.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let t_accept = Instant::now();
     // Set at the end of the acceptance block; stays zero when there is none to do.
-    #[cfg_attr(not(feature = "cuda-mle"), allow(unused_mut))]
+    #[cfg_attr(not(feature = "cuda"), allow(unused_mut))]
     let mut root_accept = Duration::ZERO;
     // Filled in the acceptance block below, i.e. only once the root has passed host-side
     // acceptance. A root this process has not itself verified must never reach a submission.
-    #[cfg_attr(not(feature = "cuda-mle"), allow(unused_mut))]
+    #[cfg_attr(not(feature = "cuda"), allow(unused_mut))]
     let mut root_export: Option<RootProofExport> = None;
 
     // Combine stage: the tree collapsed (that is what let the workers exit), so the root is in the
@@ -3138,11 +3139,11 @@ fn run_pipeline(
     // any non-leader worker, so the root is proved AND accepted on the primary by construction.
     // Without this guard the secondary would die on the `expect` below at the end of an otherwise
     // successful run — its slot is empty by design, not by failure.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     if !combines.is_empty() && is_mle_secondary() {
         info!("secondary: run complete; the root is proved and accepted on the primary");
     }
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     if !combines.is_empty() && !is_mle_secondary() {
         let root = root_slot
             .lock()
@@ -3313,14 +3314,14 @@ fn run_pipeline(
     );
     // Where that window went, lane by lane — on its own lines, since the headline's field names are
     // what the harness extracts. The combine keygen total rides along to be cross-checked.
-    #[cfg(feature = "cuda-mle")]
+    #[cfg(feature = "cuda")]
     let combine_keygen_ms = (!combines.is_empty()).then(|| {
         combines
             .iter()
             .map(|m| m.shape_stats().keygen_total_ms)
             .sum::<u128>()
     });
-    #[cfg(not(feature = "cuda-mle"))]
+    #[cfg(not(feature = "cuda"))]
     let combine_keygen_ms: Option<u128> = None;
     report_spans(e2e_wall, combine_keygen_ms, iteration);
 

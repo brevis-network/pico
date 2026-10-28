@@ -5,6 +5,15 @@ use super::{
     },
     MemoryReadWriteChip,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
 use crate::{
     chips::{
         chips::{
@@ -16,37 +25,36 @@ use crate::{
             },
         },
         ffi::FfiOption,
-        trace::TraceData,
         utils::next_power_of_two,
     },
     compiler::riscv::{opcode::Opcode, program::Program},
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
-    },
-    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord},
-    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
-    iter::{IntoPicoRefIterator, PicoSlice, PicoSliceMut},
+    emulator::riscv::record::EmulationRecord,
+    iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSlice, PicoSliceMut},
     machine::{
         chip::ChipBehavior,
         estimator::{EventCapture, EventSizeCapture},
     },
     primitives::consts::MEMORY_RW_DATAPAR,
 };
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
 use p3_field::{Field, PrimeField32};
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_memory_read_write_generate_extra_record_and_main_u64,
     cuda_memory_read_write_generate_extra_record_and_main_u64_packed,
 };
-use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
 use tracing::info;
 
 #[inline(always)]
@@ -58,7 +66,6 @@ fn encode_memory_trace_clk_u32(value: u64) -> u32 {
 
 impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -87,7 +94,6 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
         // Calculate actual population length and handle type conversion
         let populate_len = events.len() * NUM_MEMORY_CHIP_VALUE_COLS;
 
-        // Use rayon's parallel slice operations for better chunk handling
         values[..populate_len]
             .pico_chunks_mut(NUM_MEMORY_CHIP_VALUE_COLS)
             .zip_eq(events.pico_iter())
@@ -140,7 +146,10 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
             .iter()
             .any(|e| e.instruction.is_memory_instruction())
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for MemoryReadWriteChip<F> {
     fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
         // The address addition is proven in-chip, so memory instructions dispatch no ALU event;
         // this chip only contributes its own row count.

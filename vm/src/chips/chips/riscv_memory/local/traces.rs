@@ -4,27 +4,32 @@ use super::{
     columns::{MemoryLocalCols, NUM_MEMORY_LOCAL_INIT_COLS},
     MemoryLocalChip,
 };
+#[cfg(feature = "cuda")]
 use crate::{
     chips::{
-        chips::{
-            byte::event::ByteRecordBehavior,
-            events::MemoryLocalEvent,
-            riscv_global::event::GlobalInteractionEvent,
-            riscv_memory::{
-                event::{is_fresh_local_mem_event, FfiMemoryLocalEvent},
-                local::columns::NUM_SINGLE_MEMORY_LOCAL_COLS,
-            },
+        chips::riscv_memory::{
+            event::FfiMemoryLocalEvent, local::columns::NUM_SINGLE_MEMORY_LOCAL_COLS,
         },
         trace::TraceData,
-        utils::{next_power_of_two, zeroed_f_vec},
     },
-    compiler::riscv::program::Program,
     cuda_adaptor::resource_pool::{
         mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
     },
-    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord},
     instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
-    iter::PicoIterator,
+    machine::chip::GpuChipBehavior,
+};
+use crate::{
+    chips::{
+        chips::{
+            byte::event::ByteRecordBehavior, events::MemoryLocalEvent,
+            riscv_global::event::GlobalInteractionEvent,
+            riscv_memory::event::is_fresh_local_mem_event,
+        },
+        utils::{next_power_of_two, zeroed_f_vec},
+    },
+    compiler::riscv::program::Program,
+    emulator::riscv::record::EmulationRecord,
+    iter::{IndexedPicoIterator, PicoIterator, PicoSlice, PicoSliceMut},
     machine::{
         chip::ChipBehavior,
         estimator::{EventCapture, EventSizeCapture},
@@ -32,20 +37,21 @@ use crate::{
     },
     primitives::consts::LOCAL_MEMORY_DATAPAR,
 };
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind, *};
 use p3_field::PrimeField32;
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_memory_local_generate_extra_record_and_main_u64;
-use rayon::{
-    iter::IndexedParallelIterator,
-    slice::{ParallelSlice, ParallelSliceMut},
-};
+#[cfg(feature = "cuda")]
 use tracing::info;
 
 /// Split a u64 addr into 3×u16 limbs.
@@ -118,7 +124,6 @@ fn build_global_message(chunk: u32, clk: u32, addr: u64, value: u64) -> [u32; 8]
 
 impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -137,9 +142,8 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
         let padded_nb_rows = next_power_of_two(nb_rows, log_rows);
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MEMORY_LOCAL_INIT_COLS);
 
-        // Parallelize the main computation using par_chunks_mut
         values[..nb_rows * NUM_MEMORY_LOCAL_INIT_COLS]
-            .par_chunks_mut(NUM_MEMORY_LOCAL_INIT_COLS)
+            .pico_chunks_mut(NUM_MEMORY_LOCAL_INIT_COLS)
             .enumerate()
             .for_each(|(row_idx, row)| {
                 let base_event_idx = row_idx * LOCAL_MEMORY_DATAPAR;
@@ -198,7 +202,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
         let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);
 
         let (global_events, blu_batches): (Vec<_>, Vec<_>) = local_mem_events
-            .par_chunks(chunk_size * LOCAL_MEMORY_DATAPAR)
+            .pico_chunks(chunk_size * LOCAL_MEMORY_DATAPAR)
             .map(|events| {
                 let mut global_events = vec![];
                 let mut blu = vec![];
@@ -292,6 +296,23 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
         extra.add_byte_lookup_events(blu_batches.into_iter().flatten().collect());
     }
 
+    fn is_active(&self, record: &Self::Record) -> bool {
+        // Under a pad shape the shape decides presence, so a bucketed chunk's proof shape
+        // depends on the chunk kind rather than on its opcode mix. Without a shape the
+        // chip is event-driven, which is what the natural-height path wants.
+        if let Some(shape) = record.shape.as_ref() {
+            return shape.included::<F, _>(self);
+        }
+        record.get_local_mem_events().nth(0).is_some()
+    }
+
+    fn lookup_scope(&self) -> LookupScope {
+        LookupScope::Regional
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for MemoryLocalChip<F> {
     fn gpu_generate_extra_record_and_main(
         &self,
         device_id: usize,
@@ -374,20 +395,6 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
 
         info!("[memory-local-chip] generate_extra_record_and_main on GPU");
         TraceData::Gpu(NUM_MEMORY_LOCAL_INIT_COLS, d_trace)
-    }
-
-    fn is_active(&self, record: &Self::Record) -> bool {
-        // Under a pad shape the shape decides presence, so a bucketed chunk's proof shape
-        // depends on the chunk kind rather than on its opcode mix. Without a shape the
-        // chip is event-driven, which is what the natural-height path wants.
-        if let Some(shape) = record.shape.as_ref() {
-            return shape.included::<F, _>(self);
-        }
-        record.get_local_mem_events().nth(0).is_some()
-    }
-
-    fn lookup_scope(&self) -> LookupScope {
-        LookupScope::Regional
     }
 
     fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {

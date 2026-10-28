@@ -39,7 +39,7 @@ use tracing::{info, warn};
 /// Everything about HOW a block is proved is [`MleSingleNodeConfig`], unchanged, so an operating
 /// point tuned with `single_node_mle.sh` transfers here verbatim. Only the service surface is new.
 #[derive(Parser, Debug, Clone)]
-#[clap(about = "EthProofs single-node MLE/WHIR prover (KoalaBear)")]
+#[clap(about = "EthProofs single-node MLE/WHIR prover (KoalaBear)", version = crate::VERSION)]
 pub struct MleEthProofsConfig {
     #[clap(flatten)]
     pub node: MleSingleNodeConfig,

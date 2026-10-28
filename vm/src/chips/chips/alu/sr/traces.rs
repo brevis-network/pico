@@ -2,18 +2,13 @@ use crate::{
     chips::{
         chips::{alu::event::AluEvent, byte::event::ByteRecordBehavior},
         gadgets::msb::U16MSBGadget,
-        trace::TraceData,
         utils::next_power_of_two,
     },
     compiler::{
         riscv::{opcode::Opcode, program::Program},
         word::Word,
     },
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
-    },
-    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord},
-    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    emulator::riscv::record::EmulationRecord,
     iter::{IndexedPicoIterator, PicoIterator, PicoSlice, PicoSliceMut},
     machine::{
         chip::ChipBehavior,
@@ -21,21 +16,35 @@ use crate::{
     },
     primitives::consts::{u64_to_u16_limbs, SR_DATAPAR, WORD_SIZE},
 };
+use p3_air::BaseAir;
+use p3_field::{Field, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
+use std::{borrow::BorrowMut, marker::PhantomData};
+
+use super::columns::{ShiftRightValueCols, NUM_SLR_COLS, NUM_SLR_VALUE_COLS};
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
-use p3_air::BaseAir;
-use p3_field::{Field, PrimeField32};
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
-use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_sr_generate_extra_record_and_main_u64;
-use std::{borrow::BorrowMut, marker::PhantomData};
+#[cfg(feature = "cuda")]
 use tracing::info;
-
-use super::columns::{ShiftRightValueCols, NUM_SLR_COLS, NUM_SLR_VALUE_COLS};
 
 /// A chip that implements bitwise operations for the opcodes SRL, SRA, SRLW, and SRAW.
 #[derive(Default)]
@@ -49,7 +58,6 @@ impl<F: Field> BaseAir<F> for ShiftRightChip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -124,7 +132,10 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
     fn local_only(&self) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for ShiftRightChip<F> {
     fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
         counter.num_shift_right_events += record.shift_right_events.len();
     }

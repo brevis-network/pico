@@ -11,6 +11,8 @@ use super::{
     add_byte_lookups_to_raw_table, gpu_add_host_byte_lookups, gpu_allocate_byte_trace,
     gpu_finalize_byte_trace, precompute_event_size, PreallocatedGpuMemory, PreparedGpuEvents,
 };
+#[cfg(feature = "cuda")]
+use crate::machine::chip::GpuChipBehavior;
 use crate::{
     chips::{
         chips::byte::{
@@ -198,7 +200,7 @@ fn ed25519_records() -> Vec<EmulationRecord> {
 /// table holds exactly the chip's `extra_record` lookups -- once.
 fn check_host_tracegen<C>(chip: &C, mut record: EmulationRecord, code: SyscallCode)
 where
-    C: ChipBehavior<F, Record = EmulationRecord>,
+    C: GpuChipBehavior<F, Record = EmulationRecord>,
 {
     let events = record.get_precompile_events(code).len();
     assert!(
@@ -264,7 +266,7 @@ where
 /// second `extra_record` pass; that is only right while the two raise the same lookups.
 fn assert_generate_main_raises_the_extra_record_lookups<C>(chip: &C, record: &EmulationRecord)
 where
-    C: ChipBehavior<F, Record = EmulationRecord>,
+    C: GpuChipBehavior<F, Record = EmulationRecord>,
 {
     let (mut generated, mut extra) = (EmulationRecord::default(), EmulationRecord::default());
     chip.generate_main(record, &mut generated);

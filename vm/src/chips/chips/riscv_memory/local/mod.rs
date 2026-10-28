@@ -9,6 +9,7 @@ pub struct MemoryLocalChip<F>(PhantomData<F>);
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "cuda")]
     use crate::{
         chips::{
             chips::{
@@ -36,22 +37,33 @@ mod tests {
                 PreallocatedGpuMemory, PreparedGpuEvents,
             },
         },
-        machine::chip::ChipBehavior,
+        machine::chip::{ChipBehavior, GpuChipBehavior},
         primitives::consts::LOCAL_MEMORY_DATAPAR,
     };
+    #[cfg(feature = "cuda")]
     use cudart::{memory_pools::DevicePoolAllocation, stream::CudaStream};
+    #[cfg(feature = "cuda")]
     use cudart_sys::{cudaMemcpyAsync, cudaMemsetAsync, CudaMemoryCopyKind};
+    #[cfg(feature = "cuda")]
     use p3_field::PrimeCharacteristicRing;
+    #[cfg(feature = "cuda")]
     use p3_koala_bear::KoalaBear;
+    #[cfg(feature = "cuda")]
     use p3_matrix::dense::RowMajorMatrix;
+    #[cfg(feature = "cuda")]
     use pico_gpu_api::cuda_memory_local_generate_extra_record_and_main_u64;
+    #[cfg(feature = "cuda")]
     use rand::{rng, RngExt};
+    #[cfg(feature = "cuda")]
     use std::{mem::size_of, sync::LazyLock, time::Instant};
 
+    #[cfg(feature = "cuda")]
     type F = KoalaBear;
 
+    #[cfg(feature = "cuda")]
     static GPU_TEST_RECORD: LazyLock<EmulationRecord> = LazyLock::new(|| generate_record(1 << 16));
 
+    #[cfg(feature = "cuda")]
     /// Random entries at addresses outside the (empty) default image; every fourth one starts
     /// at zero and so is fresh (`has_initial = 0`, one Global event instead of two), which is
     /// what exercises the kernel's `global_slot` placement against the host's layout.
@@ -81,10 +93,12 @@ mod tests {
         record
     }
 
+    #[cfg(feature = "cuda")]
     fn cpu_generate_main(chip: &MemoryLocalChip<F>, input: &EmulationRecord) -> RowMajorMatrix<F> {
         chip.generate_main(input, &mut EmulationRecord::default())
     }
 
+    #[cfg(feature = "cuda")]
     fn gpu_generate_extra_record_and_main(
         chip: &MemoryLocalChip<F>,
         input: &EmulationRecord,
@@ -103,6 +117,7 @@ mod tests {
         trace.to_host(stream)
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn test_memory_local_gpu_generate_extra_record_and_main() {
         let original_record = LazyLock::force(&GPU_TEST_RECORD).clone();
@@ -213,6 +228,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
     fn bench_memory_local_cpu_vs_gpu() {
         let warmup_sizes: Vec<usize> = vec![1 << 16];

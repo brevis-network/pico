@@ -3,23 +3,16 @@ use crate::{
     chips::{
         chips::byte::event::ByteRecordBehavior,
         gadgets::{addr_add::AddrAddGadget, syscall_addr::SyscallAddrGadget},
-        precompiles::sha256::extend::ffi::ShaExtendFfiEvent,
-        trace::TraceData,
-        utils::{next_power_of_two, pad_rows_fixed},
+        utils::pad_rows_fixed,
     },
     compiler::{riscv::program::Program, word::Word},
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
-    },
     emulator::riscv::{
-        ffi::FFIEmulationRecord,
         record::EmulationRecord,
         syscalls::{
             code::SyscallCode,
             precompiles::{sha256::event::ShaExtendEvent, PrecompileEvent},
         },
     },
-    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     iter::PicoIterator,
     machine::{
         builder::{ChipBuilder, ChipLookupBuilder},
@@ -27,20 +20,37 @@ use crate::{
         lookup::{LookupScope, LookupType, SymbolicLookup},
     },
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{
+        precompiles::sha256::extend::ffi::ShaExtendFfiEvent, trace::TraceData,
+        utils::next_power_of_two,
+    },
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
 use core::borrow::Borrow;
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::CudaSliceMut,
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::ParallelSlice;
 use pico_derive::AlignedBorrow;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_precompile_sha256_extend_control_generate_extra_record_and_main;
 use std::{borrow::BorrowMut, iter::once};
 
@@ -72,7 +82,6 @@ impl<F: PrimeField32> BaseAir<F> for ShaExtendControlChip<F> {
 impl<F: PrimeField32> ChipBehavior<F> for ShaExtendControlChip<F> {
     type Program = Program;
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
 
     fn name(&self) -> String {
         "ShaExtendControl".to_string()
@@ -144,7 +153,10 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendControlChip<F> {
                 .is_empty()
         }
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for ShaExtendControlChip<F> {
     fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
         if let Some(shape) = record.shape.as_ref() {
             shape.included::<F, _>(self)

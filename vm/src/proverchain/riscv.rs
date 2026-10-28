@@ -7,7 +7,10 @@
 
 #[cfg(feature = "aot-emulator")]
 use crate::emulator::emulator::AotMetaEmulator;
-use crate::emulator::{opts::SnapshotMainMode, riscv::record_merge::merge_segments};
+use crate::emulator::{
+    opts::SnapshotMainMode,
+    riscv::{event_pool::HostAllocFlags, record_merge::merge_segments},
+};
 use crate::{
     compiler::riscv::program::Program,
     configs::config::{StarkGenericConfig, Val},
@@ -38,7 +41,6 @@ use crate::{
 use alloc::sync::Arc;
 use core_affinity;
 use crossbeam::channel::{bounded, unbounded, Receiver, Sender};
-use cudart::memory::CudaHostAllocFlags;
 use p3_field::PrimeField32;
 use parking_lot::Mutex as ParkingMutex;
 use std::{
@@ -636,7 +638,7 @@ where
 
     init_memory_pool();
     if !is_pool_initialized() {
-        init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+        init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
     }
 
     let num_threads = workers.get();

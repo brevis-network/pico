@@ -1,3 +1,9 @@
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    instances::preparer::{gpu_add_host_byte_lookups, PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
 use crate::{
     chips::{
         chips::{
@@ -27,14 +33,12 @@ use crate::{
             },
         },
         precompiles::checked_u64_to_u32,
-        trace::TraceData,
         utils::pad_rows_fixed,
     },
     compiler::{riscv::program::Program, word::Word},
     emulator::{
         record::RecordBehavior,
         riscv::{
-            ffi::FFIEmulationRecord,
             record::EmulationRecord,
             syscalls::{
                 precompiles::{edwards::event::EdDecompressEvent, PrecompileEvent},
@@ -42,7 +46,6 @@ use crate::{
             },
         },
     },
-    instances::preparer::{gpu_add_host_byte_lookups, PreallocatedGpuMemory, PreparedGpuEvents},
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
@@ -384,7 +387,6 @@ impl<F: Field, E: EdwardsParameters> EdDecompressChip<F, E> {
 
 impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip<F, E> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -462,7 +464,10 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
     fn local_only(&self) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32, E: EdwardsParameters> GpuChipBehavior<F> for EdDecompressChip<F, E> {
     /// The GPU prover generates this trace on the host.
     ///
     /// `cuda_edwards_decompress_generate_extra_record_and_main` is stale: its kernel writes the

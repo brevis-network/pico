@@ -1,14 +1,22 @@
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::CudaStream,
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
 use p3_field::Field;
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
-use p3_matrix::{dense::RowMajorMatrix, Dimensions, Matrix};
+#[cfg(feature = "cuda")]
+use p3_matrix::Dimensions;
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
+#[cfg(feature = "cuda")]
 use p3_maybe_rayon::prelude::*;
 
+/// A chip trace from the GPU trace generators: on the host, on the device, or both.
+#[cfg(feature = "cuda")]
 pub enum TraceData<'a, F: Field> {
     // cpu trace
     Cpu(RowMajorMatrix<F>),
@@ -18,6 +26,7 @@ pub enum TraceData<'a, F: Field> {
     Debug(RowMajorMatrix<F>, DevicePoolAllocation<'a, KoalaBear>),
 }
 
+#[cfg(feature = "cuda")]
 impl<F: Field> TraceData<'_, F> {
     pub fn width(&self) -> usize {
         match self {

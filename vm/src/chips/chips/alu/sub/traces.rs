@@ -1,3 +1,12 @@
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
 use crate::{
     chips::{
         chips::{
@@ -10,38 +19,36 @@ use crate::{
             },
             byte::event::ByteRecordBehavior,
         },
-        trace::TraceData,
         utils::next_power_of_two,
     },
     compiler::{
         riscv::{opcode::Opcode, program::Program},
         word::Word,
     },
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
-    },
-    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord},
-    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    emulator::riscv::record::EmulationRecord,
     iter::{IndexedPicoIterator, PicoBridge, PicoIterator, PicoSliceMut},
     machine::chip::ChipBehavior,
     primitives::consts::ADD_DATAPAR,
 };
 use core::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     stream::{CudaStream, CudaStreamCreateFlags},
 };
 use p3_field::{Field, PrimeField32};
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_sub_generate_extra_record_and_main, cuda_sub_generate_extra_record_and_main_packed,
 };
+#[cfg(feature = "cuda")]
 use tracing::info;
 
 impl<F: PrimeField32> ChipBehavior<F> for SubChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
 
     type Program = Program;
 
@@ -120,7 +127,10 @@ impl<F: PrimeField32> ChipBehavior<F> for SubChip<F> {
     fn local_only(&self) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for SubChip<F> {
     fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
         counter.num_add_sub_events += record.add_sub_events.len();
     }

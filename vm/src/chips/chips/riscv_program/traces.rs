@@ -5,33 +5,42 @@ use super::{
     },
     ProgramChip,
 };
+#[cfg(feature = "cuda")]
 use crate::{
     chips::{trace::TraceData, utils::next_power_of_two},
-    compiler::{addr::Pc, riscv::program::Program},
     cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
-    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord},
     instances::preparer::PreparedGpuEvents,
+    machine::chip::GpuChipBehavior,
+};
+use crate::{
+    compiler::{addr::Pc, riscv::program::Program},
+    emulator::riscv::record::EmulationRecord,
     iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator},
     machine::{
         chip::ChipBehavior,
         utils::{pad_to_power_of_two, pad_to_power_of_two_repeating_first_row},
     },
 };
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
 use hashbrown::HashMap;
 use p3_field::PrimeField32;
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_riscv_program_generate_main_u64, cuda_riscv_program_generate_main_u64_packed,
     cuda_riscv_program_generate_preprocessed_u64,
 };
 use std::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
 use tracing::info;
 
 /// Row 0 is the filler for the padding rows and for every trap (UNIMP / EBREAK) instruction, so
@@ -53,7 +62,6 @@ fn assert_instruction_zero_is_not_a_trap(program: &Program) {
 
 impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -190,7 +198,10 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for ProgramChip<F> {
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -275,7 +286,6 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         let nb_rows = input.program.instructions.len();
         let log_rows = input.shape_chip_size(&ProgramChip::<F>::default().name());

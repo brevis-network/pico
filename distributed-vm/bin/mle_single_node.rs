@@ -1,4 +1,4 @@
-//! Single-node MLE/WHIR prover (KoalaBear; GPU with `cuda-mle`).
+//! Single-node MLE/WHIR prover (KoalaBear; GPU with the `cuda` feature).
 
 use clap::Parser;
 use distributed_vm::mle::{self, config::MleSingleNodeConfig};
@@ -6,6 +6,7 @@ use pico_vm::machine::logger::setup_logger;
 
 fn main() {
     setup_logger();
+    distributed_vm::announce_backend();
     // A panicked worker thread would otherwise hang the run silently: the remaining stages block
     // on channels/barriers that the dead thread can no longer feed. Print the panic, then take
     // the whole process down so the failure is loud and immediate.

@@ -1,20 +1,26 @@
 use crate::{
+    chips::chips::alu::{
+        divrem::{utils::get_quotient_and_remainder, DivRemChip},
+        event::AluEvent,
+    },
+    compiler::riscv::opcode::Opcode,
+    emulator::riscv::record::EmulationRecord,
+    machine::chip::ChipBehavior,
+};
+#[cfg(feature = "cuda")]
+use crate::{
     chips::{
         chips::{
-            alu::{
-                divrem::{columns::NUM_DIVREM_COLS, utils::get_quotient_and_remainder, DivRemChip},
-                event::AluEvent,
-            },
+            alu::divrem::columns::NUM_DIVREM_COLS,
             byte::{columns::NUM_BYTE_MULT_COLS, ByteChip},
         },
         tests::init_test_stream,
         trace::TraceData,
     },
-    compiler::riscv::opcode::Opcode,
     cuda_adaptor::resource_pool::mem_pool::get_global_mem_pool,
     emulator::riscv::{
         alu_event_pool::{init_alu_event_buffer_pool, is_alu_pool_initialized},
-        record::EmulationRecord,
+        event_pool::HostAllocFlags,
     },
     instances::{
         compiler::shapes::riscv_shape::RiscvPadShape,
@@ -25,27 +31,37 @@ use crate::{
             PreallocatedGpuMemory, PreparedGpuEvents,
         },
     },
-    machine::chip::ChipBehavior,
+    machine::chip::GpuChipBehavior,
     primitives::consts::DIVREM_DATAPAR,
 };
-use cudart::{memory::CudaHostAllocFlags, memory_pools::DevicePoolAllocation, slice::CudaSliceMut};
+#[cfg(feature = "cuda")]
+use cudart::{memory_pools::DevicePoolAllocation, slice::CudaSliceMut};
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
+#[cfg(feature = "cuda")]
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_divrem_generate_extra_record_and_main;
 use rand::{rng, seq::IndexedRandom, RngExt};
+#[cfg(feature = "cuda")]
 use std::{sync::LazyLock, time::Instant};
 
+#[cfg(feature = "cuda")]
 type F = KoalaBear;
 
+#[cfg(feature = "cuda")]
 static GPU_TEST_RECORD: LazyLock<EmulationRecord> =
     LazyLock::new(|| generate_gpu_test_record(1 << 20));
 
+#[cfg(feature = "cuda")]
 fn cpu_generate_main(chip: &DivRemChip<F>, input: &EmulationRecord) -> RowMajorMatrix<F> {
     chip.generate_main(input, &mut EmulationRecord::default())
 }
 
+#[cfg(feature = "cuda")]
 fn generate_gpu_test_record(event_count: u64) -> EmulationRecord {
     let rng = &mut rng();
     let all_ops = [
@@ -79,6 +95,7 @@ fn generate_gpu_test_record(event_count: u64) -> EmulationRecord {
     record
 }
 
+#[cfg(feature = "cuda")]
 fn gpu_generate_extra_record_and_main(
     chip: &DivRemChip<F>,
     input: &EmulationRecord,
@@ -95,10 +112,11 @@ fn gpu_generate_extra_record_and_main(
     trace.to_host(stream)
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn test_divrem_gpu_generate_extra_record_and_main() {
     if !is_alu_pool_initialized() {
-        init_alu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+        init_alu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
     }
     let original_record = LazyLock::force(&GPU_TEST_RECORD);
 
@@ -235,11 +253,12 @@ fn test_divrem_gpu_generate_extra_record_and_main() {
     );
 }
 
+#[cfg(feature = "cuda")]
 /// Construct a Program with DIV/REM (signed 64-bit) instructions.
 #[test]
 fn bench_divrem_cpu_vs_gpu() {
     if !is_alu_pool_initialized() {
-        init_alu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+        init_alu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
     }
 
     let warmup_sizes: Vec<u64> = vec![1 << 16];

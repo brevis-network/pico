@@ -19,7 +19,7 @@
 //!
 //! Usage:
 //!   cargo run --release -p pico-vm --example mle_degree_area \
-//!     --features "bigint-rug tcmalloc mmap-memory cuda-mle" -- --elf reth --n 188 --field kb
+//!     --features "bigint-rug tcmalloc mmap-memory cuda" -- --elf reth --n 188 --field kb
 
 use std::{collections::BTreeMap, sync::Arc};
 

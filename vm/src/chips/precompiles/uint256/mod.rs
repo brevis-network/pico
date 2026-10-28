@@ -16,7 +16,7 @@ pub struct Uint256MulChip<F> {
     _phantom: PhantomData<F>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "cuda"))]
 mod gpu_tests {
     use std::{array::from_fn, sync::LazyLock};
 
@@ -50,7 +50,7 @@ mod gpu_tests {
                 PreallocatedGpuMemory, PreparedGpuEvents,
             },
         },
-        machine::chip::ChipBehavior,
+        machine::chip::{ChipBehavior, GpuChipBehavior},
     };
 
     type F = KoalaBear;

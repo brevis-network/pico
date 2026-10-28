@@ -5,18 +5,13 @@ use crate::{
             riscv_global::event::GlobalInteractionEvent,
             syscall::{columns::SyscallCols, SyscallChip, SyscallChunkKind, NUM_SYSCALL_COLS},
         },
-        trace::TraceData,
-        utils::{next_power_of_two, pad_rows_fixed},
+        utils::pad_rows_fixed,
     },
     compiler::{
         addr::{encode_proof_addr_to_u32_limbs_48, Addr},
         riscv::{opcode::ByteOpcode, program::Program},
     },
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
-    },
-    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord, syscalls::SyscallEvent},
-    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    emulator::riscv::{record::EmulationRecord, syscalls::SyscallEvent},
     iter::{IntoPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSlice},
     machine::{
         chip::ChipBehavior,
@@ -24,23 +19,36 @@ use crate::{
         lookup::{LookupScope, LookupType},
     },
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{trace::TraceData, utils::next_power_of_two},
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
 use itertools::Itertools;
 use p3_field::PrimeField32;
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_syscall_generate_extra_record_and_main_u64;
 use std::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
 use tracing::info;
 
 impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -183,7 +191,10 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
     fn lookup_scope(&self) -> LookupScope {
         LookupScope::Regional
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for SyscallChip<F> {
     fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
         // RISCV Syscall events
         counter.num_syscall_events += record.syscall_events.len();

@@ -1,5 +1,6 @@
 //! CPU/GPU trace-generation parity for the two Keccak AIRs (main trace and byte lookups).
 
+#[cfg(feature = "cuda")]
 use crate::{
     chips::{
         chips::{
@@ -25,16 +26,23 @@ use crate::{
         gpu_allocate_byte_trace, gpu_finalize_byte_trace, precompute_event_size,
         PreallocatedGpuMemory, PreparedGpuEvents,
     },
-    machine::chip::ChipBehavior,
+    machine::chip::{ChipBehavior, GpuChipBehavior},
 };
+#[cfg(feature = "cuda")]
 use p3_field::PrimeCharacteristicRing;
+#[cfg(feature = "cuda")]
 use p3_keccak_air::NUM_ROUNDS;
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
+#[cfg(feature = "cuda")]
 use rand::{rng, RngExt};
+#[cfg(feature = "cuda")]
 use tiny_keccak::keccakf;
 
+#[cfg(feature = "cuda")]
 type F = KoalaBear;
 
+#[cfg(feature = "cuda")]
 /// `num_events` random permutations with consistent memory records: reads at `clk`, writes at
 /// `clk + 1`, a fresh 200-byte state buffer per event (aligned, above the 64KB stack guard).
 pub fn generate_keccak_record(num_events: usize) -> EmulationRecord {
@@ -96,8 +104,9 @@ pub fn generate_keccak_record(num_events: usize) -> EmulationRecord {
     record
 }
 
+#[cfg(feature = "cuda")]
 /// CPU vs GPU for one chip: full main trace (real + dummy rows) and the byte table.
-fn assert_cpu_gpu_parity<C: ChipBehavior<F, Record = EmulationRecord>>(
+fn assert_cpu_gpu_parity<C: GpuChipBehavior<F, Record = EmulationRecord>>(
     chip: &C,
     original_record: &EmulationRecord,
     num_cols: usize,
@@ -178,6 +187,7 @@ fn assert_cpu_gpu_parity<C: ChipBehavior<F, Record = EmulationRecord>>(
     );
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn test_keccak_gpu_generate_extra_record_and_main() {
     // 2^10 permutations x 24 rows -> 2^15 rows (with dummy padding) x 2537 cols.
@@ -204,6 +214,7 @@ fn test_keccak_gpu_generate_extra_record_and_main() {
     println!("KeccakPermute GPU correctness test passed for {num_events} events!");
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn test_keccak_control_gpu_generate_extra_record_and_main() {
     let num_events = 1 << 14;
@@ -213,6 +224,7 @@ fn test_keccak_control_gpu_generate_extra_record_and_main() {
     println!("KeccakControl GPU correctness test passed for {num_events} events!");
 }
 
+#[cfg(feature = "cuda")]
 /// A non-power-of-two event count, so the control trace has padding rows (CPU `pad_rows_fixed`
 /// zero rows vs GPU memset) -- the path the power-of-two case above never exercises.
 #[test]

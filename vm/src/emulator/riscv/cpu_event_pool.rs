@@ -1,9 +1,8 @@
 use crate::{
     chips::chips::riscv_cpu::event::CpuEvent,
     create_event_pool_manager,
-    emulator::riscv::event_pool::{growable, EventBuffer, EventPoolManager},
+    emulator::riscv::event_pool::{growable, EventBuffer, EventPoolManager, HostAllocFlags},
 };
-use cudart::memory::CudaHostAllocFlags;
 use once_cell::sync::Lazy;
 use std::{env, fmt};
 
@@ -28,7 +27,7 @@ create_event_pool_manager!(CpuEventPoolManager, CpuEvent, CPU_EVENT_POOL);
 /// Initializes the global CPU event buffer pool.
 /// This function should be called once at application startup.
 /// It will panic if called more than once.
-pub fn init_cpu_event_buffer_pool(pool_size: usize, flags: CudaHostAllocFlags) {
+pub fn init_cpu_event_buffer_pool(pool_size: usize, flags: HostAllocFlags) {
     CpuEventPoolManager::init_pool(pool_size, flags);
 }
 

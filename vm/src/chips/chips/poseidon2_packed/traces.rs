@@ -1,3 +1,10 @@
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    compiler::recursion::{mle_instruction_buckets::MleVariant, types::Poseidon2Io},
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
 use crate::{
     chips::{
         chips::{
@@ -13,17 +20,12 @@ use crate::{
             columns::{Poseidon2ValueCols, NUM_POSEIDON2_VALUE_COLS},
             traces::populate_perm,
         },
-        trace::TraceData,
         utils::next_power_of_two,
     },
     compiler::recursion::{
-        instruction::Instruction,
-        mle_instruction_buckets::MleVariant,
-        program::RecursionProgram,
-        types::{Poseidon2Io, Poseidon2PackedInstr},
+        instruction::Instruction, program::RecursionProgram, types::Poseidon2PackedInstr,
     },
     configs::config::Poseidon2Config,
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
     emulator::recursion::emulator::RecursionRecord,
     iter::{join, IndexedPicoIterator, PicoIterator, PicoSliceMut},
     machine::{
@@ -32,17 +34,22 @@ use crate::{
     },
     primitives::consts::PERMUTATION_WIDTH,
 };
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_field::PrimeField32;
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::{
     cuda_poseidon2_packed_generate_preprocessed, cuda_recursion_poseidon2_generate_main,
 };
@@ -55,7 +62,6 @@ impl<
     > ChipBehavior<F> for Poseidon2PackedChip<F, LinearLayers, Config>
 {
     type Record = RecursionRecord<F>;
-    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -165,7 +171,15 @@ impl<
     fn local_only(&self) -> bool {
         true
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<
+        F: PrimeField32,
+        LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
+        Config: Poseidon2Config,
+    > GpuChipBehavior<F> for Poseidon2PackedChip<F, LinearLayers, Config>
+{
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,
@@ -236,7 +250,6 @@ impl<
         device_id: usize,
         input: &Self::Record,
         _: &mut Self::Record,
-        _: Option<&Self::GpuRecord>,
     ) -> TraceData<'_, F> {
         // The main columns are the shared Poseidon2ValueCols (one permutation per row), identical to
         // the recursion poseidon2 chip, so the permutation trace is produced by the same kernel; only

@@ -16,9 +16,8 @@
 //!   the two cannot drift.
 //! - `MLE_KEYGEN_CROSSCHECK=1` restores the host commit and the full digest equality assert. It is
 //!   default-on under `cfg(test)`, so the `test_keygen_recursion_gpu_*` parity tests always exercise
-//!   it — but note those tests are not run by CI (`rust.yml` is `ubuntu-latest`, and its `lint-gpu`
-//!   job is clippy with `cuda-mle` excluded), so the cross-check only fires when someone runs the
-//!   GPU tests by hand.
+//!   it — but note those tests are not run by CI (no runner has a GPU; the `cuda` job only compiles
+//!   and lints), so the cross-check only fires when someone runs the GPU tests by hand.
 //!
 //! Soundness note: the commitment is the recursion program's identity, and merged mode
 //! structurally excludes commitment VALUES from the vk pre-hash preimage, so which side computes
@@ -52,7 +51,7 @@ use crate::{
     cuda_adaptor::get_global_stream_pool,
     emulator::recursion::emulator::RecursionRecord,
     instances::chiptype::recursion_chiptype::RecursionChipType,
-    machine::chip::{ChipBehavior, MetaChip},
+    machine::chip::{ChipBehavior, GpuChipBehavior, MetaChip},
 };
 use pico_mle_core::{
     poly::matrix::MatrixDimensions,
@@ -269,12 +268,8 @@ pub fn build_ctx_gpu(
         .map(|(air_id, chip)| {
             // gpu_generate_main synchronizes internally (private NON_BLOCKING stream + swap +
             // syncs), so the transpose below can read the allocation immediately.
-            let trace = chip.gpu_generate_main(
-                device_id,
-                record,
-                &mut RecursionRecord::<Kb>::default(),
-                None,
-            );
+            let trace =
+                chip.gpu_generate_main(device_id, record, &mut RecursionRecord::<Kb>::default());
             let matrix = trace_to_col_major(trace, &mut live);
             let ctx = if chip.name() == "PublicValues" {
                 AirProvingContext::simple(matrix, pvs.clone())

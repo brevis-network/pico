@@ -3,10 +3,10 @@
 //! distinct shape is keygen'd once; all proofs of a shape then prove in parallel.
 
 use std::sync::Arc;
-// The process-global program cache is `cuda-mle`-only, and so are these. `pico-vm` builds without
+// The process-global program cache is `cuda`-only, and so are these. `pico-vm` builds without
 // that feature (pico-aot-codegen pulls it in that shape) under `deny(warnings)`, where an
 // unconditional import of them is a hard error.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 use std::sync::{Condvar, Mutex, OnceLock};
 
 use p3_field::PrimeCharacteristicRing;
@@ -377,9 +377,9 @@ impl ConvertMachine {
 //
 // GPU-only by design: the only consumer is the MLE single-node driver, which proves on the GPU.
 // The batch [`ConvertMachine`] above remains the CPU reference path (the e2e example drives it).
-// The whole section is `cuda-mle`-gated — there is no CPU path.
+// The whole section is `cuda`-gated — there is no CPU path.
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 use crate::mle::machine::recursion::gpu::{GpuEngineKb, GpuPbKb};
 
 /// Process-global cache of built verify programs, keyed by layout.
@@ -400,7 +400,7 @@ use crate::mle::machine::recursion::gpu::{GpuEngineKb, GpuPbKb};
 /// The program itself is shared by `Arc` and carries interior-mutable bucket caches, so two cards
 /// can be inside a keygen pass over one program at once — see `RecursionProgram::bucket_for_pass`,
 /// which refcounts those passes for exactly this reason.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 struct ProgramCache {
     /// Built and available. `(layout, program, insert tick)`, bounded LRU by tick.
     ///
@@ -415,7 +415,7 @@ struct ProgramCache {
     tick: u64,
 }
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 static PROGRAM_CACHE: OnceLock<(Mutex<ProgramCache>, Condvar)> = OnceLock::new();
 
 /// Clears a layout's `in_flight` mark and wakes its waiters **even if the build panics**.
@@ -426,7 +426,7 @@ static PROGRAM_CACHE: OnceLock<(Mutex<ProgramCache>, Condvar)> = OnceLock::new()
 /// thread, where a panic kills only that thread and would otherwise go unnoticed. On unwind the
 /// next requester finds the layout neither ready nor in flight, becomes the builder, and panics on
 /// the real path — which is the correct outcome: fail loudly, never hang.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 struct InFlightGuard<'a> {
     lock: &'a Mutex<ProgramCache>,
     cv: &'a Condvar,
@@ -435,7 +435,7 @@ struct InFlightGuard<'a> {
     armed: bool,
 }
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 impl Drop for InFlightGuard<'_> {
     fn drop(&mut self) {
         if !self.armed {
@@ -458,7 +458,7 @@ impl Drop for InFlightGuard<'_> {
 /// about 9.5 GB to the run's resident memory. With the whitelist off, layouts follow each chunk's
 /// natural heights and repeat far less (about 1,180 distinct over the same blocks), so the cache
 /// fills and wraps, at about 16 GB. An LRU wrap is visible rather than silent: eviction logs.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn program_cache_cap() -> usize {
     std::env::var("MLE_CONVERT_PROGRAM_CACHE")
         .ok()
@@ -477,7 +477,7 @@ fn program_cache_cap() -> usize {
 ///
 /// The expensive build runs with **no lock held**, so distinct layouts build concurrently. Callers
 /// racing on the SAME layout serialise on the condvar and share one build.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn program_for_layout(
     layout: &RecursionVkLayout,
     speculative: bool,
@@ -599,12 +599,12 @@ fn program_for_layout(
 }
 
 /// The prover-side key handle cached per layout: a device-resident proving key.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 type GpuPk = Arc<pico_mle_core::prover::DeviceMultiStarkProvingKey<GpuPbKb>>;
 
 /// One cached keygen per [`RecursionVkLayout`]: the verify program, the convert vk, and the
 /// device-resident proving key.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 struct GpuPkEntry {
     layout: RecursionVkLayout,
     program: Arc<RecursionProgram<Kb>>,
@@ -616,7 +616,7 @@ struct GpuPkEntry {
 
 /// Microsecond partition of one keygen-cache miss. Collected in one place rather than threaded out
 /// of the keygen block as a tuple, so adding or dropping a term does not reshape that block.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 #[derive(Default)]
 struct MissTiming {
     /// `RecursionVkLayout::per_air` carries a full `EvalDag` per RISC-V AIR, so the clones this
@@ -631,7 +631,7 @@ struct MissTiming {
     jit_ms: u128,
 }
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 impl MissTiming {
     /// Logged on its own line so the harness-parsed `gpu_convert_timing keygen(miss):` line stays
     /// byte-identical. `miss_us` closes the partition: whatever it exceeds
@@ -655,16 +655,16 @@ impl MissTiming {
 /// Whitelist mode of the GPU convert programs, process-wide: the program cache below is keyed
 /// by layout alone, so one process builds convert programs in one mode. Set by the first
 /// `GpuConvertMachine::new`; a later machine asking for the other mode is a caller bug.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 static CONVERT_WHITELIST_MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
 /// The core ladder row the whitelist-mode warmup keygens: row 13 holds 406 of the 3,275 corpus
 /// core chunks (`MLE_CORE_LADDER`, the 80-block p99 corpus). Any row serves the warmup's
 /// purpose; this one is the likeliest cache hit.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 const WARMUP_CORE_CLASS: usize = 13;
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn convert_whitelist_mode() -> bool {
     CONVERT_WHITELIST_MODE.get().copied().unwrap_or(false)
 }
@@ -672,7 +672,7 @@ fn convert_whitelist_mode() -> bool {
 /// The convert verify program for `layout` in the process's mode. In whitelist mode the program
 /// takes the convert tier shape and passes the tier check (`pad_convert_program`), exactly as
 /// `ConvertMachine::new` does.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 fn build_convert_program(layout: &RecursionVkLayout) -> Arc<RecursionProgram<Kb>> {
     let vk_verification = convert_whitelist_mode();
     let input = ConvertProgramInput {
@@ -686,7 +686,7 @@ fn build_convert_program(layout: &RecursionVkLayout) -> Arc<RecursionProgram<Kb>
     Arc::new(program)
 }
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub struct GpuConvertMachine {
     pub engine: GpuEngineKb,
     /// Whitelist mode: proofs witness `vk_root` into their public values and the programs are
@@ -706,7 +706,7 @@ pub struct GpuConvertMachine {
     cache_cap: usize,
 }
 
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 impl GpuConvertMachine {
     /// Light constructor: no proofs, no upfront keygen. Call [`Self::pre_keygen_warmup`] once
     /// from a quiescent thread before the proving pipeline spins up (JIT warmup — see there).
@@ -1248,7 +1248,7 @@ impl GpuConvertMachine {
 /// A convert with its proving context already built (device-resident). Consumed by
 /// [`GpuConvertMachine::prove_built`] on the same thread that built it — a built ctx must not park
 /// between build and prove, or its residency lands inside some other prove's VRAM high-water.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub struct BuiltConvert {
     vk: Arc<MultiStarkVerifyingKey<Sc>>,
     pk: GpuPk,
@@ -1263,7 +1263,7 @@ pub struct BuiltConvert {
 
 /// Output of the CPU preparation stage ([`GpuConvertMachine::prepare_one`]), ready for the
 /// GPU stage ([`GpuConvertMachine::prove_prepared`]). Flows through the pipeline channel.
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub struct GpuPreparedConvert {
     vk: Arc<MultiStarkVerifyingKey<Sc>>,
     pk: GpuPk,

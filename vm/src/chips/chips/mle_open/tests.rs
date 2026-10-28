@@ -64,6 +64,7 @@ fn test_mle_open_preprocessed_dimensions() {
 /// GPU trace-gen must be element-wise identical to the CPU path, including padding rows.
 /// The recursion layer is KoalaBear-only, so these run over KoalaBear (the GPU path allocates
 /// `DevicePoolAllocation::<KoalaBear>`). Requires a CUDA device — run on the GPU host.
+#[cfg(feature = "cuda")]
 mod gpu {
     use crate::{
         chips::{chips::mle_open::MleOpenChip, tests::init_test_stream},
@@ -74,7 +75,7 @@ mod gpu {
             types::{Address, MleOpenEvent, MleOpenInstr},
         },
         emulator::recursion::emulator::RecursionRecord,
-        machine::chip::ChipBehavior,
+        machine::chip::{ChipBehavior, GpuChipBehavior},
     };
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
@@ -118,7 +119,7 @@ mod gpu {
 
         let cpu = chip.generate_main(&record, &mut RecursionRecord::default());
         let gpu = chip
-            .gpu_generate_main(0, &record, &mut RecursionRecord::default(), None)
+            .gpu_generate_main(0, &record, &mut RecursionRecord::default())
             .to_host(stream);
 
         assert_eq!(cpu.values, gpu.values, "main parity failed for {n} events");

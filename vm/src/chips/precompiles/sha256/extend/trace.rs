@@ -3,41 +3,53 @@ use crate::{
         chips::{byte::event::ByteRecordBehavior, events::ByteLookupEvent},
         precompiles::sha256::extend::{
             columns::{ShaExtendCols, NUM_SHA_EXTEND_COLS},
-            ffi::ShaExtendFfiEvent,
             ShaExtendChip,
         },
-        trace::TraceData,
-        utils::{next_power_of_two, pad_rows_fixed},
+        utils::pad_rows_fixed,
     },
     compiler::riscv::{opcode::ByteOpcode, program::Program},
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
-    },
     emulator::riscv::{
-        ffi::FFIEmulationRecord,
         record::EmulationRecord,
         syscalls::{
             precompiles::{PrecompileEvent, ShaExtendEvent},
             SyscallCode,
         },
     },
-    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::chip::ChipBehavior,
 };
-use core::{borrow::BorrowMut, mem::size_of};
+use core::borrow::BorrowMut;
+
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{
+        precompiles::sha256::extend::ffi::ShaExtendFfiEvent, trace::TraceData,
+        utils::next_power_of_two,
+    },
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
+use core::mem::size_of;
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
-use p3_koala_bear::KoalaBear;
-
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
 use log::info;
 use p3_air::BaseAir;
 use p3_field::PrimeField32;
+#[cfg(feature = "cuda")]
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_precompile_sha256_extend_generate_extra_record_and_main;
 
 impl<F: PrimeField32> BaseAir<F> for ShaExtendChip<F> {
@@ -48,7 +60,6 @@ impl<F: PrimeField32> BaseAir<F> for ShaExtendChip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -117,7 +128,10 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
                 .is_empty()
         }
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for ShaExtendChip<F> {
     fn gpu_generate_extra_record_and_main(
         &self,
         device_id: usize,

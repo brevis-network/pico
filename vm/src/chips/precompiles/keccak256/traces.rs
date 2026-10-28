@@ -3,44 +3,53 @@ use super::{
     KeccakPermuteChip, STATE_SIZE,
 };
 use crate::{
-    chips::{precompiles::checked_u64_to_u32, trace::TraceData},
+    chips::precompiles::checked_u64_to_u32,
     compiler::riscv::program::Program,
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
-    },
     emulator::{
         record::RecordBehavior,
         riscv::{
-            ffi::FFIEmulationRecord,
             record::EmulationRecord,
             syscalls::{
-                precompiles::{
-                    keccak256::event::FFIKeccakPermuteEvent, KeccakPermuteEvent, PrecompileEvent,
-                },
+                precompiles::{KeccakPermuteEvent, PrecompileEvent},
                 SyscallCode,
             },
         },
     },
-    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     iter::{PicoBridge, PicoIterator},
     machine::chip::ChipBehavior,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    emulator::riscv::syscalls::precompiles::keccak256::event::FFIKeccakPermuteEvent,
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
     stream::{CudaStream, CudaStreamCreateFlags},
 };
+#[cfg(feature = "cuda")]
 use cudart_sys::*;
 use p3_air::BaseAir;
 use p3_field::PrimeField32;
 use p3_keccak_air::{
     generate_trace_rows, KeccakCols as UpstreamKeccakCols, NUM_KECCAK_COLS, NUM_ROUNDS,
 };
+#[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_precompile_keccak_generate_extra_record_and_main;
 use std::borrow::{Borrow, BorrowMut};
-use tracing::{debug, info};
+use tracing::debug;
+#[cfg(feature = "cuda")]
+use tracing::info;
 
 impl<F> BaseAir<F> for KeccakPermuteChip<F> {
     fn width(&self) -> usize {
@@ -50,7 +59,6 @@ impl<F> BaseAir<F> for KeccakPermuteChip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
     type Record = EmulationRecord;
-    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -143,7 +151,10 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
                 .is_empty()
         }
     }
+}
 
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for KeccakPermuteChip<F> {
     fn gpu_generate_extra_record_and_main(
         &self,
         device_id: usize,

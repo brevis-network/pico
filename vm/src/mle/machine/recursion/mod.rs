@@ -11,7 +11,7 @@
 //!   share them.
 
 mod chips;
-#[cfg(feature = "cuda-mle")]
+#[cfg(feature = "cuda")]
 pub mod gpu;
 mod layout;
 mod root_check;
