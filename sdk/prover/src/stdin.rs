@@ -74,8 +74,6 @@ impl Stdin {
 
     /// Hand the elements to the emulator.
     ///
-    /// Routed through `EmulatorStdinBuilder` rather than built as a struct literal: `programs` is
-    /// `Arc<[P]>` here and `Vec<Arc<P>>` on the GPU branch, and the builder absorbs that.
     /// `KoalaBearPoseidon2` is the builder's phantom type parameter, discarded by `finalize`.
     pub(crate) fn into_emulator_stdin(self) -> EmulatorStdin<Program, Vec<u8>> {
         let mut builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();

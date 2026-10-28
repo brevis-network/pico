@@ -264,7 +264,7 @@ impl ProverBuilder {
 
     /// Instructions per emulation chunk. Defaults to `1 << log_stacked_height`.
     ///
-    /// Fixed for the life of the [`Prover`], not per `prove`: on the GPU branch the pinned host
+    /// Fixed for the life of the [`Prover`], not per `prove`: in a `cuda` build the pinned host
     /// buffers are sized from this once per process, so two provers in one process would otherwise
     /// silently share whichever resolved first.
     pub fn chunk_size(mut self, n: u32) -> Self {

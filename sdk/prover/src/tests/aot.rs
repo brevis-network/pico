@@ -381,8 +381,8 @@ fn failed_aot_runs_leave_the_memory_pool_whole() {
         POOL,
         "MEMORY_POOL_SIZE did not reach the pool"
     );
-    // One worker: on this branch a worker keeps a pool memory between its batches, so a pool of
-    // two serves one worker and the batch being cut.
+    // One worker: a worker keeps a pool memory between its batches, so a pool of two serves one
+    // worker and the batch being cut.
     let builder = || {
         Prover::builder(COMMIT_OUT_OF_RANGE_ELF)
             .log_stacked_height(SMALL_LOG_STACKED_HEIGHT)

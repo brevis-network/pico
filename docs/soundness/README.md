@@ -144,7 +144,7 @@ cargo test -p pico-mle-core --test soundness -- --nocapture --test-threads=1
 
 A second test scores eight rows at a fixed shape against pinned reference values, so a change that
 moves the binding term shows up as a failing assertion rather than as a silently different verdict.
-No CI on this branch runs either; run both by hand, under the default degree bound and again with
+No CI job runs either; run both by hand, under the default degree bound and again with
 `soundness-bchks25-optimized`, where the parity test is skipped:
 
 ```bash

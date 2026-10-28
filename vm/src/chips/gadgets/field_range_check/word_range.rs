@@ -121,7 +121,7 @@ impl<F: Field + FieldBehavior> FieldWordRangeChecker<F> {
         // Emission order matters beyond readability: the per-AIR digests in
         // `vm/tests/riscv_constraint_dump.txt` are taken over the vk's serialized
         // `symbolic_constraints`, so moving an assertion across this call would change the
-        // Ecall AIR's digest and turn the cross-branch parity gate red for no semantic reason.
+        // Ecall AIR's digest and turn the constraint parity gate red for no semantic reason.
         // The three assertions above therefore stay here, ahead of the delegation, exactly
         // where they were when this body was one function.
         Self::range_check_u32_limbs::<CB>(builder, value[0].into(), value[1].into(), cols, is_real);
