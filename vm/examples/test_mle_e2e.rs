@@ -88,7 +88,7 @@ fn main() {
     let compiler = Compiler::new(SourceType::RISCV, elf).expect("failed to parse ELF");
     let program = compiler.compile();
 
-    // Verify-only: accept a root proved by the other branch's build. Nothing is
+    // Verify-only: accept a root proved by another build (CPU or `cuda`). Nothing is
     // emulated or proved here. The program identity is derived locally from the same ELF rather
     // than taken from the dump — that is the half of the claim worth checking.
     if let Ok(path) = std::env::var("MLE_VERIFY_ROOT") {
@@ -145,9 +145,9 @@ fn main() {
         }
         combine
             .verify(&(proof, std::sync::Arc::new(root_vk)))
-            .expect("cross-branch root verify failed");
+            .expect("cross-build root verify failed");
         info!(
-            "cross-branch root verify ✓ ({path}, height {dumped_height}, whitelist {dumped_whitelist})"
+            "cross-build root verify ✓ ({path}, height {dumped_height}, whitelist {dumped_whitelist})"
         );
         return;
     }
@@ -458,12 +458,12 @@ fn main() {
         apex.verify(&root).expect("standalone apex verify failed");
         info!("standalone apex verify ✓");
     }
-    // Cross-branch check: hand the root to the other branch's build and have it verify. What this
-    // covers is the two branches' keygen, constraint set and wire format. What it does NOT cover:
-    // this example drives the CPU `CombineMachine`, while production on the GPU branch recursion-
-    // proves through `GpuCombineMachine` — that prover is outside the gate. The child layouts
-    // travel with the proof because the verifying side has no children to derive the root's shape
-    // from.
+    // Cross-build check: hand the root to the other build (CPU or `cuda`) and have it verify. What
+    // this covers is the two builds' keygen, constraint set and wire format. What it does NOT
+    // cover: this example drives the CPU `CombineMachine`, while production `cuda` builds
+    // recursion-prove through `GpuCombineMachine` — that prover is outside the gate. The child
+    // layouts travel with the proof because the verifying side has no children to derive the
+    // root's shape from.
     if let Ok(path) = std::env::var("MLE_DUMP_ROOT") {
         let layouts = combine
             .root_child_layouts(&root.1)

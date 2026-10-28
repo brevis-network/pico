@@ -1,22 +1,21 @@
 //! The parity gate: the RISC-V machine's constraint surface must still match the
 //! pinned artifact.
 //!
-//! This is the check that stops the CPU and GPU provers' constraints drifting apart silently. The
-//! same artifact is pinned in both trees; a constraint change on one side that is not mirrored on
-//! the other turns this red. Because the digest is params-free it does **not** care about
-//! `CHUNK_SIZE` / `log_stacked_height`, so the two can be compared while they sit at different
-//! operating points.
+//! This is the check that stops the constraint surface moving silently: the CPU and `cuda` builds
+//! share the AIRs, and a constraint change that does not also update the pinned artifact turns
+//! this red. Because the digest is params-free it does **not** care about `CHUNK_SIZE` /
+//! `log_stacked_height`, so dumps taken at different operating points still compare equal.
 //!
 //! When this fails legitimately (you meant to change constraints), regenerate the artifact:
 //!   cargo run --release -p pico-vm --example mle_constraint_dump -- \
 //!     vm/tests/riscv_constraint_dump.txt
-//! and mirror it on the other branch in the same change. **The per-AIR lines in the diff name the
+//! and commit it in the same change. **The per-AIR lines in the diff name the
 //! chips that moved** — that localisation is the reason the artifact stores per-AIR digests rather
 //! than only the overall one.
 //!
-//! Note what this does and does not prove: it says the two branches agree, not that either is
-//! sound. A slimmed AIR that drops a *needed* constraint still proves and still verifies; only the
-//! e2e negative battery catches that.
+//! Note what this does and does not prove: it says the constraints match the pinned ones, not
+//! that they are sound. A slimmed AIR that drops a *needed* constraint still proves and still
+//! verifies; only the e2e negative battery catches that.
 
 use pico_vm::mle::machine::riscv::riscv_constraint_dump;
 
@@ -38,7 +37,7 @@ fn riscv_constraint_dump_matches_the_pinned_artifact() {
         panic!(
             "RISC-V constraint surface changed (first differing lines):\n{}\n\
              If intended, regenerate vm/tests/riscv_constraint_dump.txt with the \
-             mle_constraint_dump example and mirror it on the other branch, and rebuild the \
+             mle_constraint_dump example in the same change, and rebuild the \
              whitelist with the mle_build_vk_map example: the convert VKs of every shape the \
              changed AIR is present in have moved.",
             diff.join("\n")

@@ -78,7 +78,7 @@ jobs:
           cache-save: "false"
       - name: Constraint-surface parity
         run: |
-          # The pinned dump is this branch's only record of its AIR set, and nothing else in CI
+          # The pinned dump is the only record of the AIR set, and nothing else in CI
           # reads it -- without this step a chip change lands green and the artifact goes stale.
           cargo test --release -p pico-vm --test riscv_constraint_parity
       - name: Precompile support pins

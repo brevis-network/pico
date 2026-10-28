@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 /// A stopping point in the proving chain — the `--step` vocabulary of `vm/examples/test_mle_e2e.rs`.
 ///
-/// All five variants exist on every build. Only the implementations are feature- and
-/// branch-gated, so a caller can always *name* a phase in order to be told it is unavailable:
+/// All five variants exist on every build. Only the implementations are
+/// feature-gated, so a caller can always *name* a phase in order to be told it is unavailable:
 /// [`Phase::Embed`] and [`Phase::Wrap`] return [`crate::ProveError::FeatureMissing`] without
 /// `multi-field-transcript`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

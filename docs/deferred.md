@@ -136,7 +136,7 @@ does not verify.
 
 ## Gates
 
-CI runs none of these on this branch. The deferred examples build with `--features cuda` too,
+CI runs none of these. The deferred examples build with `--features cuda` too,
 which proves their riscv chunks on the GPU (the aggregator's then exercise the GPU Ecall tally),
 except `test_mle_deferred_split`, which builds its chunk contexts on the host and runs on the CPU
 build only.
