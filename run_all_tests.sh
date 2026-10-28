@@ -1,5 +1,12 @@
 #!/bin/bash
-set -e
+# Runs the GPU trace-generation tests and CPU-vs-GPU benches; needs a CUDA toolkit and a GPU.
+set -eo pipefail
+
+. "$(dirname "$0")/detect_cuda.sh"
+if ! pico_cuda_detect || [ "$PICO_BACKEND" != cuda ] || ! nvidia-smi -L 2>/dev/null | grep -q '^GPU '; then
+    echo "run_all_tests.sh: these are GPU tests; they need a CUDA toolkit and a GPU" >&2
+    exit 1
+fi
 
 tests=(
 "test_byte_gpu_generate_preprocessed"
@@ -50,10 +57,21 @@ tests=(
 "bench_fp2_mul_cpu_vs_gpu"
 )
 
+log=$(mktemp)
+trap 'rm -f "$log"' EXIT
+summary=()
 for t in "${tests[@]}"; do
     echo "========================================="
     echo "Running $t"
     echo "========================================="
-    cargo test --release -p pico-vm $t -- --nocapture
+    cargo test --release -p pico-vm --features cuda --lib "$t" -- --nocapture 2>&1 | tee "$log"
+    # A renamed or cfg'd-out test matches nothing, and cargo reports that as success.
+    passed=$(awk '/^test result: ok\./ { n += $4 } END { print n + 0 }' "$log")
+    if [ "$passed" -eq 0 ]; then
+        echo "run_all_tests.sh: '$t' matched no test" >&2
+        exit 1
+    fi
+    summary+=("$passed $t")
 done
+printf '%s\n' "${summary[@]}"
 echo "All tests completed successfully!"
