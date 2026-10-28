@@ -72,5 +72,6 @@ pico-gpu checkout, pass a `[patch]` on the command line instead of editing `Carg
   `distributed-vm` binaries on a CUDA host; `sweep_reth_mle.sh` proves every block input in a
   directory from one process. `bench-scripts` holds the tools that summarise and draw their logs,
   and `ci/test_*.sh` the launchers' own tests.
-- `.github/workflows/rust.yml`: CI, run on pull requests to `gpu` and `release/v*` and on pushes to
-  `gpu`.
+- `.github/workflows`: CI, run on pull requests to `main` and `release/v*` and on pushes to `main`.
+  `lint.yml` explains how the checks are split across the files there; `build-cuda.yml` and
+  `scripts.yml` run only when the paths they check change.

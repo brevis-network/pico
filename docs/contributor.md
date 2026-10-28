@@ -12,7 +12,7 @@ Thank you for your interest in contributing to Pico! Your contributions—whethe
 ## Pull Requests
 - Fork & Clone: Fork the repository and clone it locally.
 - Create a Branch: Use a descriptive branch name (e.g., `feature/new-proof-system` or `bugfix/fix-crash`).
-- Implement & Test: Add tests for your changes. You can review the testing commands in `.github/workflows/rust.yml` and use them or add your own tests as needed. Use [act](https://github.com/nektos/act) to simplify this process into `act pull_request`.
+- Implement & Test: Add tests for your changes. You can review the testing commands in `.github/workflows` and use them or add your own tests as needed. Use [act](https://github.com/nektos/act) to simplify this process into `act pull_request`.
 - Format & Lint: Before submitting your PR, run: `make fmt` and `make lint`.
 - Submit PR: Open a pull request with a summary of your changes and reference any related issues (e.g., “Fixes #123”). 
 
