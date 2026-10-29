@@ -61,6 +61,7 @@ env:
   CPU_FEATURES: >-
     pico-mle-core/metrics,pico-mle-core/multi-field-transcript,pico-mle-core/parallel,
     pico-mle-core/soundness-bchks25-optimized,pico-mle-core/test-utils,pico-mle-cpu/parallel,
+    pico-verifier/codec,pico-verifier/parallel,
     pico-vm/aot-emulator,pico-vm/bigint-rug,pico-vm/debug,pico-vm/debug-lookups,pico-vm/jemalloc,
     pico-vm/metrics,pico-vm/mmap-memory,pico-vm/multi-field-transcript,pico-vm/parallel,
     pico-vm/rayon,pico-vm/single-threaded,pico-vm/soundness-bchks25-optimized,pico-vm/strict,
@@ -133,3 +134,20 @@ jobs:
           # item that only `coprocessor` uses shows up as an unused-item warning. Both are host
           # builds: neither compiles the `target_os = "zkvm"` paths a guest runs.
           cargo clippy -p pico-sdk --features prover,libm --locked -- -D warnings
+
+  # `pico-verifier` is what out-of-process verifiers (ere) build, on stable. Everything else here
+  # runs on the nightly pin, so this is the only lane that catches a nightly feature creeping in.
+  stable-verifier:
+    name: CPU · pico-verifier on stable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          toolchain: "1.91.1"
+      - name: Check and test on stable
+        run: |
+          set -eux
+          cargo +1.91.1 check -p pico-verifier --locked
+          cargo +1.91.1 check -p pico-verifier --no-default-features --tests --locked
+          cargo +1.91.1 test -p pico-verifier --locked
