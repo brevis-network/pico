@@ -4017,6 +4017,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "pico-verifier"
+version = "3.1.0"
+dependencies = [
+ "bincode",
+ "p3-air",
+ "p3-field",
+ "p3-koala-bear",
+ "p3-matrix",
+ "p3-symmetric",
+ "pico-mle-core",
+ "pico-mle-cpu",
+ "serde",
+ "sha2",
+ "thiserror 1.0.69",
+ "zstd",
+]
+
+[[package]]
 name = "pico-vm"
 version = "3.1.0"
 dependencies = [
