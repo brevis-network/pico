@@ -19,6 +19,8 @@ mod execute;
 mod exit_code;
 mod export;
 mod fixture;
+#[cfg(feature = "cuda")]
+mod gpu;
 mod options;
 mod poseidon2;
 mod precompiles;

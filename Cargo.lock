@@ -3982,6 +3982,7 @@ name = "pico-prover"
 version = "3.1.0"
 dependencies = [
  "bincode",
+ "distributed-vm",
  "pico-aot-runtime",
  "pico-mle-core",
  "pico-verifier",

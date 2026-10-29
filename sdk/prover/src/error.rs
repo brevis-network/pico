@@ -129,6 +129,17 @@ pub enum ProveError {
     #[error("not a readable proof artifact: {0}")]
     Format(String),
 
+    /// The GPU pipeline failed or produced no root.
+    #[cfg(feature = "cuda")]
+    #[error("GPU proving failed: {0}")]
+    Gpu(String),
+
+    /// A previous GPU prove failed in this process and may have left the pipeline mid-run; restart
+    /// the process to prove on the GPU again.
+    #[cfg(feature = "cuda")]
+    #[error("a previous GPU prove failed in this process; restart the process to prove again")]
+    GpuPoisoned,
+
     /// The container was written by a different container format.
     #[error("proof artifact format version mismatch: expected {expected}, file claims {found}")]
     FormatVersion { expected: u32, found: u32 },
@@ -279,6 +290,15 @@ impl ProveError {
             };
         }
         Self::Emulate(error)
+    }
+
+    /// Lift a GPU pipeline failure, keeping a poisoned process distinguishable.
+    #[cfg(feature = "cuda")]
+    pub(crate) fn from_embed(error: distributed_vm::mle::embed::EmbedError) -> Self {
+        match error {
+            distributed_vm::mle::embed::EmbedError::Poisoned => Self::GpuPoisoned,
+            other => Self::Gpu(other.to_string()),
+        }
     }
 }
 

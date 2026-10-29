@@ -245,6 +245,8 @@ pub struct ProverBuilder {
     aot: Option<&'static AotProgram>,
     #[cfg(feature = "aot")]
     emulation_workers: Option<NonZeroUsize>,
+    #[cfg(feature = "cuda")]
+    gpu_event_pool_size: NonZeroUsize,
 }
 
 impl ProverBuilder {
@@ -261,6 +263,8 @@ impl ProverBuilder {
             aot: None,
             #[cfg(feature = "aot")]
             emulation_workers: None,
+            #[cfg(feature = "cuda")]
+            gpu_event_pool_size: distributed_vm::mle::embed::DEFAULT_EVENT_POOL_SIZE,
         }
     }
 
@@ -377,6 +381,17 @@ impl ProverBuilder {
         self
     }
 
+    /// Pinned host event buffers the GPU prove keeps, each one chunk's worth of CPU or ALU events;
+    /// they bound how far emulation runs ahead of the cards, and stay allocated once a GPU prove
+    /// has run. Defaults to [`distributed_vm::mle::embed::DEFAULT_EVENT_POOL_SIZE`];
+    /// `MLE_EVENT_POOL_SIZE` does not apply here. A size that cannot hold one chunk's replay, two
+    /// ALU buffers per segment, is refused when proving starts, without poisoning the process.
+    #[cfg(feature = "cuda")]
+    pub fn gpu_event_pool_size(mut self, n: NonZeroUsize) -> Self {
+        self.gpu_event_pool_size = n;
+        self
+    }
+
     /// Emulate without proving: no keygen, no whitelist. Chunks exactly as the built prover would.
     ///
     /// The whitelist options go unchecked: they bind proving only.
@@ -397,6 +412,12 @@ impl ProverBuilder {
         let path = self.resolved_emulation()?;
         let program = compile(&self.elf)?;
         self.register_aot()?;
+        // The tier latches on first read, so a whitelist builder that emulates before `build`
+        // must pick the cards' tier here, not lock in the default.
+        #[cfg(feature = "cuda")]
+        if self.verify_keys {
+            latch_gpu_memory_tier()?;
+        }
         emulate_program(program, opts, path, stdin)
     }
 
@@ -457,7 +478,18 @@ impl ProverBuilder {
             None
         };
 
+        // A whitelist prover proves Combine on the GPU: latch the cards' memory tier before any
+        // emulation of this prover reads the default.
+        #[cfg(feature = "cuda")]
+        if vk_map.is_some() {
+            latch_gpu_memory_tier()?;
+        }
+
         let program = compile(&self.elf)?;
+
+        // The riscv machine below keygens on the GPU in a `cuda` build, which needs the pool.
+        #[cfg(feature = "cuda")]
+        pico_vm::mle::machine::riscv::init_mle_gpu_pool(0);
 
         // Built once and handed on: the fit check and keygen need the same air set, and in
         // whitelist mode building it pads the program table to its bucket.
@@ -516,6 +548,10 @@ impl ProverBuilder {
             apex,
             #[cfg(feature = "multi-field-transcript")]
             embed: None,
+            #[cfg(feature = "cuda")]
+            elf: Arc::from(self.elf.as_slice()),
+            #[cfg(feature = "cuda")]
+            gpu_event_pool_size: self.gpu_event_pool_size,
         })
     }
 
@@ -653,6 +689,15 @@ fn compile(elf: &[u8]) -> Result<Arc<Program>, ProveError> {
 /// Any abort the emulator still has on guest or caller input is returned as an error, and every
 /// record's digests are made final. The emulator is built inside the call and dropped with it, so
 /// nothing an unwind interrupted outlives it.
+/// Latch the visible cards' memory tier (`PICO_GPU_MEM` overrides) before any emulation reads
+/// the default.
+#[cfg(feature = "cuda")]
+fn latch_gpu_memory_tier() -> Result<(), ProveError> {
+    distributed_vm::mle::embed::init_memory_tier()
+        .map(drop)
+        .map_err(ProveError::from_embed)
+}
+
 fn emulate_program(
     program: Arc<Program>,
     opts: EmulatorOpts,
@@ -847,6 +892,11 @@ pub struct Prover {
     apex: Option<MleApexVerifier>,
     #[cfg(feature = "multi-field-transcript")]
     embed: Option<pico_vm::mle::machine::embed::EmbedMachine>,
+    /// The ELF the GPU pipeline compiles for itself.
+    #[cfg(feature = "cuda")]
+    elf: Arc<[u8]>,
+    #[cfg(feature = "cuda")]
+    gpu_event_pool_size: NonZeroUsize,
 }
 
 impl std::fmt::Debug for Prover {
@@ -942,11 +992,21 @@ impl Prover {
     /// The returned [`Proof`] has been verified; there is no separate `verify` step and no way to
     /// obtain an unverified one.
     ///
+    /// A `cuda` build proves on the GPU only: a whitelist-mode [`Phase::Combine`] on every visible
+    /// card, anything else on card 0, because the feature swaps the proving engine for the whole
+    /// process. Build without `cuda` to prove on the CPU.
+    ///
     /// A [`Phase::Wrap`] proof made with `verify_keys(false)` is not accepted by the on-chain
     /// verifier: the wrap circuit bakes in the whitelist root only when there is one, so without it
     /// the circuit, and therefore its Groth16 key, is a different one.
     pub fn prove_to(&mut self, stdin: Stdin, phase: Phase) -> Result<Proof, ProveError> {
         phase.ensure_available()?;
+
+        // Whitelist Combine goes to every visible card; the rest prove on card 0 (see `cuda`).
+        #[cfg(feature = "cuda")]
+        if matches!(phase, Phase::Combine) && self.vk_map.is_some() {
+            return self.prove_combine_gpu(stdin);
+        }
 
         let emulated = self.emulate(stdin)?;
         let committed = emulated.execution.committed_bytes;
@@ -1239,6 +1299,76 @@ impl Prover {
         ))
     }
 
+    /// [`Phase::Combine`] on every visible GPU, in whitelist mode. The root is verified by the GPU
+    /// pipeline and again here, by the checks [`Self::verify_artifact`] runs on a loaded root.
+    #[cfg(feature = "cuda")]
+    fn prove_combine_gpu(&mut self, stdin: Stdin) -> Result<Proof, ProveError> {
+        use pico_mle_core::codec::Decode;
+
+        let Some(vk_map) = &self.vk_map else {
+            return Err(ProveError::WhitelistModeRequired {
+                what: "GPU proving",
+            });
+        };
+        let program = distributed_vm::mle::embed::EmbeddedProgram {
+            elf: Arc::clone(&self.elf),
+            whitelist: Arc::clone(vk_map),
+            trusted_root: vk_map.root(),
+            // The GPU's deferred split, which its memory tiers are calibrated for; the chunk size,
+            // and so the program id, stay this prover's.
+            emulator_opts: EmulatorOpts {
+                split_opts: SplitOpts::new(
+                    pico_vm::primitives::consts::BENCH_MAX_DEFERRED_SPLIT_THRESHOLD,
+                ),
+                ..self.opts
+            },
+            event_pool_size: self.gpu_event_pool_size,
+            emulation_workers: pico_vm::proverchain::riscv::default_pipeline_workers(),
+        };
+        let out = distributed_vm::mle::embed::prove(program, stdin.into_emulator_stdin())
+            .map_err(ProveError::from_embed)?;
+
+        let root_vk = out
+            .root
+            .root_vk
+            .ok_or_else(|| ProveError::Gpu("whitelist root exported without its vk".into()))?;
+        let proof = crate::types::InnerProof::decode_from_bytes(&out.root.proof)
+            .map_err(|e| ProveError::Gpu(format!("cannot decode the root proof: {e}")))?;
+        let vk: VerifyingKey = bincode::deserialize(&root_vk)
+            .map_err(|e| ProveError::Gpu(format!("cannot decode the root vk: {e}")))?;
+        let root: Box<ProofWithVk> = Box::new((proof, Arc::new(vk)));
+
+        self.verify_root(&root)?;
+        self.combine_proof(root, out.committed, None, None)
+    }
+
+    /// A root this prover did not just prove on the CPU: it must be complete, then pass the apex
+    /// or, without a whitelist, the combine machine that keygen'd its shape.
+    fn verify_root(&self, root: &ProofWithVk) -> Result<(), ProveError> {
+        let phase = Phase::Combine;
+        if !binding::is_complete_root(&root.0.public_values) {
+            return Err(ProveError::Incomplete);
+        }
+        match &self.apex {
+            // The whitelist authenticates the supplied key by membership, which is what lets a
+            // machine that keygen'd nothing accept this proof.
+            Some(apex) => apex
+                .verify(root)
+                .map_err(|e| ProveError::verification(phase, format!("{e:#}"))),
+            // Otherwise only the machine that keygen'd the shape can select an honest key for it.
+            // Deriving one from the file would be letting the file choose the circuit it is
+            // checked against.
+            None => {
+                if self.combine.honest_root_vk(&root.1).is_none() {
+                    return Err(ProveError::WhitelistRequired { phase });
+                }
+                self.combine
+                    .verify(root)
+                    .map_err(|e| ProveError::verification(phase, format!("{e:#}")))
+            }
+        }
+    }
+
     /// A verified combine root as a [`Proof`], once `committed` is bound to it.
     fn combine_proof(
         &self,
@@ -1334,27 +1464,7 @@ impl Prover {
                 self.riscv_proof(bundle, committed, None)
             }
             LoadedPayload::Combine(root) => {
-                if !binding::is_complete_root(&root.0.public_values) {
-                    return Err(ProveError::Incomplete);
-                }
-                match &self.apex {
-                    // The whitelist authenticates the supplied key by membership, which is what
-                    // lets a machine that keygen'd nothing accept this proof.
-                    Some(apex) => apex
-                        .verify(&root)
-                        .map_err(|e| ProveError::verification(phase, format!("{e:#}")))?,
-                    // Otherwise only the machine that keygen'd the shape can select an honest key
-                    // for it. Deriving one from the file would be letting the file choose the
-                    // circuit it is checked against.
-                    None => {
-                        if self.combine.honest_root_vk(&root.1).is_none() {
-                            return Err(ProveError::WhitelistRequired { phase });
-                        }
-                        self.combine
-                            .verify(&root)
-                            .map_err(|e| ProveError::verification(phase, format!("{e:#}")))?
-                    }
-                }
+                self.verify_root(&root)?;
                 self.combine_proof(root, committed, None, None)
             }
         }

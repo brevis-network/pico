@@ -116,8 +116,9 @@ jobs:
         run: |
           # `--tests` lints each binary only in its test profile, where `cfg(test)` code is in and
           # `cfg(not(test))` code is out; `--bins` lints the binary that ships.
-          # Every feature but `cuda` (and its alias), which needs the CUDA toolkit and is linted
-          # by `GPU · CUDA build and clippy` (build-cuda.yml); add a new feature here when one appears.
+          # Every feature but `cuda` (and its alias, and `pico-prover/cuda`), which needs the CUDA
+          # toolkit and is linted by `GPU · CUDA build and clippy` (build-cuda.yml); add a new
+          # feature here when one appears.
           cargo clippy --workspace --exclude cuda-mle --exclude pico-gpu-api \
             --lib --bins --examples --tests --benches --features "$CPU_FEATURES" --locked -- -D warnings
       - name: Clippy host prover and CLI without the outer phases

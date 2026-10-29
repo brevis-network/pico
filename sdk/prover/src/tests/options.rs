@@ -357,6 +357,9 @@ fn an_empty_record_set_is_an_error() {
     use pico_vm::mle::machine::{convert::ConvertMachine, exe::RiscvVmVk, riscv::RiscvMachine};
 
     let program = fib_program();
+    // Keygen on the GPU needs the shared pool, which only `build` sets up otherwise.
+    #[cfg(feature = "cuda")]
+    pico_vm::mle::machine::riscv::init_mle_gpu_pool(0);
     let machine =
         RiscvMachine::new(program.clone(), SMALL_LOG_STACKED_HEIGHT, false).expect("riscv keygen");
     let riscv_vk = std::sync::Arc::new(machine.vk().clone());
