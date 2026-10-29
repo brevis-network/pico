@@ -1,4 +1,10 @@
 use super::{columns::num_poseidon2_cols, Poseidon2PermuteChip, STATE_NUM_BYTES, STATE_NUM_DWORDS};
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    instances::preparer::{gpu_add_host_byte_lookups, PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
 use crate::{
     chips::{
         chips::{
@@ -143,6 +149,64 @@ impl<
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
+        for blu in self.byte_lookup_batches(input) {
+            for e in blu {
+                extra.add_byte_lookup_event(e);
+            }
+        }
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<
+        F: PrimeField32,
+        LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
+        Config: Poseidon2Config,
+    > GpuChipBehavior<F> for Poseidon2PermuteChip<F, LinearLayers, Config>
+{
+    /// The GPU prover generates this trace on the host.
+    ///
+    /// `cuda_precompile_poseidon2_generate_extra_record_and_main` is stale: its kernel writes the
+    /// RV32 layout this chip had before the RV64 port -- one memory access per state word, the
+    /// pointers as single field elements, no address gadgets and no canonicality range checkers
+    /// -- so it cannot fill these columns and is not called. The trace is `generate_main`'s, and
+    /// the byte lookups, which `generate_main` drops, are the ones `extra_record` records, added
+    /// to the device byte table here because no kernel puts them there. They are counted into the
+    /// table as they come rather than merged into a record first: a full block raises ~6M.
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        _device_id: usize,
+        input: &Self::Record,
+        _prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let lookups = self.byte_lookup_batches(input).into_iter().flatten();
+        gpu_add_host_byte_lookups(lookups.map(|lookup| (lookup, 1)), preallocated_gpu_memory)
+            .expect("poseidon2 precompile: adding the byte lookups to the device table failed");
+        TraceData::Cpu(self.generate_main(input, &mut EmulationRecord::default()))
+    }
+
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            record
+                .event_counter
+                .get_precompile_event_num(SyscallCode::POSEIDON2_PERMUTE)
+                > 0
+        }
+    }
+}
+
+impl<
+        F: PrimeField32,
+        LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
+        Config: Poseidon2Config,
+    > Poseidon2PermuteChip<F, LinearLayers, Config>
+{
+    /// The byte lookups the rows of `input`'s events raise, one batch per worker: what
+    /// `extra_record` records, and what the GPU prover counts into its byte table.
+    fn byte_lookup_batches(&self, input: &EmulationRecord) -> Vec<Vec<ByteLookupEvent>> {
         let syscall_code = SyscallCode::POSEIDON2_PERMUTE;
         let events: Vec<_> = input
             .get_precompile_events(syscall_code)
@@ -157,7 +221,7 @@ impl<
             .collect();
 
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
-        let blu_batches = events
+        events
             .pico_chunks(chunk_size)
             .map(|events| {
                 let mut blu: Vec<ByteLookupEvent> = Vec::new();
@@ -166,21 +230,9 @@ impl<
                 });
                 blu
             })
-            .collect::<Vec<_>>();
-        for blu in blu_batches {
-            for e in blu {
-                extra.add_byte_lookup_event(e);
-            }
-        }
+            .collect::<Vec<_>>()
     }
-}
 
-impl<
-        F: PrimeField32,
-        LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
-        Config: Poseidon2Config,
-    > Poseidon2PermuteChip<F, LinearLayers, Config>
-{
     fn event_to_row(
         &self,
         event: &Poseidon2PermuteEvent,

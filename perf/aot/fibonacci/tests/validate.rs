@@ -4,22 +4,29 @@
 //! benchmark ELF so the validation gate reflects the real migration target,
 //! even before the AOT stack is widened enough to pass.
 
+use aot::AotEmulatorCore;
+use aot_common::{compare_reports, compare_snapshots, recycle_snapshot_memory, AotRun};
 use pico_vm::{
     compiler::riscv::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
     configs::stark_config::KoalaBearPoseidon2 as RiscvKBSC,
-    emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
+    emulator::{
+        opts::EmulatorOpts,
+        riscv::{
+            cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
+            emulator::RiscvEmulator,
+            event_pool::HostAllocFlags,
+            public_values::RecordFinalPvsState,
+        },
+        stdin::EmulatorStdin,
+    },
     primitives::consts::{DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
 };
-
-use aot::{AotRun, FibonacciEmulator};
-use aot_common::{compare_reports, compare_snapshots, recycle_snapshot_memory};
-use pico_vm::emulator::riscv::emulator::RiscvEmulator;
+use std::sync::Arc;
 
 const INPUT_VALUE: u32 = 10_000_000u32;
-
 /// Runs baseline interpreter and AOT emulator together, comparing each chunk on the fly.
 ///
 /// Bypasses `RiscvProver` / `ProvingWitness` to avoid chip `eval()` calls during
@@ -29,6 +36,10 @@ fn run_and_compare_chunks(
     _validate_every_chunk: bool,
 ) -> ([u32; PV_DIGEST_NUM_WORDS], [u32; DIGEST_SIZE]) {
     use p3_koala_bear::KoalaBear;
+
+    if !is_pool_initialized() {
+        init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
+    }
 
     let opts = EmulatorOpts::test_opts();
 
@@ -43,7 +54,12 @@ fn run_and_compare_chunks(
     stdin_builder.write(&INPUT_VALUE);
     let stdin = stdin_builder.finalize::<Program>();
 
-    let mut baseline_emu = RiscvEmulator::new_single::<KoalaBear>(program.clone(), opts, None);
+    let mut baseline_emu = RiscvEmulator::new_single::<KoalaBear>(
+        program.clone(),
+        Arc::new(RecordFinalPvsState::default()),
+        opts,
+        None,
+    );
     baseline_emu.write_stdin(&stdin);
 
     // Set up AOT emulator.
@@ -52,7 +68,7 @@ fn run_and_compare_chunks(
     let stdin = stdin_builder.finalize::<Program>();
     let input_stream = stdin.inputs.to_vec();
 
-    let mut aot_emu = FibonacciEmulator::new(program, input_stream);
+    let mut aot_emu = AotEmulatorCore::new(program, input_stream);
 
     let mut chunk_idx = 0usize;
 

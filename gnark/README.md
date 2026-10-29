@@ -163,7 +163,8 @@ representative tape, so do not prune it.
 
 `utils` reads a proof file back and verifies it, changing each of its 14 fields in turn. The
 `koalabear_verifier` tests read `constraints.json` and `groth16_witness.json` from their own
-directory, as CI's Wrap proof job puts them there, and skip without them:
+directory (copy `test_mle_e2e --step wrap`'s `wrap_constraints.json` and
+`wrap_groth16_witness.json` there under those names), and skip without them:
 `TestSolveVerifierCircuit` solves the circuit, `TestTamperedWitnessIsUnsatisfiable` changes one
 witness value at a time and requires each change to leave it unsatisfiable, and
 `TestCircuitFitsGroth16Domain` compiles it and requires at most 2^23 constraints.

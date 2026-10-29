@@ -1,3 +1,10 @@
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    compiler::recursion::{mle_instruction_buckets::MleVariant, types::Poseidon2Io},
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
 use crate::{
     chips::{
         chips::{
@@ -27,9 +34,25 @@ use crate::{
     },
     primitives::consts::PERMUTATION_WIDTH,
 };
+#[cfg(feature = "cuda")]
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+#[cfg(feature = "cuda")]
+use cudart_sys::*;
+#[cfg(feature = "cuda")]
+use log::info;
 use p3_field::PrimeField32;
+#[cfg(feature = "cuda")]
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
+#[cfg(feature = "cuda")]
+use pico_gpu_api::{
+    cuda_poseidon2_packed_generate_preprocessed, cuda_recursion_poseidon2_generate_main,
+};
 use std::borrow::BorrowMut;
 
 impl<
@@ -147,5 +170,192 @@ impl<
 
     fn local_only(&self) -> bool {
         true
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<
+        F: PrimeField32,
+        LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
+        Config: Poseidon2Config,
+    > GpuChipBehavior<F> for Poseidon2PackedChip<F, LinearLayers, Config>
+{
+    fn gpu_generate_preprocessed(
+        &self,
+        device_id: usize,
+        program: &Self::Program,
+    ) -> Option<TraceData<'_, F>> {
+        let instructions: Box<[Poseidon2PackedInstr<F>]> = program
+            .mle_candidates(MleVariant::Poseidon2Packed)
+            .filter_map(|instruction| match instruction {
+                Instruction::Poseidon2Packed(x) => Some(**x),
+                _ => None,
+            })
+            .collect();
+
+        let nb_rows = instructions.len();
+        let padded_nb_rows = program.padded_prep_rows(&self.name(), nb_rows);
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let stream = &sync_stream.0;
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let trace_size = padded_nb_rows * self.preprocessed_width();
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        unsafe {
+            let _ = cudaMemsetAsync(
+                d_trace.as_mut_ptr() as *mut _,
+                0,
+                trace_size * size_of::<KoalaBear>(),
+                stream.into(),
+            );
+        }
+
+        let num_instrs = instructions.len();
+        if num_instrs > 0 {
+            let mut d_instrs =
+                DevicePoolAllocation::<Poseidon2PackedInstr<F>>::alloc_from_pool_async(
+                    num_instrs, mem_pool, stream,
+                )
+                .unwrap();
+            unsafe {
+                let _ = cudaMemcpyAsync(
+                    d_instrs.as_mut_c_void_ptr(),
+                    instructions.as_c_void_ptr(),
+                    num_instrs * size_of::<Poseidon2PackedInstr<F>>(),
+                    CudaMemoryCopyKind::HostToDevice,
+                    stream.into(),
+                );
+
+                cuda_poseidon2_packed_generate_preprocessed(
+                    d_instrs.as_ptr() as *const _,
+                    num_instrs,
+                    d_trace.as_mut_ptr() as *mut _,
+                    self.preprocessed_width(),
+                    stream.into(),
+                );
+            }
+        }
+
+        info!("[poseidon2-packed-chip] generate_preprocessed on GPU");
+
+        Some(TraceData::Gpu(self.preprocessed_width(), d_trace))
+    }
+
+    fn gpu_generate_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        _: &mut Self::Record,
+    ) -> TraceData<'_, F> {
+        // The main columns are the shared Poseidon2ValueCols (one permutation per row), identical to
+        // the recursion poseidon2 chip, so the permutation trace is produced by the same kernel; only
+        // the event source differs. NUM_POSEIDON2_COLS == NUM_POSEIDON2_VALUE_COLS (DATAPAR == 1).
+        let events = &input.poseidon2_packed_events;
+        let nb_rows = events.len();
+        let padded_nb_rows = match input.fixed_log2_rows(&self.name()) {
+            Some(log2_nrows) => 1 << log2_nrows,
+            None => next_power_of_two(nb_rows, None),
+        };
+
+        let value_cols = NUM_POSEIDON2_VALUE_COLS::<Config>;
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let event_size = events.len();
+        // Allocate at least one element so the device pointer is non-null even with zero events
+        // (the kernel still fills every padded row from the dummy row); avoids a 0-size-alloc UB.
+        let mut d_events = DevicePoolAllocation::<Poseidon2Io<u32>>::alloc_from_pool_async(
+            event_size.max(1),
+            mem_pool,
+            stream,
+        )
+        .unwrap();
+        // The dummy row and the round constants both come from THIS chip's constants (the FRI and
+        // MLE recursion machines instantiate this chip with different Poseidon2 constants, so a
+        // compiled-in table would silently diverge for one of them).
+        let mut dummy_row = vec![F::ZERO; value_cols];
+        {
+            let cols: &mut Poseidon2ValueCols<F, Config> = dummy_row.as_mut_slice().borrow_mut();
+            populate_perm::<F, LinearLayers, Config>(
+                F::ZERO,
+                cols,
+                [F::ZERO; PERMUTATION_WIDTH],
+                None,
+                &self.constants,
+            );
+        }
+        let rc_flat = self.constants.flatten_for_gpu();
+        let mut d_dummy_row = DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(
+            dummy_row.len(),
+            mem_pool,
+            stream,
+        )
+        .unwrap();
+        let mut d_round_constants = DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(
+            rc_flat.len(),
+            mem_pool,
+            stream,
+        )
+        .unwrap();
+        unsafe {
+            if event_size > 0 {
+                let _ = cudaMemcpyAsync(
+                    d_events.as_mut_c_void_ptr(),
+                    events.as_c_void_ptr(),
+                    event_size * size_of::<Poseidon2Io<u32>>(),
+                    CudaMemoryCopyKind::HostToDevice,
+                    stream.into(),
+                );
+            }
+            let _ = cudaMemcpyAsync(
+                d_dummy_row.as_mut_c_void_ptr(),
+                dummy_row.as_c_void_ptr(),
+                dummy_row.len() * size_of::<F>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+            let _ = cudaMemcpyAsync(
+                d_round_constants.as_mut_c_void_ptr(),
+                rc_flat.as_c_void_ptr(),
+                rc_flat.len() * size_of::<F>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+        }
+
+        let trace_size = padded_nb_rows * value_cols;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        unsafe {
+            cuda_recursion_poseidon2_generate_main(
+                value_cols,
+                event_size,
+                trace_size,
+                d_events.as_ptr() as *const _,
+                d_trace.as_mut_ptr() as *mut _,
+                d_dummy_row.as_ptr() as *const _,
+                d_round_constants.as_ptr() as *const _,
+                stream.into(),
+            );
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[poseidon2-packed-chip] generate_main on GPU");
+
+        TraceData::Gpu(value_cols, d_trace)
     }
 }

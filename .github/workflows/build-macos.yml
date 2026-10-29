@@ -1,0 +1,56 @@
+# Triggers, permissions, concurrency and job naming are explained in lint.yml.
+on:
+  pull_request:
+    branches:
+      - main
+      - release/v*
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".gitignore"
+      - "Makefile"
+      - "tools/**"
+      - ".claude/**"
+      - ".agent/**"
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".gitignore"
+      - "Makefile"
+      - "tools/**"
+      - ".claude/**"
+      - ".agent/**"
+  workflow_dispatch:
+
+name: Build macOS
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VK_VERIFICATION: false
+
+jobs:
+  # The build without a CUDA toolkit on macOS: what a fresh clone on a Mac gets.
+  macos:
+    name: CPU · macOS build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: Install protoc
+        run: brew install protobuf
+      - name: Build, constraint parity and a fib prove
+        run: |
+          set -eux
+          cargo build --release --locked
+          cargo test --release --locked -p pico-vm --test riscv_constraint_parity
+          RUST_LOG=info cargo run --release --locked -p pico-vm --example test_mle_e2e -- \
+            --elf fib --n 10 --field kb --step riscv

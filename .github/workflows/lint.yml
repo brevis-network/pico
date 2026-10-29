@@ -1,0 +1,135 @@
+on:
+  pull_request:
+    branches:
+      - main
+      - release/v*
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".gitignore"
+      - "Makefile"
+      - "tools/**"
+      - ".claude/**"
+      - ".agent/**"
+  push:
+    branches:
+      # Cache scoping: a run may only read caches from its own ref, its base branch, or the
+      # default branch. PRs here target `main`, so without a push trigger on it no shared
+      # cache ever exists for them and every new PR's first run starts cold -- which is what
+      # the 1.4-to-11.0-minute spread on `Clippy (workspace)` across five sampled runs was.
+      - main
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".gitignore"
+      - "Makefile"
+      - "tools/**"
+      - ".claude/**"
+      - ".agent/**"
+  # So a bottleneck can be re-measured, or a run retried after an infrastructure failure,
+  # without pushing an empty commit.
+  workflow_dispatch:
+
+name: Lint
+
+# This workflow only reads the repo. Declared rather than left to the repository default, which
+# may be write.
+permissions:
+  contents: read
+
+# Each workflow cancels its own superseded run on a re-push: nobody reads the result of a run a
+# newer push replaced, and the test workflows are long.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# The checks are split by area across the workflows in this directory. They run in parallel and
+# share nothing but the cargo cache; the triggers and the blocks above are the same in each, except
+# that build-cuda.yml and scripts.yml run only when what they check changes.
+#
+# Job names carry a `CPU ·` / `GPU ·` / `EVM ·` prefix so the checks list sorts by backend and says
+# what each check validates rather than "Tests" or "Lint". Every `CPU ·` job builds without the
+# `cuda` feature and so needs no CUDA toolkit; the `GPU ·` jobs check the `cuda` build and the CUDA
+# launcher scripts, but no runner here has a GPU, so nothing runs on one.
+#
+# Shared setup (the pinned toolchain, the cargo cache) lives in .github/actions/rust-setup.
+# build-cuda.yml runs in a container and sets up its own.
+
+env:
+  VK_VERIFICATION: false
+  # The CPU clippy lane's feature set: every workspace feature except `cuda` / `cuda-mle`.
+  CPU_FEATURES: >-
+    pico-mle-core/metrics,pico-mle-core/multi-field-transcript,pico-mle-core/parallel,
+    pico-mle-core/soundness-bchks25-optimized,pico-mle-core/test-utils,pico-mle-cpu/parallel,
+    pico-vm/aot-emulator,pico-vm/bigint-rug,pico-vm/debug,pico-vm/debug-lookups,pico-vm/jemalloc,
+    pico-vm/metrics,pico-vm/mmap-memory,pico-vm/multi-field-transcript,pico-vm/parallel,
+    pico-vm/rayon,pico-vm/single-threaded,pico-vm/soundness-bchks25-optimized,pico-vm/strict,
+    pico-vm/tcmalloc,pico-vm/test-utils,pico-vm/two-round-chunks,
+    pico-aot-runtime/bigint-rug,pico-aot-runtime/mmap-memory,
+    pico-cli/aot,pico-cli/multi-field-transcript,pico-prover/aot,pico-prover/multi-field-transcript,
+    pico-sdk/coprocessor,pico-sdk/kb,pico-sdk/libm,pico-sdk/prover,pico-perf/aot,pico-perf/jemalloc,
+    pico-aot-dispatch/bigint-rug,pico-aot-dispatch/mmap-memory,
+    distributed-vm/aot-emulator,distributed-vm/bigint-rug,distributed-vm/chunk-priority,
+    distributed-vm/jemalloc,distributed-vm/local_test,distributed-vm/mmap-memory,
+    distributed-vm/object_store,distributed-vm/s3-storage,distributed-vm/tcmalloc,
+    distributed-vm/two-round-chunks
+
+jobs:
+  fmt:
+    name: CPU · Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          components: rustfmt
+          # Formatting resolves no dependencies, so this job neither reads nor writes the cache.
+          cache-save: "false"
+      # Five workspace roots live here and `--all` only ever sees the one it is run from, so the
+      # other four went unchecked. Each is checked from its own root; a sixth root would have to
+      # be added here by hand.
+      - name: Format
+        run: |
+          set -eux
+          cargo fmt --all -- --check
+          for w in examples perf/aot perf/bench_apps vm/examples/patch-testing; do
+            (cd "$w" && cargo fmt --all -- --check)
+          done
+
+  lint:
+    name: CPU · Clippy (workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          components: clippy
+      # distributed-vm's build script runs protoc. The apt protobuf-compiler omits
+      # google/protobuf/*.proto, which tonic-build needs.
+      - name: Install protoc (official release)
+        run: |
+          curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-linux-x86_64.zip
+          sudo unzip -o protoc-21.12-linux-x86_64.zip -d /usr/local
+          rm protoc-21.12-linux-x86_64.zip
+      - name: Clippy (workspace)
+        run: |
+          # `--tests` lints each binary only in its test profile, where `cfg(test)` code is in and
+          # `cfg(not(test))` code is out; `--bins` lints the binary that ships.
+          # Every feature but `cuda` (and its alias), which needs the CUDA toolkit and is linted
+          # by `GPU · CUDA build and clippy` (build-cuda.yml); add a new feature here when one appears.
+          cargo clippy --workspace --exclude cuda-mle --exclude pico-gpu-api \
+            --lib --bins --examples --tests --benches --features "$CPU_FEATURES" --locked -- -D warnings
+      - name: Clippy host prover and CLI without the outer phases
+        run: |
+          # The workspace clippy above lints only the build with `multi-field-transcript`; this is
+          # the one without it.
+          cargo clippy -p pico-prover -p pico-cli --no-default-features --lib --bins --tests \
+            --locked -- -D warnings
+      - name: Clippy pico-sdk without coprocessor
+        run: |
+          set -eux
+          # The workspace step lints `pico-sdk` with every feature on. This one lints it with
+          # `coprocessor` off -- the only feature that gates pico-sdk code in a host build -- so an
+          # item that only `coprocessor` uses shows up as an unused-item warning. Both are host
+          # builds: neither compiles the `target_os = "zkvm"` paths a guest runs.
+          cargo clippy -p pico-sdk --features prover,libm --locked -- -D warnings

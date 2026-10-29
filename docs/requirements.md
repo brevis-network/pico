@@ -1,6 +1,7 @@
 # Requirements
 
-Pico 3.0 (release `v3.0.0`).
+Pico 3.1 (`v3.1.0`): the default build is the CPU prover, and the `cuda` feature adds the GPU
+prover. For the 3.0 release, see this page at `v3.0.0`.
 
 ## Host platform
 
@@ -9,7 +10,24 @@ Pico 3.0 (release `v3.0.0`).
 - `aarch64-apple-darwin` (Apple silicon macOS)
 - `x86_64-unknown-linux-gnu` (x86-64 Linux)
 
-On any other host it refuses to install and asks you to build the toolchain from source. See the [support matrix](./support-matrix.md).
+On any other host it refuses to install and asks you to build the toolchain from source. The default
+build runs on both; the GPU build (`cuda` feature) needs x86-64 Linux. See the
+[support matrix](./support-matrix.md).
+
+## CUDA and GPU (only for the `cuda` feature)
+
+The default build is the CPU prover and needs none of this.
+
+- The [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads), with `nvcc` on `PATH`, to build
+  with `--features pico-vm/cuda,distributed-vm/cuda`. CI builds with 12.3 and the GPU runs used
+  12.8; pico-gpu is also tested with 13 on an RTX 5090.
+- For the GPU prover's binaries (`distributed-vm`): `protoc` 21.x from an official release, with its
+  includes, and `libssl-dev`, `m4` and `google-perftools` (`libtcmalloc.so`).
+  [`how-to-setup-gpu-machine.md`](./how-to-setup-gpu-machine.md) walks through a fresh Ubuntu host,
+  including generating the AOT crates `single_node_mle.sh` needs.
+- An NVIDIA GPU and its driver to run a `cuda` build; without one it exits at start.
+- The GPU prover's memory thresholds are calibrated on 32 GB cards (RTX 5090); `PICO_GPU_MEM=4090`
+  selects the 24 GB tier.
 
 ## Always
 
@@ -23,11 +41,11 @@ Install the CLI and the guest toolchain:
 
 ```bash
 rustup toolchain install nightly-2026-09-27
-cargo +nightly-2026-09-27 install --git https://github.com/brevis-network/pico --tag v3.0.0 --locked pico-cli
+cargo +nightly-2026-09-27 install --git https://github.com/brevis-network/pico --tag v3.1.0 --locked pico-cli
 cargo pico install
 ```
 
-or, from a checkout of the repository at `v3.0.0`:
+or, from a checkout:
 
 ```bash
 cargo install --path sdk/cli --locked
@@ -50,7 +68,7 @@ verifier contracts in [`contracts/`](../contracts).
 ## Memory
 
 Proving memory depends on the program. The only figures in this repository are measurements of
-the examples, not guarantees:
+the examples with the 3.0 CPU prover, not guarantees:
 
 | what | machine | peak memory | wall clock |
 |---|---|---|---|

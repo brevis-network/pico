@@ -12,6 +12,40 @@
 pub mod compiler;
 pub mod config;
 pub mod machine;
+pub mod spans;
+
+pub use pico_mle_core::proof;
+// Re-exported so drivers (distributed-vm) can configure the recursion provers without
+// depending on pico-mle-core directly.
+pub use pico_mle_core::config::recursion_params_with_100_bits_security;
+// Re-exported for the same reason: `distributed-vm` enables the GPU backend only through
+// `pico-vm/cuda` and has no direct dependency on the crate, so the per-chunk
+// `MLE_BREAKDOWN` reporting in its worker loop reaches it as `pico_vm::mle::cuda_mle`.
+#[cfg(feature = "cuda")]
+pub use cuda_mle;
+
+/// Read an env var as an opt-**out**: only `0` / `off` / `no` / `false` disable it, everything else
+/// — including an unrecognised word — leaves the default in place, with a warning.
+///
+/// For a knob that ships ON: an unrecognised value must not read as "off", or someone bisecting a
+/// regression would silently keep running the new path while believing they had turned it off.
+pub fn env_opt_out(name: &str) -> bool {
+    let Ok(raw) = std::env::var(name) else {
+        return true;
+    };
+    let v = raw.trim().to_ascii_lowercase();
+    if v.is_empty() {
+        return true;
+    }
+    if matches!(v.as_str(), "0" | "off" | "no" | "false") {
+        return false;
+    }
+    if matches!(v.as_str(), "1" | "on" | "yes" | "true") {
+        return true;
+    }
+    tracing::warn!("{name}={raw:?} is not an on/off word; leaving it on");
+    true
+}
 
 /// How many ways one chunk's replay may be cut.
 ///
@@ -43,6 +77,12 @@ pub fn env_u32(name: &str) -> Option<u32> {
             None
         }
     }
+}
+
+/// Read an env var as a boolean flag: present and not `0` / `false` / empty → enabled.
+/// (A bare `std::env::var(..).is_ok()` would treat `FLAG=0` as on.)
+pub fn env_flag(name: &str) -> bool {
+    matches!(std::env::var(name).as_deref(), Ok(v) if !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"))
 }
 
 #[cfg(test)]

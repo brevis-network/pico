@@ -13,7 +13,6 @@ use p3_matrix::Matrix;
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
-    emulator::opts::EmulatorOpts,
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::logger::setup_logger,
     mle::machine::{
@@ -32,9 +31,7 @@ fn main() {
     assert_eq!(args.field, "kb", "kb-only");
 
     let compiler = Compiler::new(SourceType::RISCV, elf).expect("failed to parse ELF");
-    let records = riscv::emulate_with_opts(compiler.compile(), &stdin, EmulatorOpts::default())
-        .expect("emulation failed")
-        .records;
+    let records = riscv::emulate(compiler.compile(), stdin, None);
     let chips = RiscvChipType::<riscv::Kb>::all_chips();
     info!("{} chunk(s)", records.len());
 

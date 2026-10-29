@@ -13,6 +13,9 @@ The root workspace (`Cargo.toml`) has these members:
 | `vm` | `pico-vm` | the zkVM: compiler, emulator, chips, and the machines of every phase (see below) |
 | `mle-core` | `pico-mle-core` | the MLE/WHIR STARK backend core (KoalaBear only): config, transcript, symbolic AIR, interactions, PCS / sumcheck / LogUp / WHIR prover and verifier, reference device, `StarkEngine`, and the soundness calculator |
 | `mle-cpu` | `pico-mle-cpu` | the row-major CPU device backend (`CpuBackend`, `CpuDevice`) for `pico-mle-core` |
+| `cuda-mle` | `cuda-mle` | the GPU device backend for `pico-mle-core`: LogUp-GKR, zerocheck, stacked reduction and WHIR on CUDA. Built into `pico-vm` by its `cuda` feature |
+| `gpu-api` | `pico-gpu-api` | GPU trace generation for the RISC-V, precompile and recursion chips, and the CUDA bindings `pico-vm` calls. Compiled with `nvcc`, only in a `cuda` build |
+| `distributed-vm` | `distributed-vm` | the proving entry points, on the GPU (on the CPU with `PICO_CUDA=0`): `mle-single-node` (one host, one or more cards; also the two-machine split), `mle-ethproofs-single-node` and `mle-ethproofs-vk-bundle`, and the gRPC proving-network and ethproofs clients. See [`distributed-vm/README.md`](../distributed-vm/README.md) |
 | `aot-codegen` | `pico-aot-codegen` | ahead-of-time compilation of a guest's RISC-V code to Rust crates (`cargo pico aot`, `bin/generate_crates`) |
 | `aot-runtime` | `pico-aot-runtime` | runtime types for running AOT-compiled guests |
 | `derive` | `pico-derive` | procedural macros (`aligned_borrow_derive`, from Valida) |
@@ -21,6 +24,11 @@ The root workspace (`Cargo.toml`) has these members:
 
 `aot-generated` (`pico-aot-dispatch`) is not a member: it is a bootstrap stub that `cargo pico aot`
 or `generate_crates` replaces with code generated from a guest's ELF.
+
+The CUDA kernels live in a separate repository, [pico-gpu](https://github.com/brevis-network/pico-gpu),
+which `Cargo.toml` pins by commit; `cuda-mle` and `gpu-api` compile them. To build against a local
+pico-gpu checkout, pass a `[patch]` on the command line instead of editing `Cargo.toml`:
+`--config 'patch."https://github.com/brevis-network/pico-gpu.git".pico-gpu.path="<checkout>/rust"'`.
 
 ## `vm`
 
@@ -60,4 +68,10 @@ or `generate_crates` replaces with code generated from a guest's ELF.
   verifier from a test setup; see [`contracts/README.md`](../contracts/README.md).
 - `audits`: third-party security review reports.
 - `docs`: project documentation.
-- `.github/workflows/rust.yml`: CI, run on pull requests to `main` and `release/v*` and on pushes to `main`.
+- `single_node_mle.sh`, `two_machine_mle.sh`, `ethproofs_single_node_mle.sh`: launchers for the
+  `distributed-vm` binaries on a CUDA host; `sweep_reth_mle.sh` proves every block input in a
+  directory from one process. `bench-scripts` holds the tools that summarise and draw their logs,
+  and `ci/test_*.sh` the launchers' own tests.
+- `.github/workflows`: CI, run on pull requests to `main` and `release/v*` and on pushes to `main`.
+  `lint.yml` explains how the checks are split across the files there; `build-cuda.yml` and
+  `scripts.yml` run only when the paths they check change.

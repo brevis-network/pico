@@ -13,10 +13,39 @@ use crate::{
     iter::{IntoPicoIterator, PicoIterator, PicoSlice},
     machine::chip::ChipBehavior,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{trace::TraceData, utils::next_power_of_two},
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
+    iter::IntoPicoRefIterator,
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+#[cfg(feature = "cuda")]
+use cudart_sys::*;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
+#[cfg(feature = "cuda")]
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
+use pico_gpu_api::{
+    cuda_ecall_generate_extra_record_and_main_u64,
+    cuda_ecall_generate_extra_record_and_main_u64_packed,
+};
 use std::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
+use std::mem::size_of;
+#[cfg(feature = "cuda")]
+use tracing::info;
 
 impl<F: Field> BaseAir<F> for EcallChip<F> {
     fn width(&self) -> usize {
@@ -200,6 +229,9 @@ impl<F: PrimeField32> EcallChip<F> {
 
     /// Build the padded, row-major host trace values for a record (the body of
     /// `generate_main`), scanning `cpu_events` in parallel.
+    ///
+    /// This is the CPU-path trace builder and the `MLE_TRACE_COMPARE` reference for the CUDA
+    /// kernel (`ecall_events_to_trace_kernel`), which owns the GPU path.
     pub fn build_host_trace_values(input: &EmulationRecord) -> Vec<F> {
         let chip = Self::default();
         let events = input.cpu_events.as_slice();
@@ -213,8 +245,8 @@ impl<F: PrimeField32> EcallChip<F> {
                     .map(|event| {
                         let mut row = [F::ZERO; NUM_ECALL_CHIP_COLS];
                         let cols: &mut EcallChipCols<F> = row.as_mut_slice().borrow_mut();
-                        // Byte lookups are emitted by `extra_record`; drop the ones collected
-                        // here.
+                        // Byte lookups are emitted by `extra_record` (host path) / the ecall
+                        // kernel (GPU path); drop them here.
                         let mut blu = Vec::new();
                         chip.event_to_row(event, cols, &mut blu);
                         row
@@ -321,10 +353,173 @@ impl<F: PrimeField32> ChipBehavior<F> for EcallChip<F> {
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
-        // Mirror the Cpu chip: active whenever the chunk executes instructions. An all-padding
-        // trace is emitted when the chunk happens to contain no ecalls, so the chip's presence
-        // in a proof depends only on the chunk having instructions.
+        // Mirror the Cpu chip: active whenever the chunk executes instructions (an all-padding
+        // trace is emitted when the chunk happens to contain no ecalls, keeping the host and
+        // GPU activity predicates aligned).
         !record.cpu_events.is_empty()
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for EcallChip<F> {
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        record.event_counter.num_cpu_events > 0
+    }
+
+    /// Generate the padded, row-major main trace directly on the GPU: the ECALL subset of
+    /// `cpu_events` is uploaded to the device and a CUDA kernel fills one row per event
+    /// (producing the identical trace to `build_host_trace_values`) plus the byte lookups the chip's
+    /// constraints consume: the U16ToU8 u8-range pairs, and on COMMIT rows the two
+    /// digest-byte range checks. This kernel is their only producer on the GPU path. Padding rows
+    /// are zero except the COMMIT_DEFERRED_PROOFS tally, whose running sums the device carries
+    /// down to the last row, as `generate_main` does.
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let packed = prepared_gpu_events.packed.as_deref();
+        // Filter `cpu_events` down to the ECALL subset (the rows this chip proves).
+        //
+        // `pico_iter`, not `iter`: the subset is a handful of rows but the scan reads every cpu
+        // event in the chunk, and it runs on the prove lane with the card idle for its duration.
+        // Order survives -- rayon's `collect` into a `Vec` keeps the source order after `filter`.
+        let events: Vec<CpuEvent> = if packed.is_some() {
+            Vec::new()
+        } else {
+            input
+                .cpu_events
+                .as_slice()
+                .pico_iter()
+                .filter(|e| e.instruction.is_ecall_instruction())
+                .map(|e| *e)
+                .collect()
+        };
+        // MLE_PACKED_EVENTS: gather the ECALL subset from the packed stream instead (same
+        // predicate: is_ecall_instruction() is exactly opcode == ECALL).
+        let packed_events: Vec<crate::instances::preparer::CpuEventPacked> = packed
+            .map(|p| {
+                p.cpu_events()
+                    .pico_iter()
+                    .filter(|e| e.opcode == crate::compiler::riscv::opcode::Opcode::ECALL as u8)
+                    .map(|e| *e)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let nb_rows = if packed.is_some() {
+            packed_events.len()
+        } else {
+            events.len()
+        };
+        let log_rows = input.shape_chip_size(&self.name());
+        let padded_nb_rows = match log_rows {
+            Some(log_rows) => 1 << log_rows,
+            None => next_power_of_two(nb_rows, None),
+        };
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let trace_size = padded_nb_rows * NUM_ECALL_CHIP_COLS;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        unsafe {
+            let _ = cudaMemsetAsync(
+                d_trace.as_mut_ptr() as *mut _,
+                0,
+                trace_size * size_of::<KoalaBear>(),
+                stream.into(),
+            );
+        }
+
+        let event_size = nb_rows;
+        if event_size > 0 {
+            let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+
+            if let Some(pk) = packed {
+                use crate::instances::preparer::{CpuEventPacked, PACKED_EVENT_FORMAT_V1};
+                let mut d_events = DevicePoolAllocation::<CpuEventPacked>::alloc_from_pool_async(
+                    event_size, mem_pool, stream,
+                )
+                .unwrap();
+                unsafe {
+                    let _ = cudaMemcpyAsync(
+                        d_events.as_mut_c_void_ptr(),
+                        packed_events.as_ptr() as *const _,
+                        event_size * size_of::<CpuEventPacked>(),
+                        CudaMemoryCopyKind::HostToDevice,
+                        stream.into(),
+                    );
+                    let err = cuda_ecall_generate_extra_record_and_main_u64_packed(
+                        NUM_ECALL_CHIP_COLS,
+                        event_size,
+                        trace_size,
+                        d_events.as_ptr() as *const _,
+                        pk.chunk as usize,
+                        d_trace.as_mut_ptr() as *mut _,
+                        stream.into(),
+                        d_byte_trace.as_mut_ptr() as *mut _,
+                        PACKED_EVENT_FORMAT_V1,
+                    );
+                    assert_eq!(
+                        err.code, 0,
+                        "cuda_ecall_generate_extra_record_and_main_u64_packed failed (packed format or column \
+                         layout mismatch?)"
+                    );
+                }
+                // Hold the filtered host Vec this copied from until the kernel drains it:
+                // it is pageable, unlike the pinned staging the other chips upload from.
+                stream.synchronize().unwrap();
+                drop(d_events);
+            } else {
+                let mut d_events = DevicePoolAllocation::<CpuEvent>::alloc_from_pool_async(
+                    event_size, mem_pool, stream,
+                )
+                .unwrap();
+                unsafe {
+                    let _ = cudaMemcpyAsync(
+                        d_events.as_mut_c_void_ptr(),
+                        events.as_c_void_ptr(),
+                        event_size * size_of::<CpuEvent>(),
+                        CudaMemoryCopyKind::HostToDevice,
+                        stream.into(),
+                    );
+                }
+
+                let err = unsafe {
+                    cuda_ecall_generate_extra_record_and_main_u64(
+                        NUM_ECALL_CHIP_COLS,
+                        event_size,
+                        trace_size,
+                        d_events.as_ptr() as *const _,
+                        d_trace.as_mut_ptr() as *mut _,
+                        stream.into(),
+                        d_byte_trace.as_mut_ptr() as *mut _,
+                    )
+                };
+                assert_eq!(
+                    err.code, 0,
+                    "cuda_ecall_generate_extra_record_and_main_u64 failed (column layout mismatch?)"
+                );
+            }
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[ecall-chip] generate_extra_record_and_main on GPU");
+
+        TraceData::Gpu(NUM_ECALL_CHIP_COLS, d_trace)
     }
 }
 
@@ -332,9 +527,12 @@ impl<F: PrimeField32> ChipBehavior<F> for EcallChip<F> {
 mod tests {
     use super::deferred_commit_tally;
     use crate::{
-        chips::chips::{
-            riscv_cpu::event::CpuEvent,
-            riscv_memory::event::{MemoryReadRecord, MemoryRecordEnum},
+        chips::{
+            chips::{
+                riscv_cpu::event::CpuEvent,
+                riscv_memory::event::{MemoryReadRecord, MemoryRecordEnum},
+            },
+            ffi::FfiOption,
         },
         compiler::riscv::{instruction::Instruction, opcode::Opcode},
         emulator::riscv::syscalls::SyscallCode,
@@ -344,7 +542,7 @@ mod tests {
     fn ecall(code: SyscallCode, word_index: u64) -> CpuEvent {
         CpuEvent {
             instruction: Instruction::new(Opcode::ECALL, 5, 10, 11, false, false),
-            a_record: Some(MemoryRecordEnum::Read(MemoryReadRecord {
+            a_record: FfiOption::Some(MemoryRecordEnum::Read(MemoryReadRecord {
                 value: code.syscall_id() as u64,
                 ..Default::default()
             })),

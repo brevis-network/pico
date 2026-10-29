@@ -1,21 +1,15 @@
-# Shared Rust setup for every job in rust.yml.
+# Shared Rust setup for the Rust jobs in .github/workflows.
 #
-# Before this existed the four steps below were copy-pasted into nine jobs, so the pinned
-# toolchain appeared ten times and a change to private-dependency auth was nine edits. The
-# toolchain pin now lives in exactly one place: `default` on the `toolchain` input.
+# The toolchain pin for every job that uses this action is `default` on the `toolchain` input.
 #
 # Requires `actions/checkout` to have run first — a local composite action is loaded from the
-# checked-out tree. The git `insteadOf` rewrite is for cargo fetching private dependencies during
-# the build, not for the checkout itself, so ordering it after checkout is correct.
+# checked-out tree.
 name: Rust setup
-description: Private-dependency auth, the pinned toolchain, and the shared cargo cache.
+description: The pinned toolchain and the shared cargo cache.
 
 inputs:
-  token:
-    description: Token used to fetch private cargo dependencies over https.
-    required: true
   toolchain:
-    description: Rust toolchain. The single pin for the whole workflow.
+    description: Rust toolchain. build-cuda.yml, which runs in a container, pins its own.
     required: false
     default: nightly-2026-09-27
   components:
@@ -42,11 +36,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Authenticate private cargo dependencies
-      shell: bash
-      run: |
-        git config --global url."https://${{ inputs.token }}:@github.com/".insteadOf "https://github.com/"
-
     - name: Install Rust ${{ inputs.toolchain }}
       uses: actions-rs/toolchain@v1
       with:

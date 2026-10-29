@@ -1,4 +1,13 @@
 use super::columns::NUM_SLL_COLS;
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
 use crate::{
     chips::{
         chips::{
@@ -10,22 +19,36 @@ use crate::{
         },
         utils::next_power_of_two,
     },
-    compiler::{riscv::program::Program, word::Word},
+    compiler::{
+        riscv::{opcode::Opcode, program::Program},
+        word::Word,
+    },
     emulator::riscv::record::EmulationRecord,
     iter::{IndexedPicoIterator, PicoIterator, PicoSlice, PicoSliceMut},
-    machine::chip::ChipBehavior,
-    primitives::consts::{SLL_DATAPAR, WORD_SIZE},
+    machine::{
+        chip::ChipBehavior,
+        estimator::{EventCapture, EventSizeCapture},
+    },
+    primitives::consts::{u32_to_u16_limbs, u64_to_u16_limbs, SLL_DATAPAR, WORD_SIZE},
 };
+#[cfg(feature = "cuda")]
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+#[cfg(feature = "cuda")]
+use cudart_sys::*;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
+#[cfg(feature = "cuda")]
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
-
-use crate::{
-    compiler::riscv::opcode::Opcode,
-    machine::estimator::{EventCapture, EventSizeCapture},
-    primitives::consts::{u32_to_u16_limbs, u64_to_u16_limbs},
-};
+#[cfg(feature = "cuda")]
+use pico_gpu_api::cuda_sll_generate_extra_record_and_main_u64;
 use std::{borrow::BorrowMut, marker::PhantomData};
+#[cfg(feature = "cuda")]
+use tracing::info;
 
 #[derive(Default, Clone, Debug)]
 pub struct SLLChip<F>(PhantomData<F>);
@@ -111,6 +134,89 @@ impl<F: PrimeField32> ChipBehavior<F> for SLLChip<F> {
 
     fn local_only(&self) -> bool {
         true
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for SLLChip<F> {
+    fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
+        counter.num_shift_left_events += record.shift_left_events.len();
+    }
+
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        record.event_counter.num_shift_left_events > 0
+    }
+
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let events = &input.shift_left_events;
+
+        let nrows = events.len().div_ceil(SLL_DATAPAR);
+        let log2_nrows = input.shape_chip_size(&self.name());
+        let padded_nrows = match log2_nrows {
+            Some(log2_nrows) => 1 << log2_nrows,
+            None => next_power_of_two(nrows, None),
+        };
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+        // TODO: check error
+        // gpu generate trace
+        let event_size = events.len();
+        let mut d_events =
+            DevicePoolAllocation::<AluEvent>::alloc_from_pool_async(event_size, mem_pool, stream)
+                .unwrap();
+        // Same bytes from the preparer's pinned staging when present (a pageable source
+        // blocks this thread for the whole DMA); unstaged chunks keep the Vec upload.
+        let staged = prepared_gpu_events.staged_alu.shift_left();
+        unsafe {
+            let src_ptr: *const std::ffi::c_void = if staged.len() == event_size && event_size > 0 {
+                staged.as_ptr() as *const _
+            } else {
+                CudaSlice::as_slice(events).as_c_void_ptr()
+            };
+            let _ = cudaMemcpyAsync(
+                d_events.as_mut_c_void_ptr(),
+                src_ptr,
+                event_size * size_of::<AluEvent>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+        }
+        let trace_size = padded_nrows * NUM_SLL_COLS;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+        unsafe {
+            cuda_sll_generate_extra_record_and_main_u64(
+                NUM_SLL_VALUE_COLS,
+                event_size,
+                trace_size,
+                d_events.as_ptr() as *const _,
+                d_trace.as_mut_ptr() as *mut _,
+                d_byte_trace.as_mut_ptr() as *mut _,
+                stream.into(),
+            );
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[sll-chip] generate_extra_record_and_main on GPU");
+
+        TraceData::Gpu(NUM_SLL_COLS, d_trace)
     }
 }
 

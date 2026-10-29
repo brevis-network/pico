@@ -1,6 +1,7 @@
 //! Known-answer and algorithm-identity tests for the riscv-stage Poseidon2 instances: the AIR
 //! gadget (`chips::gadgets::poseidon2`), the host permutation
-//! (`FieldSpecificPoseidon2Config::permutation`), hash-to-curve and the deferred-proof digest.
+//! (`FieldSpecificPoseidon2Config::permutation`), hash-to-curve,
+//! the deferred-proof digest and the padding rows.
 //!
 //! Two questions are answered independently of each other:
 //!
@@ -13,7 +14,7 @@
 //!   the constants can differ. Only the constants are non-production: it drives the same
 //!   `populate_perm` the chips do.
 //!
-//! The `kat_*` tests pin the outputs above so that a refactor is provably
+//! The `kat_*` tests pin the current outputs of every outlet so that a refactor is provably
 //! behaviour-identical and a constant change is visible in exactly the places it should be.
 
 use std::borrow::BorrowMut;
@@ -30,6 +31,7 @@ use crate::{
     chips::{
         chips::riscv_poseidon2::{
             columns::{RiscvPoseidon2ValueCols, RISCV_NUM_POSEIDON2_VALUE_COLS},
+            dummy_row::{DUMMY_ROW_KB, RISCV_DUMMY_ROW_KB},
             traces::populate_perm_riscv,
         },
         gadgets::poseidon2::{
@@ -69,6 +71,15 @@ where
         .last()
         .expect("at least one ending full round")
         .post
+}
+
+/// Order-independent, Poseidon2-independent fingerprint of a row: length and a weighted sum of
+/// the canonical values. Used for the padding rows, which are several hundred elements long.
+fn row_fingerprint<F: PrimeField32>(row: &[F]) -> (usize, u64) {
+    let fold = row.iter().enumerate().fold(0u64, |acc, (i, x)| {
+        acc.wrapping_add((i as u64 + 1).wrapping_mul(x.as_canonical_u32() as u64))
+    });
+    (row.len(), fold)
 }
 
 fn gadget_matches_host_permutation<F>()
@@ -163,7 +174,7 @@ fn gadget_detects_a_perturbed_round_constant() {
 }
 
 // Pinned outputs of the outlets under Plonky3 0.5.4's instances: the permutation of 0..16, the
-// hash-to-curve of 1..=8 and the deferred-proof digest of 1..=48.
+// hash-to-curve of 1..=8, the deferred-proof digest of 1..=48, and the two padding rows.
 // A deliberate constant change re-pins them; nothing else may move them.
 
 const KAT_PERMUTATION_KOALABEAR: [u32; 16] = [
@@ -181,6 +192,11 @@ const KAT_LIFT_X_HASH: [u32; 16] = [
 const KAT_HASH_DEFERRED_PROOF: [u32; 8] = [
     184493143, 734763323, 559066146, 797564627, 968271056, 2011893203, 1492992321, 307463095,
 ];
+const KAT_DUMMY_ROW_KB: (usize, u64) = (165, 15185852523920);
+/// Columns of the riscv (rate-8) padding row: `DUMMY_ROW_KB` without the eight capacity-input
+/// zeros and without the nine uncommitted lanes of the last full round
+/// (1 + 8 + 4·16 + 20 + 3·16 + 7).
+const KAT_RISCV_DUMMY_ROW_LEN: usize = 148;
 #[test]
 fn kat_permutation_koalabear() {
     let actual = canon(KoalaBear::permutation().permute(seq::<KoalaBear, 16>(0)));
@@ -205,4 +221,25 @@ fn kat_hash_deferred_proof_koalabear() {
     let pv: [KoalaBear; 32] = seq(17);
     let actual = canon(hash_deferred_proof(&prev, &vk, &pv));
     assert_eq!(actual, KAT_HASH_DEFERRED_PROOF, "actual = {actual:?}");
+}
+
+/// The full-width padding row is pinned by fingerprint; the riscv padding row must be exactly its
+/// projection: drop `inputs[8..16]` (cells 9..17) and `ending_full_rounds[3].post[7..16]` (the
+/// last nine cells). This is the column-level statement that the riscv padding row commits exactly
+/// a subset of the full-width witness; that no constraint reads the dropped lanes is a separate,
+/// constraint-level fact (the riscv chip's round driver asserts only the committed lanes).
+#[test]
+fn kat_dummy_rows_koalabear() {
+    let actual = row_fingerprint(&DUMMY_ROW_KB[..]);
+    assert_eq!(actual, KAT_DUMMY_ROW_KB, "actual = {actual:?}");
+
+    let full = &DUMMY_ROW_KB[..];
+    let projected: Vec<KoalaBear> = full[..1 + 8]
+        .iter()
+        .chain(&full[1 + PERMUTATION_WIDTH..full.len() - (PERMUTATION_WIDTH - 7)])
+        .copied()
+        .collect();
+    assert_eq!(projected.len(), KAT_RISCV_DUMMY_ROW_LEN);
+    assert_eq!(RISCV_DUMMY_ROW_KB.len(), KAT_RISCV_DUMMY_ROW_LEN);
+    assert_eq!(RISCV_DUMMY_ROW_KB[..], projected[..]);
 }

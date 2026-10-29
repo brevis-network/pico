@@ -6,6 +6,10 @@ use crate::{
 };
 use core::fmt::Debug;
 use pico_derive::AlignedBorrow;
+use rand::{
+    distr::{Distribution, StandardUniform},
+    Rng, RngExt,
+};
 use serde::{Deserialize, Serialize};
 use static_assertions::const_assert_eq;
 use std::{
@@ -102,6 +106,44 @@ pub struct RecursionPublicValues<T> {
     /// The exit code of the program.  Note that this is not part of the public values digest,
     /// since it's value will be individually constrained.
     pub exit_code: T,
+}
+
+impl<T> Distribution<RecursionPublicValues<T>> for StandardUniform
+where
+    StandardUniform: Distribution<T>
+        + Distribution<[Word<T>; PV_DIGEST_NUM_WORDS]>
+        + Distribution<[T; DIGEST_SIZE]>
+        + Distribution<[T; 7]>,
+{
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> RecursionPublicValues<T> {
+        use crate::machine::septic::{SepticCurve, SepticExtension};
+        RecursionPublicValues {
+            committed_value_digest: rng.random(),
+            deferred_proofs_digest: rng.random(),
+            start_reconstruct_deferred_digest: rng.random(),
+            end_reconstruct_deferred_digest: rng.random(),
+            start_pc: rng.random(),
+            next_pc: rng.random(),
+            start_chunk: rng.random(),
+            next_chunk: rng.random(),
+            start_execution_chunk: rng.random(),
+            next_execution_chunk: rng.random(),
+            previous_init_addr_limbs: rng.random(),
+            last_init_addr_limbs: rng.random(),
+            previous_finalize_addr_limbs: rng.random(),
+            last_finalize_addr_limbs: rng.random(),
+            riscv_vk_digest: rng.random(),
+            vk_root: rng.random(),
+            global_cumulative_sum: SepticDigest(SepticCurve {
+                x: SepticExtension(rng.random()),
+                y: SepticExtension(rng.random()),
+            }),
+            flag_complete: rng.random(),
+            contains_execution_chunk: rng.random(),
+            digest: rng.random(),
+            exit_code: rng.random(),
+        }
+    }
 }
 
 /// Converts the public values to an array of elements.

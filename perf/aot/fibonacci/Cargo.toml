@@ -11,21 +11,27 @@ path = "src/lib.rs"
 # Core Pico types.
 pico-vm = { path = "../../../vm" }
 pico-aot-dispatch = { path = "../../../aot-generated", optional = true }
-aot-common = { path = "../aot_common", optional = true, features = [] }
+pico-aot-runtime = { path = "../../../aot-runtime", optional = true }
+aot-common = { path = "../aot_common", features = [] }
 
 # Convenience
 hashbrown = { version = "0.14.5", features = ["serde", "inline-more"] }
 bincode = "1.3"
+serde = { version = "1.0", features = ["derive"] }
 
 [[bin]]
 name = "run"
 path = "src/bin/run.rs"
+
+[[bin]]
+name = "pipeline_bench"
+path = "src/bin/pipeline_bench.rs"
 
 [dev-dependencies]
 p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", rev = "da6ca12c" }
 
 [features]
 default = ["aot"]
-aot = ["pico-aot-dispatch", "aot-common/aot"]
+aot = ["pico-aot-dispatch", "pico-aot-runtime", "aot-common/aot"]
 bigint-rug = ["pico-vm/bigint-rug", "pico-aot-dispatch/bigint-rug"]
 mmap-memory = ["pico-vm/mmap-memory", "pico-aot-dispatch/mmap-memory"]

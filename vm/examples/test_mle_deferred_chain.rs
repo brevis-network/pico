@@ -72,10 +72,7 @@ use pico_vm::{
         program::Program,
     },
     configs::stark_config::KoalaBearPoseidon2,
-    emulator::{
-        opts::EmulatorOpts, recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP,
-        stdin::EmulatorStdin,
-    },
+    emulator::{recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP, stdin::EmulatorStdin},
     machine::logger::setup_logger,
     mle::machine::{
         combine::CombineMachine,
@@ -89,6 +86,8 @@ use pico_vm::{
 };
 use tracing::info;
 
+#[path = "common/emulate.rs"]
+mod emulate;
 /// How a tree whose root rejects its own constraints fails.
 const ROOT_REJECTED: &str = "root combine proof failed STARK verify";
 /// How a deferred node whose constraints reject its sub-proof fails.
@@ -106,6 +105,9 @@ const LOG_STACKED_HEIGHT: usize = 23;
 
 fn main() {
     setup_logger();
+    // The GPU riscv prover allocates from the shared pool; a CPU build has none to set up.
+    #[cfg(feature = "cuda")]
+    riscv::init_mle_gpu_pool(riscv::MLE_GPU_DEVICE);
 
     let program = Arc::new(
         Compiler::new(SourceType::RISCV, &std::fs::read(ELF).expect("elf"))
@@ -114,15 +116,14 @@ fn main() {
     );
     let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
     stdin.write(&10u32);
-    let opts = EmulatorOpts::from_env_chunk_size(1 << 23);
+    let opts = emulate::opts_from_env_chunk_size(1 << 23);
     // A chunk wider than the stacked height proves the wrong shape, and both are env-settable.
     assert!(
         (opts.chunk_size as u64) <= (1u64 << LOG_STACKED_HEIGHT),
         "chunk_size {} exceeds 2^{LOG_STACKED_HEIGHT}: raise the height with CHUNK_SIZE",
         opts.chunk_size
     );
-    let emulated =
-        riscv::emulate_with_opts(Arc::clone(&program), &stdin.finalize(), opts).expect("emulation");
+    let emulated = emulate::emulate_with_opts(Arc::clone(&program), &stdin.finalize(), opts);
 
     let bundle = riscv::prove_riscv(
         Arc::clone(&program),
@@ -197,12 +198,11 @@ fn main() {
     let mut agg_stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
     agg_stdin.write(&vec![fib_identity; 2]);
     agg_stdin.write(&vec![emulated.committed_bytes.clone(); 2]);
-    let agg_emulated = riscv::emulate_with_opts(
+    let agg_emulated = emulate::emulate_with_opts(
         Arc::clone(&agg_program),
         &agg_stdin.finalize(),
-        EmulatorOpts::from_env_chunk_size(1 << 23),
-    )
-    .expect("aggregator emulation");
+        emulate::opts_from_env_chunk_size(1 << 23),
+    );
     let (agg_riscv_vk, agg_proofs) = riscv::prove_riscv(
         Arc::clone(&agg_program),
         &agg_emulated.records,
@@ -300,12 +300,11 @@ fn main() {
     let mut one_stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
     one_stdin.write(&vec![fib_identity; 1]);
     one_stdin.write(&vec![emulated.committed_bytes.clone(); 1]);
-    let one_emulated = riscv::emulate_with_opts(
+    let one_emulated = emulate::emulate_with_opts(
         Arc::clone(&agg_program),
         &one_stdin.finalize(),
-        EmulatorOpts::from_env_chunk_size(1 << 23),
-    )
-    .expect("one-claim aggregator emulation");
+        emulate::opts_from_env_chunk_size(1 << 23),
+    );
     let (one_riscv_vk, one_proofs) = riscv::prove_riscv(
         Arc::clone(&agg_program),
         &one_emulated.records,

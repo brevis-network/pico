@@ -264,7 +264,7 @@ impl ProverBuilder {
 
     /// Instructions per emulation chunk. Defaults to `1 << log_stacked_height`.
     ///
-    /// Fixed for the life of the [`Prover`], not per `prove`: on the GPU branch the pinned host
+    /// Fixed for the life of the [`Prover`], not per `prove`: in a `cuda` build the pinned host
     /// buffers are sized from this once per process, so two provers in one process would otherwise
     /// silently share whichever resolved first.
     pub fn chunk_size(mut self, n: u32) -> Self {
@@ -352,9 +352,9 @@ impl ProverBuilder {
     /// Defaults to this machine's core count, the most [`Self::build`] accepts: the pipeline runs
     /// one replay worker per core at most.
     ///
-    /// A worker replays a chunk from an emulator memory it holds until the chunk is done, out of a
-    /// pool of `MEMORY_POOL_SIZE` memories, 16 unset. So about that many workers run at once
-    /// whatever this says.
+    /// A worker keeps an emulator memory from a pool of `MEMORY_POOL_SIZE` between its batches, so
+    /// the pool needs one per worker plus the batch being cut: unset, it is raised to that, and
+    /// [`Self::build`] refuses a smaller one.
     #[cfg(feature = "aot")]
     pub fn emulation_workers(mut self, n: NonZeroUsize) -> Self {
         self.emulation_workers = Some(n);

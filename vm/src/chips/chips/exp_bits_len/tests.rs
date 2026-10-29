@@ -155,3 +155,138 @@ fn test_exp_bits_len_preprocessed_dimensions() {
     assert_eq!(p31.result_out.mult, F::ZERO); // no write off the first row
     assert_eq!(p31.bit_out.mult, F::ZERO); // terminal row exports no bit
 }
+
+/// GPU trace-gen must be element-wise identical to the CPU path over the full 32-row blocks, the
+/// non-zero padding rows (result = result_multiplier = 1), and — critically — the closed-form
+/// canonicality flags recomputed per-row on the device. The boundary set exercises the low/high
+/// region split at bit 24, `num_bits` extremes, and all-zero / all-one bit patterns. Needs a CUDA
+/// device (chip is KoalaBear-only).
+#[cfg(feature = "cuda")]
+mod gpu {
+    use super::F;
+    use crate::{
+        chips::{chips::exp_bits_len::ExpBitsLenChip, tests::init_test_stream, trace::TraceData},
+        compiler::recursion::{
+            instruction::Instruction,
+            program::RecursionProgram,
+            types::{Address, ExpBitsLenEvent, ExpBitsLenInstr},
+        },
+        emulator::recursion::emulator::RecursionRecord,
+        machine::chip::{ChipBehavior, GpuChipBehavior},
+    };
+    use p3_field::PrimeCharacteristicRing;
+
+    // (bit_src canonical u32, num_bits). All bit_src < p = 2^31 - 2^24 + 1 (0x7F000001), num_bits < 32.
+    // Covers: zero, single bit, low-24 all-one, the bit-24 boundary, high-bits-all-one (p-1), etc.
+    const BOUNDARY: &[(u32, u32)] = &[
+        (0, 0),
+        (0, 31),
+        (1, 1),
+        (0x00FF_FFFF, 24),
+        (0x00FF_FFFF, 25),
+        (0x0100_0000, 25),
+        (0x7F00_0000, 31),
+        (0x0000_FFFF, 16),
+        (0x4000_0001, 31),
+        (0x0055_5555, 20),
+    ];
+
+    fn ev(base_u: u32, bit_src_u: u32, num_bits: u32) -> ExpBitsLenEvent<F> {
+        ExpBitsLenEvent {
+            base: F::from_u32(base_u),
+            bit_src: F::from_u32(bit_src_u),
+            num_bits,
+        }
+    }
+
+    fn cycled_events(n: usize) -> Vec<ExpBitsLenEvent<F>> {
+        (0..n)
+            .map(|i| {
+                let (src, nb) = BOUNDARY[i % BOUNDARY.len()];
+                ev(2 + (i as u32 % 5), src, nb)
+            })
+            .collect()
+    }
+
+    fn assert_main_parity(events: Vec<ExpBitsLenEvent<F>>) {
+        let stream = init_test_stream();
+        let chip = ExpBitsLenChip::<F>::default();
+        let mut record = RecursionRecord::<F>::default();
+        record.exp_bits_len_events = events;
+        let cpu = chip.generate_main(&record, &mut RecursionRecord::default());
+        let gpu: TraceData<'_, F> =
+            chip.gpu_generate_main(0, &record, &mut RecursionRecord::default());
+        let gpu = gpu.to_host(stream);
+        assert_eq!(cpu.values, gpu.values, "main parity failed");
+    }
+
+    /// Build a program whose instructions have exactly the given per-instruction bit-output counts.
+    fn program_with_bit_out_counts(counts: &[usize]) -> RecursionProgram<F> {
+        let mk = |v: u32| Address(F::from_u32(v));
+        let instructions = counts
+            .iter()
+            .enumerate()
+            .map(|(k, &cnt)| {
+                let base = (k as u32 + 1) * 1000;
+                let (_, nb) = BOUNDARY[k % BOUNDARY.len()];
+                Instruction::ExpBitsLen(Box::new(ExpBitsLenInstr {
+                    base: F::from_u32(2 + k as u32),
+                    num_bits: nb,
+                    bit_src_in_addr: mk(base),
+                    result_out_addr: mk(base + 1),
+                    result_mult: F::from_u32(k as u32 + 1),
+                    bit_outs_addrs_mults: (0..cnt as u32)
+                        .map(|i| (mk(base + 100 + i), F::from_u32(i + 1)))
+                        .collect(),
+                }))
+            })
+            .collect();
+        RecursionProgram {
+            instructions,
+            ..Default::default()
+        }
+    }
+
+    fn assert_preprocessed_parity(program: RecursionProgram<F>) {
+        let stream = init_test_stream();
+        let chip = ExpBitsLenChip::<F>::default();
+        let cpu = chip.generate_preprocessed(&program).unwrap();
+        let gpu = chip
+            .gpu_generate_preprocessed(0, &program)
+            .unwrap()
+            .to_host(stream);
+        assert_eq!(cpu.values, gpu.values, "preprocessed parity failed");
+    }
+
+    #[test]
+    fn test_exp_bits_len_gpu_main_empty_matches_cpu() {
+        assert_main_parity(vec![]);
+    }
+    #[test]
+    fn test_exp_bits_len_gpu_main_single_matches_cpu() {
+        assert_main_parity(vec![ev(7, 0x0155_5555, 23)]);
+    }
+    #[test]
+    fn test_exp_bits_len_gpu_main_boundary_matches_cpu() {
+        // One event per boundary pattern, so every flag boundary is exercised.
+        let events = BOUNDARY.iter().map(|&(s, nb)| ev(3, s, nb)).collect();
+        assert_main_parity(events);
+    }
+    #[test]
+    fn test_exp_bits_len_gpu_main_multi_matches_cpu() {
+        assert_main_parity(cycled_events(10));
+    }
+    #[test]
+    fn test_exp_bits_len_gpu_preprocessed_empty_matches_cpu() {
+        assert_preprocessed_parity(program_with_bit_out_counts(&[]));
+    }
+    #[test]
+    fn test_exp_bits_len_gpu_preprocessed_single_matches_cpu() {
+        assert_preprocessed_parity(program_with_bit_out_counts(&[31]));
+    }
+    #[test]
+    fn test_exp_bits_len_gpu_preprocessed_varied_matches_cpu() {
+        // Varied bit-output counts, including 0 and the full 31, across several instructions.
+        assert_preprocessed_parity(program_with_bit_out_counts(&[0, 5, 31, 12]));
+    }
+}

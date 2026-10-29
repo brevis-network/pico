@@ -1,4 +1,7 @@
-use crate::chips::precompiles::poseidon2::FieldSpecificPrecompilePoseidon2Chip;
+use crate::{
+    chips::precompiles::poseidon2::FieldSpecificPrecompilePoseidon2Chip,
+    compiler::riscv::opcode::Opcode,
+};
 use hashbrown::HashSet;
 use p3_air::{Air, BaseAir};
 use p3_field::PrimeField32;
@@ -54,7 +57,7 @@ use crate::{
             },
         },
     },
-    compiler::riscv::{opcode::Opcode, program::Program},
+    compiler::riscv::program::Program,
     define_chip_type,
     emulator::riscv::{record::EmulationRecord, syscalls::precompiles::PrecompileLocalMemory},
     instances::compiler::shapes::riscv_shape::{
@@ -165,6 +168,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
         vec![
             Self::Program(Default::default()),
             Self::Cpu(Default::default()),
+            Self::Ecall(Default::default()),
             Self::ShaCompress(Default::default()),
             Self::ShaCompressControl(Default::default()),
             // Both Ed25519 chips, back in the machine after their RV64 port. What they needed:
@@ -242,9 +246,85 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::Global(Default::default()),
             Self::Byte(Default::default()),
             Self::Poseidon2(Default::default()),
-            // Ecall: appended last so the hard-coded batch indices (0..=44) stay valid.
-            Self::Ecall(Default::default()),
         ]
+    }
+
+    pub fn gpu_generate_extra_record_and_main_chips() -> Vec<MetaChip<F, Self>> {
+        [
+            // CPU chip
+            Self::Cpu(Default::default()),
+            // Batch 1
+            Self::Program(Default::default()),
+            Self::MemoryReadWrite(Default::default()),
+            // Divrem
+            Self::DivRem(Default::default()),
+            // Add
+            Self::Add(Default::default()),
+            // Sub
+            Self::Sub(Default::default()),
+            // addw
+            Self::Addw(Default::default()),
+            // Subw
+            Self::Subw(Default::default()),
+            // Lt
+            Self::Lt(Default::default()),
+            // Mul
+            Self::Mul(Default::default()),
+            // Batch 2
+            Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
+                MemoryChipType::Initialize,
+            )),
+            Self::MemoryFinalize(MemoryInitializeFinalizeChip::new(MemoryChipType::Finalize)),
+            Self::MemoryLocal(Default::default()),
+            Self::SyscallRiscv(SyscallChip::riscv()),
+            Self::SyscallPrecompile(SyscallChip::precompile()),
+            // Global
+            Self::Global(Default::default()),
+            // Poseidon2
+            Self::Poseidon2(Default::default()),
+            // Batch 3
+            Self::SR(Default::default()),
+            Self::SLL(Default::default()),
+            Self::Bitwise(Default::default()),
+            // Precompiles
+            Self::ShaCompress(Default::default()),
+            Self::ShaCompressControl(Default::default()),
+            Self::WsBn254Add(Default::default()),
+            Self::WsBls381Add(Default::default()),
+            Self::WsSecp256k1Add(Default::default()),
+            Self::WsSecp256r1Add(Default::default()),
+            Self::WsDecompressBls381(Default::default()),
+            Self::WsDecompressSecp256k1(Default::default()),
+            Self::WsDecompressSecp256r1(Default::default()),
+            Self::WsDoubleBn254(Default::default()),
+            Self::WsDoubleBls381(Default::default()),
+            Self::WsDoubleSecp256k1(Default::default()),
+            Self::WsDoubleSecp256r1(Default::default()),
+            Self::ShaExtend(Default::default()),
+            Self::ShaExtendControl(Default::default()),
+            Self::KeecakP(Default::default()),
+            Self::KeccakControl(Default::default()),
+            Self::FpBn254(Default::default()),
+            Self::Fp2AddSubBn254(Default::default()),
+            Self::Fp2MulBn254(Default::default()),
+            Self::FpBls381(Default::default()),
+            Self::Fp2AddSubBls381(Default::default()),
+            Self::Fp2MulBls381(Default::default()),
+            Self::FpSecp256k1(Default::default()),
+            Self::U256Mul(Default::default()),
+            // Byte
+            Self::Byte(Default::default()),
+            // Ecall: appended last so the orchestrator's hard-coded batch indices
+            // (0..=45) stay valid; host tracegen + H2D, see EcallChip::gpu_generate_extra_record_and_main.
+            Self::Ecall(Default::default()),
+            // The precompiles whose traces are generated on the host (their device kernels
+            // predate the RV64 layouts): appended after Ecall for the same reason Ecall is.
+            Self::Poseidon2P(Default::default()),
+            Self::Ed25519Add(Default::default()),
+            Self::Ed25519Decompress(Default::default()),
+        ]
+        .map(MetaChip::<F, RiscvChipType<F>>::new)
+        .into()
     }
 
     /// Get the heights of the preprocessed chips for a given program.
@@ -268,45 +348,53 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
                 Self::Cpu(Default::default()).name(),
                 record.cpu_events.len(),
             ),
+            // NOTE: the Ecall chip is intentionally NOT listed here: the shape
+            // specs carry no `Ecall` entry and `find_shape_from_allowed_heights` fails on
+            // chips it has no allowed heights for. The Ecall chip always pads dynamically to
+            // a power of two (its trace is tiny — one row per ecall).
             (
                 Self::DivRem(Default::default()).name(),
                 record.divrem_events.len().div_ceil(DIVREM_DATAPAR),
             ),
             (
                 Self::Add(Default::default()).name(),
-                record
-                    .add_events
+                (record
+                    .add_sub_events
+                    .as_slice()
                     .iter()
                     .filter(|e| e.opcode == Opcode::ADD)
-                    .count()
-                    .div_ceil(ADD_DATAPAR),
+                    .count())
+                .div_ceil(ADD_DATAPAR),
             ),
             (
                 Self::Sub(Default::default()).name(),
-                record
-                    .sub_events
+                (record
+                    .add_sub_events
+                    .as_slice()
                     .iter()
                     .filter(|e| e.opcode == Opcode::SUB)
-                    .count()
-                    .div_ceil(SUB_DATAPAR),
+                    .count())
+                .div_ceil(SUB_DATAPAR),
             ),
             (
                 Self::Addw(Default::default()).name(),
-                record
-                    .add_events
+                (record
+                    .add_sub_events
+                    .as_slice()
                     .iter()
                     .filter(|e| e.opcode == Opcode::ADDW)
-                    .count()
-                    .div_ceil(ADD_DATAPAR),
+                    .count())
+                .div_ceil(ADD_DATAPAR),
             ),
             (
                 Self::Subw(Default::default()).name(),
-                record
-                    .sub_events
+                (record
+                    .add_sub_events
+                    .as_slice()
                     .iter()
                     .filter(|e| e.opcode == Opcode::SUBW)
-                    .count()
-                    .div_ceil(SUB_DATAPAR),
+                    .count())
+                .div_ceil(SUB_DATAPAR),
             ),
             (
                 Self::Bitwise(Default::default()).name(),
@@ -339,6 +427,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
                 Self::MemoryReadWrite(Default::default()).name(),
                 record
                     .cpu_events
+                    .as_slice()
                     .iter()
                     .filter(|e| e.instruction.is_memory_instruction())
                     .count()
@@ -437,6 +526,105 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::Poseidon2(Default::default()),
         ]
         .map(MetaChip::new)
+        .into()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn get_all_riscv_chips_for_analyzer_2() -> Vec<MetaChip<F, Self>> {
+        [
+            Self::Cpu(Default::default()),
+            Self::Ecall(Default::default()),
+            Self::ShaCompress(Default::default()),
+            Self::ShaCompressControl(Default::default()),
+            Self::ShaExtendControl(Default::default()),
+            Self::Add(Default::default()),
+            Self::Addw(Default::default()),
+            Self::Sub(Default::default()),
+            Self::Subw(Default::default()),
+            Self::Bitwise(Default::default()),
+            Self::Mul(Default::default()),
+            Self::DivRem(Default::default()),
+            Self::SLL(Default::default()),
+            Self::SR(Default::default()),
+            Self::Lt(Default::default()),
+            Self::MemoryLocal(Default::default()),
+            Self::MemoryReadWrite(Default::default()),
+            Self::Global(Default::default()),
+            Self::SyscallRiscv(SyscallChip::riscv()),
+            Self::Poseidon2(Default::default()),
+            Self::Program(Default::default()),
+            Self::Byte(Default::default()),
+            Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
+                MemoryChipType::Initialize,
+            )),
+            Self::MemoryFinalize(MemoryInitializeFinalizeChip::new(MemoryChipType::Finalize)),
+            Self::WsSecp256k1Add(Default::default()),
+            Self::WsSecp256r1Add(Default::default()),
+            Self::SyscallPrecompile(SyscallChip::precompile()),
+            Self::WsDoubleSecp256k1(Default::default()),
+            Self::WsDoubleSecp256r1(Default::default()),
+            Self::KeecakP(Default::default()),
+            Self::KeccakControl(Default::default()),
+            Self::FpBn254(Default::default()),
+        ]
+        .map(MetaChip::new)
+        .into()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn get_all_riscv_chips_for_analyzer() -> Vec<RiscvChipType<F>> {
+        [
+            Self::Program(Default::default()),
+            Self::Cpu(Default::default()),
+            Self::Ecall(Default::default()),
+            Self::ShaCompressControl(Default::default()),
+            Self::Ed25519Add(Default::default()),
+            Self::Ed25519Decompress(Default::default()),
+            Self::WsBn254Add(Default::default()),
+            Self::WsBls381Add(Default::default()),
+            Self::WsSecp256k1Add(Default::default()),
+            Self::WsSecp256r1Add(Default::default()),
+            Self::WsDecompressBls381(Default::default()),
+            Self::WsDecompressSecp256k1(Default::default()),
+            Self::WsDecompressSecp256r1(Default::default()),
+            Self::WsDoubleBn254(Default::default()),
+            Self::WsDoubleBls381(Default::default()),
+            Self::WsDoubleSecp256k1(Default::default()),
+            Self::WsDoubleSecp256r1(Default::default()),
+            Self::ShaExtendControl(Default::default()),
+            Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
+                MemoryChipType::Initialize,
+            )),
+            Self::MemoryFinalize(MemoryInitializeFinalizeChip::new(MemoryChipType::Finalize)),
+            Self::MemoryLocal(Default::default()),
+            Self::MemoryReadWrite(Default::default()),
+            Self::DivRem(Default::default()),
+            Self::Mul(Default::default()),
+            Self::Lt(Default::default()),
+            Self::SR(Default::default()),
+            Self::SLL(Default::default()),
+            Self::Add(Default::default()),
+            Self::Addw(Default::default()),
+            Self::Sub(Default::default()),
+            Self::Subw(Default::default()),
+            Self::Bitwise(Default::default()),
+            Self::KeecakP(Default::default()),
+            Self::KeccakControl(Default::default()),
+            Self::FpBn254(Default::default()),
+            Self::Fp2AddSubBn254(Default::default()),
+            Self::Fp2MulBn254(Default::default()),
+            Self::FpBls381(Default::default()),
+            Self::Fp2AddSubBls381(Default::default()),
+            Self::Fp2MulBls381(Default::default()),
+            Self::FpSecp256k1(Default::default()),
+            Self::U256Mul(Default::default()),
+            Self::Poseidon2P(Default::default()),
+            Self::SyscallRiscv(SyscallChip::riscv()),
+            Self::SyscallPrecompile(SyscallChip::precompile()),
+            Self::Global(Default::default()),
+            Self::Byte(Default::default()),
+            Self::Poseidon2(Default::default()),
+        ]
         .into()
     }
 

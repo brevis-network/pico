@@ -1,0 +1,53 @@
+# Triggers, permissions, concurrency and job naming are explained in lint.yml.
+on:
+  pull_request:
+    branches:
+      - main
+      - release/v*
+    paths:
+      - "**.sh"
+      - "ci/**"
+      # What the tests read besides the scripts: the sweep CSV parser, and the prover's headline.
+      - "bench-scripts/**"
+      - "distributed-vm/src/mle/mod.rs"
+      - ".github/workflows/scripts.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "**.sh"
+      - "ci/**"
+      - "bench-scripts/**"
+      - "distributed-vm/src/mle/mod.rs"
+      - ".github/workflows/scripts.yml"
+  workflow_dispatch:
+
+name: Scripts
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VK_VERIFICATION: false
+
+jobs:
+  # No build. A wrong card split or a parser that drifted from the prover's headline would
+  # otherwise only show up in a real run.
+  scripts:
+    name: GPU · Launcher script tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: The sweep CSV path
+        run: bash ci/test_sweep_csv.sh
+      - name: The sweep launcher
+        run: bash ci/test_sweep_launcher.sh
+      - name: The two-machine launcher
+        run: bash ci/test_two_machine_launcher.sh
+      - name: CUDA detection
+        run: bash ci/test_detect_cuda.sh

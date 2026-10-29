@@ -29,13 +29,9 @@ categories = ["cryptography"]
 # The patched crates depend on `pico-patch-libs` from the public pico repo; redirect it at this
 # workspace's copy, as `perf/bench_apps/Cargo.toml` does.
 #
-# This reaches the deps that name the repo without a branch. A dep that pins one -- the RV64
-# generation does, `branch = "rv64"` -- is a different source id to cargo and is *not* patched,
-# so `bls12_381`, `substrate-bn`, `k256` and one `curve25519-dalek-ng` still bring the `rv64`
-# branch's copy. `pico-patch-libs` only declares the syscall symbols (`pico-sdk` defines them),
-# and the two copies declare the syscalls those crates call identically. They are not identical
-# throughout: the branch's `syscall_poseidon2_permute` still takes `[u32; 16]`, which none of the
-# four calls. So a change to a declaration here does not reach those four until the branch has it.
+# Cargo matches a patch by the repository URL, so it also reaches the deps that pin
+# `branch = "rv64"` (`bls12_381`, `substrate-bn`, `k256` and one `curve25519-dalek-ng`) once the
+# lock is resolved afresh: every crate here then builds against this workspace's copy.
 #
 # Each app pins its fork by `rev`, with the branch it came from beside it. The branch sources
 # still in `Cargo.lock` are named by the forks' own manifests, and cargo refuses a patch that

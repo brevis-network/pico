@@ -44,6 +44,7 @@ use std::{
     sync::Arc,
 };
 
+use alloy_primitives::keccak256;
 use clap::Parser;
 use p3_koala_bear::KoalaBear;
 use pico_vm::{
@@ -53,13 +54,15 @@ use pico_vm::{
     },
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
-        opts::EmulatorOpts, record::RecordBehavior, riscv::riscv_emulator::RiscvEmulator,
+        opts::EmulatorOpts,
+        record::RecordBehavior,
+        riscv::{public_values::RecordFinalPvsState, riscv_emulator::RiscvEmulator},
         stdin::EmulatorStdin,
     },
 };
 
-/// Chunk size used when `CHUNK_SIZE` is unset, so a report does not depend on the host's RAM.
-const DEFAULT_CHUNK_SIZE: u32 = 1 << 22;
+/// Fallback chunk size, and the default capacity of the pinned CPU and ALU event buffers.
+const DEFAULT_CHUNK_SIZE: &str = "4194304";
 
 /// Fields are tab-separated because event-kind names contain spaces (`Cpu Events`).
 const SEP: char = '\t';
@@ -160,10 +163,15 @@ fn main() {
         );
     }
 
-    // Not `EmulatorOpts::default()`, whose fallback is derived from host RAM: reports from two
-    // hosts must be comparable on the event-kind column.
-    let opts = EmulatorOpts::from_env_chunk_size(DEFAULT_CHUNK_SIZE);
-    let chunk_size = opts.chunk_size.to_string();
+    // `EmulatorOpts::default()` derives the chunk size from host RAM, while the pinned CPU and ALU
+    // event buffers are sized from `CHUNK_SIZE` alone and default to 2^22. A derived chunk larger
+    // than the buffers overflows them part-way through a block — "Buffer is full", from
+    // `event_pool.rs`. `mle::machine::riscv::emulate` clamps instead, using two `pub(crate)`
+    // constants an example cannot see, so setting the variable is the seam that is public.
+    if std::env::var_os("CHUNK_SIZE").is_none() {
+        std::env::set_var("CHUNK_SIZE", DEFAULT_CHUNK_SIZE);
+    }
+    let chunk_size = std::env::var("CHUNK_SIZE").expect("just set");
 
     let elf_bytes = std::fs::read(&args.elf)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", args.elf.display()));
@@ -190,7 +198,7 @@ fn main() {
         eprintln!("block {block}: running");
         let input =
             std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-        reports.push(run_block(block, &program, &input, opts));
+        reports.push(run_block(block, &program, &input));
     }
     assert!(
         !reports.is_empty(),
@@ -300,12 +308,17 @@ fn fixtures(dir: &Path) -> Vec<(u64, PathBuf)> {
     out
 }
 
-fn run_block(block: u64, program: &Arc<Program>, input: &[u8], opts: EmulatorOpts) -> BlockReport {
+fn run_block(block: u64, program: &Arc<Program>, input: &[u8]) -> BlockReport {
     let mut builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
     builder.write_slice(input);
     let stdin = builder.finalize::<Program>();
 
-    let mut emulator = RiscvEmulator::new_single::<KoalaBear>(program.clone(), opts, None);
+    let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
+        program.clone(),
+        Arc::new(RecordFinalPvsState::default()),
+        EmulatorOpts::default(),
+        None,
+    );
     for chunk in &*stdin.inputs {
         emulator.state.input_stream.push(chunk.clone());
     }
@@ -548,14 +561,5 @@ fn read_report(path: &Path, chunk_size: &str) -> BTreeMap<u64, Baseline> {
             path.display()
         ),
     }
-    out
-}
-
-fn keccak256(bytes: &[u8]) -> [u8; 32] {
-    use tiny_keccak::{Hasher, Keccak};
-    let mut out = [0u8; 32];
-    let mut hasher = Keccak::v256();
-    hasher.update(bytes);
-    hasher.finalize(&mut out);
     out
 }

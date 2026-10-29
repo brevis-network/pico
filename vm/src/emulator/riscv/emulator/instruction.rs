@@ -3,6 +3,7 @@ use crate::{
     chips::chips::riscv_memory::event::MemoryAccessPosition,
     compiler::riscv::{instruction::Instruction, opcode::Opcode, register::Register},
     emulator::riscv::syscalls::{syscall_context::SyscallContext, SyscallCode},
+    primitives::consts::CHUNK_CLK_START,
 };
 use tracing::debug;
 
@@ -53,6 +54,9 @@ impl RiscvEmulator {
 
         self.mode.init_memory_access(&mut self.memory_accesses);
 
+        if self.state.clk == u64::from(CHUNK_CLK_START) {
+            self.chunk_start_pc = self.state.pc;
+        }
         // TODO(rv64im-3r7): remove u64::from ALU payload bridges after canonical ALU operand/result
         // paths are u64 end-to-end (alu_rr/alu result locals no longer u32-compat).
         match instruction.opcode {
@@ -61,7 +65,7 @@ impl RiscvEmulator {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b.wrapping_add(c);
                 self.alu_rw(rd, a);
-                self.mode.emit_alu(
+                self.mode.emit_alu_pinned(
                     instruction.op_a,
                     self.state.clk,
                     a,
@@ -69,14 +73,14 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.add_events,
+                    &mut self.record.add_sub_events,
                 );
             }
             Opcode::SUB => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b.wrapping_sub(c);
                 self.alu_rw(rd, a);
-                self.mode.emit_alu(
+                self.mode.emit_alu_pinned(
                     instruction.op_a,
                     self.state.clk,
                     a,
@@ -84,7 +88,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.sub_events,
+                    &mut self.record.add_sub_events,
                 );
             }
             Opcode::XOR => {
@@ -181,7 +185,7 @@ impl RiscvEmulator {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = if (b as i64) < (c as i64) { 1 } else { 0 };
                 self.alu_rw(rd, a);
-                self.mode.emit_alu(
+                self.mode.emit_alu_pinned(
                     instruction.op_a,
                     self.state.clk,
                     a,
@@ -196,7 +200,7 @@ impl RiscvEmulator {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = if b < c { 1 } else { 0 };
                 self.alu_rw(rd, a);
-                self.mode.emit_alu(
+                self.mode.emit_alu_pinned(
                     instruction.op_a,
                     self.state.clk,
                     a,
@@ -648,7 +652,7 @@ impl RiscvEmulator {
                 compat_cpu_event_b_u64 = Some(compat_b_u64);
                 compat_cpu_event_c_u64 = Some(compat_c_u64);
                 self.rw(rd, result);
-                self.mode.emit_alu(
+                self.mode.emit_alu_pinned(
                     instruction.op_a,
                     self.state.clk,
                     result,
@@ -656,7 +660,7 @@ impl RiscvEmulator {
                     compat_c_u64,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.add_events,
+                    &mut self.record.add_sub_events,
                 );
             }
             Opcode::SUBW => {
@@ -670,7 +674,7 @@ impl RiscvEmulator {
                 compat_cpu_event_b_u64 = Some(compat_b_u64);
                 compat_cpu_event_c_u64 = Some(compat_c_u64);
                 self.rw(rd, result);
-                self.mode.emit_alu(
+                self.mode.emit_alu_pinned(
                     instruction.op_a,
                     self.state.clk,
                     result,
@@ -678,7 +682,7 @@ impl RiscvEmulator {
                     compat_c_u64,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.sub_events,
+                    &mut self.record.add_sub_events,
                 );
             }
             Opcode::SLLW => {
@@ -898,6 +902,9 @@ impl RiscvEmulator {
             &mut self.record.cpu_events,
             &mut self.record.memory_read_write_event_indices,
         );
+
+        self.chunk_last_next_pc = next_pc;
+        self.chunk_exit_code = exit_code;
 
         // Update the program counter.
         self.state.pc = next_pc;

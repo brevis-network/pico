@@ -1,9 +1,11 @@
 [workspace]
-members = ["derive", "mle-core", "mle-cpu", "vm", "aot-codegen", "aot-runtime", "sdk/*", "gnark/field-ffi", "perf"]
+members = ["derive", "mle-core", "mle-cpu", "cuda-mle", "vm", "aot-codegen", "aot-runtime", "sdk/*", "gnark/field-ffi", "perf", "distributed-vm", "gpu-api"]
+# `cuda-mle` and `gpu-api` need a CUDA toolkit; they build only through `pico-vm/cuda`.
+default-members = ["derive", "mle-core", "mle-cpu", "vm", "aot-codegen", "aot-runtime", "sdk/*", "gnark/field-ffi", "perf", "distributed-vm"]
 resolver = "2"
 
 [workspace.package]
-version = "3.0.0"
+version = "3.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 keywords = ["zkvm", "plonky3", "stark", "whir"]
@@ -17,7 +19,7 @@ debug = true                        # Enable full debug info (DWARF) for symbol 
 split-debuginfo = "unpacked"        # On macOS, place DWARF info next to binary (for browser UI like pprof/speedscope)
 codegen-units = 1                   # Merge all codegen units for more coherent stack traces
 lto = "off"                         # Disable Link Time Optimization to avoid symbol folding across crates
-incremental = false                # Disable incremental compilation to ensure reproducibility
+incremental = false                 # Disable incremental compilation to ensure reproducibility
 strip = "none"                      # Prevent release build from stripping debug symbol
 
 # Run the benchmarks in perf folder.
@@ -46,6 +48,7 @@ pico-sdk = { path = "sdk/sdk" }
 pico-cli = { path = "sdk/cli" }
 pico-patch-libs = { path = "sdk/patch-libs" }
 pico-perf = { path = "perf" }
+pico-gpu-api = { path = "gpu-api" }
 
 # p3
 
@@ -88,13 +91,20 @@ p3-interpolation = { git = "https://github.com/brevis-network/Plonky3.git", rev 
 # p3-bn254 = { path = "../p3/bn254" }
 # p3-circle = { path = "../p3/circle" }
 
+# gpu
+cudart = { git = "https://github.com/brevis-network/era-cuda.git", rev = "4277a3558fce68b5ae48bc80055046bb1d0d6ed4" }
+cudart-sys = { git = "https://github.com/brevis-network/era-cuda.git", rev = "4277a3558fce68b5ae48bc80055046bb1d0d6ed4" }
+# To build against a local pico-gpu checkout, override this with a `[patch]` outside this file,
+# e.g. `--config 'patch."https://github.com/brevis-network/pico-gpu.git".pico-gpu.path="<checkout>/rust"'`.
+pico-gpu = { git = "https://github.com/brevis-network/pico-gpu.git", rev = "4c9dc387f33a6dfd80704b1ddfaaf6dd6eee5b44" }
+
 # misc
 amcl = { package = "snowbridge-amcl", version = "1.0.2", default-features = false, features = ["bls381"] }
 anyhow = { version = "1.0.40", default-features = false }
 arrayref = "0.3.8"
 backtrace = "0.3.71"
 base64 = "0.22"
-bincode = "1.3.3"
+bincode = "=1.3.3"
 bytemuck = "1.16.3"
 cfg-if = "1.0.0"
 clap = { version = "4.5.13", features = ["cargo", "derive", "env"] }
@@ -115,12 +125,12 @@ elf = "0.7.4"
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "sec1"] }
 env_logger = "0.11.6"
 eyre = "0.6.12"
+bls12_381 = "0.7.1"
 futures = "0.3"
 generic-array = { version = "1.1.0", features = ["alloc", "serde"] }
 getset = "0.1.3"
-halo2curves  = "0.7.0"
-bls12_381 = "0.7.1"
-hashbrown = { version = "0.14.5", features = ["serde", "inline-more"] }
+halo2curves = "0.7.0"
+hashbrown = { version = "0.14.5", features = ["inline-more", "rayon", "serde"] }
 hex = "0.4.3"
 hex-literal = "1.0.0"
 hybrid-array = "0.2.1"
@@ -134,11 +144,14 @@ num = { version = "0.4.3" }
 num-bigint = "0.4.6"
 num-traits = "0.2"
 num_cpus = "1.16"
+object_store = { version = "0.12", features = ["aws"] }
 once_cell = "1.20"
 p256 = { version = "0.13.2", features = ["expose-field"] }
 paste = "1.0.15"
 postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
 proc-macro2 = "1.0"
+prost = "0.13"
+prost-types = "0.13"
 quote = "1.0"
 rand = "0.10"
 rayon = "1.10"
@@ -150,21 +163,27 @@ rustc-hash = "2.0.0"
 serde = { version = "1.0.205", features = ["derive", "rc"] }
 serde_json = "1.0.121"
 serde_with = "3.9.0"
+sha2 = "0.10"
 static_assertions = "1.1"
 strum = { version = "0.26.3", features = ["derive"] }
 strum_macros = "0.26.4"
 syn = { version = "1.0", features = ["full"] }
 sysinfo = "0.30.13"
+tcmalloc = "0.3"
 target-lexicon = "0.12"
 thiserror = "1.0.63"
 tikv-jemallocator = "0.6"
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "signal"] }
 tokio-stream = "0.1"
+tonic = { version = "0.13", features = ["zstd"] }
+tonic-build = { version = "0.13", features = ["prost"] }
 tracing = "0.1.40"
 tracing-forest = { version = "0.1.6", features = ["ansi", "smallvec"] }
 tracing-subscriber = { version = "0.3.18", features = ["std", "env-filter"] }
 typenum = "1.17.0"
 vec_map = { version = "0.8.2", features = ["serde"] }
+walkdir = "2"
 yansi = { version = "1.0.1", features = ["detect-tty", "detect-env"] }
 zkhash = "0.2.0"
+zstd = "0.13"

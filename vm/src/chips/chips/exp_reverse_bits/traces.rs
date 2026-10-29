@@ -13,15 +13,32 @@ use crate::{
     emulator::recursion::emulator::RecursionRecord,
     machine::chip::ChipBehavior,
 };
+use core::borrow::BorrowMut;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
-use std::borrow::BorrowMut;
 
 use crate::{chips::utils::pad_rows_fixed, compiler::recursion::types::ExpReverseBitsInstr};
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{trace::TraceData, utils::next_power_of_two},
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+#[cfg(feature = "cuda")]
+use cudart_sys::*;
+#[cfg(feature = "cuda")]
+use log::info;
+#[cfg(feature = "cuda")]
+use pico_gpu_api::{cuda_exp_bits_generate_main, cuda_exp_bits_generate_preprocessed};
 
 impl<F: PrimeField32> ChipBehavior<F> for ExpReverseBitsLenChip<F> {
     type Record = RecursionRecord<F>;
-
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -144,5 +161,197 @@ impl<F: PrimeField32> ChipBehavior<F> for ExpReverseBitsLenChip<F> {
 
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for ExpReverseBitsLenChip<F> {
+    fn gpu_generate_preprocessed(
+        &self,
+        device_id: usize,
+        program: &Self::Program,
+    ) -> Option<TraceData<'_, F>> {
+        use crate::compiler::recursion::types::{
+            preprocess_exp_reverse_bits_instr_ffi, ExpReverseBitsInstrFfi,
+        };
+        use p3_koala_bear::KoalaBear;
+
+        let exp_reverse_bits_instrs: Box<[ExpReverseBitsInstr<_>]> =
+            if let Some(guard) = program.get_buckets() {
+                let buckets = guard.as_ref().unwrap();
+                buckets.exp_reverse_bits.clone()
+            } else {
+                program
+                    .instructions
+                    .iter()
+                    .filter_map(|instruction| {
+                        if let Instruction::ExpReverseBitsLen(instr) = instruction {
+                            Some(instr.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Box<[_]>>()
+            };
+        let exp_reverse_bits_refs: Box<[_]> = exp_reverse_bits_instrs.iter().collect();
+        let (instrs, addrs) = preprocess_exp_reverse_bits_instr_ffi(&exp_reverse_bits_refs);
+
+        let nb_rows = addrs.len();
+        let log_rows = program.fixed_log2_rows(&self.name());
+        let padded_nb_rows = match log_rows {
+            Some(log_rows) => 1 << log_rows,
+            None => next_power_of_two(nb_rows, None),
+        };
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let stream = &sync_stream.0;
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let trace_size = padded_nb_rows * self.preprocessed_width();
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        unsafe {
+            let _ = cudaMemsetAsync(
+                d_trace.as_mut_ptr() as *mut _,
+                0,
+                trace_size * size_of::<KoalaBear>(),
+                stream.into(),
+            );
+        }
+
+        let num_instrs = instrs.len();
+        if num_instrs > 0 {
+            use crate::compiler::recursion::types::Address;
+            let mut d_instrs =
+                DevicePoolAllocation::<ExpReverseBitsInstrFfi<F>>::alloc_from_pool_async(
+                    num_instrs, mem_pool, stream,
+                )
+                .unwrap();
+            let mut d_addrs = DevicePoolAllocation::<Address<F>>::alloc_from_pool_async(
+                addrs.len(),
+                mem_pool,
+                stream,
+            )
+            .unwrap();
+            unsafe {
+                let _ = cudaMemcpyAsync(
+                    d_instrs.as_mut_c_void_ptr(),
+                    instrs.as_c_void_ptr(),
+                    num_instrs * size_of::<ExpReverseBitsInstrFfi<F>>(),
+                    CudaMemoryCopyKind::HostToDevice,
+                    stream.into(),
+                );
+                let _ = cudaMemcpyAsync(
+                    d_addrs.as_mut_c_void_ptr(),
+                    addrs.as_c_void_ptr(),
+                    addrs.len() * size_of::<Address<F>>(),
+                    CudaMemoryCopyKind::HostToDevice,
+                    stream.into(),
+                );
+
+                cuda_exp_bits_generate_preprocessed(
+                    d_instrs.as_ptr() as *const _,
+                    num_instrs,
+                    d_addrs.as_ptr() as *const _,
+                    d_trace.as_mut_ptr() as *mut _,
+                    self.preprocessed_width(),
+                    stream.into(),
+                );
+            }
+        }
+
+        // No per-chip synchronization — caller (BaseProver) syncs once after all chips.
+        info!("[batch-fri-chip] generate_preprocessed on GPU");
+
+        Some(TraceData::Gpu(self.preprocessed_width(), d_trace))
+    }
+
+    fn gpu_generate_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        _: &mut Self::Record,
+    ) -> TraceData<'_, F> {
+        use crate::compiler::recursion::types::{
+            preprocess_exp_reverse_bits_ffi, ExpReverseBitsFfiEvent,
+        };
+        use p3_koala_bear::KoalaBear;
+
+        let (events, bits) = preprocess_exp_reverse_bits_ffi(&input.exp_reverse_bits_len_events);
+
+        let nb_rows = bits.len();
+        let log_rows = input.fixed_log2_rows(&self.name());
+        let padded_nb_rows = match log_rows {
+            Some(log_rows) => 1 << log_rows,
+            None => next_power_of_two(nb_rows, None),
+        };
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let trace_size = padded_nb_rows * NUM_EXP_REVERSE_BITS_LEN_COLS;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        unsafe {
+            let _ = cudaMemsetAsync(
+                d_trace.as_mut_ptr() as *mut _,
+                0,
+                trace_size * size_of::<KoalaBear>(),
+                stream.into(),
+            );
+        }
+
+        let event_size = events.len();
+        if event_size > 0 {
+            let mut d_events =
+                DevicePoolAllocation::<ExpReverseBitsFfiEvent<F>>::alloc_from_pool_async(
+                    event_size, mem_pool, stream,
+                )
+                .unwrap();
+            let mut d_bits =
+                DevicePoolAllocation::<F>::alloc_from_pool_async(bits.len(), mem_pool, stream)
+                    .unwrap();
+            unsafe {
+                let _ = cudaMemcpyAsync(
+                    d_events.as_mut_c_void_ptr(),
+                    events.as_c_void_ptr(),
+                    event_size * size_of::<ExpReverseBitsFfiEvent<F>>(),
+                    CudaMemoryCopyKind::HostToDevice,
+                    stream.into(),
+                );
+                let _ = cudaMemcpyAsync(
+                    d_bits.as_mut_c_void_ptr(),
+                    bits.as_c_void_ptr(),
+                    bits.len() * size_of::<F>(),
+                    CudaMemoryCopyKind::HostToDevice,
+                    stream.into(),
+                );
+
+                cuda_exp_bits_generate_main(
+                    d_events.as_ptr() as *const _,
+                    event_size,
+                    d_bits.as_ptr() as *const _,
+                    d_trace.as_mut_ptr() as *mut _,
+                    NUM_EXP_REVERSE_BITS_LEN_COLS,
+                    stream.into(),
+                );
+            }
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[exp-reverse-bits-len-chip] generate_main on GPU");
+
+        TraceData::Gpu(NUM_EXP_REVERSE_BITS_LEN_COLS, d_trace)
     }
 }

@@ -84,7 +84,8 @@ pub const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 7;
 // allocation). Was 2^22, the old 24-bit chunk-clk cap.
 pub const BENCH_MAX_CHUNK_SIZE: u32 = 1 << 23;
 pub const BENCH_MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 20;
-pub const BENCH_MAX_CHUNK_BATCH_SIZE: u32 = 16;
+// One chunk per batch, for the same reason as `TEST_CHUNK_BATCH_SIZE`.
+pub const BENCH_MAX_CHUNK_BATCH_SIZE: u32 = 1;
 pub const BENCH_RECURSION_MAX_CHUNK_SIZE: u32 = 1 << 22;
 
 /*
@@ -181,6 +182,8 @@ impl Poseidon2Config for KoalaBearConfig {
     type SBoxRegisters = typenum::U0;
 }
 pub const KOALABEAR_S_BOX_DEGREE: u64 = 3;
+pub const KOALABEAR_NUM_EXTERNAL_ROUNDS: usize = 8;
+pub const KOALABEAR_NUM_INTERNAL_ROUNDS: usize = 20;
 
 pub const BN254_S_BOX_DEGREE: u64 = 5;
 

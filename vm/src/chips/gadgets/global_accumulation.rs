@@ -49,7 +49,7 @@ impl<F: PrimeField, const N: usize> GlobalAccumulationOperation<F, N> {
     /// `point == -cum` (same x, opposite y) is never produced by an honest trace (the scan would
     /// have hit the point at infinity first) and is rejected by A4 (it forces `y1 = y2`).
     ///
-    /// The GPU tracegen (`global_accumulation.hpp`) mirrors this branch structure exactly.
+    /// The GPU tracegen (`global_accumulation.cuh`) mirrors this branch structure exactly.
     pub fn slope(cum: SepticCurve<F>, point: SepticCurve<F>) -> SepticExtension<F> {
         if point.x != cum.x {
             (point.y - cum.y) / (point.x - cum.x)

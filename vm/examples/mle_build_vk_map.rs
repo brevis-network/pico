@@ -82,7 +82,7 @@ use pico_vm::{
         program::Program,
     },
     configs::stark_config::kb_poseidon2::KoalaBearPoseidon2,
-    emulator::{opts::EmulatorOpts, riscv::record::EmulationRecord, stdin::EmulatorStdin},
+    emulator::{riscv::record::EmulationRecord, stdin::EmulatorStdin},
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::{chip::MetaChip, logger::setup_logger},
     mle::{
@@ -414,22 +414,24 @@ fn main() {
         let mut passed = 0usize;
         for block in &blocks {
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let records = riscv::emulate_with_opts(
+                // One record at a time: a reth block's records do not all fit the GPU prover's
+                // pinned event pools at once.
+                let mut i = 0usize;
+                riscv::emulate_each(
                     reth_program.clone(),
-                    &reth_stdin(&reth_dir, block),
-                    EmulatorOpts::default(),
-                )
-                .expect("emulation failed")
-                .records;
-                for (i, record) in records.iter().enumerate() {
-                    let key = shape_content_key(&selected_shape(&chips, record));
-                    assert!(
-                        key_set.contains(&key),
-                        "VALIDATION FAILED: block {block} chunk {i} selects a shape the \
-                         whitelist does not hold: {key}"
-                    );
-                }
-                records.len()
+                    reth_stdin(&reth_dir, block),
+                    None,
+                    |record| {
+                        let key = shape_content_key(&selected_shape(&chips, &record));
+                        assert!(
+                            key_set.contains(&key),
+                            "VALIDATION FAILED: block {block} chunk {i} selects a shape the \
+                             whitelist does not hold: {key}"
+                        );
+                        i += 1;
+                    },
+                );
+                i
             }));
             match outcome {
                 Ok(n) => {
@@ -466,9 +468,7 @@ fn main() {
         _ => ("fib-10".to_string(), fib_program.clone(), fib_stdin(10)),
     };
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let records = riscv::emulate_with_opts(program.clone(), &stdin, EmulatorOpts::default())
-            .expect("emulation failed")
-            .records;
+        let records = riscv::emulate(program.clone(), stdin, None);
         let expected: Vec<RecursionVkLayout> = records
             .iter()
             .map(|r| synthesized_convert_layout(&riscv_vk, &selected_shape(&chips, r)))

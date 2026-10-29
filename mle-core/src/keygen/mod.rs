@@ -874,8 +874,8 @@ pub const CONSTRAINT_DIGEST_DOMAIN: u32 = u32::from_le_bytes(*b"CSdg");
 /// Contrast [`LeanAirVk`], whose preimage leads with `params: &StarkVerifyingParams` *and* whose
 /// enclosing [`LeanVkPreimage`] carries `&SystemParams`. `SystemParams` holds `n_stack`, a
 /// function of `CHUNK_SIZE`, and `preprocessed_data.hypercube_dim` is `log_height - l_skip` — so
-/// two branches at different chunk sizes get different pre-hashes even with byte-identical
-/// constraints. That is exactly why the cross-branch comparator cannot be `compute_vk_pre_hash`.
+/// two builds at different chunk sizes get different pre-hashes even with byte-identical
+/// constraints. That is exactly why the constraint comparator cannot be `compute_vk_pre_hash`.
 #[derive(serde::Serialize)]
 #[serde(bound = "")]
 struct AirConstraintPreimage<'a, SC: StarkProtocolConfig> {
@@ -954,10 +954,10 @@ pub fn air_constraint_digest<SC: StarkProtocolConfig>(
 
 /// Compute the params-free constraint dump for a whole machine.
 ///
-/// This is the **cross-branch** comparator: equal dumps mean constraints, interactions, column
+/// This is the **constraint** comparator: equal dumps mean constraints, interactions, column
 /// widths, public-value counts and degrees all match, independent of `CHUNK_SIZE` /
-/// `log_stacked_height`. `compute_vk_pre_hash` keeps its separate role as a *within-branch*
-/// keygen-stability check and must not be repurposed for this.
+/// `log_stacked_height`. `compute_vk_pre_hash` keeps its separate role as a keygen-stability
+/// check within one build and must not be repurposed for this.
 ///
 /// Because the constraint DAG is already stored in the vk (`symbolic_constraints`), no separate
 /// export path and no proving is needed — keygen alone is enough. Optional AIRs (the compute
@@ -1008,7 +1008,7 @@ impl<F: p3_field::PrimeField64, const N: usize> ConstraintDump<[F; N]> {
     /// `canonical_serde`), so the format depends neither on `Debug` formatting nor on the field
     /// type's own serde.
     ///
-    /// This is the exchange format between branches: dump on each, diff the files.
+    /// This is the exchange format between builds or revisions: dump on each, diff the files.
     pub fn render(&self) -> String {
         let hex = |d: &[F; N]| {
             postcard::to_allocvec(&CanonicalDigest(d.as_slice()))
@@ -1279,8 +1279,8 @@ mod tests {
     }
 
     /// The constraint dump is stable across two independent keygens — the same property
-    /// `keygen_is_deterministic` pins for `pre_hash`, but for the cross-branch comparator. If this
-    /// drifted, a dump diff could not distinguish "the branches differ" from "keygen is flaky".
+    /// `keygen_is_deterministic` pins for `pre_hash`, but for the constraint comparator. If this
+    /// drifted, a dump diff could not distinguish "the constraints differ" from "keygen is flaky".
     #[test]
     fn constraint_dump_is_stable_across_keygens() {
         let engine: KoalaBearPoseidon2RefEngine =
@@ -1409,7 +1409,7 @@ mod tests {
     /// `n_stack`, i.e. different `log_stacked_height`) produce the **same** dump for the same AIRs.
     ///
     /// This is the property `compute_vk_pre_hash` does NOT have, and the reason this comparator
-    /// exists: `main` and `gpu-base` are not at the same `CHUNK_SIZE`, so a params-dependent
+    /// exists: the CPU and GPU provers are not at the same `CHUNK_SIZE`, so a params-dependent
     /// digest could not compare them.
     #[test]
     fn constraint_dump_is_independent_of_the_operating_point() {

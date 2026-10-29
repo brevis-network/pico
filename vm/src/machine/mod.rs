@@ -7,6 +7,8 @@ pub mod extension;
 pub mod field;
 pub mod logger;
 pub mod lookup;
+#[cfg(feature = "cuda")]
+pub mod prover;
 pub mod report;
 pub mod septic;
 pub mod utils;

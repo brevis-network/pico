@@ -1167,6 +1167,7 @@ pub fn mle_natural_heights(record: &EmulationRecord) -> BTreeMap<String, usize> 
             "Ecall".to_string(),
             record
                 .cpu_events
+                .as_slice()
                 .iter()
                 .filter(|e| e.instruction.is_ecall_instruction())
                 .count(),
@@ -1230,6 +1231,148 @@ pub fn mle_natural_heights(record: &EmulationRecord) -> BTreeMap<String, usize> 
     out
 }
 
+/// [`mle_natural_heights`] read off the GPU preparer's `EventCounter`, which already holds
+/// every count the device kernels size their traces from, extra-record events included. Row for
+/// row what `mle_natural_heights` returns on the augmented record, without that path's record
+/// clone and host extra-record pass, and without its walks over the events: a core chunk's table
+/// is rebuilt from the counter (the ecall count is taken over the CPU events in parallel); a
+/// memory chunk's from the two event vectors' lengths; a precompile chunk's from the counter's
+/// per-kind event and local-memory counts; Global and Poseidon2, the two heights extra-record
+/// output feeds, come from the counter in every family. `MLE_SHAPE_CROSSCHECK=1` asserts the
+/// equality on every chunk (`prepare_chunk_shaped`).
+#[cfg(feature = "cuda")]
+pub fn mle_natural_heights_from_counter(
+    record: &EmulationRecord,
+    counter: &crate::instances::preparer::EventCounter,
+) -> BTreeMap<String, usize> {
+    use crate::primitives::consts::{
+        ADD_DATAPAR, BITWISE_DATAPAR, DIVREM_DATAPAR, LOCAL_MEMORY_DATAPAR, LT_DATAPAR,
+        MEMORY_RW_DATAPAR, MUL_DATAPAR, RISCV_POSEIDON2_DATAPAR, SLL_DATAPAR, SR_DATAPAR,
+        SUB_DATAPAR,
+    };
+    if !record.is_cpu_chunk {
+        // The deferred families, off the counter: `mle_natural_heights` walks every precompile
+        // event's local memory accesses to count them, which on a keccak chunk is hundreds of
+        // milliseconds on the preparer lane, while the packaging already counted exactly that
+        // (`get_precompile_local_mem_len`, the same expression). Same map as the record walk,
+        // row for row; `MLE_SHAPE_CROSSCHECK=1` asserts it.
+        use crate::{
+            instances::compiler::shapes::riscv_shape::{
+                precompile_rows_per_event, precompile_syscall_code,
+            },
+            primitives::consts::LOCAL_MEMORY_DATAPAR,
+        };
+        let mut out: BTreeMap<String, usize> = BTreeMap::new();
+        if !record.memory_initialize_events.is_empty() || !record.memory_finalize_events.is_empty()
+        {
+            // Most memory records carry finalize events only: the finalize stream is bucketed
+            // on its own and the initialize stream rides as one block on the last record, or
+            // on a record of its own (`EmulationRecord::split`).
+            for (name, rows) in [
+                ("MemoryInitialize", record.memory_initialize_events.len()),
+                ("MemoryFinalize", record.memory_finalize_events.len()),
+            ] {
+                if rows > 0 {
+                    out.insert(name.to_string(), rows);
+                }
+            }
+        } else {
+            // A precompile chunk carries exactly one compute kind (`split` puts each kind in
+            // its own record), its control sibling if it has one, and the shared companions.
+            for kind in precompile_kinds() {
+                let code = precompile_syscall_code(kind);
+                let events = record
+                    .precompile_events
+                    .get_events(code)
+                    .map_or(0, |events| events.len());
+                if events == 0 {
+                    continue;
+                }
+                let local_mem_events = counter.get_precomplie_local_mem_event_num(code);
+                if let Some(control) = precompile_control_sibling(kind) {
+                    out.insert(control.to_string(), events);
+                }
+                out.insert(kind.clone(), events * precompile_rows_per_event(kind));
+                out.insert("SyscallPrecompile".to_string(), events);
+                out.insert(
+                    "MemoryLocal".to_string(),
+                    local_mem_events.div_ceil(LOCAL_MEMORY_DATAPAR),
+                );
+            }
+        }
+        // What the two generators read, whichever family: Global pads `events + 1` (its last
+        // row must be padding), Poseidon2 packs `RISCV_POSEIDON2_DATAPAR` events per row.
+        out.insert("Global".to_string(), counter.num_global_lookup_events + 1);
+        out.insert(
+            "RiscvKoalaBearPoseidon2".to_string(),
+            counter
+                .num_poseidon2_events
+                .div_ceil(RISCV_POSEIDON2_DATAPAR),
+        );
+        return out;
+    }
+    // One row per ecall instruction: counted over the CPU events in parallel, as the CPU chip's
+    // own extra-record count is -- a serial pass over a full chunk's events is ~60 ms on the
+    // preparer lane, which the provers then wait for.
+    let ecalls = {
+        use crate::iter::{PicoIterator, PicoSlice};
+        let events = record.cpu_events.as_slice();
+        let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
+        events
+            .pico_chunks(chunk_size)
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .filter(|e| e.instruction.is_ecall_instruction())
+                    .count()
+            })
+            .pico_reduce(|| 0, |a, b| a + b)
+    };
+    // `get_local_mem_events` chains the precompile local memory events (none in a CPU chunk)
+    // and the CPU ones; the counter holds both counts.
+    let local = record.cpu_local_memory_access.len() + counter.total_precompile_local_mem_events;
+    [
+        ("Cpu", counter.num_cpu_events),
+        ("DivRem", counter.num_divrem_events.div_ceil(DIVREM_DATAPAR)),
+        ("Add", counter.num_add_events.div_ceil(ADD_DATAPAR)),
+        ("Sub", counter.num_sub_events.div_ceil(SUB_DATAPAR)),
+        ("Addw", counter.num_addw_events.div_ceil(ADD_DATAPAR)),
+        ("Subw", counter.num_subw_events.div_ceil(SUB_DATAPAR)),
+        (
+            "Bitwise",
+            counter.num_bitwise_events.div_ceil(BITWISE_DATAPAR),
+        ),
+        ("Mul", counter.num_mul_events.div_ceil(MUL_DATAPAR)),
+        (
+            "ShiftRight",
+            counter.num_shift_right_events.div_ceil(SR_DATAPAR),
+        ),
+        (
+            "ShiftLeft",
+            counter.num_shift_left_events.div_ceil(SLL_DATAPAR),
+        ),
+        ("LessThan", counter.num_lt_events.div_ceil(LT_DATAPAR)),
+        ("MemoryLocal", local.div_ceil(LOCAL_MEMORY_DATAPAR)),
+        (
+            "MemoryReadWrite",
+            counter.num_memory_read_writes.div_ceil(MEMORY_RW_DATAPAR),
+        ),
+        // `+ 1`: the Global trace always ends with one padding row.
+        ("Global", counter.num_global_lookup_events + 1),
+        (
+            "RiscvKoalaBearPoseidon2",
+            counter
+                .num_poseidon2_events
+                .div_ceil(RISCV_POSEIDON2_DATAPAR),
+        ),
+        ("SyscallRiscv", counter.num_syscall_events),
+        ("Ecall", ecalls),
+    ]
+    .into_iter()
+    .map(|(name, rows)| (name.to_string(), rows))
+    .collect()
+}
+
 /// The shape a CPU-chunk record proves under: the first [`MLE_CORE_LADDER`] entry that dominates
 /// its natural heights componentwise, else the catch-all.
 ///
@@ -1271,6 +1414,15 @@ pub fn select_core_rung(
         .collect();
     let refs: Vec<(&str, usize)> = catch_all.iter().map(|(n, h)| (n.as_str(), *h)).collect();
     dominates(&refs).then_some((MLE_CORE_LADDER.len(), catch_all))
+}
+
+/// Whether a core shape is the catch-all row: every air at its `MLE_RISCV_MAIN_LOG_HEIGHTS`
+/// height. The catch-all is a CPU-only shape (its GKR leaf buffer is 64 GiB), so a GPU prover
+/// asks this before it commits to a chunk.
+pub fn is_core_catch_all(shape: &[(String, usize)]) -> bool {
+    shape
+        .iter()
+        .all(|(name, log)| *log == bucket_log_height(name, true))
 }
 
 /// The shape a record proves under, given the airs it declares present.
@@ -1756,6 +1908,7 @@ mod tests {
     /// the family does not have, or missed one, would not be a whole height vector.
     #[test]
     fn core_ladder_classes_sit_under_the_catch_all() {
+        assert!(!MLE_CORE_LADDER.is_empty(), "the core ladder is empty");
         for (i, class) in MLE_CORE_LADDER.iter().enumerate() {
             let names: Vec<&str> = class.iter().map(|(n, _)| *n).collect();
             for member in MLE_CORE_CANONICAL_PRESENCE {

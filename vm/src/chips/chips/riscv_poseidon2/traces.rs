@@ -1,9 +1,20 @@
+#[cfg(feature = "cuda")]
+use super::dummy_row::RISCV_DUMMY_ROW_KB;
 use super::{
     columns::{
         RiscvLastFullRound, RiscvPoseidon2ValueCols, RISCV_NUM_POSEIDON2_COLS,
         RISCV_NUM_POSEIDON2_VALUE_COLS, RISCV_POSEIDON2_NUM_INPUTS, RISCV_POSEIDON2_NUM_OUTPUTS,
     },
     Poseidon2ChipP3,
+};
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{chips::riscv_poseidon2::Poseidon2Event, trace::TraceData},
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
 };
 use crate::{
     chips::{
@@ -21,12 +32,24 @@ use crate::{
     machine::{chip::ChipBehavior, field::same_field},
     primitives::consts::{PERMUTATION_WIDTH, RISCV_POSEIDON2_DATAPAR},
 };
+#[cfg(feature = "cuda")]
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+#[cfg(feature = "cuda")]
+use cudart_sys::*;
 use hybrid_array::Array;
 use p3_field::{PrimeField, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
+#[cfg(feature = "cuda")]
+use pico_gpu_api::cuda_riscv_poseidon2_generate_main;
 use std::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
+use tracing::info;
 use typenum::Unsigned;
 
 /// Populate one riscv (rate-8) permutation slot: commits `state[0..8]` as `inputs`, requires the
@@ -209,6 +232,196 @@ impl<
     }
 
     fn local_only(&self) -> bool {
+        true
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<
+        F: PrimeField32,
+        LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
+        Config: Poseidon2Config,
+    > GpuChipBehavior<F> for Poseidon2ChipP3<F, LinearLayers, Config>
+{
+    fn gpu_generate_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        _: &mut Self::Record,
+    ) -> TraceData<'_, F> {
+        let events = &input.poseidon2_events;
+
+        let nrows = events.len().div_ceil(RISCV_POSEIDON2_DATAPAR);
+        let log_nrows = input.shape_chip_size(&self.name());
+        let padded_nrows = next_power_of_two(nrows, log_nrows);
+
+        let total_cols = RISCV_NUM_POSEIDON2_COLS::<Config>;
+        let value_cols = RISCV_NUM_POSEIDON2_VALUE_COLS::<Config>;
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+        // TODO: check error
+        // gpu generate trace
+        let event_size = events.len();
+        let mut d_events = DevicePoolAllocation::<Poseidon2Event>::alloc_from_pool_async(
+            event_size, mem_pool, stream,
+        )
+        .unwrap();
+        let dummy_row_size = RISCV_DUMMY_ROW_KB.len();
+        let mut d_dummy_row = DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(
+            dummy_row_size,
+            mem_pool,
+            stream,
+        )
+        .unwrap();
+        let rc_flat = self.constants.flatten_for_gpu();
+        let mut d_round_constants = DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(
+            rc_flat.len(),
+            mem_pool,
+            stream,
+        )
+        .unwrap();
+        unsafe {
+            let _ = cudaMemcpyAsync(
+                d_events.as_mut_c_void_ptr(),
+                events.as_c_void_ptr(),
+                event_size * size_of::<Poseidon2Event>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+            let _ = cudaMemcpyAsync(
+                d_dummy_row.as_mut_c_void_ptr(),
+                RISCV_DUMMY_ROW_KB.as_c_void_ptr(),
+                dummy_row_size * size_of::<KoalaBear>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+            let _ = cudaMemcpyAsync(
+                d_round_constants.as_mut_c_void_ptr(),
+                rc_flat.as_c_void_ptr(),
+                rc_flat.len() * size_of::<F>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+        }
+
+        let trace_size = padded_nrows * total_cols;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        unsafe {
+            cuda_riscv_poseidon2_generate_main(
+                value_cols,
+                event_size,
+                trace_size,
+                d_events.as_ptr() as *const _,
+                d_trace.as_mut_ptr() as *mut _,
+                d_dummy_row.as_ptr() as *const _,
+                d_round_constants.as_ptr() as *const _,
+                stream.into(),
+            );
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[riscv-poseidon2-chip] generate_main on GPU");
+
+        TraceData::Gpu(total_cols, d_trace)
+    }
+
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let event_size = prepared_gpu_events.event_counter.num_poseidon2_events;
+
+        let nrows = event_size.div_ceil(RISCV_POSEIDON2_DATAPAR);
+        let log_nrows = input.shape_chip_size(&self.name());
+        let padded_nrows = next_power_of_two(nrows, log_nrows);
+
+        let total_cols = RISCV_NUM_POSEIDON2_COLS::<Config>;
+        let value_cols = RISCV_NUM_POSEIDON2_VALUE_COLS::<Config>;
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+        // TODO: check error
+        // gpu generate trace
+        let dummy_row_size = RISCV_DUMMY_ROW_KB.len();
+        let mut d_dummy_row = DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(
+            dummy_row_size,
+            mem_pool,
+            stream,
+        )
+        .unwrap();
+        let rc_flat = self.constants.flatten_for_gpu();
+        let mut d_round_constants = DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(
+            rc_flat.len(),
+            mem_pool,
+            stream,
+        )
+        .unwrap();
+        unsafe {
+            let _ = cudaMemcpyAsync(
+                d_dummy_row.as_mut_c_void_ptr(),
+                RISCV_DUMMY_ROW_KB.as_c_void_ptr(),
+                dummy_row_size * size_of::<KoalaBear>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+            let _ = cudaMemcpyAsync(
+                d_round_constants.as_mut_c_void_ptr(),
+                rc_flat.as_c_void_ptr(),
+                rc_flat.len() * size_of::<F>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+        }
+
+        let trace_size = padded_nrows * total_cols;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        let d_poseidon2_events = preallocated_gpu_memory.d_poseidon2_events.as_mut();
+        if let (true, Some(d_poseidon2_events)) = (event_size > 0, d_poseidon2_events) {
+            unsafe {
+                cuda_riscv_poseidon2_generate_main(
+                    value_cols,
+                    event_size,
+                    trace_size,
+                    d_poseidon2_events.as_mut_ptr() as *mut _,
+                    d_trace.as_mut_ptr() as *mut _,
+                    d_dummy_row.as_ptr() as *const _,
+                    d_round_constants.as_ptr() as *const _,
+                    stream.into(),
+                );
+            }
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[riscv-poseidon2-chip] generate_extra_record_and_main on GPU");
+
+        TraceData::Gpu(total_cols, d_trace)
+    }
+
+    fn is_active_for_extra_record(&self, _record: &PreparedGpuEvents) -> bool {
         true
     }
 }

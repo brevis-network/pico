@@ -1,7 +1,7 @@
 //! The VM and protocol types this crate names.
 //!
-//! `Kb` is the field and `Sc` is the protocol config. Both exist under the same path on the GPU
-//! branch, where only the engine behind them differs, which is what lets this crate be one source
+//! `Kb` is the field and `Sc` is the protocol config. Both are the same in the CPU and `cuda`
+//! builds, where only the engine behind them differs, which is what lets this crate be one source
 //! for both. No engine type is named anywhere in the crate.
 
 pub(crate) use pico_vm::mle::machine::riscv::{Kb, Sc};

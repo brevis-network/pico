@@ -4,8 +4,8 @@
 //! Both paths cut chunks and split the deferred pool with the same code, after every chunk, so
 //! everything `common/record_parity.rs` compares must match.
 //!
-//! The shared `emulate_snapshot_pipeline` splits the pool as gpu-base's pipeline does, from chunk
-//! 16 on, and one case pins that it still does.
+//! The shared `emulate_snapshot_pipeline` splits the pool as the GPU prover's pipeline does, from
+//! chunk 16 on, and one case pins that it still does.
 
 use std::{
     num::NonZeroUsize,
@@ -86,9 +86,9 @@ fn bls12381_fp() {
     check("bls12381-fp");
 }
 
-/// The BLS12-381 field guest's run through the shared pipeline's own split, which gpu-base's
-/// pipeline also takes: the block that fills after the third chunk stays in the pool until the
-/// run ends.
+/// The BLS12-381 field guest's run through the shared pipeline's own split, which the GPU
+/// prover's pipeline also takes: the block that fills after the third chunk stays in the pool
+/// until the run ends.
 #[test]
 fn the_shared_pipeline_holds_the_deferred_pool_back_as_gpu_base_does() {
     let _one_at_a_time = PIPELINE.lock().unwrap_or_else(PoisonError::into_inner);

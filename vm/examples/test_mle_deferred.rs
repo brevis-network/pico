@@ -21,7 +21,7 @@ use pico_mle_core::config::recursion_params_with_100_bits_security;
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
-    emulator::{opts::EmulatorOpts, recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP},
+    emulator::recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP,
     machine::logger::setup_logger,
     mle::machine::{
         deferred::DeferredMachine,
@@ -33,6 +33,8 @@ use pico_vm::{
 };
 use tracing::info;
 
+#[path = "common/emulate.rs"]
+mod emulate;
 #[path = "common/parse_args.rs"]
 mod parse_args;
 #[path = "common/tree.rs"]
@@ -41,6 +43,9 @@ use tree::build_tree;
 
 fn main() {
     setup_logger();
+    // The GPU riscv prover allocates from the shared pool; a CPU build has none to set up.
+    #[cfg(feature = "cuda")]
+    riscv::init_mle_gpu_pool(riscv::MLE_GPU_DEVICE);
     let (elf, stdin, args) = parse_args::parse_args::<KoalaBearPoseidon2>();
     assert_eq!(
         args.field, "kb",
@@ -63,16 +68,15 @@ fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(23);
-    let opts = EmulatorOpts::from_env_chunk_size(1 << 23);
+    let opts = emulate::opts_from_env_chunk_size(1 << 23);
     // A chunk wider than the stacked height proves the wrong shape, and both are env-settable.
     assert!(
         (opts.chunk_size as u64) <= (1u64 << log_stacked_height),
         "chunk_size {} exceeds 2^{log_stacked_height}: raise MLE_LOG_STACKED_HEIGHT with CHUNK_SIZE",
         opts.chunk_size
     );
-    let emulated =
-        riscv::emulate_with_opts(program.clone(), &stdin, opts).expect("emulation failed");
-    info!("emulated {} chunk(s)", emulated.chunks);
+    let emulated = emulate::emulate_with_opts(program.clone(), &stdin, opts);
+    info!("emulated {} chunk(s)", emulated.records.len());
 
     // ── The sub-proof: an ordinary end-to-end run of the guest ──────────────────────────────
     let bundle = riscv::prove_riscv(

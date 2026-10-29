@@ -186,7 +186,7 @@ impl Opcode {
     /// `UNIMP` and `EBREAK` are traps: the emulator stops with an error on them and never emits a
     /// CPU event, and the Program chip's preprocessed table writes row 0 in their place so that no
     /// table row carries a trap's pc (`riscv_program/traces.rs`). The CUDA preprocessed-table
-    /// kernel repeats this test by opcode value (`chips/include/program.hpp`).
+    /// kernel repeats this test by opcode value (pico-gpu's `src/tracegen/riscv/program.cuh`).
     #[must_use]
     pub const fn is_trap(self) -> bool {
         matches!(self, Opcode::UNIMP | Opcode::EBREAK)

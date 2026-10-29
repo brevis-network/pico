@@ -40,8 +40,13 @@ impl<F: Field> FieldBehavior for F {
     }
 }
 
-/// The field's width-16 Poseidon2: Plonky3 0.5.4's default instance for it. Every riscv-stage use
-/// resolves here, so they are all the one permutation the MLE transcript and Merkle hasher use.
+/// The field's width-16 Poseidon2 instance, as seen from every side: the host permutation
+/// (`permutation`), the round constants the AIR gadget and the GPU trace-gen consume
+/// (`round_constants`), and the linear layers / round structure the gadget is generic over. Every
+/// riscv-stage use of Poseidon2 -- the riscv Poseidon2 chip, the Poseidon2 precompile, the Global
+/// chip's hash-to-curve, the deferred-proof digest -- resolves to this one instance, and it is
+/// Plonky3 0.5.4's default for the field (`default_*_poseidon2_16`, the `*_POSEIDON2_RC_16_*`
+/// round constants), the same permutation the MLE transcript and Merkle hasher use.
 pub trait FieldSpecificPoseidon2Config: Field {
     type Poseidon2Config: Poseidon2Config;
     type LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>;

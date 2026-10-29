@@ -138,7 +138,8 @@ mod tests {
     }
 
     /// The empty partial is the identity — the case that actually occurs when one machine is
-    /// assigned no chunks, which is precisely the starve-the-secondary bug PR 4 fixed.
+    /// assigned no chunks, which is precisely the starve-the-secondary case the MLE chunk
+    /// defaults fix.
     #[test]
     fn an_empty_partial_is_the_identity() {
         let all = digests(4);

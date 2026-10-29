@@ -22,9 +22,56 @@ use crate::{
     emulator::recursion::emulator::RecursionRecord,
     machine::chip::{ChipBehavior, PreprocessedRows},
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{trace::TraceData, utils::next_power_of_two},
+    compiler::recursion::mle_instruction_buckets::MleVariant,
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+#[cfg(feature = "cuda")]
+use cudart_sys::*;
+#[cfg(feature = "cuda")]
+use log::info;
 use p3_field::PrimeField32;
+#[cfg(feature = "cuda")]
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
+use pico_gpu_api::{cuda_exp_bits_len_generate_main, cuda_exp_bits_len_generate_preprocessed};
 use std::borrow::BorrowMut;
+
+#[cfg(feature = "cuda")]
+/// H2D mirror of the CUDA `ExpBitsLenFlatEvent`: `bit_src` is pre-reduced to its canonical u32 so
+/// the kernel does its bit logic on a plain integer (base stays a field element for the ladder).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ExpBitsLenFlatEvent<F: Copy> {
+    base: F,
+    bit_src: u32,
+    num_bits: u32,
+}
+
+#[cfg(feature = "cuda")]
+/// H2D mirror of the CUDA `ExpBitsLenPreprocMeta`: per-instruction bookkeeping for the two-buffer
+/// expansion (the per-row bit outputs live in a flat `MemoryAccessCols` side buffer).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ExpBitsLenPreprocMeta<F: Copy> {
+    base: F,
+    num_bits: u32,
+    bit_src_in_addr: Address<F>,
+    result_out_addr: Address<F>,
+    result_mult: F,
+    bit_outs_offset: u32,
+    bit_outs_count: u32,
+}
 
 /// Builds the 32 witnessed rows for a single request over the KoalaBear field
 /// (`LOW_BITS_COUNT = 24`).
@@ -213,5 +260,202 @@ impl<F: PrimeField32> ChipBehavior<F> for ExpBitsLenChip<F> {
 
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for ExpBitsLenChip<F> {
+    fn gpu_generate_preprocessed(
+        &self,
+        device_id: usize,
+        program: &Self::Program,
+    ) -> Option<TraceData<'_, F>> {
+        assert_koalabear_field::<F>();
+
+        // Two-buffer layout: per-instruction metadata + a flat (addr, mult) buffer for the per-row
+        // bit outputs. The kernel writes the 32-row block for each instruction on the device; the
+        // host only serializes the variable-length `bit_outs_addrs_mults` and copies integer offsets.
+        let width = NUM_EXP_BITS_LEN_PREPROCESSED_COLS;
+        let mut metas: Vec<ExpBitsLenPreprocMeta<F>> = Vec::new();
+        let mut bit_outs_flat: Vec<MemoryAccessCols<F>> = Vec::new();
+        program
+            .mle_candidates(MleVariant::ExpBitsLen)
+            .filter_map(|instruction| {
+                if let Instruction::ExpBitsLen(instr) = instruction {
+                    Some(instr.as_ref())
+                } else {
+                    None
+                }
+            })
+            .for_each(|instr: &ExpBitsLenInstr<F>| {
+                let bit_outs_offset = bit_outs_flat.len() as u32;
+                let bit_outs_count = instr.bit_outs_addrs_mults.len() as u32;
+                for &(addr, mult) in &instr.bit_outs_addrs_mults {
+                    bit_outs_flat.push(MemoryAccessCols { addr, mult });
+                }
+                metas.push(ExpBitsLenPreprocMeta {
+                    base: instr.base,
+                    num_bits: instr.num_bits,
+                    bit_src_in_addr: instr.bit_src_in_addr,
+                    result_out_addr: instr.result_out_addr,
+                    result_mult: instr.result_mult,
+                    bit_outs_offset,
+                    bit_outs_count,
+                });
+            });
+
+        let num_instrs = metas.len();
+        let real_rows = num_instrs * NUM_BITS_MAX_PLUS_ONE;
+        let padded_nb_rows = program.padded_prep_rows(&self.name(), real_rows);
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let stream = &sync_stream.0;
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let trace_size = padded_nb_rows * width;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        unsafe {
+            let _ = cudaMemsetAsync(
+                d_trace.as_mut_ptr() as *mut _,
+                0,
+                trace_size * size_of::<KoalaBear>(),
+                stream.into(),
+            );
+        }
+
+        if real_rows > 0 {
+            let mut d_metas =
+                DevicePoolAllocation::<ExpBitsLenPreprocMeta<F>>::alloc_from_pool_async(
+                    num_instrs, mem_pool, stream,
+                )
+                .unwrap();
+            let mut d_bit_outs =
+                DevicePoolAllocation::<MemoryAccessCols<F>>::alloc_from_pool_async(
+                    bit_outs_flat.len().max(1),
+                    mem_pool,
+                    stream,
+                )
+                .unwrap();
+            unsafe {
+                let _ = cudaMemcpyAsync(
+                    d_metas.as_mut_c_void_ptr(),
+                    metas.as_c_void_ptr(),
+                    num_instrs * size_of::<ExpBitsLenPreprocMeta<F>>(),
+                    CudaMemoryCopyKind::HostToDevice,
+                    stream.into(),
+                );
+                if !bit_outs_flat.is_empty() {
+                    let _ = cudaMemcpyAsync(
+                        d_bit_outs.as_mut_c_void_ptr(),
+                        bit_outs_flat.as_c_void_ptr(),
+                        bit_outs_flat.len() * size_of::<MemoryAccessCols<F>>(),
+                        CudaMemoryCopyKind::HostToDevice,
+                        stream.into(),
+                    );
+                }
+
+                cuda_exp_bits_len_generate_preprocessed(
+                    d_metas.as_ptr() as *const _,
+                    num_instrs,
+                    d_bit_outs.as_ptr() as *const _,
+                    d_trace.as_mut_ptr() as *mut _,
+                    width,
+                    real_rows,
+                    stream.into(),
+                );
+            }
+        }
+
+        info!("[exp-bits-len-chip] generate_preprocessed on GPU");
+
+        Some(TraceData::Gpu(width, d_trace))
+    }
+
+    fn gpu_generate_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        _: &mut Self::Record,
+    ) -> TraceData<'_, F> {
+        assert_koalabear_field::<F>();
+
+        // `bit_src` is pre-reduced to canonical u32 so the kernel's bit logic runs on a plain integer
+        // (matching the CPU `event.bit_src.as_canonical_u32()`); base stays a field element.
+        let events: Box<[ExpBitsLenFlatEvent<F>]> = input
+            .exp_bits_len_events
+            .iter()
+            .map(|ev| ExpBitsLenFlatEvent {
+                base: ev.base,
+                bit_src: ev.bit_src.as_canonical_u32(),
+                num_bits: ev.num_bits,
+            })
+            .collect();
+
+        let num_events = events.len();
+        let real_rows = num_events * NUM_BITS_MAX_PLUS_ONE;
+        // Match CPU `pad_rows_fixed` (next_power_of_two of the real row count, 16-floor). Padding rows
+        // (result = result_multiplier = 1) are written by the same kernel launch.
+        let padded_nb_rows = next_power_of_two(real_rows, input.fixed_log2_rows(&self.name()));
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let trace_size = padded_nb_rows * NUM_EXP_BITS_LEN_COLS;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        unsafe {
+            let _ = cudaMemsetAsync(
+                d_trace.as_mut_ptr() as *mut _,
+                0,
+                trace_size * size_of::<KoalaBear>(),
+                stream.into(),
+            );
+        }
+
+        // Allocate at least one element so the device pointer is non-null even with zero events
+        // (all rows are then padding rows, filled by the kernel).
+        let mut d_events = DevicePoolAllocation::<ExpBitsLenFlatEvent<F>>::alloc_from_pool_async(
+            num_events.max(1),
+            mem_pool,
+            stream,
+        )
+        .unwrap();
+        unsafe {
+            if num_events > 0 {
+                let _ = cudaMemcpyAsync(
+                    d_events.as_mut_c_void_ptr(),
+                    events.as_c_void_ptr(),
+                    num_events * size_of::<ExpBitsLenFlatEvent<F>>(),
+                    CudaMemoryCopyKind::HostToDevice,
+                    stream.into(),
+                );
+            }
+
+            cuda_exp_bits_len_generate_main(
+                d_events.as_ptr() as *const _,
+                num_events,
+                d_trace.as_mut_ptr() as *mut _,
+                NUM_EXP_BITS_LEN_COLS,
+                padded_nb_rows,
+                stream.into(),
+            );
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[exp-bits-len-chip] generate_main on GPU");
+
+        TraceData::Gpu(NUM_EXP_BITS_LEN_COLS, d_trace)
     }
 }

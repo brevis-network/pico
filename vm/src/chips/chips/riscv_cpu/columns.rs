@@ -13,8 +13,9 @@ use std::mem::size_of;
 
 pub const NUM_CPU_COLS: usize = size_of::<CpuCols<u8>>();
 
-// Pinned on both sides: the CUDA mirror asserts the same width (`chips/include/cpu.hpp`, and the
-// second hand-written mirror in `chips/include/packed_tracegen.hpp`), and the host writes
+// Pinned on both sides: the CUDA mirror asserts the same width (pico-gpu's
+// `src/tracegen/riscv/cpu.cuh`, and the second hand-written mirror in
+// `src/tracegen/riscv/packed_tracegen.cuh`), and the host writes
 // `is_last` into the GPU trace by column index after the kernels run, so a silent width change on
 // either side would put that write in the wrong column.
 const _: () = assert!(NUM_CPU_COLS == 58);

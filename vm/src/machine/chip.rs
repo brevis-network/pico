@@ -1,3 +1,9 @@
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    cuda_adaptor::resource_pool::stream_pool::get_global_stream_pool,
+    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+};
 use crate::{
     compiler::program::ProgramBehavior,
     emulator::record::RecordBehavior,
@@ -10,6 +16,8 @@ use crate::{
 use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
+use p3_matrix::Matrix;
 use pico_mle_core::{
     air::symbolic::{get_symbolic_builder_with_public_values, SymbolicRapBuilder},
     keygen::types::TraceWidth,
@@ -74,14 +82,96 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     }
 }
 
+/// GPU trace generation. Every method defaults to the CPU generator, so a chip only overrides what
+/// it runs on the device.
+#[cfg(feature = "cuda")]
+pub trait GpuChipBehavior<F: Field>: ChipBehavior<F> {
+    fn gpu_generate_preprocessed(
+        &self,
+        _device_id: usize,
+        program: &Self::Program,
+    ) -> Option<TraceData<'_, F>> {
+        self.generate_preprocessed(program).map(TraceData::Cpu)
+    }
+
+    fn gpu_generate_main(
+        &self,
+        _device_id: usize,
+        input: &Self::Record,
+        output: &mut Self::Record,
+    ) -> TraceData<'_, F> {
+        TraceData::Cpu(self.generate_main(input, output))
+    }
+
+    fn debug_gpu_generate_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        output: &mut Self::Record,
+    ) -> TraceData<'_, F> {
+        // TODO: change to prover related device ID
+        let sync_stream = get_global_stream_pool(device_id);
+        let stream = &sync_stream.0;
+
+        let trace_data = self.gpu_generate_main(device_id, input, output);
+        let host_gpu_trace = trace_data.to_host(stream);
+
+        match trace_data {
+            TraceData::Gpu(_, gpu_trace) => {
+                let cpu_trace = self.generate_main(input, output);
+
+                // compare the cpu and gpu traces
+                let chip_name = self.name();
+                let width = cpu_trace.width();
+                assert_eq!(
+                    cpu_trace.values.len(),
+                    host_gpu_trace.values.len(),
+                    "[debug_gpu_generate_main] {} chip: trace lengths are not equal",
+                    chip_name,
+                );
+                assert_eq!(
+                    cpu_trace.values[0..width],
+                    host_gpu_trace.values[0..width],
+                    "[debug_gpu_generate_main] {} chip: first rows are not equal",
+                    chip_name,
+                );
+                assert_eq!(
+                    cpu_trace.values, host_gpu_trace.values,
+                    "[debug_gpu_generate_main] {} chip: total trace values are not equal",
+                    chip_name,
+                );
+
+                TraceData::Debug(cpu_trace, gpu_trace)
+            }
+            TraceData::Cpu(_) | TraceData::Debug(_, _) => trace_data,
+        }
+    }
+
+    fn count_extra_records(_record: &Self::Record, _counter: &mut EventCounter) {}
+
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        _device_id: usize,
+        input: &Self::Record,
+        _prepared_gpu_events: &PreparedGpuEvents,
+        _preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        TraceData::Cpu(self.generate_main(input, &mut Self::Record::default()))
+    }
+
+    fn is_active_for_extra_record(&self, _record: &PreparedGpuEvents) -> bool {
+        false
+    }
+}
+
 /// Chip wrapper, includes interactions
 #[derive(Clone, Debug)]
 pub struct MetaChip<F: Field, C> {
     /// Underlying chip
-    chip: C,
-    /// messages for chip as looking table
+    pub chip: C,
+    /// bus + scope of every lookup the chip sends
     pub(crate) looking: Vec<LookupSummary>,
-    /// messages for chip as looked table
+    /// bus + scope of every lookup the chip receives
     pub(crate) looked: Vec<LookupSummary>,
     _field: PhantomData<F>,
 }
@@ -107,10 +197,11 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         debug!(
             "new chip {:<21} pre_width {:<2} looking_len {:<3} looked_len {:<3}",
             chip.name(),
-            chip.preprocessed_width(),
+            preprocessed_width,
             looking.len(),
             looked.len()
         );
+
         Self {
             chip,
             looking,
@@ -214,5 +305,48 @@ where
 
     fn is_active(&self, record: &C::Record) -> bool {
         self.chip.is_active(record)
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<F, C> GpuChipBehavior<F> for MetaChip<F, C>
+where
+    F: Field,
+    C: GpuChipBehavior<F>,
+{
+    fn gpu_generate_preprocessed(
+        &self,
+        device_id: usize,
+        program: &Self::Program,
+    ) -> Option<TraceData<'_, F>> {
+        self.chip.gpu_generate_preprocessed(device_id, program)
+    }
+
+    fn gpu_generate_main(
+        &self,
+        device_id: usize,
+        input: &C::Record,
+        output: &mut C::Record,
+    ) -> TraceData<'_, F> {
+        self.chip.gpu_generate_main(device_id, input, output)
+    }
+
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        self.chip.is_active_for_extra_record(record)
+    }
+
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        input: &C::Record,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        self.chip.gpu_generate_extra_record_and_main(
+            device_id,
+            input,
+            prepared_gpu_events,
+            preallocated_gpu_memory,
+        )
     }
 }

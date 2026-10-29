@@ -3,9 +3,8 @@
 //! chip's `ChipBehavior::preprocessed_rows` declaration is a field read instead of its own
 //! program-length scan.
 //!
-//! Separate from [`crate::instances::chiptype::recursion_chiptype::RecursionEventCount`]
-//! because that covers only the non-MLE recursion chips and skips every MLE instruction
-//! variant.
+//! Separate from [`super::instruction_buckets::InstructionBuckets`] / `RecursionEventCount`
+//! because those cover only the 9-chip FRI set and skip every MLE instruction variant.
 //!
 //! Every field must equal the row count the chip's own `generate_preprocessed` produces before
 //! padding; `declared_preprocessed_dims_match_generated` enforces the pairing per chip.

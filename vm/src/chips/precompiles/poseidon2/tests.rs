@@ -307,10 +307,10 @@ fn the_boundary_between_p_minus_one_and_p_is_exact() {
 /// map entry rather than a missing symbol.
 ///
 /// A synthetic program is used rather than the guest ELF `perf/bench_data/rv64/poseidon2-elf`,
-/// which `sdk/prover/src/tests/precompiles.rs` proves: seven hand-assembled instructions (four to
-/// issue the permute ECALL, three to halt) keep this test independent of a prebuilt binary and
-/// aimed at exactly the syscall-map, ECALL and event path. `riscv_constraint_dump` builds a
-/// `Program` the same way.
+/// which the MLE e2e proves (`--elf poseidon2`): seven hand-assembled instructions (four to issue
+/// the permute ECALL, three to halt) keep this test independent of a prebuilt binary and aimed at
+/// exactly the syscall-map, ECALL and event path. `riscv_constraint_dump` builds a `Program` the
+/// same way.
 #[cfg(test)]
 mod syscall_reachability_tests {
     use crate::{

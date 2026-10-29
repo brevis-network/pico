@@ -6,13 +6,22 @@ license.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+# Replays one dumped recursion emulation off the box (see `vm/bin/rec_emulate_replay.rs`).
+# Outside `src/bin` so it is declared here rather than auto-discovered.
+[[bin]]
+name = "rec-emulate-replay"
+path = "bin/rec_emulate_replay.rs"
+
 [dependencies]
 # pico
 pico-derive.workspace = true
+pico-gpu-api = { workspace = true, optional = true }
 # MLE/WHIR protocol core; `parallel` routed via vm's `rayon` feature (see below).
 pico-mle-core = { path = "../mle-core", default-features = false }
 # Row-major CPU device; the engine the MLE RISCV path proves on.
 pico-mle-cpu = { path = "../mle-cpu", default-features = false }
+# GPU CUDA MLE/WHIR backend, pulled in only under the `cuda` feature.
+cuda-mle = { path = "../cuda-mle", optional = true }
 
 # p3
 p3-air.workspace = true
@@ -26,6 +35,9 @@ p3-symmetric.workspace = true
 p3-maybe-rayon = { workspace = true, features = [] }
 p3-bn254.workspace = true
 p3-koala-bear.workspace = true
+
+cudart = { workspace = true, optional = true }
+cudart-sys = { workspace = true, optional = true }
 
 # misc
 amcl.workspace = true
@@ -41,6 +53,7 @@ crossbeam.workspace = true
 core_affinity.workspace = true
 csv.workspace = true
 curve25519-dalek.workspace = true
+dashmap.workspace = true
 dashu.workspace = true
 derivative.workspace = true
 derive-new.workspace = true
@@ -67,8 +80,8 @@ p256.workspace = true
 paste.workspace = true
 postcard.workspace = true
 rand.workspace = true
-rayon-scan = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }
+rayon-scan = { workspace = true, optional = true }
 rrs-lib.workspace = true
 rug = { workspace = true, optional = true }
 rustc-hash.workspace = true
@@ -87,30 +100,38 @@ tracing.workspace = true
 typenum.workspace = true
 vec_map.workspace = true
 zkhash.workspace = true
+bitvec = "1.0.1"
+parking_lot = "0.12"
 
-
+# memory allocators
+# install tcmalloc library:
+# sudo apt-get install google-perftools
+# sudo ln -s /usr/lib/x86_64-linux-gnu/libtcmalloc.so.4 /usr/lib/x86_64-linux-gnu/libtcmalloc.so
+tcmalloc = { workspace = true, optional = true }
 # Set JEMALLOC_SYS_WITH_MALLOC_CONF="retain:true,background_thread:true,metadata_thp:always,dirty_decay_ms:-1,muzzy_decay_ms:-1,abort_conf:true"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { workspace = true, optional = true }
 
 [dev-dependencies]
+alloy-primitives = "1.2.1"
 # Cargo unions this with the `[dependencies]` entry, so `default-features = false` must be repeated
 # here or `pico-mle-core/parallel` comes back on for every test/bench/example build.
 pico-mle-core = { path = "../mle-core", default-features = false, features = ["test-utils"] }
 pico-mle-cpu = { path = "../mle-cpu", default-features = false }
-num = { workspace = true, features = ["rand"] }
 rand.workspace = true
+# `test_mle_e2e --step wrap` checks the committed bytes it writes against the proof's digest.
+sha2.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 memmap2 = { version = "0.9", optional = true }
 libc = { version = "0.2", optional = true }
-
 
 [features]
 default = ["rayon", "strict", "multi-field-transcript"]
 bigint-rug = ["rug"] # curves
 debug = []
 debug-lookups = []
+tcmalloc = ["dep:tcmalloc"]
 jemalloc = ["dep:tikv-jemallocator"]
 single-threaded = []
 rayon = ["dep:rayon", "dep:rayon-scan", "p3-maybe-rayon/parallel", "parallel"]
@@ -120,7 +141,17 @@ aot-emulator = []
 # Enables fast reset via madvise(MADV_DONTNEED)
 mmap-memory = ["dep:memmap2", "dep:libc"]
 
-# Pass-throughs to `pico-mle-core`.
+# Two-round chunk assignment: Primary 0-7,16-23; Secondary 8-15,24-31; Dynamic 32+
+two-round-chunks = []
+
+# GPU prover: CUDA trace generation and the CUDA MLE/WHIR backend. Needs a CUDA toolkit to build
+# and a GPU to run; off by default, so the default build needs neither.
+cuda = ["dep:cuda-mle", "dep:pico-gpu-api", "dep:cudart", "dep:cudart-sys"]
+
+# Pass-throughs to `pico-mle-core`. All but `multi-field-transcript` are off by default. vm gates
+# two things of its own on them: `multi-field-transcript` the EVM path (the embed and wrap stages
+# and the BN254 config they prove under), so it is on by default, and `test-utils` the Ecall
+# trace's `CVD_FORGE_K` forgery hook.
 parallel = ["pico-mle-core/parallel", "pico-mle-cpu/parallel"]
 metrics = ["dep:metrics", "pico-mle-core/metrics"]
 multi-field-transcript = ["pico-mle-core/multi-field-transcript"]
@@ -136,3 +167,8 @@ required-features = ["multi-field-transcript"]
 [[example]]
 name = "mle_soundness_manifest"
 required-features = ["multi-field-transcript"]
+
+# Counts events the way the GPU preparer does.
+[[example]]
+name = "mle_event_stats"
+required-features = ["cuda"]

@@ -13,15 +13,38 @@ use crate::{
     iter::{IntoPicoIterator, PicoIterator},
     machine::{
         chip::ChipBehavior,
-        estimator::EventCapture,
+        estimator::{EventCapture, EventSizeCapture},
         lookup::{LookupScope, LookupType},
         utils::pad_to_power_of_two,
     },
     primitives::consts::u64_to_u16_limbs,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{trace::TraceData, utils::next_power_of_two},
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{EventCounter, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+#[cfg(feature = "cuda")]
+use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
 use p3_field::PrimeField32;
+#[cfg(feature = "cuda")]
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
+use pico_gpu_api::cuda_memory_initialize_finalize_generate_extra_record_and_main_u64;
 use std::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
+use tracing::info;
 
 impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
     type Record = EmulationRecord;
@@ -241,4 +264,137 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
     }
 }
 
-impl<F> EventCapture for MemoryInitializeFinalizeChip<F> {}
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
+    fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
+        counter.num_memory_initialize_events += record.memory_initialize_events.len();
+        counter.num_memory_finalize_events += record.memory_finalize_events.len();
+        counter.num_global_lookup_events += record.memory_initialize_events.len();
+        counter.num_global_lookup_events += record.memory_finalize_events.len();
+    }
+
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        match self.kind {
+            MemoryChipType::Initialize => record.event_counter.num_memory_initialize_events > 0,
+            MemoryChipType::Finalize => record.event_counter.num_memory_finalize_events > 0,
+        }
+    }
+
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut crate::instances::preparer::PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let memory_events = match self.kind {
+            MemoryChipType::Initialize => &input.memory_initialize_events,
+            MemoryChipType::Finalize => &input.memory_finalize_events,
+        };
+
+        let nrows = memory_events.len();
+        let log2_nrows = input.shape_chip_size(&self.name());
+        let padded_nrows = next_power_of_two(nrows, log2_nrows);
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let event_size = memory_events.len();
+        let mut d_events =
+            DevicePoolAllocation::<MemoryInitializeFinalizeEvent>::alloc_from_pool_async(
+                event_size, mem_pool, stream,
+            )
+            .unwrap();
+        unsafe {
+            let _ = cudaMemcpyAsync(
+                d_events.as_mut_c_void_ptr(),
+                memory_events.as_c_void_ptr(),
+                event_size * size_of::<MemoryInitializeFinalizeEvent>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+        }
+
+        let is_receive = match self.kind {
+            MemoryChipType::Initialize => false,
+            MemoryChipType::Finalize => true,
+        };
+
+        let previous_addr_limbs: [u32; 3] = match self.kind {
+            MemoryChipType::Initialize => input.public_values.previous_init_addr_limbs,
+            MemoryChipType::Finalize => input.public_values.previous_finalize_addr_limbs,
+        };
+
+        let mut d_previous_addr_limbs =
+            DevicePoolAllocation::<u32>::alloc_from_pool_async(3, mem_pool, stream).unwrap();
+        unsafe {
+            let _ = cudaMemcpyAsync(
+                d_previous_addr_limbs.as_mut_c_void_ptr(),
+                previous_addr_limbs.as_ptr() as *const _,
+                3 * size_of::<u32>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+        }
+
+        let trace_size = padded_nrows * NUM_MEMORY_INITIALIZE_FINALIZE_COLS;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        let d_global_events = preallocated_gpu_memory.d_global_events.as_mut().unwrap();
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+
+        let start_index = match self.kind {
+            MemoryChipType::Initialize => {
+                prepared_gpu_events
+                    .event_counter
+                    .start_indices
+                    .memory_initialize_extra_global_start_index
+            }
+            MemoryChipType::Finalize => {
+                prepared_gpu_events
+                    .event_counter
+                    .start_indices
+                    .memory_finalize_extra_global_start_index
+            }
+        };
+
+        unsafe {
+            cuda_memory_initialize_finalize_generate_extra_record_and_main_u64(
+                NUM_MEMORY_INITIALIZE_FINALIZE_COLS,
+                event_size,
+                trace_size,
+                d_events.as_ptr() as *const _,
+                d_previous_addr_limbs.as_ptr() as *const _,
+                d_trace.as_mut_ptr() as *mut _,
+                d_global_events.as_mut_ptr() as *mut _,
+                start_index,
+                is_receive,
+                d_byte_trace.as_mut_ptr() as *mut _,
+                stream.into(),
+            );
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[memory-initialize-finalize-chip] generate_extra_record_and_main on GPU");
+
+        TraceData::Gpu(NUM_MEMORY_INITIALIZE_FINALIZE_COLS, d_trace)
+    }
+}
+
+impl<F> EventCapture for MemoryInitializeFinalizeChip<F> {
+    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
+        event_counter.num_memory_initialize_events += record.memory_initialize_events.len();
+        event_counter.num_memory_finalize_events += record.memory_finalize_events.len();
+        event_counter.num_global_lookup_events += record.memory_initialize_events.len();
+        event_counter.num_global_lookup_events += record.memory_finalize_events.len();
+    }
+}

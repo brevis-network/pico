@@ -1,11 +1,13 @@
 #[cfg(feature = "aot-emulator")]
-use crate::emulator::{aot::create_aot_emulator, riscv::public_values::RecordFinalPvsState};
+use crate::emulator::aot::create_aot_emulator;
 use crate::{
     compiler::riscv::program::Program,
     configs::config::{StarkGenericConfig, Val},
     emulator::{
         riscv::{
             emulator::{ParOptions, SharedDeferredState},
+            memory::ContiguousRiscvMemory,
+            public_values::RecordFinalPvsState,
             record::EmulationRecord,
             riscv_emulator::{EmulationError, RiscvEmulator},
             state::RiscvEmulationState,
@@ -18,10 +20,9 @@ use crate::{
         witness::ProvingWitness,
     },
 };
+use alloc::sync::Arc;
 use p3_field::PrimeField32;
 use std::marker::PhantomData;
-#[cfg(feature = "aot-emulator")]
-use std::sync::Arc;
 
 // Meta emulator that encapsulates multiple emulators
 // SC and C for configs in the emulated machine
@@ -47,12 +48,32 @@ where
 {
     pub fn setup_riscv(
         proving_witness: &ProvingWitness<SC, C, Vec<u8>>,
+        final_pvs_state: Arc<RecordFinalPvsState>,
         par_opts: Option<ParOptions>,
     ) -> Self {
+        // Ensure the CUDA pinned-memory event pools are initialised.
+        // They are required by CpuEventBuffer / AluEventBuffer which
+        // back EmulationRecord. The pools are process-global singletons,
+        // so the guarded init is a cheap no-op after the first call.
+        {
+            use crate::emulator::riscv::{
+                alu_event_pool::{init_alu_event_buffer_pool, is_alu_pool_initialized},
+                cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
+                event_pool::HostAllocFlags,
+            };
+            if !is_pool_initialized() {
+                init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
+            }
+            if !is_alu_pool_initialized() {
+                init_alu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
+            }
+        }
+
         // create a new emulator based on the emulator type
         let opts = proving_witness.opts.unwrap();
         let mut emulator = RiscvEmulator::new_single::<SC::Val>(
             proving_witness.program.clone().unwrap(),
+            final_pvs_state,
             opts,
             par_opts,
         );
@@ -74,18 +95,45 @@ where
         target_clk: u64,
         final_segment: bool,
     ) -> Self {
-        let mut me = MetaEmulator::setup_riscv(witness, par_opts);
-        let opts = me.emulator.as_ref().unwrap().opts;
-        let prog = me.emulator.as_ref().unwrap().program.clone();
-        me.emulator = Some(RiscvEmulator::recover::<SC::Val>(
+        // Build the snapshot-worker emulator directly from the witness. The previous
+        // implementation called `setup_riscv`, which constructed a *full* RiscvEmulator
+        // (syscall/hook maps, contiguous memory, an EmulationRecord, a throwaway deferred
+        // state, plus a `write_stdin` copy of the entire input stream) only to read `opts`
+        // and `program` back off it and immediately discard it when `recover` rebuilt a
+        // second emulator. `opts`/`program` come straight from the witness, and the
+        // recovered emulator uses `shared_ds` directly, so the `setup_riscv` emulator —
+        // and the `shared_ds.lock()`/`final_pvs_state.clone()` that only fed its deferred
+        // state — are pure redundant work (heavy under concurrent per-worker allocation).
+        let opts = witness.opts.unwrap();
+        let prog = witness.program.clone().unwrap();
+        let emulator = RiscvEmulator::recover::<SC::Val>(
             prog,
             state,
             opts,
+            par_opts,
             shared_ds,
             target_clk,
             final_segment,
-        ));
-        me
+        );
+        Self {
+            stdin: witness.stdin.clone().unwrap(),
+            emulator: Some(emulator),
+            batch_size: opts.chunk_batch_size,
+            _sc_and_chip: PhantomData,
+        }
+    }
+
+    /// [`RiscvEmulator::recover_in_place`]: returns the previous state's memory.
+    #[must_use]
+    pub fn recover_riscv_in_place(
+        &mut self,
+        state: RiscvEmulationState,
+        shared_ds: SharedDeferredState,
+        target_clk: u64,
+        final_segment: bool,
+    ) -> ContiguousRiscvMemory {
+        let emulator = self.emulator.as_mut().expect("emulator missing");
+        emulator.recover_in_place(state, shared_ds, target_clk, final_segment)
     }
 
     pub fn next_record_batch<F>(&mut self, record_callback: &mut F) -> EmulationReport
@@ -107,9 +155,9 @@ where
         emulator.emulate_batch(record_callback)
     }
 
-    pub fn set_cost_estimator(&mut self, enabled: bool) {
+    pub fn disable_cost_estimator_for_snapshot(&mut self) {
         if let Some(e) = &mut self.emulator {
-            e.opts.cost_estimator = enabled;
+            e.opts.cost_estimator = false;
         }
     }
 
@@ -123,6 +171,20 @@ where
     {
         let emu = self.emulator.as_mut().unwrap();
         emu.emulate_state(emit_events, record_cb)
+    }
+
+    /// The interpreter snapshot pass does not split a chunk, so a batch is always one segment.
+    pub fn next_state_batch_segments<F>(
+        &mut self,
+        emit_events: bool,
+        record_cb: &mut F,
+    ) -> Result<(Vec<(RiscvEmulationState, u64)>, EmulationReport), EmulationError>
+    where
+        F: FnMut(EmulationRecord),
+    {
+        let (state, report) = self.next_state_batch(emit_events, record_cb)?;
+        let target = report.current_cycle;
+        Ok((vec![(state, target)], report))
     }
 
     pub fn cycles(&self) -> u64 {
@@ -171,7 +233,11 @@ where
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config,
     C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
 {
-    pub fn setup_riscv(proving_witness: &ProvingWitness<SC, C, Vec<u8>>) -> Self {
+    pub fn setup_riscv(
+        proving_witness: &ProvingWitness<SC, C, Vec<u8>>,
+        final_pvs_state: Arc<RecordFinalPvsState>,
+        _par_opts: Option<ParOptions>,
+    ) -> Self {
         let opts = proving_witness.opts.as_ref().expect("witness.opts not set");
         let program = proving_witness
             .program
@@ -184,10 +250,6 @@ where
             .expect("witness.stdin not set")
             .inputs
             .to_vec();
-        // The factory takes the shared final-pvs cell the AOT runtime writes its last record's
-        // digests into. Nothing on this branch reads it back, so there is no shared cell to pass
-        // and one is made here.
-        let final_pvs_state = Arc::new(RecordFinalPvsState::default());
         let emulator = create_aot_emulator(program, input_stream, *opts, final_pvs_state)
             .expect("AOT emulator factory not registered");
         Self {
@@ -196,13 +258,24 @@ where
         }
     }
 
-    pub fn next_state_batch(
+    pub fn disable_cost_estimator_for_snapshot(&mut self) {
+        // The AOT snapshot path does not build or use the interpreter cost estimator.
+    }
+
+    pub fn next_state_batch<F>(
         &mut self,
-    ) -> Result<(RiscvEmulationState, EmulationReport), EmulationError> {
+        _emit_events: bool,
+        _record_cb: &mut F,
+    ) -> Result<(RiscvEmulationState, EmulationReport), EmulationError>
+    where
+        F: FnMut(EmulationRecord),
+    {
+        let _ = _emit_events;
+        let _ = _record_cb;
         self.emulator.next_state_batch()
     }
 
-    /// See [`crate::emulator::aot::AotSnapshotEmulator::next_state_batch_segments`].
+    /// See [`AotSnapshotEmulator::next_state_batch_segments`].
     pub fn next_state_batch_segments(
         &mut self,
     ) -> Result<(Vec<(RiscvEmulationState, u64)>, EmulationReport), EmulationError> {
@@ -249,13 +322,7 @@ where
     fn next_state_batch(
         &mut self,
     ) -> Result<(RiscvEmulationState, EmulationReport), EmulationError> {
-        AotMetaEmulator::next_state_batch(self)
-    }
-
-    fn next_state_batch_segments(
-        &mut self,
-    ) -> Result<(Vec<(RiscvEmulationState, u64)>, EmulationReport), EmulationError> {
-        AotMetaEmulator::next_state_batch_segments(self)
+        AotMetaEmulator::next_state_batch(self, true, &mut |_| {})
     }
 
     fn cycles(&self) -> u64 {

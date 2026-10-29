@@ -3,6 +3,15 @@ use super::{
     event::GlobalInteractionEvent,
     GlobalChip,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::{chip::GpuChipBehavior, field::FieldSpecificPoseidon2Config},
+};
 use crate::{
     chips::{
         chips::{
@@ -20,16 +29,30 @@ use crate::{
     },
     machine::{
         chip::ChipBehavior,
-        estimator::EventCapture,
+        estimator::{EventCapture, EventSizeCapture},
         lookup::LookupScope,
         septic::{
             FieldSepticCurve, SepticCurve, SepticCurveComplete, SepticDigest, SepticExtension,
         },
     },
 };
+#[cfg(feature = "cuda")]
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+#[cfg(feature = "cuda")]
+use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
 use p3_field::PrimeField32;
+#[cfg(feature = "cuda")]
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
+use pico_gpu_api::cuda_riscv_global_generate_extra_record_and_main;
 use std::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
+use tracing::info;
 
 impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
     type Record = EmulationRecord;
@@ -213,4 +236,112 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
     }
 }
 
-impl<F> EventCapture for GlobalChip<F> {}
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for GlobalChip<F> {
+    fn count_extra_records(_record: &Self::Record, counter: &mut EventCounter) {
+        // counter.num_global_lookup_events += record.global_lookup_events.len();
+        counter.num_poseidon2_events += counter.num_global_lookup_events;
+    }
+
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let event_size = prepared_gpu_events.event_counter.num_global_lookup_events;
+
+        let nb_rows = event_size;
+        let log_rows = input.shape_chip_size(&self.name());
+        // `+ 1`: the accumulation constraints need the last row to be padding (A8), whose `cum`
+        // is the chunk total that `GcsBindAir` binds to the public values.
+        let padded_nb_rows = next_power_of_two(nb_rows + 1, log_rows);
+        assert!(nb_rows < padded_nb_rows);
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let d_global_events = preallocated_gpu_memory.d_global_events.as_mut();
+        let d_poseidon2_events = preallocated_gpu_memory.d_poseidon2_events.as_mut();
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+
+        let trace_size = padded_nb_rows * NUM_GLOBAL_COLS;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+
+        // The hash-to-curve inside the kernel runs the KoalaBear Poseidon2 instance; ship its
+        // round constants in the layout the kernel reads.
+        let rc_flat = KoalaBear::round_constants().flatten_for_gpu();
+        let mut d_round_constants = DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(
+            rc_flat.len(),
+            mem_pool,
+            stream,
+        )
+        .unwrap();
+        unsafe {
+            let _ = cudaMemcpyAsync(
+                d_round_constants.as_mut_c_void_ptr(),
+                rc_flat.as_c_void_ptr(),
+                rc_flat.len() * size_of::<KoalaBear>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+        }
+
+        // With no events the kernel still runs: it fills every row as padding with `cum = START`
+        // (the CPU tracegen's `final_digest` for n = 0) and never touches the event buffers, so
+        // absent buffers are passed as null.
+        let d_events_ptr: Option<(*const std::ffi::c_void, *mut std::ffi::c_void)> =
+            match (event_size, d_global_events, d_poseidon2_events) {
+                (0, _, _) => Some((std::ptr::null(), std::ptr::null_mut())),
+                (_, Some(d_global_events), Some(d_poseidon2_events)) => Some((
+                    d_global_events.as_mut_ptr() as *const std::ffi::c_void,
+                    d_poseidon2_events.as_mut_ptr() as *mut std::ffi::c_void,
+                )),
+                _ => None,
+            };
+        if let Some((d_global_events, d_poseidon2_events)) = d_events_ptr {
+            unsafe {
+                cuda_riscv_global_generate_extra_record_and_main(
+                    NUM_GLOBAL_COLS,
+                    event_size,
+                    trace_size,
+                    d_global_events,
+                    d_trace.as_mut_ptr() as *mut _,
+                    stream.into(),
+                    d_byte_trace.as_mut_ptr() as *mut _,
+                    d_poseidon2_events,
+                    prepared_gpu_events
+                        .event_counter
+                        .start_indices
+                        .global_extra_poseidon2_start_index,
+                    d_round_constants.as_ptr() as *const _,
+                );
+            }
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[riscv-global-chip] generate_extra_record_and_main on GPU");
+        TraceData::Gpu(NUM_GLOBAL_COLS, d_trace)
+    }
+
+    fn is_active_for_extra_record(&self, _record: &PreparedGpuEvents) -> bool {
+        true
+    }
+}
+
+impl<F> EventCapture for GlobalChip<F> {
+    fn count_extra_records(_record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
+        event_counter.num_poseidon2_events += event_counter.num_global_lookup_events;
+    }
+}

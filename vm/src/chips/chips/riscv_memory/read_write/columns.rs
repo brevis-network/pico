@@ -1,5 +1,8 @@
 use crate::{
-    chips::chips::{riscv_cpu::event::CpuEvent, riscv_memory::event::MemoryRecordEnum},
+    chips::{
+        chips::{riscv_cpu::event::CpuEvent, riscv_memory::event::MemoryRecordEnum},
+        ffi::FfiOption,
+    },
     compiler::{riscv::opcode::Opcode, word::Word},
     primitives::consts::MEMORY_RW_DATAPAR,
 };
@@ -20,9 +23,10 @@ pub struct MemoryChipCols<F> {
 
 pub const NUM_MEMORY_CHIP_VALUE_COLS: usize = size_of::<MemoryChipValueCols<u8>>();
 
-// Pinned on both sides: the CUDA mirror (`chips/include/memory_read_write.hpp`, and the second
-// hand-written mirror in `chips/include/packed_tracegen.hpp`) asserts the same width, so a field
-// added or removed on one side only fails the build instead of silently shifting every column.
+// Pinned on both sides: the CUDA mirror (pico-gpu's `src/tracegen/riscv/memory_read_write.cuh`,
+// and the second hand-written mirror in `src/tracegen/riscv/packed_tracegen.cuh`) asserts the
+// same width, so a field added or removed on one side only fails the build instead of silently
+// shifting every column.
 const _: () = assert!(NUM_MEMORY_CHIP_VALUE_COLS == 49);
 
 #[derive(AlignedBorrow, Clone, Copy, Debug, Default)]
@@ -200,13 +204,13 @@ impl<F: Field> MemoryInstructionCols<F> {
         // Overwrite with the memory-record values for a, b, and c. The dispatch
         // lookup binds these to the Cpu chip's committed operand values, which
         // are record-derived, so the same record values must be committed here.
-        if let Some(record) = event.a_record {
+        if let FfiOption::Some(record) = event.a_record {
             self.op_a_value = record.value().into();
         }
-        if let Some(MemoryRecordEnum::Read(record)) = event.b_record {
+        if let FfiOption::Some(MemoryRecordEnum::Read(record)) = event.b_record {
             self.op_b_value = record.value.into();
         }
-        if let Some(MemoryRecordEnum::Read(record)) = event.c_record {
+        if let FfiOption::Some(MemoryRecordEnum::Read(record)) = event.c_record {
             self.op_c_value = record.value.into();
         }
     }

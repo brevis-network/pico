@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    chips::chips::riscv_memory::event::MemoryRecordEnum,
+    chips::{chips::riscv_memory::event::MemoryRecordEnum, ffi::FfiOption},
     compiler::riscv::instruction::Instruction,
     emulator::riscv::{
         event_types::{RvAddr, RvChunk, RvClk, RvValue},
@@ -29,21 +29,60 @@ pub struct CpuEvent {
     /// The first operand.
     pub a: RvValue,
     /// The first operand memory record.
-    pub a_record: Option<MemoryRecordEnum>,
+    pub a_record: FfiOption<MemoryRecordEnum>,
     /// The second operand.
     pub b: RvValue,
     /// The second operand memory record.
-    pub b_record: Option<MemoryRecordEnum>,
+    pub b_record: FfiOption<MemoryRecordEnum>,
     /// The third operand.
     pub c: RvValue,
     /// The third operand memory record.
-    pub c_record: Option<MemoryRecordEnum>,
+    pub c_record: FfiOption<MemoryRecordEnum>,
     /// The memory value.
-    pub memory: Option<RvValue>,
+    pub memory: FfiOption<RvValue>,
     /// The memory record.
-    pub memory_record: Option<MemoryRecordEnum>,
+    pub memory_record: FfiOption<MemoryRecordEnum>,
     /// The exit code.
     pub exit_code: u32,
+}
+
+/// Slimmed CpuEvent for GPU trace generation.
+///
+/// Excludes `memory`, `memory_record`, and `exit_code` which are not accessed
+/// by the riscv_cpu CUDA kernel, reducing per-event size by ~24%.
+#[derive(Debug, Copy, Clone, Default)]
+#[repr(C)]
+pub struct CpuEventSlim {
+    pub chunk: RvChunk,
+    pub clk: RvClk,
+    pub pc: RvAddr,
+    pub next_pc: RvAddr,
+    pub instruction: Instruction,
+    pub a: RvValue,
+    pub a_record: FfiOption<MemoryRecordEnum>,
+    pub b: RvValue,
+    pub b_record: FfiOption<MemoryRecordEnum>,
+    pub c: RvValue,
+    pub c_record: FfiOption<MemoryRecordEnum>,
+}
+
+impl From<&CpuEvent> for CpuEventSlim {
+    #[inline]
+    fn from(e: &CpuEvent) -> Self {
+        Self {
+            chunk: e.chunk,
+            clk: e.clk,
+            pc: e.pc,
+            next_pc: e.next_pc,
+            instruction: e.instruction,
+            a: e.a,
+            a_record: e.a_record,
+            b: e.b,
+            b_record: e.b_record,
+            c: e.c,
+            c_record: e.c_record,
+        }
+    }
 }
 
 impl CpuEvent {
@@ -68,13 +107,13 @@ impl CpuEvent {
             next_pc,
             instruction,
             a,
-            a_record: record.a,
+            a_record: record.a.into(), // TODO: consider changing the underlying type to FfiOption
             b,
-            b_record: record.b,
+            b_record: record.b.into(),
             c,
-            c_record: record.c,
-            memory,
-            memory_record: record.memory,
+            c_record: record.c.into(),
+            memory: memory.into(),
+            memory_record: record.memory.into(),
             exit_code,
         }
     }
@@ -84,9 +123,9 @@ impl CpuEvent {
     #[inline]
     pub fn op_a_prev_value(&self) -> u64 {
         match &self.a_record {
-            Some(MemoryRecordEnum::Read(r)) => r.value,
-            Some(MemoryRecordEnum::Write(w)) => w.prev_value,
-            None => 0,
+            FfiOption::Some(MemoryRecordEnum::Read(r)) => r.value,
+            FfiOption::Some(MemoryRecordEnum::Write(w)) => w.prev_value,
+            FfiOption::None => 0,
         }
     }
 
@@ -96,8 +135,8 @@ impl CpuEvent {
     #[inline]
     pub fn op_a_committed_value(&self) -> u64 {
         match &self.a_record {
-            Some(r) => r.value(),
-            None => self.a,
+            FfiOption::Some(r) => r.value(),
+            FfiOption::None => self.a,
         }
     }
 
@@ -106,7 +145,7 @@ impl CpuEvent {
     #[inline]
     pub fn op_b_committed_value(&self) -> u64 {
         match &self.b_record {
-            Some(MemoryRecordEnum::Read(r)) => r.value,
+            FfiOption::Some(MemoryRecordEnum::Read(r)) => r.value,
             _ => self.b,
         }
     }
@@ -115,18 +154,28 @@ impl CpuEvent {
     #[inline]
     pub fn op_c_committed_value(&self) -> u64 {
         match &self.c_record {
-            Some(MemoryRecordEnum::Read(r)) => r.value,
+            FfiOption::Some(MemoryRecordEnum::Read(r)) => r.value,
             _ => self.c,
         }
     }
+}
+
+/// ALU events one CPU row adds (see `CpuChip::count_cpu_event`). Shared with the GPU kernels,
+/// which index the ALU buffers by it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct CpuExtraEventIndices {
+    pub add: usize,
+    pub lt: usize,
 }
 
 #[cfg(test)]
 mod tests {
     use super::CpuEvent;
     use crate::{
-        chips::chips::riscv_memory::event::{
-            MemoryReadRecord, MemoryRecordEnum, MemoryWriteRecord,
+        chips::{
+            chips::riscv_memory::event::{MemoryReadRecord, MemoryRecordEnum, MemoryWriteRecord},
+            ffi::FfiOption,
         },
         compiler::riscv::{instruction::Instruction, opcode::Opcode},
         emulator::riscv::record::MemoryAccessRecord,
@@ -182,10 +231,10 @@ mod tests {
         // The memory records must survive too: `new` copies them straight out of the access
         // record, so a widening or a field reorder there is only visible if they are populated
         // and compared.
-        assert_eq!(event.a_record, record.a);
-        assert_eq!(event.b_record, record.b);
-        assert_eq!(event.c_record, record.c);
-        assert_eq!(event.memory_record, record.memory);
+        assert_eq!(event.a_record, FfiOption::from(record.a));
+        assert_eq!(event.b_record, FfiOption::from(record.b));
+        assert_eq!(event.c_record, FfiOption::from(record.c));
+        assert_eq!(event.memory_record, FfiOption::from(record.memory));
 
         let encoded = serde_json::to_string(&event).expect("serialize cpu event");
         let decoded: CpuEvent = serde_json::from_str(&encoded).expect("deserialize cpu event");

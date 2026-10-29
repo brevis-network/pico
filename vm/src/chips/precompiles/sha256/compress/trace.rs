@@ -18,11 +18,39 @@ use crate::{
     machine::chip::ChipBehavior,
     primitives::consts::u32_to_half_word,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::{
+        precompiles::sha256::compress::ffi::ShaCompressFfiEvent, trace::TraceData,
+        utils::next_power_of_two,
+    },
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::chip::GpuChipBehavior,
+};
+use core::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
+use core::mem::size_of;
+#[cfg(feature = "cuda")]
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+#[cfg(feature = "cuda")]
+use cudart_sys::*;
+#[cfg(feature = "cuda")]
+use log::info;
 use p3_air::BaseAir;
 use p3_field::PrimeField32;
+#[cfg(feature = "cuda")]
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
-use std::borrow::BorrowMut;
+#[cfg(feature = "cuda")]
+use pico_gpu_api::cuda_precompile_sha256_compress_generate_extra_record_and_main;
 
 impl<F: PrimeField32> BaseAir<F> for ShaCompressChip<F> {
     fn width(&self) -> usize {
@@ -31,8 +59,8 @@ impl<F: PrimeField32> BaseAir<F> for ShaCompressChip<F> {
 }
 
 impl<F: PrimeField32> ChipBehavior<F> for ShaCompressChip<F> {
-    type Program = Program;
     type Record = EmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         "ShaCompress".to_string()
@@ -122,6 +150,93 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaCompressChip<F> {
                 .get_precompile_events(SyscallCode::SHA_COMPRESS)
                 .is_empty()
         }
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> GpuChipBehavior<F> for ShaCompressChip<F> {
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            !record.sha_compress_events.is_empty()
+        }
+    }
+
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let events = &prepared_gpu_events.sha_compress_events;
+
+        let num_cols_per_row = NUM_SHA_COMPRESS_COLS;
+        let log_rows = input.shape_chip_size(&self.name());
+        // Each SHA compress event generates 80 rows (8 init + 64 compress + 8 finalize)
+        let num_total_rows = next_power_of_two(events.len() * 80, log_rows);
+        let trace_size = num_total_rows * num_cols_per_row;
+        let event_size = events.len();
+
+        // TODO: hack so that zero length events are correct, which requires
+        // calling the kernel
+        //
+        // our CUDA bridge uses as_slice to convert to pointer for some reason
+        // which causes rust to panic when the allocation is 0
+        let event_alloc_size = if event_size == 0 { 1 } else { event_size };
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        // Allocate device memory for events
+        let mut d_events = DevicePoolAllocation::<ShaCompressFfiEvent>::alloc_from_pool_async(
+            event_alloc_size,
+            mem_pool,
+            stream,
+        )
+        .unwrap();
+        // Allocate device memory for trace output
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+
+        unsafe {
+            let _ = cudaMemcpyAsync(
+                d_events.as_mut_c_void_ptr(),
+                events.as_c_void_ptr(),
+                event_size * size_of::<ShaCompressFfiEvent>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+        }
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+        unsafe {
+            cuda_precompile_sha256_compress_generate_extra_record_and_main(
+                d_events.as_ptr() as *const _,
+                event_size,
+                size_of::<ShaCompressCols<F>>(),
+                d_trace.as_mut_ptr() as *mut _,
+                num_total_rows,
+                num_cols_per_row,
+                d_byte_trace.as_mut_ptr() as *mut _,
+                stream.into(),
+            );
+        }
+
+        // Switch to main stream for further processing
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[precompile-sha256-compress-chip] gpu_generate_extra_record_and_main on GPU");
+
+        TraceData::Gpu(num_cols_per_row, d_trace)
     }
 }
 

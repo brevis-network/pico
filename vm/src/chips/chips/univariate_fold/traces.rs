@@ -18,10 +18,57 @@ use crate::{
     },
     primitives::consts::EXTENSION_DEGREE,
 };
+#[cfg(feature = "cuda")]
+use crate::{
+    chips::trace::TraceData,
+    compiler::recursion::{ir::Block, mle_instruction_buckets::MleVariant, types::Address},
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    machine::chip::GpuChipBehavior,
+};
+#[cfg(feature = "cuda")]
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+#[cfg(feature = "cuda")]
+use cudart_sys::*;
+#[cfg(feature = "cuda")]
+use log::info;
 use p3_air::BaseAir;
 use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
+#[cfg(feature = "cuda")]
+use pico_gpu_api::{
+    cuda_univariate_fold_generate_main, cuda_univariate_fold_generate_preprocessed,
+};
 use std::borrow::BorrowMut;
+
+#[cfg(feature = "cuda")]
+/// H2D mirror of the CUDA `UnivariateFoldFlatEvent`: the `Vec<Block>` coefficients padded to a
+/// fixed `MAX_COEFFS` array so the event copies to the device with a raw memcpy.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct UnivariateFoldFlatEvent<F: Copy> {
+    coeffs: [Block<F>; MAX_COEFFS],
+    claimed_sum: Block<F>,
+    r: Block<F>,
+    next_sum: Block<F>,
+}
+
+#[cfg(feature = "cuda")]
+/// H2D mirror of the CUDA `UnivariateFoldInstr`: the `Vec<Address>` coefficient addresses padded to
+/// `MAX_COEFFS` plus the active `num_coeffs` count.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct UnivariateFoldFlatInstr<F: Copy> {
+    coeffs_addrs: [Address<F>; MAX_COEFFS],
+    num_coeffs: F,
+    claimed_sum_addr: Address<F>,
+    r_addr: Address<F>,
+    next_sum_addr: Address<F>,
+    mult: F,
+}
 
 impl<F> BaseAir<F> for UnivariateFoldChip<F> {
     fn width(&self) -> usize {
@@ -165,5 +212,195 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
 
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> GpuChipBehavior<F>
+    for UnivariateFoldChip<F>
+{
+    fn gpu_generate_preprocessed(
+        &self,
+        device_id: usize,
+        program: &Self::Program,
+    ) -> Option<TraceData<'_, F>> {
+        use p3_koala_bear::KoalaBear;
+
+        // The `filter_map` flattens each `Vec<Address>` into the fixed `MAX_COEFFS` layout the
+        // kernel expects.
+        let instructions: Box<[UnivariateFoldFlatInstr<F>]> = program
+            .mle_candidates(MleVariant::UnivariateFold)
+            .filter_map(|instruction| match instruction {
+                Instruction::UnivariateFold(i) => {
+                    let instr = i.as_ref();
+                    let mut coeffs_addrs = [Address(F::ZERO); MAX_COEFFS];
+                    for (dst, src) in coeffs_addrs.iter_mut().zip(instr.coeffs_addrs.iter()) {
+                        *dst = *src;
+                    }
+                    Some(UnivariateFoldFlatInstr {
+                        coeffs_addrs,
+                        num_coeffs: F::from_usize(instr.coeffs_addrs.len()),
+                        claimed_sum_addr: instr.claimed_sum_addr,
+                        r_addr: instr.r_addr,
+                        next_sum_addr: instr.next_sum_addr,
+                        mult: instr.mult,
+                    })
+                }
+                _ => None,
+            })
+            .collect();
+
+        let nb_rows = instructions.len();
+        let padded_nb_rows = program.padded_prep_rows(&self.name(), nb_rows);
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let stream = &sync_stream.0;
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let trace_size = padded_nb_rows * self.preprocessed_width();
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        unsafe {
+            let _ = cudaMemsetAsync(
+                d_trace.as_mut_ptr() as *mut _,
+                0,
+                trace_size * size_of::<KoalaBear>(),
+                stream.into(),
+            );
+        }
+
+        let num_instrs = instructions.len();
+        if num_instrs > 0 {
+            let mut d_instrs =
+                DevicePoolAllocation::<UnivariateFoldFlatInstr<F>>::alloc_from_pool_async(
+                    num_instrs, mem_pool, stream,
+                )
+                .unwrap();
+            unsafe {
+                let _ = cudaMemcpyAsync(
+                    d_instrs.as_mut_c_void_ptr(),
+                    instructions.as_c_void_ptr(),
+                    num_instrs * size_of::<UnivariateFoldFlatInstr<F>>(),
+                    CudaMemoryCopyKind::HostToDevice,
+                    stream.into(),
+                );
+
+                cuda_univariate_fold_generate_preprocessed(
+                    d_instrs.as_ptr() as *const _,
+                    num_instrs,
+                    d_trace.as_mut_ptr() as *mut _,
+                    self.preprocessed_width(),
+                    stream.into(),
+                );
+            }
+        }
+
+        // No per-chip synchronization — caller (BaseProver) syncs once after all chips.
+        info!("[univariate-fold-chip] generate_preprocessed on GPU");
+
+        Some(TraceData::Gpu(self.preprocessed_width(), d_trace))
+    }
+
+    fn gpu_generate_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        _: &mut Self::Record,
+    ) -> TraceData<'_, F> {
+        use p3_koala_bear::KoalaBear;
+
+        // Flatten each event's `Vec<Block>` coefficients into the fixed `MAX_COEFFS` layout; the
+        // kernel then derives eval_at_0/eval_at_1 and the Horner accumulator.
+        let events: Box<[UnivariateFoldFlatEvent<F>]> = input
+            .univariate_fold_events
+            .iter()
+            .map(|ev| {
+                let mut coeffs = [Block([F::ZERO; EXTENSION_DEGREE]); MAX_COEFFS];
+                for (dst, src) in coeffs.iter_mut().zip(ev.coeffs.iter()) {
+                    *dst = *src;
+                }
+                UnivariateFoldFlatEvent {
+                    coeffs,
+                    claimed_sum: ev.claimed_sum,
+                    r: ev.r,
+                    next_sum: ev.next_sum,
+                }
+            })
+            .collect();
+
+        let nb_rows = events.len().max(16);
+        let padded_nb_rows = match input.fixed_log2_rows(&self.name()) {
+            Some(log_rows) => {
+                let specified = 1 << log_rows;
+                assert!(
+                    specified >= nb_rows,
+                    "fixed_log2_rows too small: 2^{log_rows}={specified} < {nb_rows} real rows"
+                );
+                specified
+            }
+            None => nb_rows.next_power_of_two(),
+        };
+
+        // Binomial extension constant W, passed as its canonical u32 (the FFI wrapper rebuilds the
+        // field element); matches the CPU `ef_mul` which uses `<F as BinomiallyExtendable>::W`.
+        let w = <F as BinomiallyExtendable<EXTENSION_DEGREE>>::W.as_canonical_u32();
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let trace_size = padded_nb_rows * NUM_UNIVARIATE_FOLD_COLS;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        unsafe {
+            let _ = cudaMemsetAsync(
+                d_trace.as_mut_ptr() as *mut _,
+                0,
+                trace_size * size_of::<KoalaBear>(),
+                stream.into(),
+            );
+        }
+
+        let event_size = events.len();
+        if event_size > 0 {
+            let mut d_events =
+                DevicePoolAllocation::<UnivariateFoldFlatEvent<F>>::alloc_from_pool_async(
+                    event_size, mem_pool, stream,
+                )
+                .unwrap();
+            unsafe {
+                let _ = cudaMemcpyAsync(
+                    d_events.as_mut_c_void_ptr(),
+                    events.as_c_void_ptr(),
+                    event_size * size_of::<UnivariateFoldFlatEvent<F>>(),
+                    CudaMemoryCopyKind::HostToDevice,
+                    stream.into(),
+                );
+
+                cuda_univariate_fold_generate_main(
+                    d_events.as_ptr() as *const _,
+                    event_size,
+                    d_trace.as_mut_ptr() as *mut _,
+                    NUM_UNIVARIATE_FOLD_COLS,
+                    w,
+                    stream.into(),
+                );
+            }
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[univariate-fold-chip] generate_main on GPU");
+
+        TraceData::Gpu(NUM_UNIVARIATE_FOLD_COLS, d_trace)
     }
 }

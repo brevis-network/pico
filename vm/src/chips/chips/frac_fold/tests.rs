@@ -112,3 +112,146 @@ fn test_frac_fold_trace_values() {
     assert_eq!(row[16], F::from_u32(41)); // out_p[0]
     assert_eq!(row[20], F::from_u32(14)); // out_q[0]
 }
+
+/// GPU trace-gen must be element-wise identical to the CPU path, including padding rows.
+/// The recursion layer is KoalaBear-only, so these run over KoalaBear (the GPU path allocates
+/// `DevicePoolAllocation::<KoalaBear>`). Requires a CUDA device — run on the GPU host.
+#[cfg(feature = "cuda")]
+mod gpu {
+    use crate::{
+        chips::{chips::frac_fold::FracFoldChip, tests::init_test_stream},
+        compiler::recursion::{
+            instruction::Instruction,
+            ir::Block,
+            program::RecursionProgram,
+            types::{Address, FracFoldEvent, FracFoldInstr},
+        },
+        emulator::recursion::emulator::RecursionRecord,
+        machine::chip::{ChipBehavior, GpuChipBehavior},
+    };
+    use p3_field::PrimeCharacteristicRing;
+    use p3_koala_bear::KoalaBear;
+
+    type F = KoalaBear;
+
+    fn block(base: u32) -> Block<F> {
+        Block([
+            F::from_u32(base),
+            F::from_u32(base.wrapping_add(1)),
+            F::from_u32(base.wrapping_add(2)),
+            F::from_u32(base.wrapping_add(3)),
+        ])
+    }
+
+    fn sample_events(n: u32) -> Vec<FracFoldEvent<F>> {
+        (0..n)
+            .map(|i| {
+                let b = i.wrapping_mul(10);
+                FracFoldEvent {
+                    p1: block(b),
+                    q1: block(b.wrapping_add(100)),
+                    p2: block(b.wrapping_add(200)),
+                    q2: block(b.wrapping_add(300)),
+                    out_p: block(b.wrapping_add(400)),
+                    out_q: block(b.wrapping_add(500)),
+                }
+            })
+            .collect()
+    }
+
+    fn sample_program(n: u32) -> RecursionProgram<F> {
+        RecursionProgram {
+            instructions: (0..n)
+                .map(|i| {
+                    let a = i.wrapping_mul(6);
+                    Instruction::FracFold(FracFoldInstr {
+                        in_p1_addr: Address(F::from_u32(a)),
+                        in_q1_addr: Address(F::from_u32(a.wrapping_add(1))),
+                        in_p2_addr: Address(F::from_u32(a.wrapping_add(2))),
+                        in_q2_addr: Address(F::from_u32(a.wrapping_add(3))),
+                        out_p_addr: Address(F::from_u32(a.wrapping_add(4))),
+                        out_q_addr: Address(F::from_u32(a.wrapping_add(5))),
+                        mult: F::ONE,
+                    })
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    /// CPU `generate_main` vs GPU `gpu_generate_main` — full matrix incl. padding.
+    fn assert_main_parity(n: u32) {
+        let stream = init_test_stream();
+        let chip = FracFoldChip::<F>::default();
+        let mut record = RecursionRecord::<F>::default();
+        record.frac_fold_events = sample_events(n);
+
+        let cpu = chip.generate_main(&record, &mut RecursionRecord::default());
+        let gpu = chip
+            .gpu_generate_main(0, &record, &mut RecursionRecord::default())
+            .to_host(stream);
+
+        assert_eq!(cpu.values, gpu.values, "main parity failed for {n} events");
+    }
+
+    /// CPU `generate_preprocessed` vs GPU `gpu_generate_preprocessed` — full matrix incl. padding.
+    fn assert_preprocessed_parity(n: u32) {
+        let stream = init_test_stream();
+        let chip = FracFoldChip::<F>::default();
+        let program = sample_program(n);
+
+        let cpu = chip.generate_preprocessed(&program).unwrap();
+        let gpu = chip
+            .gpu_generate_preprocessed(0, &program)
+            .unwrap()
+            .to_host(stream);
+
+        assert_eq!(
+            cpu.values, gpu.values,
+            "preprocessed parity failed for {n} instrs"
+        );
+    }
+
+    // Row-count cases (CPU `pad_to_power_of_two`: floor real rows to 16, then next_power_of_two):
+    //   0 -> 16 (all padding), 5 -> 16 (under floor), 40 -> 64 (non-power-of-two), 64 -> 64 (exact).
+
+    #[test]
+    fn test_frac_fold_gpu_main_empty_matches_cpu() {
+        assert_main_parity(0);
+    }
+
+    #[test]
+    fn test_frac_fold_gpu_main_sub16_matches_cpu() {
+        assert_main_parity(5);
+    }
+
+    #[test]
+    fn test_frac_fold_gpu_main_matches_cpu() {
+        assert_main_parity(40);
+    }
+
+    #[test]
+    fn test_frac_fold_gpu_main_pow2_matches_cpu() {
+        assert_main_parity(64);
+    }
+
+    #[test]
+    fn test_frac_fold_gpu_preprocessed_empty_matches_cpu() {
+        assert_preprocessed_parity(0);
+    }
+
+    #[test]
+    fn test_frac_fold_gpu_preprocessed_sub16_matches_cpu() {
+        assert_preprocessed_parity(5);
+    }
+
+    #[test]
+    fn test_frac_fold_gpu_preprocessed_matches_cpu() {
+        assert_preprocessed_parity(40);
+    }
+
+    #[test]
+    fn test_frac_fold_gpu_preprocessed_pow2_matches_cpu() {
+        assert_preprocessed_parity(64);
+    }
+}

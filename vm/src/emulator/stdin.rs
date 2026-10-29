@@ -26,7 +26,7 @@ impl<I, SC: StarkGenericConfig> Default for EmulatorStdinBuilder<I, SC> {
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct EmulatorStdin<P, I> {
-    pub programs: Arc<[P]>,
+    pub programs: Vec<Arc<P>>,
     pub inputs: Arc<[I]>,
     pub flag_empty: bool,
     pub pointer: usize,
@@ -50,7 +50,7 @@ where
 #[allow(clippy::should_implement_trait)]
 impl<P, I> EmulatorStdin<P, I> {
     // get both program and input for emulator
-    pub fn get_program_and_input(&self, index: usize) -> (&P, &I, bool) {
+    pub fn get_program_and_input(&self, index: usize) -> (&Arc<P>, &I, bool) {
         let flag_last = index == self.inputs.len() - 1;
 
         if index < self.programs.len() && index < self.inputs.len() {
@@ -83,7 +83,7 @@ impl<P, I> EmulatorStdin<P, I> {
         I: Clone,
     {
         Self {
-            programs: Arc::new([]),
+            programs: Vec::new(),
             inputs: Arc::from(buf),
             flag_empty: false,
             pointer: 0,
@@ -99,14 +99,13 @@ impl<SC: StarkGenericConfig> EmulatorStdinBuilder<Vec<u8>, SC> {
         self.buffer.push(tmp);
     }
 
-    /// Write a slice of bytes to the buffer.
     pub fn write_slice(&mut self, slice: &[u8]) {
         self.buffer.push(slice.to_vec());
     }
 
     pub fn finalize<P>(self) -> EmulatorStdin<P, Vec<u8>> {
         EmulatorStdin {
-            programs: Arc::new([]),
+            programs: Vec::new(),
             inputs: self.buffer.into(),
             flag_empty: false,
             pointer: 0,

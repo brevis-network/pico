@@ -41,8 +41,8 @@ use pico_vm::{
     },
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
-        opts::EmulatorOpts, record::RecordBehavior,
-        recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP, stdin::EmulatorStdin,
+        record::RecordBehavior, recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP,
+        stdin::EmulatorStdin,
     },
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::logger::setup_logger,
@@ -51,13 +51,12 @@ use pico_vm::{
         combine::CombineMachine,
         convert::ConvertMachine,
         exe::RiscvVmVk,
-        recursion::recursion_public_values,
         riscv::{
-            self, air_id, build_ctx, mle_riscv_air_refs, Engine, Kb, RiscvProof,
+            self, air_id, build_ctx, ctx_to_engine, mle_riscv_air_refs, Engine, Kb, RiscvProof,
             RISCV_APP_PREP_AIR_IDS,
         },
     },
-    primitives::consts::{MAX_NUM_PVS, PV_DIGEST_NUM_WORDS, RISCV_NUM_PVS},
+    primitives::consts::{MAX_NUM_PVS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS, RISCV_NUM_PVS},
 };
 
 const LOG_STACKED_HEIGHT: usize = 23;
@@ -106,6 +105,9 @@ impl Case {
 
 fn main() {
     setup_logger();
+    // The GPU riscv prover allocates from the shared pool; a CPU build has none to set up.
+    #[cfg(feature = "cuda")]
+    riscv::init_mle_gpu_pool(riscv::MLE_GPU_DEVICE);
     let patched = match env::var("TIE_EXPECT")
         .unwrap_or_else(|_| "patched".into())
         .as_str()
@@ -122,15 +124,10 @@ fn main() {
     let program = Compiler::new(SourceType::RISCV, &elf)
         .expect("failed to parse ELF")
         .compile();
-    let opts = EmulatorOpts::from_env_chunk_size(1 << LOG_STACKED_HEIGHT);
-    assert!(
-        (opts.chunk_size as u64) <= (1u64 << LOG_STACKED_HEIGHT),
-        "chunk_size {} exceeds 2^{LOG_STACKED_HEIGHT}",
-        opts.chunk_size
-    );
-    let records = riscv::emulate_with_opts(Arc::clone(&program), &stdin.finalize(), opts)
-        .expect("emulation failed")
-        .records;
+    // Paired with `LOG_STACKED_HEIGHT`: a chunk of 2^23 instructions needs a stacked height of 23,
+    // so a larger `CHUNK_SIZE` would prove a different shape than this test pins; refuse it.
+    let chunk_size = riscv::chunk_size_from_env(LOG_STACKED_HEIGHT);
+    let records = riscv::emulate(Arc::clone(&program), stdin.finalize(), Some(chunk_size));
 
     let engine: Engine = StarkEngine::new(riscv_params_with_100_bits_security(LOG_STACKED_HEIGHT));
     let airs = mle_riscv_air_refs(Arc::clone(&program), BUCKET);
@@ -173,7 +170,9 @@ fn main() {
                         }
                     }
                 }
-                engine.prove(&d_pk, ctx).expect("riscv prove failed")
+                engine
+                    .prove(&d_pk, ctx_to_engine(ctx))
+                    .expect("riscv prove failed")
             })
             .collect();
         // Without a COMMIT the Ecall constraints are vacuous and this harness tests nothing.
@@ -225,7 +224,12 @@ fn main() {
         });
 
         let root_cvd = root.as_ref().ok().map(|root| {
-            let pvs = recursion_public_values(&root.0.public_values).expect("root public values");
+            let pvs = root
+                .0
+                .public_values
+                .iter()
+                .find(|p| p.len() == RECURSION_NUM_PVS)
+                .expect("root proof carries no recursion public values");
             RECURSION_PUBLIC_VALUES_COL_MAP
                 .committed_value_digest
                 .iter()

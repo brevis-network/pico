@@ -18,5 +18,5 @@ pub use paged::{
 };
 pub use pool::{
     init_memory_pool, memory_pool_capacity, memory_pool_size, memory_recycler_threads,
-    RecvTimeoutError, GLOBAL_MEMORY_POOL, GLOBAL_MEMORY_RECYCLER, POOL_WAIT,
+    raise_pool_size_floor, RecvTimeoutError, GLOBAL_MEMORY_POOL, GLOBAL_MEMORY_RECYCLER, POOL_WAIT,
 };
