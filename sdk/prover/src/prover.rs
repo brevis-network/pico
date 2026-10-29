@@ -55,6 +55,7 @@ use {
 use crate::{
     artifact::{LoadedPayload, ProofArtifact},
     binding,
+    cost::CostEstimate,
     error::ProveError,
     phase::Phase,
     proof::{digest_words, Payload, Proof},
@@ -380,11 +381,23 @@ impl ProverBuilder {
     ///
     /// The whitelist options go unchecked: they bind proving only.
     pub fn execute(&self, stdin: Stdin) -> Result<Execution, ProveError> {
+        self.emulate(stdin).map(|emulated| emulated.execution)
+    }
+
+    /// Emulate without proving, and report what proving the run would fill per RISC-V AIR. No
+    /// keygen and no trace generation: see [`CostEstimate`] for what the rows count.
+    pub fn estimate_cost(&self, stdin: Stdin) -> Result<CostEstimate, ProveError> {
+        self.emulate(stdin).map(CostEstimate::from_emulation)
+    }
+
+    /// The emulation behind [`Self::execute`] and [`Self::estimate_cost`], with the options
+    /// [`Self::build`] would give the prover.
+    fn emulate(&self, stdin: Stdin) -> Result<Emulation, ProveError> {
         let opts = emulator_opts(self.resolved_chunk_size()?);
         let path = self.resolved_emulation()?;
         let program = compile(&self.elf)?;
         self.register_aot()?;
-        emulate_program(program, opts, path, stdin).map(|emulated| emulated.execution)
+        emulate_program(program, opts, path, stdin)
     }
 
     /// Keygen the RISC-V air set and check the options against each other.
@@ -912,6 +925,11 @@ impl Prover {
     /// Emulate without proving. [`ProverBuilder::execute`] does the same without keygen.
     pub fn execute(&self, stdin: Stdin) -> Result<Execution, ProveError> {
         self.emulate(stdin).map(|emulated| emulated.execution)
+    }
+
+    /// [`ProverBuilder::estimate_cost`] with this prover's options.
+    pub fn estimate_cost(&self, stdin: Stdin) -> Result<CostEstimate, ProveError> {
+        self.emulate(stdin).map(CostEstimate::from_emulation)
     }
 
     /// Prove to [`Phase::Combine`]: a single complete root proof over the whole execution.

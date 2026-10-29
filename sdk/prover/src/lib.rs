@@ -33,7 +33,8 @@
 //! whitelist mode only, and returns an `EvmBundle`: the gnark inputs and the wrap circuit's two
 //! public inputs. [`Prover::execute`] emulates without proving, and returns an [`Execution`] whose
 //! bytes are explicitly *not* authenticated. [`ProverBuilder::execute`] does the same without
-//! keygen.
+//! keygen. [`ProverBuilder::estimate_cost`] emulates and reports the trace rows proving would fill,
+//! per RISC-V AIR.
 //!
 //! # Verifying outside this crate
 //!
@@ -115,6 +116,7 @@
 mod artifact;
 mod binding;
 mod committed;
+mod cost;
 mod error;
 #[cfg(feature = "multi-field-transcript")]
 mod evm;
@@ -126,6 +128,7 @@ mod types;
 
 pub use artifact::{ProofArtifact, FORMAT_VERSION};
 pub use committed::CommittedValues;
+pub use cost::{ChipCost, CostComponent, CostEstimate};
 pub use error::{ProveError, ReadError};
 #[cfg(feature = "multi-field-transcript")]
 pub use evm::EvmBundle;

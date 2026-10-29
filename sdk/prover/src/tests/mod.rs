@@ -10,6 +10,7 @@ mod chain;
 mod chunks;
 mod committed;
 mod coprocessor;
+mod cost;
 mod emulation_abort;
 mod environment;
 #[cfg(feature = "multi-field-transcript")]

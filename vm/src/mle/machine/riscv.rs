@@ -341,7 +341,9 @@ pub mod air_id {
     pub const MEM_FINAL: usize = 17;
     pub const GLOBAL: usize = 18;
     pub const POSEIDON2: usize = 19;
-    // Precompile / SyscallPrecompile AIR ids (20..=44) are literal indices in `INCLUDED`.
+    /// First and last of the precompile and `SyscallPrecompile` AIR ids, literal in `INCLUDED`.
+    pub const PRECOMPILE_FIRST: usize = 20;
+    pub const PRECOMPILE_LAST: usize = 44;
     /// Dedicated Ecall chip; appended after the precompile block so the literal
     /// precompile indices stay valid.
     pub const ECALL: usize = 45;
@@ -967,7 +969,14 @@ pub fn augmented_record(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
     record: &EmulationRecord,
 ) -> EmulationRecord {
-    let mut record = record.clone();
+    augment_record(chips, record.clone())
+}
+
+/// [`augmented_record`] on a record the caller gives up, without the clone.
+pub fn augment_record(
+    chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
+    mut record: EmulationRecord,
+) -> EmulationRecord {
     for chip in chips.iter() {
         if air_id_for(&chip.name()).is_none() {
             continue;
@@ -979,6 +988,32 @@ pub fn augmented_record(
         }
     }
     record
+}
+
+/// The main-trace rows each AIR of `record` fills at natural heights (`verify_keys(false)`), as
+/// `(air id, rows)` in chip order: what `generate_main` writes before padding, after the same
+/// extra-record pass [`build_ctx`] runs. Counts events; generates no trace. The byte table is
+/// always its full `NUM_ROWS`, the program table one row per instruction.
+pub fn natural_air_rows(
+    chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
+    record: EmulationRecord,
+) -> Vec<(usize, usize)> {
+    let record = augment_record(chips, record);
+    let natural = crate::mle::machine::shape::mle_natural_heights(&record);
+    chips
+        .iter()
+        .filter(|chip| chip.is_active(&record))
+        .filter_map(|chip| {
+            let name = chip.name();
+            let id = air_id_for(&name)?;
+            let rows = match id {
+                air_id::BYTE => crate::chips::chips::byte::traces::NUM_ROWS,
+                air_id::PROGRAM => record.program.instructions.len(),
+                _ => natural.get(&name).copied().unwrap_or(0),
+            };
+            Some((id, rows))
+        })
+        .collect()
 }
 
 /// Build the proving context of one record: the extra-record pass first (as
@@ -2785,5 +2820,37 @@ mod tests {
             ],
             "the orchestrator's positional tail moved"
         );
+    }
+
+    /// `natural_air_rows` names the AIRs `build_ctx` generates, and each trace is its row count
+    /// padded: the count is what the trace holds before padding.
+    #[test]
+    fn natural_air_rows_match_the_generated_traces() {
+        use p3_matrix::Matrix;
+
+        let out = emulate_with_opts(fib_program(), &fib_stdin(10), fixed_opts(1 << 12))
+            .expect("fib emulation");
+        assert!(out.records.len() > 1, "want CPU and memory records");
+        let chips = RiscvChipType::<Kb>::all_chips();
+        for (i, record) in out.records.iter().enumerate() {
+            let rows = natural_air_rows(&chips, record.clone());
+            let ctx = build_ctx(&chips, record, false);
+            let traced: Vec<(usize, usize)> = ctx
+                .per_trace
+                .iter()
+                .map(|(id, air)| (*id, air.common_main.height()))
+                .collect();
+            assert_eq!(
+                rows.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+                traced.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+                "record {i}: AIR sets differ"
+            );
+            for ((id, rows), (_, height)) in rows.iter().zip(&traced) {
+                assert!(
+                    *rows <= *height && *height <= rows.next_power_of_two().max(16),
+                    "record {i}, air {id}: {rows} natural rows, trace height {height}"
+                );
+            }
+        }
     }
 }
