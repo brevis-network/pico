@@ -35,6 +35,13 @@
 //! bytes are explicitly *not* authenticated. [`ProverBuilder::execute`] does the same without
 //! keygen.
 //!
+//! # Verifying outside this crate
+//!
+//! In whitelist mode ([`ProverBuilder::shipped_whitelist`] needs no files), [`Prover::vk_bundle`]
+//! and [`Proof::export_v3`] give the bytes `pico_verifier::verify(bundle, envelope, committed)`
+//! takes, on stable Rust and without this crate. Under a whitelist other than the shipped one,
+//! `pico_verifier::verify_with_root` takes its root.
+//!
 //! # Persisting a proof
 //!
 //! [`Proof::write`] and [`ProofArtifact::read`] move a proof between processes, and

@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use pico_mle_core::{codec::Encode, p3_field::PrimeField32};
+use pico_verifier::envelope::{encode_v3, MleRootProofV3};
 use pico_vm::mle::machine::{convert::ProofWithVk, riscv::RiscvProof};
 
 use crate::{
@@ -152,6 +153,26 @@ impl Proof {
     /// Whether the whitelist was on.
     pub fn verify_keys(&self) -> bool {
         self.verify_keys
+    }
+
+    /// The proof as a verifier outside this crate takes it: the v3 envelope
+    /// (`pico_verifier::envelope`) and the committed bytes it binds. With the prover's
+    /// [`crate::Prover::vk_bundle`] they verify by `pico_verifier::verify(bundle, envelope,
+    /// committed)` under the shipped whitelist, or `verify_with_root` under another. A
+    /// whitelist-mode [`Phase::Combine`] proof only; nothing is written to disk.
+    pub fn export_v3(&self) -> Result<(Vec<u8>, Vec<u8>), ProveError> {
+        if !self.verify_keys {
+            return Err(ProveError::WhitelistModeRequired {
+                what: "a v3 envelope",
+            });
+        }
+        let Payload::Combine(root) = &self.payload else {
+            return Err(ProveError::NotARootProof { phase: self.phase });
+        };
+        let envelope = MleRootProofV3::from_root(root)
+            .and_then(|body| encode_v3(&body))
+            .map_err(|e| ProveError::Format(format!("cannot encode the v3 envelope: {e}")))?;
+        Ok((envelope, self.committed.clone()))
     }
 
     /// Write a container a fresh process can load with [`crate::ProofArtifact::read`].

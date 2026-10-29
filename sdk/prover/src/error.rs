@@ -215,6 +215,18 @@ pub enum ProveError {
     )]
     EvmNoCommittedDigest,
 
+    /// `what` exists only for a whitelist-mode proof or prover: the VK bundle and the v3 envelope
+    /// name the whitelist a verifier pins, and outside whitelist mode there is none.
+    #[error(
+        "{what} needs whitelist mode: build the prover with `shipped_whitelist()`, or \
+         `verify_keys(true)` with `vk_map(path)` and `trusted_vk_root(root)`"
+    )]
+    WhitelistModeRequired { what: &'static str },
+
+    /// [`crate::Proof::export_v3`] on a proof that does not stop at [`Phase::Combine`].
+    #[error("only a Combine root exports as a v3 envelope; this proof stops at {phase:?}")]
+    NotARootProof { phase: Phase },
+
     /// The phase has no verification path that works from a container alone, in any configuration.
     #[error("a {phase:?} proof cannot be verified from a file in a fresh process")]
     UnverifiableInFreshProcess { phase: Phase },

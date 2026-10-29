@@ -40,6 +40,7 @@ use pico_vm::{
         convert::{ConvertMachine, ProofWithVk},
         exe::RiscvVmVk,
         riscv::{self, RiscvMachine, RiscvProof},
+        vk_bundle::encode_vk_bundle_v2,
         vk_map::{vk_identity, MleVkMap, VkMapError},
     },
     primitives::consts::MAX_LOG_NUMBER_OF_CHUNKS,
@@ -204,6 +205,12 @@ pub(crate) struct Emulation {
     pub(crate) execution: Execution,
 }
 
+/// Where a whitelist-mode prover's whitelist comes from.
+enum VkMapSource {
+    Path(PathBuf),
+    Shipped,
+}
+
 /// Which emulator makes a run's records.
 #[derive(Clone, Copy, Debug)]
 enum EmulationPath {
@@ -231,7 +238,7 @@ pub struct ProverBuilder {
     chunk_size: Option<u32>,
     concurrency: NonZeroUsize,
     verify_keys: bool,
-    vk_map_path: Option<PathBuf>,
+    vk_map: Option<VkMapSource>,
     trusted_vk_root: Option<[u32; 8]>,
     #[cfg(feature = "aot")]
     aot: Option<&'static AotProgram>,
@@ -247,7 +254,7 @@ impl ProverBuilder {
             chunk_size: None,
             concurrency: DEFAULT_CONCURRENCY,
             verify_keys: false,
-            vk_map_path: None,
+            vk_map: None,
             trusted_vk_root: None,
             #[cfg(feature = "aot")]
             aot: None,
@@ -309,7 +316,15 @@ impl ProverBuilder {
     /// The whitelist artifact as `mle_build_vk_map` writes it: the `.bin` form, which is what the
     /// repo ships (`vm/src/mle/shape_vk_bins/`), or its `.json` twin. Read by extension.
     pub fn vk_map(mut self, path: impl Into<PathBuf>) -> Self {
-        self.vk_map_path = Some(path.into());
+        self.vk_map = Some(VkMapSource::Path(path.into()));
+        self
+    }
+
+    /// Whitelist mode under the whitelist compiled into this build, pinned to the root shipped
+    /// beside it; no file is read at runtime. A [`Self::trusted_vk_root`], when set, must match.
+    pub fn shipped_whitelist(mut self) -> Self {
+        self.verify_keys = true;
+        self.vk_map = Some(VkMapSource::Shipped);
         self
     }
 
@@ -386,29 +401,41 @@ impl ProverBuilder {
                     self.log_stacked_height
                 )));
             }
-            let path = self.vk_map_path.as_ref().ok_or_else(|| {
+            let source = self.vk_map.as_ref().ok_or_else(|| {
                 ProveError::InconsistentOptions(
-                    "verify_keys(true) needs vk_map(path): the whitelist is an artifact, and a \
-                     whitelist built from this run's own keys would only be as trustworthy as \
-                     this run"
+                    "verify_keys(true) needs vk_map(path) or shipped_whitelist(): the whitelist \
+                     is an artifact, and a whitelist built from this run's own keys would only \
+                     be as trustworthy as this run"
                         .into(),
                 )
             })?;
-            let pinned = self.trusted_vk_root.ok_or_else(|| {
-                ProveError::InconsistentOptions(
-                    "verify_keys(true) needs trusted_vk_root(root): the artifact carries its own \
-                     root, so loading it proves consistency, never authenticity"
-                        .into(),
-                )
-            })?;
-            let map = load_vk_map(path)?;
+            let (map, pinned) = match source {
+                VkMapSource::Path(path) => {
+                    let pinned = self.trusted_vk_root.ok_or_else(|| {
+                        ProveError::InconsistentOptions(
+                            "verify_keys(true) needs trusted_vk_root(root): the artifact carries \
+                             its own root, so loading it proves consistency, never authenticity"
+                                .into(),
+                        )
+                    })?;
+                    (load_vk_map(path)?, pinned)
+                }
+                // Checked against the shipped root on load; a caller's root pins it further.
+                VkMapSource::Shipped => {
+                    let map = MleVkMap::shipped()?;
+                    let pinned = self
+                        .trusted_vk_root
+                        .unwrap_or_else(|| digest_words(&map.root()));
+                    (map, pinned)
+                }
+            };
             let loaded = digest_words(&map.root());
             if loaded != pinned {
                 return Err(ProveError::VkRootMismatch { loaded, pinned });
             }
             Some(Arc::new(map))
         } else {
-            if self.vk_map_path.is_some() || self.trusted_vk_root.is_some() {
+            if self.vk_map.is_some() || self.trusted_vk_root.is_some() {
                 return Err(ProveError::InconsistentOptions(
                     "a whitelist was supplied with verify_keys(false); nothing would read it"
                         .into(),
@@ -857,6 +884,20 @@ impl Prover {
     /// Instructions per emulation chunk.
     pub fn chunk_size(&self) -> u32 {
         self.opts.chunk_size
+    }
+
+    /// The v2 VK bundle (`pico_verifier::bundle`) a verifier of this prover's proofs is handed:
+    /// the program's exe identity, the pinned whitelist root, and the membership of every key a
+    /// root proof can carry. Whitelist mode only. See [`Proof::export_v3`].
+    pub fn vk_bundle(&self) -> Result<Vec<u8>, ProveError> {
+        let map = self
+            .vk_map
+            .as_ref()
+            .ok_or(ProveError::WhitelistModeRequired {
+                what: "a VK bundle",
+            })?;
+        encode_vk_bundle_v2(&self.riscv_vm_vk, map)
+            .map_err(|e| ProveError::Format(format!("cannot encode the VK bundle: {e}")))
     }
 
     /// How many replay workers the AOT pipeline runs; `None` when this prover interprets.

@@ -16,6 +16,7 @@ mod environment;
 mod evm;
 mod execute;
 mod exit_code;
+mod export;
 mod fixture;
 mod options;
 mod poseidon2;
