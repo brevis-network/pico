@@ -35,7 +35,7 @@ fn main() {
     println!("cargo:rerun-if-changed={sppark}");
     println!("cargo:rerun-if-changed={pico_src}");
 
-    // ── mle-kernels: hashing and device info ─────────────────────────────────
+    // ── mle-kernels: hashing, device info and NVTX ───────────────────────────
     //
     // `sponge.cu` and `merkle_tree.cu` declare `using Fp = kb31_t;` themselves; `device_info.cu`
     // is field-free. Every file is named: `src/prover/` also holds the sources `cuda_kb_all`
@@ -52,6 +52,7 @@ fn main() {
         .library_name("mle-kernels")
         .watch("cuda")
         .file("cuda/src/device_info.cu")
+        .file("cuda/src/nvtx.cu")
         .file(format!("{prover}/sponge.cu"))
         .file(format!("{prover}/merkle_tree.cu"))
         .build();
