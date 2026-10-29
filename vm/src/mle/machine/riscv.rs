@@ -80,13 +80,13 @@ use crate::{
         record::RecordBehavior,
         riscv::{
             alu_event_pool::{
-                init_alu_event_buffer_pool, is_alu_pool_initialized, ALU_EVENT_BUFFER_CAPACITY,
+                alu_event_buffer_capacity, init_alu_event_buffer_pool, is_alu_pool_initialized,
             },
             cpu_event_pool::{
-                init_cpu_event_buffer_pool, is_pool_initialized, CPU_EVENT_BUFFER_CAPACITY,
+                cpu_event_buffer_capacity, init_cpu_event_buffer_pool, is_pool_initialized,
             },
             emulator::{EmulationError, RiscvEmulator},
-            event_pool::use_growable_event_buffers,
+            event_pool::{growable_event_buffers, GrowableEventBuffers},
             public_values::RecordFinalPvsState,
             record::EmulationRecord,
         },
@@ -738,8 +738,9 @@ pub enum EmulateError {
 /// The chunk size and the caller's `log_stacked_height` are one decision: a chunk holds one CPU row
 /// per instruction, so a full chunk of `2^n` instructions needs a stacked height of at least `n`.
 ///
-/// Every record is held until the caller drops the output, so this switches the process's pinned
-/// event buffers from the fixed pools to growable ones; [`emulate_each`] streams instead.
+/// Every record is held until the caller drops the output, so the buffers this emulation takes are
+/// growable rather than pooled; [`emulate_each`] streams instead. While it runs, a GPU pipeline in
+/// the same process waits, and it waits for one.
 pub fn emulate_with_opts(
     program: Arc<Program>,
     stdin: &EmulatorStdin<Program, Vec<u8>>,
@@ -748,7 +749,7 @@ pub fn emulate_with_opts(
     if opts.snapshot_main != SnapshotMainMode::Interpreter {
         return Err(EmulateError::UnsupportedSnapshotMain(opts.snapshot_main));
     }
-    hold_records_in_growable_buffers();
+    let _growable = hold_records_in_growable_buffers();
     let final_pvs_state = Arc::new(RecordFinalPvsState::default());
     let mut emulator = RiscvEmulator::new_single::<Kb>(program, final_pvs_state, opts, None);
     emulator.write_stdin(stdin);
@@ -771,11 +772,12 @@ pub fn emulate_with_opts(
     })
 }
 
-/// Switches the process's pinned event buffers from the fixed pools, which a caller holding every
-/// record would run dry, to growable ones, and claims the pools empty before an emulator would
-/// fill them with full-size buffers it never uses.
-fn hold_records_in_growable_buffers() {
-    use_growable_event_buffers();
+/// Switches the event buffers this emulation takes from the fixed pools, which a caller holding
+/// every record would run dry, to growable ones, for as long as the returned scope lives; a GPU
+/// pipeline later in the process gets its bounded pools back. Claims the pools empty before an
+/// emulator would fill them with full-size buffers it never uses.
+fn hold_records_in_growable_buffers() -> GrowableEventBuffers {
+    let scope = growable_event_buffers();
     if !is_pool_initialized() {
         init_cpu_event_buffer_pool(
             0,
@@ -788,6 +790,7 @@ fn hold_records_in_growable_buffers() {
             crate::emulator::riscv::event_pool::HostAllocFlags::DEFAULT,
         );
     }
+    scope
 }
 
 /// [`emulate_with_opts`] through the snapshot pipeline: one snapshot thread, running the
@@ -822,7 +825,7 @@ pub fn emulate_with_pipeline(
     if opts.snapshot_main == SnapshotMainMode::Aot && !aot_ready {
         return Err(EmulateError::AotUnavailable);
     }
-    hold_records_in_growable_buffers();
+    let _growable = hold_records_in_growable_buffers();
     let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<Kb>, Vec<u8>> {
         program: Some(program),
         vk_root: None,
@@ -903,7 +906,7 @@ pub fn emulate_each(
     // `CHUNK_SIZE` for the ALU pool, and a caller that named no size inherits a RAM-derived chunk
     // that can exceed the 2^22 default. Clamp rather than panic, but say so — it silently shrinks
     // the chunk a caller asked for.
-    let buffer_cap = u32::try_from((*CPU_EVENT_BUFFER_CAPACITY).min(*ALU_EVENT_BUFFER_CAPACITY))
+    let buffer_cap = u32::try_from(cpu_event_buffer_capacity().min(alu_event_buffer_capacity()))
         .unwrap_or(u32::MAX);
     if opts.chunk_size > buffer_cap {
         tracing::warn!(

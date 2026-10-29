@@ -477,6 +477,12 @@ pub fn max_pipeline_workers() -> usize {
     core_affinity::get_core_ids().map_or(1, |cores| cores.len())
 }
 
+/// Replay workers for a caller that states none: 8, the GPU benchmark script's `NUM_THREADS`, or
+/// one per core on a smaller machine. Past it the snapshot thread, not the replay, bounds the run.
+pub fn default_pipeline_workers() -> NonZeroUsize {
+    NonZeroUsize::new(max_pipeline_workers().min(8)).unwrap_or(NonZeroUsize::MIN)
+}
+
 /// Refuses a run the snapshot pipeline could not finish, as [`emulate_snapshot_pipeline_with`]
 /// does before any thread starts: more workers than [`max_pipeline_workers`], or a memory pool, as
 /// the `MEMORY_POOL_*` and `MEMORY_RECYCLER_THREADS` variables and the AOT split size it, that the
