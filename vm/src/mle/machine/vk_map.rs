@@ -321,13 +321,14 @@ pub fn root_file_text(
     lines.join("\n") + "\n"
 }
 
-/// The root a root file names, from its `MLE_VK_ROOT="..."` line.
-pub fn root_from_root_file(text: &str) -> Option<[Kb; 8]> {
-    text.lines()
-        .find_map(|l| l.strip_prefix("MLE_VK_ROOT=\""))
-        .and_then(|l| l.strip_suffix('"'))
-        .map(limbs_from_string)
-}
+/// The whitelist artifact the repository ships (`vm/src/mle/shape_vk_bins/`), compiled in so a
+/// prover needs no file at runtime. [`MleVkMap::shipped`] loads it.
+pub const SHIPPED_VK_MAP_BIN: &[u8] = include_bytes!("../shape_vk_bins/mle_vk_map_kb.bin");
+
+// The root file shipped beside [`SHIPPED_VK_MAP_BIN`] and the root it pins are `pico_verifier`'s,
+// so prover and verifier trust one copy. `the_shipped_artifact_matches_this_binary` checks that
+// the root is the shipped artifact's.
+pub use pico_verifier::whitelist::{root_from_root_file, shipped_vk_root, SHIPPED_VK_ROOT_FILE};
 
 /// The content key of a riscv shape: its `name:height` pairs, sorted. Two shapes with the same
 /// key are the same shape whatever label or index the enumeration gave them; the builder
@@ -478,12 +479,34 @@ impl MleVkMap {
             path: path.to_path_buf(),
             source,
         })?;
+        Self::try_from_bin_bytes(&data, path)
+    }
+
+    /// [`Self::try_load_bin`] over bytes already in memory; `origin` names them in errors.
+    pub fn try_from_bin_bytes(data: &[u8], origin: impl AsRef<Path>) -> Result<Self, VkMapError> {
         let artifact: VkMapArtifact =
-            bincode::deserialize(&data).map_err(|source| VkMapError::ParseBin {
-                path: path.to_path_buf(),
+            bincode::deserialize(data).map_err(|source| VkMapError::ParseBin {
+                path: origin.as_ref().to_path_buf(),
                 source,
             })?;
         Self::try_from_artifact(&artifact)
+    }
+
+    /// The whitelist this build ships ([`SHIPPED_VK_MAP_BIN`]), checked against the root shipped
+    /// beside it ([`shipped_vk_root`]). Reads no file and no environment variable.
+    pub fn shipped() -> Result<Self, VkMapError> {
+        let origin = "<shipped mle_vk_map_kb.bin>";
+        let map = Self::try_from_bin_bytes(SHIPPED_VK_MAP_BIN, origin)?;
+        let pinned = shipped_vk_root();
+        if map.root() != pinned {
+            use p3_field::PrimeField32;
+            return Err(VkMapError::PinnedRootMismatch {
+                path: origin.into(),
+                artifact: map.root().map(|f| f.as_canonical_u32()),
+                pinned: pinned.map(|f| f.as_canonical_u32()),
+            });
+        }
+        Ok(map)
     }
 
     /// Load a bincode artifact, panicking on any failure (see [`Self::try_load_bin`]).
@@ -646,18 +669,8 @@ mod tests {
     #[test]
     fn the_shipped_artifact_matches_this_binary() {
         use p3_field::PrimeField32;
-        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/mle/shape_vk_bins");
-        let map = MleVkMap::try_load_bin(format!("{dir}/mle_vk_map_kb.bin"))
-            .unwrap_or_else(|e| panic!("shipped whitelist does not load: {e}"));
-        let root_file =
-            std::fs::read_to_string(format!("{dir}/mle_vk_root.txt")).expect("root file");
-        let pinned =
-            root_from_root_file(&root_file).expect("mle_vk_root.txt carries an MLE_VK_ROOT line");
-        assert_eq!(
-            map.root(),
-            pinned,
-            "mle_vk_root.txt names a different root than the artifact"
-        );
+        // `shipped` checks the compiled-in artifact against the compiled-in root file.
+        let map = MleVkMap::shipped().unwrap_or_else(|e| panic!("shipped whitelist: {e}"));
         use crate::{
             compiler::riscv::compiler::{Compiler, SourceType},
             mle::machine::{combine::CombineMachine, deferred::DeferredMachine, exe::RiscvVmVk},
@@ -764,7 +777,7 @@ mod tests {
                           mle_soundness_manifest";
         assert_eq!(
             limbs(&manifest["apex"]["vk_root"]),
-            pinned.map(|f| f.as_canonical_u32()),
+            shipped_vk_root().map(|f| f.as_canonical_u32()),
             "the soundness manifest records another whitelist root than mle_vk_root.txt; \
              {regenerate}"
         );
