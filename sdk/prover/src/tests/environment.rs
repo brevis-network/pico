@@ -240,14 +240,17 @@ knob_probe!(
 );
 
 /// A variable the crate root documents as reaching the prover must be in the list callers warn
-/// from, and nothing else may be. A row that reaches it only with the `aot` feature counts only in
+/// from, and nothing else may be. A row that reaches it only with the `aot` or `cuda` feature counts only in
 /// a build with it.
 #[test]
 fn the_exported_variables_are_the_ones_the_crate_documents() {
     let mut documented: Vec<&str> = include_str!("../lib.rs")
         .lines()
         .filter(|line| line.starts_with("//! | `") && line.contains("| **yes"))
-        .filter(|line| cfg!(feature = "aot") || !line.contains("| **yes, with the `aot` feature"))
+        .filter(|line| {
+            cfg!(any(feature = "aot", feature = "cuda"))
+                || !line.contains("| **yes, with the `aot` or `cuda` feature")
+        })
         .flat_map(|line| {
             let names = line.split('|').nth(1).expect("a names column");
             names.split('`').skip(1).step_by(2)

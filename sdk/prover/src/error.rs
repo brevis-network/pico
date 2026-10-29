@@ -74,7 +74,7 @@ pub enum ProveError {
 
     /// The process cannot take this AOT program: it holds a different one, or AOT code installed
     /// without `pico_aot_runtime::register`.
-    #[cfg(feature = "aot")]
+    #[cfg(any(feature = "aot", feature = "cuda"))]
     #[error("cannot register the AOT program: {0}")]
     AotRegistration(#[source] pico_aot_runtime::AotError),
 

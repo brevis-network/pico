@@ -219,7 +219,9 @@ enum EmulationPath {
     /// One interpreter makes the records; the interpreter runs the pipeline's snapshot thread.
     Interpreter { workers: NonZeroUsize },
     /// The registered AOT program runs the pipeline's snapshot thread, records included.
-    #[cfg(feature = "aot")]
+    /// The AOT runtime runs the pipeline's snapshot thread: the registered program's compiled
+    /// code, or in a `cuda` build without one, the runtime interpreting every block.
+    #[cfg(any(feature = "aot", feature = "cuda"))]
     Aot { workers: NonZeroUsize },
 }
 
@@ -227,7 +229,7 @@ impl EmulationPath {
     fn workers(self) -> NonZeroUsize {
         match self {
             Self::Interpreter { workers } => workers,
-            #[cfg(feature = "aot")]
+            #[cfg(any(feature = "aot", feature = "cuda"))]
             Self::Aot { workers } => workers,
         }
     }
@@ -235,7 +237,7 @@ impl EmulationPath {
     fn snapshot_main(self) -> SnapshotMainMode {
         match self {
             Self::Interpreter { .. } => SnapshotMainMode::Interpreter,
-            #[cfg(feature = "aot")]
+            #[cfg(any(feature = "aot", feature = "cuda"))]
             Self::Aot { .. } => SnapshotMainMode::Aot,
         }
     }
@@ -264,6 +266,8 @@ pub struct ProverBuilder {
     emulation_workers: Option<NonZeroUsize>,
     #[cfg(feature = "cuda")]
     gpu_event_pool_size: NonZeroUsize,
+    #[cfg(feature = "cuda")]
+    interpreted_aot_runtime: bool,
 }
 
 impl ProverBuilder {
@@ -281,6 +285,8 @@ impl ProverBuilder {
             emulation_workers: None,
             #[cfg(feature = "cuda")]
             gpu_event_pool_size: distributed_vm::mle::embed::DEFAULT_EVENT_POOL_SIZE,
+            #[cfg(feature = "cuda")]
+            interpreted_aot_runtime: true,
         }
     }
 
@@ -392,9 +398,10 @@ impl ProverBuilder {
     /// most [`Self::build`] accepts is the core count, since the pipeline runs one replay worker
     /// per core at most.
     ///
-    /// With [`Self::aot`] a worker keeps an emulator memory from a pool of `MEMORY_POOL_SIZE`
-    /// between its batches, so the pool needs one per worker plus the batch being cut: unset, it
-    /// is raised to that, and [`Self::build`] refuses a smaller one.
+    /// With [`Self::aot`], or in a `cuda` build on the interpreted AOT runtime, a worker keeps an
+    /// emulator memory from a pool of `MEMORY_POOL_SIZE` between its batches, so the pool needs
+    /// one per worker plus the batch being cut: unset, it is raised to that, and [`Self::build`]
+    /// refuses a smaller one.
     pub fn emulation_workers(mut self, n: NonZeroUsize) -> Self {
         self.emulation_workers = Some(n);
         self
@@ -408,6 +415,22 @@ impl ProverBuilder {
     #[cfg(feature = "cuda")]
     pub fn gpu_event_pool_size(mut self, n: NonZeroUsize) -> Self {
         self.gpu_event_pool_size = n;
+        self
+    }
+
+    /// Whether, without [`Self::aot`], the snapshot thread is the AOT runtime interpreting every
+    /// block (no compiled code, any ELF) rather than the VM's interpreter. Defaults to `true`:
+    /// the runtime's interpreter and precompile backends emulate a reth block in about half the
+    /// time. It changes how records are made, not what is proved.
+    ///
+    /// The runtime, like an [`Self::aot`] program, is registered once per process, whichever
+    /// comes first, by `build`, `execute` or `estimate_cost`: after a default builder, a builder
+    /// with [`Self::aot`] is refused ([`ProveError::AotRegistration`]), and after one with
+    /// [`Self::aot`], a default builder is refused the same way; `interpreted_aot_runtime(false)`
+    /// registers nothing and works after either.
+    #[cfg(feature = "cuda")]
+    pub fn interpreted_aot_runtime(mut self, on: bool) -> Self {
+        self.interpreted_aot_runtime = on;
         self
     }
 
@@ -684,16 +707,27 @@ impl ProverBuilder {
         let workers = self
             .emulation_workers
             .unwrap_or_else(default_pipeline_workers);
+        #[cfg(feature = "cuda")]
+        if self.interpreted_aot_runtime {
+            check_pipeline(workers, SnapshotMainMode::Aot)
+                .map_err(|e| ProveError::InconsistentOptions(e.to_string()))?;
+            return Ok(EmulationPath::Aot { workers });
+        }
         check_pipeline(workers, SnapshotMainMode::Interpreter)
             .map_err(|e| ProveError::InconsistentOptions(e.to_string()))?;
         Ok(EmulationPath::Interpreter { workers })
     }
 
-    /// Registers the AOT program, if there is one, for the process: what the pipeline will run.
+    /// Registers the AOT program, or in a `cuda` build the interpreted runtime, for the process:
+    /// what the pipeline's snapshot thread will run.
     fn register_aot(&self) -> Result<(), ProveError> {
         #[cfg(feature = "aot")]
         if let Some(program) = self.aot {
-            pico_aot_runtime::register(program).map_err(ProveError::AotRegistration)?;
+            return pico_aot_runtime::register(program).map_err(ProveError::AotRegistration);
+        }
+        #[cfg(feature = "cuda")]
+        if self.interpreted_aot_runtime {
+            pico_aot_runtime::register_interpreted().map_err(ProveError::AotRegistration)?;
         }
         Ok(())
     }
@@ -737,7 +771,7 @@ fn emulate_program(
     let stdin = stdin.into_emulator_stdin();
     let mut emulated = std::panic::catch_unwind(AssertUnwindSafe(|| match path {
         EmulationPath::Interpreter { .. } => riscv::emulate_with_opts(program, &stdin, opts),
-        #[cfg(feature = "aot")]
+        #[cfg(any(feature = "aot", feature = "cuda"))]
         EmulationPath::Aot { workers } => riscv::emulate_with_pipeline(
             program,
             &stdin,

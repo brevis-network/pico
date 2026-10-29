@@ -68,6 +68,84 @@ fn chunks_past_the_default_event_buffers_prove() {
     assert_eq!(proof.committed().as_bytes(), executed.committed_bytes);
 }
 
+/// The interpreted AOT runtime, which a `cuda` build emulates with by default, runs the run the
+/// VM's interpreter runs. On guests covering the runtime's precompile backends (BN254 and
+/// BLS12-381 field and curve ops, secp256k1, keccak, SHA-256, poseidon2): the same execution
+/// (bytes, cycles, chunks, precompile calls) and cost estimate. On three of them, both GPU roots
+/// verify and bind the same bytes.
+#[test]
+#[ignore = "needs a GPU"]
+fn the_interpreted_aot_runtime_matches_the_interpreter() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../perf/bench_data/rv64");
+    let hello = || Stdin::from(&"hello world".to_string());
+    let guests: [(&str, fn() -> Stdin, bool); 8] = [
+        ("bn254-fp-elf", Stdin::new, true),
+        ("bls12381-fp-elf", Stdin::new, true),
+        ("k256-elf", Stdin::new, true),
+        ("bn254-elf-ws-add-double", Stdin::new, false),
+        ("bls12381-elf-ws-add-double-decompress", Stdin::new, false),
+        ("tiny-keccak-elf", hello, false),
+        ("sha2-elf", hello, false),
+        ("coprocessor-elf", Stdin::new, false),
+    ];
+    for (guest, stdin, prove) in guests {
+        let elf = std::fs::read(format!("{dir}/{guest}")).expect("guest ELF");
+        let builder = |aot_runtime: bool| {
+            let (map, root) = shipped_whitelist();
+            Prover::builder(&elf)
+                .log_stacked_height(WHITELIST_LOG_STACKED_HEIGHT)
+                .verify_keys(true)
+                .vk_map(map)
+                .trusted_vk_root(root)
+                .interpreted_aot_runtime(aot_runtime)
+        };
+        let (aot, plain) = (builder(true), builder(false));
+
+        let executed = aot.execute(stdin()).expect("execute");
+        let expected = plain.execute(stdin()).expect("execute");
+        assert!(
+            !executed.precompile_calls.is_empty(),
+            "{guest}: no precompile"
+        );
+        assert_eq!(
+            executed.committed_bytes, expected.committed_bytes,
+            "{guest}"
+        );
+        assert_eq!(executed.cycles, expected.cycles, "{guest}");
+        assert_eq!(executed.chunks, expected.chunks, "{guest}");
+        assert_eq!(
+            executed.precompile_calls, expected.precompile_calls,
+            "{guest}"
+        );
+        assert_eq!(
+            aot.estimate_cost(stdin()).expect("cost"),
+            plain.estimate_cost(stdin()).expect("cost"),
+            "{guest}"
+        );
+        println!("[gpu] {guest}: {:?}", executed.precompile_calls);
+        if !prove {
+            continue;
+        }
+
+        let proved = aot
+            .build()
+            .expect("whitelist prover")
+            .prove(stdin())
+            .expect("GPU combine, AOT runtime");
+        let reference = plain
+            .build()
+            .expect("whitelist prover")
+            .prove(stdin())
+            .expect("GPU combine, interpreter");
+        assert!(proved.binds_complete_execution());
+        assert_eq!(
+            proved.committed().as_bytes(),
+            reference.committed().as_bytes()
+        );
+        assert_eq!(proved.committed().as_bytes(), executed.committed_bytes);
+    }
+}
+
 /// An event pool that would pin more than half the host, or that cannot hold one record, is
 /// refused before anything runs, so it leaves the process able to prove. Named to sort after the
 /// child-process tests: its prover keeps card memory in this process.
@@ -106,9 +184,7 @@ fn pinning_past_half_the_host_is_refused_up_front() {
         .build()
         .expect("whitelist prover");
     for _ in 0..2 {
-        let err = prover
-            .prove(Stdin::from(&N))
-            .expect_err("a pool of one");
+        let err = prover.prove(Stdin::from(&N)).expect_err("a pool of one");
         assert!(
             matches!(&err, ProveError::Gpu(m) if m.contains("event buffers")),
             "got {err}"

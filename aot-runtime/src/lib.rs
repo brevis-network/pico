@@ -61,5 +61,5 @@ pub mod types;
 pub use dispatch::{lookup_block_fn, set_lookup_block_fn};
 pub use emulator::AotEmulatorCore;
 pub use program::{AotError, AotProgram};
-pub use snapshot_runtime::{register, register_snapshot_aot_factory};
+pub use snapshot_runtime::{register, register_interpreted, register_snapshot_aot_factory};
 pub use types::{BlockClock, BlockFn, ClockUpdate, NextStep};
