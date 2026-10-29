@@ -20,7 +20,8 @@ pico-gpu-api = { workspace = true, optional = true }
 pico-mle-core = { path = "../mle-core", default-features = false }
 # Row-major CPU device; the engine the MLE RISCV path proves on.
 pico-mle-cpu = { path = "../mle-cpu", default-features = false }
-# The stable verifier the apex, whitelist hashing and exe identity live in.
+# The stable verifier the apex, whitelist hashing and exe identity live in. Its `codec` (zstd, C)
+# is enabled below for host builds only, so a guest build stays free of it.
 pico-verifier.workspace = true
 # GPU CUDA MLE/WHIR backend, pulled in only under the `cuda` feature.
 cuda-mle = { path = "../cuda-mle", optional = true }
@@ -113,6 +114,9 @@ tcmalloc = { workspace = true, optional = true }
 # Set JEMALLOC_SYS_WITH_MALLOC_CONF="retain:true,background_thread:true,metadata_thp:always,dirty_decay_ms:-1,muzzy_decay_ms:-1,abort_conf:true"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { workspace = true, optional = true }
+
+[target.'cfg(not(target_os = "zkvm"))'.dependencies]
+pico-verifier = { workspace = true, features = ["codec"] }
 
 [dev-dependencies]
 alloy-primitives = "1.2.1"
