@@ -107,6 +107,14 @@
 //! replay its snapshots into the records. It changes how the records are made, not what is
 //! proved.
 //!
+//! # Build features for speed
+//!
+//! `bigint-rug`, `tcmalloc` and `mmap-memory` forward `pico-vm`'s features of those names: GMP for
+//! the curve precompiles' big-integer arithmetic, tcmalloc as the global allocator, and an emulator
+//! memory reset in place. None changes a proof. Emulation bounds a GPU prove, and the precompiles'
+//! arithmetic bounds emulating a block heavy in them: on four RTX 5090s, a p99 reth block's
+//! `execute` went from 21-39 s to 9-13 s with the three, and its `prove` from 27-44 s to 14-17 s.
+//!
 //! # Not here
 //!
 //! The Groth16 proving key, the Groth16 proof and the on-chain verifier are made outside this
