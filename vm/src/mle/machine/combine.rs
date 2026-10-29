@@ -629,10 +629,9 @@ impl CombineMachine {
 use std::time::Instant;
 
 #[cfg(feature = "cuda")]
-use crate::mle::machine::recursion::{
-    digest_to_u32s,
-    gpu::{self, GpuEngineKb, GpuPbKb},
-};
+use crate::mle::machine::recursion::gpu::{self, GpuEngineKb, GpuPbKb};
+#[cfg(feature = "cuda")]
+use pico_verifier::hash::digest_to_u32s;
 
 /// The prover-side key handle cached per shape: a device-resident proving key.
 #[cfg(feature = "cuda")]

@@ -229,7 +229,8 @@ impl EmbedMachine {
             pvs,
             &self.riscv_vm_vk.digest(),
             self.vk_map.as_ref().map(|m| m.root()).as_ref(),
-        )
+        )?;
+        Ok(())
     }
 
     /// Distinct embed shapes keygen'd so far (observability for the dedup behavior).

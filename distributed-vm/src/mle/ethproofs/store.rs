@@ -82,37 +82,17 @@ pub struct MleRootEnvelope {
 }
 
 /// Whitelist-mode submissions (`RootProofExport::root_vk` set) use v3 instead of
-/// [`MleRootEnvelope`]: `PICOMLE\0` | 3 (u32 LE) | zstd(bincode([`MleRootProofV3`])).
+/// [`MleRootEnvelope`]: `PICOMLE\0` | 3 (u32 LE) | zstd(bincode([`MleRootProofV3`])), defined by
+/// `pico_verifier::envelope`.
 ///
 /// No layouts: v3 roots are proved in whitelist mode, so a verifier checks the root's vk against
 /// the pinned whitelist instead of rebuilding it from layouts it would have to trust. The magic is
 /// what routes these bytes to the MLE verifier inside ethproofs' `verify_stark("Pico", ..)`; the
 /// FRI proofs sharing that entry are bincode and never start with it.
-pub const PROOF_MAGIC: [u8; 8] = *b"PICOMLE\0";
-pub const ENVELOPE_V3: u32 = 3;
-
-/// zstd level for the v3 body. Measured on a fib root (795 KB of proof + vk): -3 gives 480 KB in
-/// 1.3 ms, -19 gives 459 KB in 111 ms. This runs inside the reported proving time, so -3.
-const PROOF_ZSTD_LEVEL: i32 = 3;
-
-/// The v3 body. Field order is the wire format; the verifier declares the same struct.
-#[derive(Serialize, Deserialize)]
-pub struct MleRootProofV3 {
-    /// The combine root proof in `mle-core`'s canonical versioned wire format.
-    pub proof: Vec<u8>,
-    /// bincode of the root's `MultiStarkVerifyingKey`. Untrusted by design: the verifier accepts it
-    /// only as a member of the whitelist its VK bundle pins.
-    pub root_vk: Vec<u8>,
-}
+pub use pico_verifier::envelope::{MleRootProofV3, ENVELOPE_V3, PROOF_MAGIC};
 
 fn encode_v3(body: &MleRootProofV3) -> Result<Vec<u8>, String> {
-    let raw = bincode::serialize(body).map_err(|e| e.to_string())?;
-    let zstd = zstd::encode_all(raw.as_slice(), PROOF_ZSTD_LEVEL).map_err(|e| e.to_string())?;
-    let mut out = Vec::with_capacity(PROOF_MAGIC.len() + 4 + zstd.len());
-    out.extend_from_slice(&PROOF_MAGIC);
-    out.extend_from_slice(&ENVELOPE_V3.to_le_bytes());
-    out.extend_from_slice(&zstd);
-    Ok(out)
+    pico_verifier::envelope::encode_v3(body).map_err(|e| e.to_string())
 }
 
 /// How many finished blocks stay answerable.

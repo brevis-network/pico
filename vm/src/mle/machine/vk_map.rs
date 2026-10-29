@@ -18,23 +18,24 @@
 use std::collections::HashMap;
 
 use p3_field::PrimeCharacteristicRing;
-use p3_symmetric::Permutation;
 use pico_mle_core::{
     config::{
-        koala_bear_poseidon2::default_koalabear_poseidon2_16,
         riscv_params_with_100_bits_security,
         soundness::{admit_production_vk, UnderBudgetError},
     },
     keygen::types::MultiStarkVerifyingKey,
     StarkEngine,
 };
+pub use pico_verifier::whitelist::{
+    vk_identity, vk_map_leaf, VkIdentity, VkMembership, MLE_VK_MERKLE_DEPTH, VK_MAP_LEAF_DOMAIN,
+};
+use pico_verifier::whitelist::{VkMerkleTree, VkWhitelist};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use super::{
-    exe::sponge_hash,
     recursion::{
         extract_recursion_vk_layout_from_heights, pad_convert_program,
         recursion_air_refs_with_preprocessed, Engine,
@@ -46,60 +47,14 @@ use crate::{
     mle::compiler::recursion::{ConvertProgramInput, ConvertVerifierCircuit, RecursionVkLayout},
 };
 
-/// Fixed Merkle depth: 2^15 = 32,768 whitelist slots. The whitelist holds 15,680 leaves (15,643
-/// riscv shapes, 36 combine node shapes and the deferred node), so this leaves 109% headroom;
-/// depth 14 would leave 704 free slots (4.3%). A ladder class costs one slot, but a new
-/// precompile kind sweeps a few hundred shapes -- the three at air ids 47-49 took 519 -- so a
-/// few more kinds would use them up.
-/// The depth is baked into the membership circuit, so changing it changes every combine VK and
-/// the root.
-pub const MLE_VK_MERKLE_DEPTH: usize = 15;
-
-/// Domain separator for whitelist leaves (distinguishes leaf hashes from every other sponge use).
-pub const VK_MAP_LEAF_DOMAIN: u32 = 0x564B_6D70; // "VKmp"
-
-/// One whitelisted VK identity: (lean pre_hash, merged_preprocessed_commit).
-pub type VkIdentity = ([Kb; 8], [Kb; 8]);
-
-/// The whitelist tree. Levels are stored bottom-up (`levels[0]` = leaves) for path extraction.
+/// The whitelist: its entries, the fixed-depth Merkle tree over them, and a lookup index.
 #[derive(Clone, Debug)]
 pub struct MleVkMap {
     /// The whitelisted identities, in leaf order.
     pub entries: Vec<VkIdentity>,
-    levels: Vec<Vec<[Kb; 8]>>,
+    tree: VkMerkleTree,
     /// Leaf index by identity: the lookup every combine witness performs, once per child.
     index: HashMap<VkIdentity, usize>,
-}
-
-/// Two-to-one Poseidon2 compress: `permute([l ‖ r])[..8]` — the in-circuit
-/// `compress_poseidon2`'s host mirror.
-fn compress(l: [Kb; 8], r: [Kb; 8]) -> [Kb; 8] {
-    let perm = default_koalabear_poseidon2_16();
-    let mut state = [Kb::ZERO; 16];
-    state[..8].copy_from_slice(&l);
-    state[8..].copy_from_slice(&r);
-    perm.permute_mut(&mut state);
-    std::array::from_fn(|i| state[i])
-}
-
-/// Leaf hash of one VK identity.
-pub fn vk_map_leaf(pre_hash: &[Kb; 8], merged_commit: &[Kb; 8]) -> [Kb; 8] {
-    let mut elems = Vec::with_capacity(17);
-    elems.push(Kb::from_u32(VK_MAP_LEAF_DOMAIN));
-    elems.extend_from_slice(pre_hash);
-    elems.extend_from_slice(merged_commit);
-    sponge_hash(&elems)
-}
-
-/// The identity pair of a recursion VK (merged mode). Panics on a non-merged vk — every
-/// whitelisted key is a recursion key.
-pub fn vk_identity(vk: &MultiStarkVerifyingKey<Sc>) -> VkIdentity {
-    (
-        vk.pre_hash,
-        vk.inner
-            .merged_preprocessed_commit
-            .expect("whitelisted VKs are recursion (merged-preprocessed) keys"),
-    )
 }
 
 impl MleVkMap {
@@ -113,37 +68,21 @@ impl MleVkMap {
     ///
     /// Entry count is artifact-controlled, so a load path that must not abort needs this.
     pub fn try_build(entries: Vec<VkIdentity>) -> Result<Self, VkMapError> {
-        let n_slots = 1usize << MLE_VK_MERKLE_DEPTH;
-        if entries.len() > n_slots {
-            return Err(VkMapError::TooManyEntries {
-                entries: entries.len(),
-                slots: n_slots,
-            });
-        }
-        let mut leaves: Vec<[Kb; 8]> = entries.iter().map(|(p, m)| vk_map_leaf(p, m)).collect();
-        leaves.resize(n_slots, [Kb::ZERO; 8]);
-        let mut levels = vec![leaves];
-        for _ in 0..MLE_VK_MERKLE_DEPTH {
-            let prev = levels.last().unwrap();
-            let next: Vec<[Kb; 8]> = prev
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .map(|p| compress(p[0], p[1]))
-                .collect();
-            levels.push(next);
-        }
+        let tree = VkMerkleTree::try_build(&entries).map_err(|e| VkMapError::TooManyEntries {
+            entries: e.entries,
+            slots: e.slots,
+        })?;
         let index = entries.iter().enumerate().map(|(i, e)| (*e, i)).collect();
         Ok(Self {
             entries,
-            levels,
+            tree,
             index,
         })
     }
 
     /// The whitelist root — the per-config trusted constant.
     pub fn root(&self) -> [Kb; 8] {
-        self.levels.last().unwrap()[0]
+        self.tree.root()
     }
 
     /// Leaf index of an identity, if whitelisted.
@@ -158,75 +97,29 @@ impl MleVkMap {
     /// witness generation before the circuit ever sees a bad path.
     #[doc(hidden)]
     pub fn corrupt_paths_for_testing(&mut self) {
-        let depth = self.levels.len() - 1; // keep the root level intact
-        for level in &mut self.levels[..depth] {
-            for node in level.iter_mut() {
-                node[0] += Kb::ONE;
-            }
-        }
+        self.tree.corrupt_paths_for_testing();
     }
 
     /// Merkle path for the leaf at `index`: little-endian index bits and the sibling digest per
     /// level, bottom-up — the witness order the membership circuit consumes.
     pub fn path(&self, index: usize) -> (Vec<bool>, Vec<[Kb; 8]>) {
-        assert!(index < (1 << MLE_VK_MERKLE_DEPTH));
-        let mut bits = Vec::with_capacity(MLE_VK_MERKLE_DEPTH);
-        let mut siblings = Vec::with_capacity(MLE_VK_MERKLE_DEPTH);
-        let mut idx = index;
-        for level in &self.levels[..MLE_VK_MERKLE_DEPTH] {
-            bits.push(idx & 1 == 1);
-            siblings.push(level[idx ^ 1]);
-            idx >>= 1;
-        }
-        (bits, siblings)
+        self.tree.path(index)
     }
 
     /// The entry at `index` with its Merkle path: proof that it is a member, without the rest of
     /// the tree.
     pub fn membership(&self, index: usize) -> VkMembership {
-        let (_, siblings) = self.path(index);
-        VkMembership {
-            identity: self.entries[index],
-            index,
-            siblings,
-        }
+        self.tree.membership(index, self.entries[index])
     }
 }
 
-/// One whitelist member and its Merkle path.
-///
-/// What a verifier outside the prover holds instead of the whole whitelist: an apex only has to
-/// authenticate the ROOT proof's vk (every other key is checked in-circuit against the root), so
-/// the memberships of the keys a root can carry -- the combine and deferred node keys -- stand in
-/// for the 15,680-entry map. They depend on the whitelist only through its root, so a verifier
-/// built on them needs no shape config.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct VkMembership {
-    pub identity: VkIdentity,
-    /// Leaf index; its little-endian bits say on which side each sibling sits.
-    pub index: usize,
-    /// One sibling digest per level, bottom-up, as [`MleVkMap::path`] gives them.
-    pub siblings: Vec<[Kb; 8]>,
-}
+impl VkWhitelist for MleVkMap {
+    fn root(&self) -> [Kb; 8] {
+        self.tree.root()
+    }
 
-impl VkMembership {
-    /// Whether the identity sits at `index` in a tree with this `root`: hash the leaf and fold
-    /// it up the path, the host mirror of the in-circuit membership check.
-    pub fn verifies_against(&self, root: &[Kb; 8]) -> bool {
-        if self.siblings.len() != MLE_VK_MERKLE_DEPTH || self.index >= 1 << MLE_VK_MERKLE_DEPTH {
-            return false;
-        }
-        let mut node = vk_map_leaf(&self.identity.0, &self.identity.1);
-        let mut idx = self.index;
-        for sibling in &self.siblings {
-            node = if idx & 1 == 1 {
-                compress(*sibling, node)
-            } else {
-                compress(node, *sibling)
-            };
-            idx >>= 1;
-        }
-        node == *root
+    fn contains(&self, id: &VkIdentity) -> bool {
+        self.find(id).is_some()
     }
 }
 
@@ -648,55 +541,6 @@ mod tests {
         )
     }
 
-    /// Every path re-verifies against the root with the same leaf/compress functions.
-    #[test]
-    fn paths_verify_against_root() {
-        let map = MleVkMap::build((0..5).map(|i| id(i * 100)).collect());
-        let root = map.root();
-        for (i, (p, m)) in map.entries.clone().iter().enumerate() {
-            let (bits, siblings) = map.path(i);
-            let mut cur = vk_map_leaf(p, m);
-            for (bit, sib) in bits.iter().zip(&siblings) {
-                cur = if *bit {
-                    compress(*sib, cur)
-                } else {
-                    compress(cur, *sib)
-                };
-            }
-            assert_eq!(cur, root, "leaf {i} path does not reconstruct the root");
-        }
-    }
-
-    /// A membership verifies against its own root, and against nothing else: another root, a
-    /// changed sibling, index or identity, or a path of the wrong length all fail.
-    #[test]
-    fn memberships_verify_against_their_root_only() {
-        let map = MleVkMap::build((0..5).map(|i| id(i * 100)).collect());
-        let root = map.root();
-        for i in 0..map.entries.len() {
-            assert!(map.membership(i).verifies_against(&root), "leaf {i}");
-        }
-        let good = map.membership(3);
-        let other_root = MleVkMap::build((0..5).map(|i| id(i * 100 + 1)).collect()).root();
-        assert!(!good.verifies_against(&other_root));
-
-        let mut m = good.clone();
-        m.siblings[7][0] += Kb::ONE;
-        assert!(!m.verifies_against(&root), "changed sibling");
-        let mut m = good.clone();
-        m.index = 2;
-        assert!(!m.verifies_against(&root), "changed index");
-        let mut m = good.clone();
-        m.identity.1[0] += Kb::ONE;
-        assert!(!m.verifies_against(&root), "changed identity");
-        let mut m = good.clone();
-        m.siblings.pop();
-        assert!(!m.verifies_against(&root), "short path");
-        let mut m = good;
-        m.index = 1 << MLE_VK_MERKLE_DEPTH;
-        assert!(!m.verifies_against(&root), "index past the tree");
-    }
-
     /// Every failure an artifact can carry is reported rather than aborting: missing, malformed,
     /// root mismatch, more entries than slots.
     #[test]
@@ -969,13 +813,5 @@ mod tests {
         let b = vec![("Add".to_string(), 21), ("Cpu".to_string(), 23)];
         assert_eq!(shape_content_key(&a), shape_content_key(&b));
         assert_eq!(shape_content_key(&a), "Add:21,Cpu:23");
-    }
-
-    #[test]
-    fn root_is_sensitive_to_entries() {
-        let base = MleVkMap::build(vec![id(0), id(100)]).root();
-        assert_ne!(MleVkMap::build(vec![id(0), id(101)]).root(), base);
-        assert_ne!(MleVkMap::build(vec![id(100), id(0)]).root(), base);
-        assert_ne!(MleVkMap::build(vec![id(0)]).root(), base);
     }
 }

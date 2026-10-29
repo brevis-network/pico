@@ -13,6 +13,8 @@ pico-vm = { path = "../../vm", default-features = false, features = ["rayon", "s
 # The protocol core, for the proof codec and the verifying-key type a stored proof carries.
 # `default-features = false` mirrors `vm/Cargo.toml`: `parallel` reaches it through `pico-vm`.
 pico-mle-core = { path = "../../mle-core", default-features = false }
+# The committed-value binding is the stable verifier's, so the two cannot disagree.
+pico-verifier = { workspace = true, features = ["codec"] }
 # The AOT program registry, for `aot`.
 pico-aot-runtime = { path = "../../aot-runtime", default-features = false, optional = true }
 

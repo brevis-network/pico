@@ -49,6 +49,7 @@ p3-poseidon2.workspace = true
 p3-maybe-rayon.workspace = true
 pico-perf.workspace = true
 pico-sdk.workspace = true
+pico-verifier = { workspace = true, features = ["codec"] }
 pico-vm.workspace = true
 pico-aot-runtime = { workspace = true, optional = true }
 pico-aot-dispatch = { path = "../aot-generated", optional = true }

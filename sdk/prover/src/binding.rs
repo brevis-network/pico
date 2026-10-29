@@ -7,16 +7,13 @@
 use std::borrow::Borrow;
 
 use pico_mle_core::p3_field::{PrimeCharacteristicRing, PrimeField32};
+use pico_verifier::public_values;
 use pico_vm::{
     compiler::word::Word,
-    emulator::{
-        recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP,
-        riscv::{public_values::PublicValues, record::EmulationRecord},
-    },
+    emulator::riscv::{public_values::PublicValues, record::EmulationRecord},
     mle::machine::{air::GCS_DIGEST_LEN, riscv::air_id},
-    primitives::consts::{PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS, RISCV_NUM_PVS, WORD_SIZE},
+    primitives::consts::{PV_DIGEST_NUM_WORDS, RISCV_NUM_PVS, WORD_SIZE},
 };
-use sha2::{Digest, Sha256};
 
 use crate::{
     error::ProveError,
@@ -231,18 +228,9 @@ pub(crate) fn recursion_committed_digest(
     pv_sets: &[Vec<Kb>],
     phase: Phase,
 ) -> Result<[u8; 32], ProveError> {
-    let pvs = pv_sets
-        .iter()
-        .find(|p| p.len() == RECURSION_NUM_PVS)
-        .ok_or_else(|| {
-            ProveError::verification(phase, "proof carries no recursion public values")
-        })?;
-    let col = RECURSION_PUBLIC_VALUES_COL_MAP;
-    digest_at(
-        pvs,
-        col.committed_value_digest.iter().flat_map(|w| w.0),
-        phase,
-    )
+    let refused = |e: pico_verifier::VerifyError| ProveError::verification(phase, e.to_string());
+    let pvs = public_values::recursion_public_values(pv_sets).map_err(refused)?;
+    public_values::committed_value_digest(pvs).map_err(refused)
 }
 
 /// Output bytes [`rebind`] accepted against the digest a proof attests to. Only `rebind` makes
@@ -263,12 +251,7 @@ impl Bound {
 /// An all-zero digest is a guest that never ran the COMMIT ecall: it attests to no output, so the
 /// only bytes it can be paired with are none.
 pub(crate) fn rebind(committed: Vec<u8>, digest: [u8; 32]) -> Result<Bound, ProveError> {
-    let bound = if digest == [0u8; 32] {
-        committed.is_empty()
-    } else {
-        <[u8; 32]>::from(Sha256::digest(&committed)) == digest
-    };
-    if bound {
+    if public_values::committed_values_bound(&committed, &digest) {
         Ok(Bound { committed, digest })
     } else {
         Err(ProveError::CommittedValuesUnbound)
@@ -277,14 +260,18 @@ pub(crate) fn rebind(committed: Vec<u8>, digest: [u8; 32]) -> Result<Bound, Prov
 
 /// The complete-root flag, read before anything expensive runs.
 pub(crate) fn is_complete_root(pv_sets: &[Vec<Kb>]) -> bool {
-    pv_sets
-        .iter()
-        .find(|p| p.len() == RECURSION_NUM_PVS)
-        .is_some_and(|pvs| pvs[RECURSION_PUBLIC_VALUES_COL_MAP.flag_complete] == Kb::ONE)
+    public_values::recursion_public_values(pv_sets)
+        .is_ok_and(|pvs| pvs[public_values::RECURSION_PV_OFFSETS.flag_complete] == Kb::ONE)
 }
 
 #[cfg(test)]
 mod tests {
+    use pico_vm::{
+        emulator::recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP,
+        primitives::consts::RECURSION_NUM_PVS,
+    };
+    use sha2::{Digest, Sha256};
+
     use super::*;
 
     #[test]

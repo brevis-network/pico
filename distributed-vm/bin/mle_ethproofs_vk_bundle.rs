@@ -38,9 +38,10 @@ fn main() -> Result<(), String> {
     let vm_vk = riscv_vm_vk_for_elf(&elf)?;
 
     let bytes = encode_vk_bundle_v2(&vm_vk, &map)?;
-    let decoded = decode_vk_bundle_v2(&bytes)?;
+    let decoded = decode_vk_bundle_v2(&bytes).map_err(|e| e.to_string())?;
     let members = decoded.members.len();
-    apex_from_bundle(decoded)?;
+    // `try_load` pinned the map to `MLE_VK_ROOT` when set, so this is the deployment's root.
+    apex_from_bundle(&decoded, map.root()).map_err(|e| e.to_string())?;
     std::fs::write(&args.out, &bytes).map_err(|e| format!("{}: {e}", args.out.display()))?;
 
     let vm_vk_line: Vec<String> = vm_vk_to_u32s(&vm_vk).iter().map(u32::to_string).collect();
