@@ -4,8 +4,8 @@
 //! - `pipeline-interp`: `emulate_with_pipeline` with the interpreter on the snapshot thread.
 //! - `pipeline-aot`: the same with the generated code on the snapshot thread, so the two pipeline
 //!   arms differ in that alone: the same options and the same `--workers`.
-//! - `execute-default`, `execute-aot`: `Prover::execute`, the emulation `prove_to` runs, from the
-//!   builders the two prove arms use.
+//! - `execute-default`, `execute-aot`: `Prover::execute`, which runs the snapshot pipeline without
+//!   a witness, from the builders the two prove arms use.
 //! - `prove-default`: `Prover::prove_to` from a builder without `aot`, which emulates through
 //!   `emulate_with_opts`.
 //! - `prove-aot`: the same with `aot`, and `emulation_workers(--workers)` unless `--workers
@@ -475,7 +475,8 @@ fn through_prover(args: &Args, elf: &[u8]) -> Result<Measured, String> {
     DISPATCHES.store(0, Ordering::Relaxed);
 
     let mut measured = Measured {
-        workers: prover.emulation_workers(),
+        // `prove-default` on the CPU emulates with one interpreter; the other arms run the pipeline.
+        workers: (!matches!(args.arm, Arm::ProveDefault)).then(|| prover.emulation_workers()),
         chunk_size,
         timed: "",
         wall: Duration::ZERO,
