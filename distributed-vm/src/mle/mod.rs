@@ -21,6 +21,7 @@ pub mod two_machine;
 mod watch;
 
 use std::{
+    fmt,
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -79,7 +80,7 @@ use crate::common::{
     global_scheduler::GlobalScheduler,
     machine_role::{get_worker_label, set_mle_chunk_assignment_defaults},
     mle_scheduler_singleton::{
-        get_mle_scheduler, is_mle_secondary, mle_acquire_task_unified_async,
+        get_mle_scheduler, is_mle_secondary, mle_abort_run, mle_acquire_task_unified_async,
         mle_finalize_emulation, mle_register_chunk, mle_report_chunk_terminal,
         mle_report_gcs_digest, reset_mle_scheduler, MleAcquireResult,
     },
@@ -152,6 +153,28 @@ pub struct BlockOutcome {
     /// The bytes the guest committed, from the emulation. Bound to a proof only by the root's
     /// `committed_value_digest`, which a verifier checks.
     pub committed: Vec<u8>,
+    /// Embedded runs only: the guest's emulation failed, and the run was drained rather than
+    /// proved. Nothing it held is left behind, so the next block proves normally.
+    pub guest_failure: Option<GuestFailure>,
+}
+
+/// Why a guest ended an embedded run early: its emulation, not the provers, failed.
+#[derive(Debug)]
+pub enum GuestFailure {
+    /// The emulator's own error: a non-zero exit, a limit, a bad syscall, short stdin.
+    Emulation(pico_vm::emulator::riscv::emulator::EmulationError),
+    /// The emulation panicked before any other pipeline thread had failed. Any emulator panic
+    /// counts, a host-side emulator bug included: it ends the run without poisoning.
+    Panicked(String),
+}
+
+impl fmt::Display for GuestFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Emulation(e) => write!(f, "{e}"),
+            Self::Panicked(message) => write!(f, "the emulation panicked: {message}"),
+        }
+    }
 }
 
 /// The combine root, packaged so somebody else can verify it.
@@ -2215,12 +2238,16 @@ fn run_pipeline(
     // `NUM_THREADS > 1` in the emulator — so it is the stamp that downstream restores order from.
     // Where the stamp comes from is at the send below.
     let (record_tx, record_rx) = crossbeam::channel::unbounded::<(usize, EmulationRecord)>();
+    // Set once the guest's emulation fails in an embedded run: the run drains instead of proving.
+    let guest_failed = Arc::new(AtomicBool::new(false));
     let emulator_opts = embedded
         .map(|e| e.emulator_opts)
         .unwrap_or_else(EmulatorOpts::bench_riscv_ops);
     let emulation_workers = embedded.map(|e| e.emulation_workers);
     let emulate_handle = {
         let program = program.clone();
+        let guest_failed = Arc::clone(&guest_failed);
+        let embedded_run = embedded.is_some();
         thread::Builder::new()
             .name("mle-emulate".into())
             .spawn_watched(move || {
@@ -2234,7 +2261,7 @@ fn run_pipeline(
             let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<KoalaBear>, Vec<u8>>::
                 setup_for_mle_riscv(program, stdin, emulator_opts);
             vram_probe("emu_witness", iteration.unwrap_or(0), prover_count);
-            let (emulated_cycles, committed) = {
+            let emulated = {
                 let corrupted = Arc::clone(&corrupted);
                 let on_record = move |mut record: EmulationRecord, _done: bool| {
                     // Nothing downstream will take it: end the emulation rather than run on.
@@ -2256,30 +2283,50 @@ fn run_pipeline(
                     record_tx.send((seq, record)).expect("preparer hung up");
                 };
                 // The embedded entry states its replay workers; the CLI reads `NUM_THREADS`.
-                let (_reports, total_cycles, pv_stream) = match emulation_workers {
-                    Some(workers) => emulate_snapshot_pipeline_with(
-                        &witness,
-                        workers,
-                        DeferredSplit::FromChunk16,
-                        on_record,
-                    ),
-                    None => emulate_snapshot_pipeline(&witness, on_record),
-                }
-                .expect("snapshot pipeline failed");
+                let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    match emulation_workers {
+                        Some(workers) => emulate_snapshot_pipeline_with(
+                            &witness,
+                            workers,
+                            DeferredSplit::FromChunk16,
+                            on_record,
+                        ),
+                        None => emulate_snapshot_pipeline(&witness, on_record),
+                    }
+                }));
                 // record_tx drops here → the preparer sees the end of the stream.
                 //
                 // The cycle count used to go with it: the whole tuple was discarded by the
                 // `.expect`, and ethproofs requires `proving_cycles` on every submission, so there
                 // was no way to fill that field without re-emulating the block.
-                (total_cycles, pv_stream)
+                match run {
+                    Ok(Ok((_reports, total_cycles, pv_stream))) => Ok((total_cycles, pv_stream)),
+                    // An embedded caller gets the guest's failure back and the run drains; the
+                    // CLI still stops on it.
+                    Ok(Err(e)) if embedded_run => Err(GuestFailure::Emulation(e)),
+                    Ok(Err(e)) => panic!("snapshot pipeline failed: {e:?}"),
+                    // A panic is the emulation's own unless another pipeline thread failed first.
+                    Err(payload) if embedded_run && !watch::failed() => Err(
+                        GuestFailure::Panicked(watch::panic_message(&*payload)),
+                    ),
+                    Err(payload) => std::panic::resume_unwind(payload),
+                }
             };
-            if corrupt_memory && !corrupted.load(Ordering::Relaxed) {
+            let (emulated_cycles, committed, failure) = match emulated {
+                Ok((cycles, committed)) => (cycles, committed, None),
+                Err(failure) => {
+                    guest_failed.store(true, Ordering::SeqCst);
+                    mle_abort_run();
+                    (0, Vec::new(), Some(failure))
+                }
+            };
+            if corrupt_memory && failure.is_none() && !corrupted.load(Ordering::Relaxed) {
                 panic!(
                     "CORRUPT_MEMORY: no pass-through cell found to tamper; negative test could not run"
                 );
             }
             vram_probe("emu_end", iteration.unwrap_or(0), prover_count);
-            (t.elapsed(), emulated_cycles, committed)
+            (t.elapsed(), emulated_cycles, committed, failure)
         })
         .expect("spawn mle-emulate")
     };
@@ -2326,6 +2373,7 @@ fn run_pipeline(
             let record_rx = record_rx.clone();
             let store = Arc::clone(&store);
             let shaper = Arc::clone(&provers[0]);
+            let guest_failed = Arc::clone(&guest_failed);
             hs.push(
                 thread::Builder::new()
                     .name(format!("mle-riscv-preparer-{pidx}"))
@@ -2338,6 +2386,10 @@ fn run_pipeline(
                         {
                             if watch::failed() {
                                 break;
+                            }
+                            // A drained run: drop the record, which returns its event buffers.
+                            if guest_failed.load(Ordering::SeqCst) {
+                                continue;
                             }
                             // This lane has no `Wait`: `prepare_chunk` takes no gate (`:505-506`
                             // records that it allocates no device memory) and its downstream is
@@ -3045,7 +3097,8 @@ fn run_pipeline(
     drop(combine_task_tx);
     drop(combine_ready_rxs);
 
-    let (emulate_wall, emulated_cycles, committed) = watch::join(emulate_handle, "emulate thread");
+    let (emulate_wall, emulated_cycles, committed, guest_failure) =
+        watch::join(emulate_handle, "emulate thread");
     vram_probe("emulate_joined", iteration.unwrap_or(0), prover_count);
     let (chunk_count, prepare_wall) = watch::join(preparer_handle, "preparer thread");
     vram_probe("after_preparer", iteration.unwrap_or(0), prover_count);
@@ -3054,6 +3107,36 @@ fn run_pipeline(
         emulate_wall.as_secs_f64(),
         prepare_wall.as_secs_f64(),
     );
+
+    // The guest failed: the scheduler is aborted, so every lane drains and exits. Join them all,
+    // then drop what the run prepared and the cross-chunk sums it accumulated, so the resident
+    // machines and the event pools serve the next block as if this one never ran.
+    if let Some(failure) = guest_failure {
+        for h in workers {
+            watch::join(h, "worker thread");
+        }
+        #[cfg(feature = "cuda")]
+        {
+            if let Some(pb) = convert_prebuild.as_ref() {
+                pb.shutdown();
+            }
+            for h in convert_stage {
+                watch::join(h, "convert stage thread");
+            }
+            for h in combine_stage {
+                watch::join(h, "combine preparer thread");
+            }
+        }
+        store.clear();
+        let _ = RiscvMachine::drain_cross_chunk_gcs_over(provers.iter().map(|p| p.as_ref()));
+        info!("MLE run drained after the guest failed: {failure}");
+        return BlockOutcome {
+            cycles: emulated_cycles,
+            committed,
+            guest_failure: Some(failure),
+            ..Default::default()
+        };
+    }
 
     // Nothing to prove (degenerate empty program): the scheduler never completes with zero
     // chunks, so return without joining the workers — process exit reaps them.
@@ -3453,6 +3536,7 @@ fn run_pipeline(
         root_accept,
         root: root_export,
         committed,
+        guest_failure: None,
     }
 }
 

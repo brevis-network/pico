@@ -161,6 +161,9 @@ pub struct GlobalScheduler<P: Clone + Send + Sync> {
     /// How long a waiter sleeps between its own queue checks: `WAIT_SLICE`, except in tests.
     wait_slice: Duration,
 
+    /// Set by [`Self::abort`]: the run is being drained, so nothing more is handed out or kept.
+    aborted: AtomicBool,
+
     #[cfg(test)]
     test_hook: Mutex<Option<TestHook>>,
 }
@@ -186,6 +189,7 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
             proven_chunks: Mutex::new(BTreeSet::new()),
             no_combine: AtomicBool::new(false),
             wait_slice: WAIT_SLICE,
+            aborted: AtomicBool::new(false),
             #[cfg(test)]
             test_hook: Mutex::new(None),
         }
@@ -239,6 +243,9 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
     /// when all chunks are in. Mirrors the no-combine branch of `report_proof` (which drops the
     /// proof anyway) but takes no proof, so the FRI riscv `BaseProof` need not be lifted to `P`.
     pub fn report_chunk_terminal(&self, chunk_idx: usize) {
+        if self.is_aborted() {
+            return;
+        }
         self.in_flight.fetch_sub(1, Ordering::SeqCst);
         self.chunks_proven.fetch_add(1, Ordering::SeqCst);
         self.proven_chunks.lock().insert(chunk_idx);
@@ -254,8 +261,25 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
         }
     }
 
+    /// Ends the current block without a result: waiters and later acquires get `Complete`, and
+    /// chunks or proofs that still arrive are dropped, so every lane drains and exits. `reset`
+    /// clears it for the next block.
+    pub fn abort(&self) {
+        self.aborted.store(true, Ordering::SeqCst);
+        self.completed.store(true, Ordering::SeqCst);
+        info!("GlobalScheduler: run aborted");
+        self.wake_all_waiters_complete();
+    }
+
+    fn is_aborted(&self) -> bool {
+        self.aborted.load(Ordering::SeqCst)
+    }
+
     /// Register a chunk during emulation (called by Primary only)
     pub fn register_chunk(&self, chunk_idx: usize) {
+        if self.is_aborted() {
+            return;
+        }
         // De-duplicate
         let mut registered = self.registered_chunks.lock();
         if registered.contains(&chunk_idx) {
@@ -596,6 +620,11 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
                 worker_id: worker_id.to_string(),
                 sender: tx,
             });
+            // Completion (or `abort`) may have woken the waiters between the first check and
+            // this registration: drop our sender so the receiver resolves to `Complete` now.
+            if self.completed.load(Ordering::SeqCst) {
+                waiters.pop_back();
+            }
             info!(
                 "GlobalScheduler: {} registered as waiter (queue len={})",
                 worker_id,
@@ -683,6 +712,11 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
         let Some(pos) = waiters.iter().position(|w| w.id == waiter_id) else {
             return Recheck::Resolved;
         };
+        // Completed without waking this waiter: dropping its sender resolves it to `Complete`.
+        if self.completed.load(Ordering::SeqCst) {
+            waiters.remove(pos);
+            return Recheck::Resolved;
+        }
         match self.try_acquire_queued_task_only(worker_id) {
             Some(task) => {
                 waiters.remove(pos);
@@ -694,6 +728,9 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
 
     /// Returns the combine task if a new one is generated
     pub fn report_proof(&self, proof: IndexedProof<P>, worker_id: &str) -> Option<CombineTask<P>> {
+        if self.is_aborted() {
+            return None;
+        }
         // No-combine mode: chunk proofs are terminal. Retain the proof as a standalone leaf,
         // count it, and complete when all chunks are proven — never generate combine tasks.
         if self.no_combine.load(Ordering::SeqCst) {
@@ -892,7 +929,8 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
     /// and the queue has handed the last one out. Chunks already in flight do not count -- this is
     /// about the feed, not about what is still being proven.
     pub fn chunk_feed_closed(&self) -> bool {
-        self.emulation_done.load(Ordering::SeqCst) && self.chunk_queue.lock().is_empty()
+        self.is_aborted()
+            || (self.emulation_done.load(Ordering::SeqCst) && self.chunk_queue.lock().is_empty())
     }
 
     /// Check if a specific block is complete
@@ -944,6 +982,7 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
         self.chunks_proven.store(0, Ordering::SeqCst);
         self.total_chunks.store(0, Ordering::SeqCst);
         self.in_flight.store(0, Ordering::SeqCst);
+        self.aborted.store(false, Ordering::SeqCst);
         // Waiters must already be drained: report_proof's wake_all_waiters_complete()
         // empties the queue at block completion, and entry checks (`is_complete` /
         // `is_complete_for_block`) reject new acquires until the next block starts.

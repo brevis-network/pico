@@ -46,6 +46,11 @@ pub fn size_cpu_event_buffer_pool(
     CpuEventPoolManager::size_pool(pool_size, capacity, pinning, flags);
 }
 
+/// Buffers the global CPU event pool has lent out and not had back; `None` before any init.
+pub fn cpu_event_buffers_outstanding() -> Option<usize> {
+    CpuEventPoolManager::outstanding()
+}
+
 /// Events per buffer of the global CPU event pool, or the environment's default before one exists.
 pub fn cpu_event_buffer_capacity() -> usize {
     CpuEventPoolManager::buffer_capacity().unwrap_or(*CPU_EVENT_BUFFER_CAPACITY)

@@ -352,8 +352,9 @@ fn switching_programs_rebuilds_the_machines_without_growing() {
     );
 }
 
-/// A failed GPU prove poisons the process: the next prove is refused with a clear error rather
-/// than hanging or panicking on the leftover pipeline state. Runs in a child process, since the
+/// A pipeline failure that is not the guest's poisons the process: the next prove is refused with
+/// a clear error rather than hanging or panicking on the leftover pipeline state. The failure is
+/// `CORRUPT_MEMORY`'s tampered record, which no proof can close. Runs in a child process, since the
 /// poisoning outlives the test.
 #[test]
 #[ignore = "needs a GPU"]
@@ -362,18 +363,105 @@ fn a_failed_gpu_prove_poisons_later_proves() {
         run_child(
             "tests::gpu::a_failed_gpu_prove_poisons_later_proves",
             POISON_MARKER,
-            &[(CHILD_VAR, "1".to_string())],
+            &[
+                (CHILD_VAR, "1".to_string()),
+                ("CORRUPT_MEMORY", "1".to_string()),
+            ],
         );
         return;
     }
 
-    // This guest halts with exit code 1 on fib's input.
-    let mut failing = whitelist_prover(OTHER_ELF);
     let mut fib = whitelist_prover(FIB_ELF);
-    let first = failing.prove(Stdin::from(&N)).expect_err("a failing guest");
+    let first = fib.prove(Stdin::from(&N)).expect_err("a tampered run");
     assert!(matches!(first, ProveError::Gpu(_)), "got {first}");
 
     let second = fib.prove(Stdin::from(&N)).expect_err("a poisoned process");
     assert!(matches!(second, ProveError::GpuPoisoned), "got {second}");
     println!("{POISON_MARKER}");
+}
+
+const GUEST_CHILD_VAR: &str = "PICO_PROVER_GPU_GUEST_FAILURE_CHILD";
+const GUEST_MARKER: &str = "[gpu] a failing guest left the process able to prove";
+
+/// A guest whose emulation fails is an ordinary error on the GPU path too: the run drains, every
+/// pooled event buffer and emulator memory comes back, and the next prove in the process works.
+/// The same program on bad input, as a caller retrying with fixed input would see it, so the
+/// resident machines and their per-run state carry over; then another program's failure. In a
+/// child process, so no earlier test's pools or poisoning are in the way.
+#[test]
+#[ignore = "needs a GPU"]
+fn a_failing_guest_leaves_the_process_able_to_prove() {
+    use pico_vm::{
+        emulator::riscv::{
+            alu_event_pool::alu_event_buffers_outstanding,
+            cpu_event_pool::cpu_event_buffers_outstanding, emulator::EmulationError,
+            memory::memory_pool_free,
+        },
+        mle::machine::riscv::EmulateError,
+    };
+
+    if std::env::var(GUEST_CHILD_VAR).is_err() {
+        run_child(
+            "tests::gpu::a_failing_guest_leaves_the_process_able_to_prove",
+            GUEST_MARKER,
+            &[(GUEST_CHILD_VAR, "1".to_string())],
+        );
+        return;
+    }
+
+    // Free emulator memories once the recyclers have put back what a run used: unchanged for a
+    // second, and at least `at_least`.
+    let settled_memory_pool = |at_least: usize| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let mut last = memory_pool_free();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            let now = memory_pool_free();
+            if (now == last && now >= at_least) || std::time::Instant::now() > deadline {
+                return now;
+            }
+            last = now;
+        }
+    };
+    let assert_drained = |baseline: usize| {
+        assert_eq!(cpu_event_buffers_outstanding(), Some(0));
+        assert_eq!(alu_event_buffers_outstanding(), Some(0));
+        let free = settled_memory_pool(baseline);
+        assert!(free >= baseline, "{free} memories free, {baseline} before");
+    };
+    let mut fib = whitelist_prover(FIB_ELF);
+    let proof = fib.prove(Stdin::from(&N)).expect("fib");
+    assert_is_fib_output(proof.committed().as_bytes(), N);
+    let baseline = settled_memory_pool(0);
+
+    for _ in 0..2 {
+        // Fib reads its input, and there is none.
+        let err = fib.prove(Stdin::new()).expect_err("fib without its input");
+        assert!(
+            matches!(err, ProveError::Emulate(EmulateError::Emulation(_))),
+            "got {err}"
+        );
+        assert_drained(baseline);
+        let proof = fib.prove(Stdin::from(&N)).expect("fib after a failing run");
+        assert_is_fib_output(proof.committed().as_bytes(), N);
+    }
+
+    // Another program, which halts with exit code 1 on fib's input.
+    let mut failing = whitelist_prover(OTHER_ELF);
+    let err = failing.prove(Stdin::from(&N)).expect_err("a failing guest");
+    assert!(
+        matches!(
+            err,
+            ProveError::Emulate(EmulateError::Emulation(
+                EmulationError::HaltWithNonZeroExitCode(_)
+            ))
+        ),
+        "got {err}"
+    );
+    assert_drained(baseline);
+    let proof = fib
+        .prove(Stdin::from(&N))
+        .expect("fib after another guest failed");
+    assert_is_fib_output(proof.committed().as_bytes(), N);
+    println!("{GUEST_MARKER}");
 }

@@ -275,6 +275,13 @@ impl<T: std::fmt::Debug> EventPool<T> {
         self.pool_size
     }
 
+    /// Buffers lent out and not yet returned.
+    pub fn outstanding(&self) -> usize {
+        self.pinned
+            .load(Ordering::Acquire)
+            .saturating_sub(self.receiver.len())
+    }
+
     /// Drain and drop all buffers currently in the pool.
     /// Outstanding buffers held by other threads will be dropped when they go out of scope.
     pub fn shutdown(&self) {
@@ -666,6 +673,8 @@ pub trait EventPoolManager<T> {
     fn pool_size() -> Option<usize>;
     /// The current pool's events per buffer; `None` before any init.
     fn buffer_capacity() -> Option<usize>;
+    /// The current pool's buffers lent out and not yet returned; `None` before any init.
+    fn outstanding() -> Option<usize>;
     fn get_buffer() -> Option<EventBuffer<T>>;
     fn return_buffer(buffer: EventBuffer<T>);
     fn shutdown_pool();
@@ -761,6 +770,10 @@ macro_rules! create_event_pool_manager {
 
             fn buffer_capacity() -> Option<usize> {
                 current_pool().map(|p| p.buffer_capacity())
+            }
+
+            fn outstanding() -> Option<usize> {
+                current_pool().map(|p| p.outstanding())
             }
 
             fn get_buffer() -> Option<$crate::emulator::riscv::event_pool::EventBuffer<$event_type>>

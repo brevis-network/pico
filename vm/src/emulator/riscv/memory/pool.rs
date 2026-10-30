@@ -106,6 +106,11 @@ pub static GLOBAL_MEMORY_POOL: Lazy<(
     (tx, rx)
 });
 
+/// Memories waiting in the pool, ready to hand out.
+pub fn memory_pool_free() -> usize {
+    GLOBAL_MEMORY_POOL.1.len()
+}
+
 /// Eagerly initialize the memory pool and recycler threads.
 /// Safe to call multiple times.
 pub fn init_memory_pool() {

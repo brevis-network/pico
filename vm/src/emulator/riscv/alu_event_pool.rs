@@ -56,6 +56,11 @@ pub fn size_alu_event_buffer_pool(
     AluEventPoolManager::size_pool(pool_size, capacity, pinning, flags);
 }
 
+/// Buffers the global ALU event pool has lent out and not had back; `None` before any init.
+pub fn alu_event_buffers_outstanding() -> Option<usize> {
+    AluEventPoolManager::outstanding()
+}
+
 /// Events per buffer of the global ALU event pool, or the environment's default before one exists.
 pub fn alu_event_buffer_capacity() -> usize {
     AluEventPoolManager::buffer_capacity().unwrap_or(*ALU_EVENT_BUFFER_CAPACITY)

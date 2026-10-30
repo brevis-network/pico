@@ -92,6 +92,9 @@ pub enum EmbedError {
         host_bytes: u64,
     },
     NoRoot,
+    /// The guest's emulation failed, or the emulator panicked (a host-side emulator bug
+    /// included). The run was drained, and the process can prove again.
+    Guest(super::GuestFailure),
     Panicked(String),
     /// An earlier call failed and may have left the pipeline's threads and scheduler mid-run.
     Poisoned,
@@ -124,6 +127,7 @@ impl fmt::Display for EmbedError {
                 *host_bytes as f64 / (1u64 << 30) as f64,
             ),
             Self::NoRoot => write!(f, "the pipeline produced no root proof"),
+            Self::Guest(failure) => write!(f, "the guest failed: {failure}"),
             Self::Panicked(msg) => write!(f, "GPU proving failed: {msg}"),
             Self::Poisoned => write!(
                 f,
@@ -202,14 +206,16 @@ pub struct EmbeddedProof {
     pub cycles: u64,
 }
 
-/// Set once a pipeline run fails: the run can leave worker threads and scheduler state behind,
-/// so the process proves nothing more.
+/// Set once a pipeline run fails other than by its guest (a device error, a panicking stage, no
+/// root): the run can leave worker threads and scheduler state behind, so the process proves
+/// nothing more.
 #[cfg(feature = "cuda")]
 static POISONED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Proves `program` on `stdin` to one complete whitelist-mode root on all visible cards, and
-/// verifies it with the apex before returning. One call at a time per process; after a failed
-/// pipeline run every later call returns [`EmbedError::Poisoned`].
+/// verifies it with the apex before returning. One call at a time per process. A guest whose
+/// emulation fails returns [`EmbedError::Guest`] and leaves the process able to prove; after any
+/// other failed run every later call returns [`EmbedError::Poisoned`].
 ///
 /// The memory tier is latched as [`init_memory_tier`] does; a caller that emulates before its
 /// first call should run that first.
@@ -249,6 +255,10 @@ pub fn prove(
             return Err(EmbedError::Panicked(super::watch::panic_message(&*payload)));
         }
     };
+    // The guest failed and the run drained cleanly: the process can prove again.
+    if let Some(failure) = outcome.guest_failure.take() {
+        return Err(EmbedError::Guest(failure));
+    }
     let Some(root) = outcome.root.take() else {
         POISONED.store(true, std::sync::atomic::Ordering::Release);
         return Err(EmbedError::NoRoot);
