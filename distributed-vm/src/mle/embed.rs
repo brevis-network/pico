@@ -40,7 +40,7 @@ pub struct EmbeddedProgram {
 
 /// [`EmbeddedProgram::event_pool_size`]'s default. The entry pins buffers on demand, so a small
 /// guest pins only the few it uses; a reth block pins up to all 32. Each in-flight chunk holds one
-/// CPU and two ALU buffers.
+/// CPU and two ALU buffers, and the pipeline lets replay run only as far ahead as the pools hold.
 pub const DEFAULT_EVENT_POOL_SIZE: NonZeroUsize = NonZeroUsize::new(32).unwrap();
 
 /// The most of the host's memory the event pools may pin; the rest is the emulation's and the
@@ -83,6 +83,8 @@ pub enum EmbedError {
     WhitelistRootMismatch,
     /// An earlier emulation latched another memory tier than the cards need.
     TierLatched(TierAlreadySet),
+    /// The event pools cannot hold one chunk's replay segments, so the run could not finish.
+    EventPoolTooSmall(String),
     /// The event pools would pin more of the host's memory than [`MAX_PINNED_EVENT_FRACTION`].
     EventPoolTooLarge {
         pool_size: usize,
@@ -109,6 +111,7 @@ impl fmt::Display for EmbedError {
                 write!(f, "the whitelist does not carry the trusted root")
             }
             Self::TierLatched(e) => write!(f, "{e}"),
+            Self::EventPoolTooSmall(why) => write!(f, "{why}; raise the event pool size"),
             Self::EventPoolTooLarge {
                 pool_size,
                 pinned_bytes,
@@ -257,10 +260,16 @@ pub fn prove(
     })
 }
 
-/// Refuses event pools that would pin more than [`MAX_PINNED_EVENT_FRACTION`] of the host: up
-/// front, where a refusal poisons nothing.
+/// Refuses event pools too small for one chunk's replay segments, or that would pin more than
+/// [`MAX_PINNED_EVENT_FRACTION`] of the host: up front, where a refusal poisons nothing.
 #[cfg(feature = "cuda")]
 fn check_pinned_memory(program: &EmbeddedProgram) -> Result<(), EmbedError> {
+    use pico_vm::proverchain::riscv::{chunk_segments, event_pool_refusal};
+    let pool = Some(program.event_pool_size.get());
+    let segments = chunk_segments(program.emulator_opts.snapshot_main);
+    if let Some(error) = event_pool_refusal(pool, pool, segments) {
+        return Err(EmbedError::EventPoolTooSmall(error.to_string()));
+    }
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
     // A container's limit, where there is one, is the host it gets.

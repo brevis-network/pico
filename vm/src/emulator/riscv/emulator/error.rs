@@ -84,4 +84,17 @@ pub enum EmulationError {
     /// would wait on the pool forever. Refused before any thread starts, for the same reason.
     #[error("the snapshot pipeline would wait on its memory pool forever: {0}")]
     PipelineMemoryPool(String),
+
+    /// The pooled event buffers cannot hold one chunk's replay segments, which take a CPU buffer
+    /// and two ALU buffers each until the chunk is folded.
+    #[error(
+        "the snapshot pipeline needs {segments} pooled CPU and {} ALU event buffers to replay a \
+         chunk in {segments} segment(s), got {cpu} and {alu}",
+        2 * segments
+    )]
+    EventPoolTooSmall {
+        cpu: usize,
+        alu: usize,
+        segments: usize,
+    },
 }

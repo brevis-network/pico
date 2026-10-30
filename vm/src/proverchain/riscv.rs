@@ -284,6 +284,72 @@ impl RunControl {
     }
 }
 
+/// Keeps replay within a window of the sequencer's in-order point when event buffers are pooled.
+///
+/// From `DYNAMIC_CHUNK_START` on, the sequencer holds a finished chunk until every earlier one is
+/// in, and a held record keeps its pooled buffers. Unbounded run-ahead lets those records and the
+/// replays past them take the whole pool while the chunk everyone waits on still needs a buffer.
+/// Only chunks `[next, next + window)` may replay, `window` being as many records as the pools hold,
+/// so the lowest unfinished chunk can always complete. A split chunk's segments each hold buffers
+/// until folded, which the window does not count; the AOT split replay is off unless its
+/// environment variables ask for it.
+struct RunAhead {
+    next: Mutex<u32>,
+    moved: std::sync::Condvar,
+    window: Option<u32>,
+}
+
+impl RunAhead {
+    fn new() -> Self {
+        Self {
+            next: Mutex::new(0),
+            moved: std::sync::Condvar::new(),
+            window: pooled_records(),
+        }
+    }
+
+    fn advance(&self, next: u32) {
+        if self.window.is_some() {
+            *self.next.lock().unwrap_or_else(PoisonError::into_inner) = next;
+            self.moved.notify_all();
+        }
+    }
+
+    /// Waits until `batch` is inside the window, or the run has failed.
+    fn admit(&self, batch: u32, run: &RunControl) {
+        let Some(window) = self.window else { return };
+        let mut next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
+        while batch >= next.saturating_add(window) && !run.is_aborted() {
+            next = self
+                .moved
+                .wait_timeout(next, std::time::Duration::from_millis(50))
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+    }
+}
+
+/// How many records the fixed event pools can hold at once (a record takes one CPU buffer and two
+/// ALU buffers, `add_sub_events` and `lt_events`); `None` when buffers are growable.
+fn pooled_records() -> Option<u32> {
+    use crate::emulator::riscv::{
+        alu_event_pool::alu_event_buffer_pool_size, cpu_event_pool::cpu_event_buffer_pool_size,
+        event_pool::growable,
+    };
+    if growable() {
+        return None;
+    }
+    let cpu = cpu_event_buffer_pool_size().filter(|&n| n > 0);
+    let alu = alu_event_buffer_pool_size()
+        .filter(|&n| n > 0)
+        .map(|n| n / 2);
+    let records = match (cpu, alu) {
+        (None, None) => return None,
+        (cpu, alu) => cpu.unwrap_or(usize::MAX).min(alu.unwrap_or(usize::MAX)),
+    };
+    Some(records.clamp(1, u32::MAX as usize) as u32)
+}
+
 type WorkerEmulator<SC, C> = MetaEmulator<SC, C, Program, Vec<u8>, RiscvEmulator>;
 
 /// A worker's emulator for the length of one replay, whose memory is released if the replay does
@@ -502,6 +568,19 @@ pub fn check_pipeline(
             cores,
         });
     }
+    if !crate::emulator::riscv::event_pool::growable() {
+        use crate::emulator::riscv::{
+            alu_event_pool::alu_event_buffer_pool_size, cpu_event_pool::cpu_event_buffer_pool_size,
+        };
+        let segments = chunk_segments(snapshot_main);
+        if let Some(error) = event_pool_refusal(
+            cpu_event_buffer_pool_size(),
+            alu_event_buffer_pool_size(),
+            segments,
+        ) {
+            return Err(error);
+        }
+    }
     let segments = pooled_segments(snapshot_main);
     let pooled = segments.map(|segments| (workers.get(), segments));
     if let Some((workers, segments)) = pooled {
@@ -511,6 +590,28 @@ pub fn check_pipeline(
         Some(reason) => Err(EmulationError::PipelineMemoryPool(reason)),
         None => Ok(()),
     }
+}
+
+/// Replay segments per chunk of a run whose snapshot thread is `snapshot_main`: more than one only
+/// where the AOT split replay cuts the leading chunks.
+pub fn chunk_segments(snapshot_main: SnapshotMainMode) -> usize {
+    pooled_segments(snapshot_main).unwrap_or(1)
+}
+
+/// Why event pools of `cpu` and `alu` buffers could hang a run whose chunks replay in `segments`,
+/// if they could: each segment holds a CPU buffer and two ALU buffers until the chunk is folded,
+/// which the run-ahead window does not count. `None` or `0` is an unpooled side, never short.
+pub fn event_pool_refusal(
+    cpu: Option<usize>,
+    alu: Option<usize>,
+    segments: usize,
+) -> Option<EmulationError> {
+    let short = |pool: Option<usize>, need: usize| pool.is_some_and(|n| n > 0 && n < need);
+    (short(cpu, segments) || short(alu, 2 * segments)).then(|| EmulationError::EventPoolTooSmall {
+        cpu: cpu.unwrap_or(0),
+        alu: alu.unwrap_or(0),
+        segments,
+    })
 }
 
 /// How many pool memories each batch of a run takes, if its snapshot memories come from the pool:
@@ -670,6 +771,7 @@ where
     let mut pv_stream: Vec<u8> = Vec::new();
     let reports = Mutex::new(Vec::new());
     let run = RunControl::default();
+    let run_ahead = RunAhead::new();
 
     // One batch on worker `tid`. The emulator in `slot` is reused across batches; the replay owns
     // it meanwhile and only hands it back if the batch completes.
@@ -817,6 +919,7 @@ where
         let _lane = spans::idle(WorkKind::Unattributed);
         let mut slot = None;
         while let Ok(snapshot) = snap_rx.recv() {
+            run_ahead.admit(snapshot.0.batch as u32, &run);
             if run.is_aborted() {
                 release(snapshot.1.memory, pooled);
                 continue;
@@ -837,6 +940,7 @@ where
         spawn_named(s, "mle-sequencer", {
             let shared_ds = Arc::clone(&shared_ds);
             let run = &run;
+            let run_ahead = &run_ahead;
             let handle_record = &handle_record;
             let collector = &collector;
             move || {
@@ -1005,6 +1109,7 @@ where
                             }
                             next += 1;
                         }
+                        run_ahead.advance(next);
                     });
                 }
             }
@@ -1274,6 +1379,47 @@ mod tests {
             "child ran no assertion; is the test name still its path?\n{}",
             tail(&stdout)
         );
+    }
+
+    /// A chunk's segments together need a CPU buffer and two ALU buffers each; pools that cannot
+    /// hold them are refused, and unpooled sides are never short.
+    #[test]
+    fn event_pools_that_cannot_hold_a_split_chunk_are_refused() {
+        assert!(event_pool_refusal(Some(2), Some(2), 1).is_none());
+        assert!(event_pool_refusal(Some(1), Some(1), 1).is_some());
+        assert!(event_pool_refusal(Some(3), Some(3), 2).is_some());
+        assert!(event_pool_refusal(Some(2), Some(4), 2).is_none());
+        assert!(event_pool_refusal(Some(1), Some(4), 2).is_some());
+        assert!(event_pool_refusal(None, Some(0), 4).is_none());
+        let message = event_pool_refusal(Some(3), Some(3), 2).unwrap().to_string();
+        assert!(message.contains("2 pooled CPU and 4 ALU"), "{message}");
+    }
+
+    /// A replay past the window waits until the sequencer moves `next`, so the records it holds
+    /// cannot take the buffers the lowest unfinished chunk needs.
+    #[test]
+    fn replay_waits_inside_the_run_ahead_window() {
+        let run_ahead = RunAhead {
+            next: Mutex::new(0),
+            moved: std::sync::Condvar::new(),
+            window: Some(2),
+        };
+        let run = RunControl::default();
+        run_ahead.admit(1, &run);
+        let admitted = std::sync::atomic::AtomicBool::new(false);
+        thread::scope(|s| {
+            s.spawn(|| {
+                run_ahead.admit(2, &run);
+                admitted.store(true, Ordering::SeqCst);
+            });
+            thread::sleep(Duration::from_millis(200));
+            assert!(
+                !admitted.load(Ordering::SeqCst),
+                "batch 2 ran past a window of 2"
+            );
+            run_ahead.advance(1);
+        });
+        assert!(admitted.load(Ordering::SeqCst));
     }
 
     /// Every way a run can fail reaches the caller as what it was, and none of them hangs: a
