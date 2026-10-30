@@ -139,8 +139,8 @@ fn a_failed_build_registers_nothing_and_a_second_program_is_refused() {
         .build()
         .expect("the same program registers again");
     assert_eq!(
-        again.emulation_workers().map(NonZeroUsize::get),
-        Some(max_pipeline_workers()),
+        again.emulation_workers().get(),
+        max_pipeline_workers(),
         "the worker count defaults to the core count"
     );
     let err = Prover::builder(OTHER_ELF)
@@ -231,9 +231,9 @@ fn a_memory_pool_that_can_never_serve_the_run_is_refused() {
 }
 
 /// More workers than cores is refused at `build`, rather than by the pipeline once a prove has
-/// started.
+/// started; without AOT the count sizes `execute`'s pipeline, and is checked the same way.
 #[test]
-fn workers_beyond_the_core_count_or_without_aot_are_refused() {
+fn workers_beyond_the_core_count_are_refused() {
     let workers = max_pipeline_workers() + 1;
     let err = small_builder()
         .aot(fib_program())
@@ -246,14 +246,10 @@ fn workers_beyond_the_core_count_or_without_aot_are_refused() {
         "{err}"
     );
 
-    let err = small_builder()
+    small_builder()
         .emulation_workers(NonZeroUsize::MIN)
         .execute(Stdin::from(&N))
-        .expect_err("workers without aot must be refused");
-    assert!(
-        matches!(&err, ProveError::InconsistentOptions(m) if m.contains("aot(program)")),
-        "{err}"
-    );
+        .expect("workers without aot size execute's pipeline");
 }
 
 /// Proves and verifies fib to [`Phase::Combine`] through the AOT pipeline, with the output bytes
@@ -292,10 +288,7 @@ fn an_aot_run_proves_and_verifies_to_combine() {
         .aot(fib_program())
         .build()
         .expect("prover");
-    assert_eq!(
-        prover.emulation_workers().map(NonZeroUsize::get),
-        Some(max_pipeline_workers())
-    );
+    assert_eq!(prover.emulation_workers().get(), max_pipeline_workers());
     let interpreted = emulate_fib(emulator_opts(SMALL_CHUNK));
     assert!(
         interpreted.chunks > 1,

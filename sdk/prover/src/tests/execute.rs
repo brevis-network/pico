@@ -54,6 +54,42 @@ fn the_builder_executes_the_run_the_built_prover_executes() {
     assert_same_run(&from_builder, &from_prover);
 }
 
+/// `execute` runs the light-trace pipeline; proving emulates the records in full. The two must
+/// report one run: same bytes, cycles, chunks, reports and precompile calls.
+#[test]
+fn execute_reports_the_run_proving_emulates() {
+    for (guest, elf, stdin) in [
+        ("fib", FIB_ELF, Stdin::from(&N)),
+        ("bn254-fp", BN254_FP_ELF, Stdin::new()),
+    ] {
+        let prover = Prover::builder(elf)
+            .log_stacked_height(SMALL_LOG_STACKED_HEIGHT)
+            .chunk_size(CHUNK)
+            .build()
+            .expect("prover");
+        let executed = prover.execute(stdin.clone()).expect("execute");
+        let emulated = prover.emulate(stdin).expect("emulate").execution;
+        assert!(
+            executed.chunks > 1,
+            "{guest}: one chunk compares no boundary"
+        );
+        assert_same_run(&executed, &emulated);
+        assert_eq!(
+            executed
+                .reports
+                .iter()
+                .map(|r| r.start_chunk)
+                .collect::<Vec<_>>(),
+            emulated
+                .reports
+                .iter()
+                .map(|r| r.start_chunk)
+                .collect::<Vec<_>>(),
+            "{guest}"
+        );
+    }
+}
+
 /// The whitelist binds proving only: `execute` runs without the artifact `build` refuses to go on
 /// without.
 #[test]

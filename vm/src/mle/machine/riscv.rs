@@ -100,7 +100,7 @@ use crate::{
         witness::ProvingWitness,
     },
     primitives::consts::{MAX_NUM_PVS, RISCV_NUM_PVS},
-    proverchain::riscv::{emulate_snapshot_pipeline_with, DeferredSplit},
+    proverchain::riscv::{emulate_snapshot_pipeline_with_selector, DeferredSplit, TraceKind},
 };
 use pico_mle_core::{
     config::{
@@ -813,6 +813,63 @@ pub fn emulate_with_pipeline(
     opts: EmulatorOpts,
     workers: NonZeroUsize,
 ) -> Result<EmulationOutput, EmulateError> {
+    let records = Mutex::new(Vec::new());
+    let (reports, cycles, committed_bytes) =
+        pipeline_emulation(program, stdin, opts, workers, TraceKind::Full, |record| {
+            records
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(record)
+        })?;
+    let records = records.into_inner().unwrap_or_else(PoisonError::into_inner);
+    let chunks = records.iter().filter(|record| record.is_cpu_chunk).count() as u32;
+    Ok(EmulationOutput {
+        records,
+        chunks,
+        committed_bytes,
+        cycles,
+        reports,
+    })
+}
+
+/// [`emulate_with_pipeline`] for a caller that needs what the run did, not its witness: the
+/// replays make light-trace records, without CPU and ALU events, and each goes to `on_record` and
+/// is dropped. `records` comes back empty; `chunks`, `cycles`, `committed_bytes` and `reports` are
+/// [`emulate_with_pipeline`]'s, and so is every record's chunk boundary and precompile event.
+pub fn execute_with_pipeline(
+    program: Arc<Program>,
+    stdin: &EmulatorStdin<Program, Vec<u8>>,
+    opts: EmulatorOpts,
+    workers: NonZeroUsize,
+    on_record: impl Fn(&EmulationRecord) + Send + Sync,
+) -> Result<EmulationOutput, EmulateError> {
+    let chunks = std::sync::atomic::AtomicU32::new(0);
+    let (reports, cycles, committed_bytes) =
+        pipeline_emulation(program, stdin, opts, workers, TraceKind::Light, |record| {
+            if record.is_cpu_chunk {
+                chunks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            on_record(&record);
+        })?;
+    Ok(EmulationOutput {
+        records: Vec::new(),
+        chunks: chunks.into_inner(),
+        committed_bytes,
+        cycles,
+        reports,
+    })
+}
+
+/// The snapshot pipeline under `opts`, splitting the deferred pool after every chunk and handing
+/// each record to `sink`; the reports come back sorted by `start_chunk`.
+fn pipeline_emulation(
+    program: Arc<Program>,
+    stdin: &EmulatorStdin<Program, Vec<u8>>,
+    opts: EmulatorOpts,
+    workers: NonZeroUsize,
+    trace: TraceKind,
+    sink: impl Fn(EmulationRecord) + Send + Sync,
+) -> Result<(Vec<EmulationReport>, u64, Vec<u8>), EmulateError> {
     if opts.chunk_batch_size != 1 {
         return Err(EmulateError::UnsupportedChunkBatchSize(
             opts.chunk_batch_size,
@@ -835,28 +892,15 @@ pub fn emulate_with_pipeline(
         opts: Some(opts),
         records: Vec::new(),
     };
-    let records = Mutex::new(Vec::new());
-    let (mut reports, cycles, committed_bytes) = emulate_snapshot_pipeline_with(
+    let (mut reports, cycles, committed_bytes) = emulate_snapshot_pipeline_with_selector(
         &witness,
         workers,
         DeferredSplit::AfterEveryChunk,
-        |record, _done| {
-            records
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(record)
-        },
+        |record, _done| sink(record),
+        |_| trace,
     )?;
     reports.sort_by_key(|report| report.start_chunk);
-    let records = records.into_inner().unwrap_or_else(PoisonError::into_inner);
-    let chunks = records.iter().filter(|record| record.is_cpu_chunk).count() as u32;
-    Ok(EmulationOutput {
-        records,
-        chunks,
-        committed_bytes,
-        cycles,
-        reports,
-    })
+    Ok((reports, cycles, committed_bytes))
 }
 
 /// Emulate the program to completion, collecting one [`EmulationRecord`] per chunk.

@@ -5,7 +5,7 @@ use std::{
     num::NonZeroUsize,
     panic::AssertUnwindSafe,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex, PoisonError},
 };
 
 use pico_mle_core::{
@@ -44,11 +44,11 @@ use pico_vm::{
         vk_map::{vk_identity, MleVkMap, VkMapError},
     },
     primitives::consts::MAX_LOG_NUMBER_OF_CHUNKS,
+    proverchain::riscv::{check_pipeline, default_pipeline_workers, max_pipeline_workers},
 };
 #[cfg(feature = "aot")]
 use {
     pico_aot_runtime::AotProgram,
-    pico_vm::proverchain::riscv::{check_pipeline, max_pipeline_workers},
     sha2::{Digest, Sha256},
 };
 
@@ -212,15 +212,33 @@ enum VkMapSource {
     Shipped,
 }
 
-/// Which emulator makes a run's records.
+/// Which emulator makes a run's records. Either way `execute`, and a `cuda` build's GPU prove,
+/// run the snapshot pipeline with `workers` interpreters replaying its snapshot thread.
 #[derive(Clone, Copy, Debug)]
 enum EmulationPath {
-    /// One interpreter.
-    Interpreter,
-    /// The snapshot pipeline: the registered AOT program runs ahead, and `workers` interpreters
-    /// replay its snapshots into the records.
+    /// One interpreter makes the records; the interpreter runs the pipeline's snapshot thread.
+    Interpreter { workers: NonZeroUsize },
+    /// The registered AOT program runs the pipeline's snapshot thread, records included.
     #[cfg(feature = "aot")]
     Aot { workers: NonZeroUsize },
+}
+
+impl EmulationPath {
+    fn workers(self) -> NonZeroUsize {
+        match self {
+            Self::Interpreter { workers } => workers,
+            #[cfg(feature = "aot")]
+            Self::Aot { workers } => workers,
+        }
+    }
+
+    fn snapshot_main(self) -> SnapshotMainMode {
+        match self {
+            Self::Interpreter { .. } => SnapshotMainMode::Interpreter,
+            #[cfg(feature = "aot")]
+            Self::Aot { .. } => SnapshotMainMode::Aot,
+        }
+    }
 }
 
 /// Options for a [`Prover`].
@@ -243,7 +261,6 @@ pub struct ProverBuilder {
     trusted_vk_root: Option<[u32; 8]>,
     #[cfg(feature = "aot")]
     aot: Option<&'static AotProgram>,
-    #[cfg(feature = "aot")]
     emulation_workers: Option<NonZeroUsize>,
     #[cfg(feature = "cuda")]
     gpu_event_pool_size: NonZeroUsize,
@@ -261,7 +278,6 @@ impl ProverBuilder {
             trusted_vk_root: None,
             #[cfg(feature = "aot")]
             aot: None,
-            #[cfg(feature = "aot")]
             emulation_workers: None,
             #[cfg(feature = "cuda")]
             gpu_event_pool_size: distributed_vm::mle::embed::DEFAULT_EVENT_POOL_SIZE,
@@ -366,16 +382,19 @@ impl ProverBuilder {
         self
     }
 
-    /// Replay workers the AOT pipeline runs beside its snapshot thread. Needs [`Self::aot`], the
-    /// one path with workers.
+    /// Replay workers the snapshot pipeline runs beside its snapshot thread: the pipeline that
+    /// [`Self::execute`] always runs, that makes the records with [`Self::aot`], and that a `cuda`
+    /// build's GPU prove runs. Proving without [`Self::aot`] on the CPU interprets in one thread.
     ///
-    /// Defaults to this machine's core count, the most [`Self::build`] accepts: the pipeline runs
-    /// one replay worker per core at most.
+    /// Defaults to this machine's core count for the records [`Self::aot`] makes, and otherwise,
+    /// the GPU prove included, to
+    /// [`default_pipeline_workers`](pico_vm::proverchain::riscv::default_pipeline_workers); the
+    /// most [`Self::build`] accepts is the core count, since the pipeline runs one replay worker
+    /// per core at most.
     ///
-    /// A worker keeps an emulator memory from a pool of `MEMORY_POOL_SIZE` between its batches, so
-    /// the pool needs one per worker plus the batch being cut: unset, it is raised to that, and
-    /// [`Self::build`] refuses a smaller one.
-    #[cfg(feature = "aot")]
+    /// With [`Self::aot`] a worker keeps an emulator memory from a pool of `MEMORY_POOL_SIZE`
+    /// between its batches, so the pool needs one per worker plus the batch being cut: unset, it
+    /// is raised to that, and [`Self::build`] refuses a smaller one.
     pub fn emulation_workers(mut self, n: NonZeroUsize) -> Self {
         self.emulation_workers = Some(n);
         self
@@ -394,9 +413,13 @@ impl ProverBuilder {
 
     /// Emulate without proving: no keygen, no whitelist. Chunks exactly as the built prover would.
     ///
+    /// Runs the snapshot pipeline (see [`Self::emulation_workers`]) and makes no witness: the
+    /// records it reads the counts from carry no CPU or ALU events and are dropped as they come.
+    ///
     /// The whitelist options go unchecked: they bind proving only.
     pub fn execute(&self, stdin: Stdin) -> Result<Execution, ProveError> {
-        self.emulate(stdin).map(|emulated| emulated.execution)
+        let (program, opts, path) = self.emulation_setup()?;
+        execute_program(program, opts, path, stdin)
     }
 
     /// Emulate without proving, and report what proving the run would fill per RISC-V AIR. No
@@ -408,6 +431,12 @@ impl ProverBuilder {
     /// The emulation behind [`Self::execute`] and [`Self::estimate_cost`], with the options
     /// [`Self::build`] would give the prover.
     fn emulate(&self, stdin: Stdin) -> Result<Emulation, ProveError> {
+        let (program, opts, path) = self.emulation_setup()?;
+        emulate_program(program, opts, path, stdin)
+    }
+
+    /// What an emulation of [`Self::execute`] or [`Self::emulate`] runs with.
+    fn emulation_setup(&self) -> Result<(Arc<Program>, EmulatorOpts, EmulationPath), ProveError> {
         let opts = emulator_opts(self.resolved_chunk_size()?);
         let path = self.resolved_emulation()?;
         let program = compile(&self.elf)?;
@@ -418,7 +447,7 @@ impl ProverBuilder {
         if self.verify_keys {
             latch_gpu_memory_tier()?;
         }
-        emulate_program(program, opts, path, stdin)
+        Ok((program, opts, path))
     }
 
     /// Keygen the RISC-V air set and check the options against each other.
@@ -552,6 +581,11 @@ impl ProverBuilder {
             elf: Arc::from(self.elf.as_slice()),
             #[cfg(feature = "cuda")]
             gpu_event_pool_size: self.gpu_event_pool_size,
+            // Beside the GPU's preparers and provers, not the AOT path's one per core.
+            #[cfg(feature = "cuda")]
+            gpu_emulation_workers: self
+                .emulation_workers
+                .unwrap_or_else(default_pipeline_workers),
         })
     }
 
@@ -615,49 +649,44 @@ impl ProverBuilder {
     /// The emulator these options resolve to, with an AOT program checked against the ELF and the
     /// pipeline against this machine. Shared by [`Self::build`] and [`Self::execute`], so the two
     /// emulate alike; neither registers the program before its last fallible step.
-    #[cfg(feature = "aot")]
     fn resolved_emulation(&self) -> Result<EmulationPath, ProveError> {
-        let Some(program) = self.aot else {
-            if let Some(workers) = self.emulation_workers {
-                return Err(ProveError::InconsistentOptions(format!(
-                    "emulation_workers({workers}) was set without aot(program); only the AOT \
-                     pipeline runs workers"
-                )));
-            }
-            return Ok(EmulationPath::Interpreter);
-        };
-
-        // Checked here because the pipeline would refuse it only once a prove had started.
+        // Checked here because the pipeline would refuse it only once a run had started.
         let cores = max_pipeline_workers();
-        let workers = self
-            .emulation_workers
-            .unwrap_or(NonZeroUsize::new(cores).unwrap_or(NonZeroUsize::MIN));
-        if workers.get() > cores {
+        if let Some(workers) = self.emulation_workers.filter(|w| w.get() > cores) {
             return Err(ProveError::InconsistentOptions(format!(
                 "emulation_workers({workers}) exceeds this machine's {cores} cores; the pipeline \
                  runs at most one replay worker per core"
             )));
         }
-        // The pipeline refuses the same, but only once a prove has started.
-        check_pipeline(workers, SnapshotMainMode::Aot)
+
+        #[cfg(feature = "aot")]
+        if let Some(program) = self.aot {
+            let workers = self
+                .emulation_workers
+                .unwrap_or(NonZeroUsize::new(cores).unwrap_or(NonZeroUsize::MIN));
+            // The pipeline refuses the same, but only once a prove has started.
+            check_pipeline(workers, SnapshotMainMode::Aot)
+                .map_err(|e| ProveError::InconsistentOptions(e.to_string()))?;
+
+            if program.is_stub() {
+                return Err(ProveError::AotNotGenerated);
+            }
+            let elf: [u8; 32] = Sha256::digest(&self.elf).into();
+            if program.elf_sha256() != elf {
+                return Err(ProveError::AotElfMismatch {
+                    generated_from: program.elf_sha256(),
+                    elf,
+                });
+            }
+            return Ok(EmulationPath::Aot { workers });
+        }
+
+        let workers = self
+            .emulation_workers
+            .unwrap_or_else(default_pipeline_workers);
+        check_pipeline(workers, SnapshotMainMode::Interpreter)
             .map_err(|e| ProveError::InconsistentOptions(e.to_string()))?;
-
-        if program.is_stub() {
-            return Err(ProveError::AotNotGenerated);
-        }
-        let elf: [u8; 32] = Sha256::digest(&self.elf).into();
-        if program.elf_sha256() != elf {
-            return Err(ProveError::AotElfMismatch {
-                generated_from: program.elf_sha256(),
-                elf,
-            });
-        }
-        Ok(EmulationPath::Aot { workers })
-    }
-
-    #[cfg(not(feature = "aot"))]
-    fn resolved_emulation(&self) -> Result<EmulationPath, ProveError> {
-        Ok(EmulationPath::Interpreter)
+        Ok(EmulationPath::Interpreter { workers })
     }
 
     /// Registers the AOT program, if there is one, for the process: what the pipeline will run.
@@ -707,7 +736,7 @@ fn emulate_program(
     check_stdin(&stdin)?;
     let stdin = stdin.into_emulator_stdin();
     let mut emulated = std::panic::catch_unwind(AssertUnwindSafe(|| match path {
-        EmulationPath::Interpreter => riscv::emulate_with_opts(program, &stdin, opts),
+        EmulationPath::Interpreter { .. } => riscv::emulate_with_opts(program, &stdin, opts),
         #[cfg(feature = "aot")]
         EmulationPath::Aot { workers } => riscv::emulate_with_pipeline(
             program,
@@ -722,7 +751,10 @@ fn emulate_program(
     .map_err(|payload| ProveError::EmulationAborted(panic_message(&*payload)))?
     .map_err(ProveError::from_emulate)?;
     binding::backfill_final_digests(&mut emulated.records);
-    let precompile_calls = precompile_calls(&emulated.records);
+    let mut precompile_calls = BTreeMap::new();
+    for record in &emulated.records {
+        count_precompile_calls(&mut precompile_calls, record);
+    }
     Ok(Emulation {
         records: emulated.records,
         execution: Execution {
@@ -735,34 +767,64 @@ fn emulate_program(
     })
 }
 
-/// Calls per precompile across `records`, by the code the guest called.
+/// [`emulate_program`]'s [`Execution`] from the snapshot pipeline, without the records: they are
+/// light-trace, and dropped once counted.
+fn execute_program(
+    program: Arc<Program>,
+    opts: EmulatorOpts,
+    path: EmulationPath,
+    stdin: Stdin,
+) -> Result<Execution, ProveError> {
+    check_stdin(&stdin)?;
+    let stdin = stdin.into_emulator_stdin();
+    let calls = Mutex::new(BTreeMap::new());
+    let opts = EmulatorOpts {
+        snapshot_main: path.snapshot_main(),
+        ..opts
+    };
+    let executed = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        riscv::execute_with_pipeline(program, &stdin, opts, path.workers(), |record| {
+            count_precompile_calls(
+                &mut calls.lock().unwrap_or_else(PoisonError::into_inner),
+                record,
+            )
+        })
+    }))
+    .map_err(|payload| ProveError::EmulationAborted(panic_message(&*payload)))?
+    .map_err(ProveError::from_emulate)?;
+    Ok(Execution {
+        committed_bytes: executed.committed_bytes,
+        cycles: executed.cycles,
+        chunks: executed.chunks,
+        reports: executed.reports,
+        precompile_calls: calls.into_inner().unwrap_or_else(PoisonError::into_inner),
+    })
+}
+
+/// Adds `record`'s calls per precompile to `calls`, by the code the guest called.
 ///
 /// Read from each event's own id rather than from the group it is filed under, because the
 /// field-arithmetic precompiles file a `SUB` or `MUL` event under their `ADD`'s code. The id is the
 /// low byte of the code, and the codes one group coalesces differ in nothing else.
-fn precompile_calls(records: &[EmulationRecord]) -> BTreeMap<SyscallCode, u64> {
-    let mut calls = BTreeMap::new();
-    for record in records {
-        for (&filed_under, events) in &record.precompile_events.events {
-            for (event, _) in events {
-                let called = if event.syscall_id == filed_under.syscall_id() {
-                    filed_under
-                } else {
-                    SyscallCode::try_from_u32((filed_under as u32 & !0xff) | event.syscall_id)
-                        .filter(|code| code.count_map() == filed_under.count_map())
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "a precompile event with syscall id {:#x} is filed under \
-                                 {filed_under}, which does not coalesce it",
-                                event.syscall_id
-                            )
-                        })
-                };
-                *calls.entry(called).or_insert(0) += 1;
-            }
+fn count_precompile_calls(calls: &mut BTreeMap<SyscallCode, u64>, record: &EmulationRecord) {
+    for (&filed_under, events) in &record.precompile_events.events {
+        for (event, _) in events {
+            let called = if event.syscall_id == filed_under.syscall_id() {
+                filed_under
+            } else {
+                SyscallCode::try_from_u32((filed_under as u32 & !0xff) | event.syscall_id)
+                    .filter(|code| code.count_map() == filed_under.count_map())
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "a precompile event with syscall id {:#x} is filed under \
+                             {filed_under}, which does not coalesce it",
+                            event.syscall_id
+                        )
+                    })
+            };
+            *calls.entry(called).or_insert(0) += 1;
         }
     }
-    calls
 }
 
 /// Load a whitelist artifact by extension, the naming `mle_build_vk_map` writes: `.bin` is the
@@ -897,6 +959,9 @@ pub struct Prover {
     elf: Arc<[u8]>,
     #[cfg(feature = "cuda")]
     gpu_event_pool_size: NonZeroUsize,
+    /// The GPU prove's replay workers.
+    #[cfg(feature = "cuda")]
+    gpu_emulation_workers: NonZeroUsize,
 }
 
 impl std::fmt::Debug for Prover {
@@ -963,18 +1028,15 @@ impl Prover {
             .map_err(|e| ProveError::Format(format!("cannot encode the VK bundle: {e}")))
     }
 
-    /// How many replay workers the AOT pipeline runs; `None` when this prover interprets.
-    #[cfg(feature = "aot")]
-    pub fn emulation_workers(&self) -> Option<NonZeroUsize> {
-        match self.emulation {
-            EmulationPath::Interpreter => None,
-            EmulationPath::Aot { workers } => Some(workers),
-        }
+    /// How many replay workers this prover's snapshot pipeline runs (see
+    /// [`ProverBuilder::emulation_workers`]).
+    pub fn emulation_workers(&self) -> NonZeroUsize {
+        self.emulation.workers()
     }
 
     /// Emulate without proving. [`ProverBuilder::execute`] does the same without keygen.
     pub fn execute(&self, stdin: Stdin) -> Result<Execution, ProveError> {
-        self.emulate(stdin).map(|emulated| emulated.execution)
+        execute_program(self.program.clone(), self.opts, self.emulation, stdin)
     }
 
     /// [`ProverBuilder::estimate_cost`] with this prover's options.
@@ -1320,10 +1382,11 @@ impl Prover {
                 split_opts: SplitOpts::new(
                     pico_vm::primitives::consts::BENCH_MAX_DEFERRED_SPLIT_THRESHOLD,
                 ),
+                snapshot_main: self.emulation.snapshot_main(),
                 ..self.opts
             },
             event_pool_size: self.gpu_event_pool_size,
-            emulation_workers: pico_vm::proverchain::riscv::default_pipeline_workers(),
+            emulation_workers: self.gpu_emulation_workers,
         };
         let out = distributed_vm::mle::embed::prove(program, stdin.into_emulator_stdin())
             .map_err(ProveError::from_embed)?;
