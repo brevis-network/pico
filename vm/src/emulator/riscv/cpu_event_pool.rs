@@ -1,7 +1,9 @@
 use crate::{
     chips::chips::riscv_cpu::event::CpuEvent,
     create_event_pool_manager,
-    emulator::riscv::event_pool::{growable, EventBuffer, EventPoolManager, HostAllocFlags},
+    emulator::riscv::event_pool::{
+        growable, EventBuffer, EventPoolManager, HostAllocFlags, Pinning,
+    },
 };
 use once_cell::sync::Lazy;
 use std::{env, fmt};
@@ -10,10 +12,11 @@ use std::{env, fmt};
 const DEFAULT_CPU_EVENT_BUFFER_CAPACITY: usize = 1 << 22;
 
 // static variable of cpu event buffer size for avoiding duplicate initialization
-pub(crate) static CPU_EVENT_BUFFER_CAPACITY: Lazy<usize> = Lazy::new(cpu_event_buffer_capacity);
+pub(crate) static CPU_EVENT_BUFFER_CAPACITY: Lazy<usize> =
+    Lazy::new(cpu_event_buffer_capacity_from_env);
 
 // get the cpu event buffer size
-fn cpu_event_buffer_capacity() -> usize {
+fn cpu_event_buffer_capacity_from_env() -> usize {
     // set to CHUNK_SIZE if available
     env::var("CHUNK_SIZE")
         .ok()
@@ -25,10 +28,37 @@ fn cpu_event_buffer_capacity() -> usize {
 create_event_pool_manager!(CpuEventPoolManager, CpuEvent, CPU_EVENT_POOL);
 
 /// Initializes the global CPU event buffer pool.
-/// This function should be called once at application startup.
-/// It will panic if called more than once.
+/// A no-op once the pool exists.
 pub fn init_cpu_event_buffer_pool(pool_size: usize, flags: HostAllocFlags) {
     CpuEventPoolManager::init_pool(pool_size, flags);
+}
+
+/// Makes the global CPU event buffer pool hold exactly `pool_size` buffers of `capacity` events
+/// each (`None`: the environment's default), pinned as `pinning` says, replacing one of another
+/// shape. A caller that cuts
+/// its own chunks passes their size: a chunk larger than the buffers overflows them mid-emulation.
+pub fn size_cpu_event_buffer_pool(
+    pool_size: usize,
+    capacity: Option<usize>,
+    pinning: Pinning,
+    flags: HostAllocFlags,
+) {
+    CpuEventPoolManager::size_pool(pool_size, capacity, pinning, flags);
+}
+
+/// Buffers the global CPU event pool has lent out and not had back; `None` before any init.
+pub fn cpu_event_buffers_outstanding() -> Option<usize> {
+    CpuEventPoolManager::outstanding()
+}
+
+/// Events per buffer of the global CPU event pool, or the environment's default before one exists.
+pub fn cpu_event_buffer_capacity() -> usize {
+    CpuEventPoolManager::buffer_capacity().unwrap_or(*CPU_EVENT_BUFFER_CAPACITY)
+}
+
+/// The global CPU event buffer pool's buffer count; `None` before any init.
+pub fn cpu_event_buffer_pool_size() -> Option<usize> {
+    CpuEventPoolManager::pool_size()
 }
 
 /// Gets a real buffer from the global pool, wrapped in `CpuEventBuffer::Real`.
@@ -117,7 +147,7 @@ impl<'de> Deserialize<'de> for CpuEventBuffer {
                 write!(
                     f,
                     "a sequence of CpuEvent (up to capacity {})",
-                    *CPU_EVENT_BUFFER_CAPACITY
+                    cpu_event_buffer_capacity()
                 )
             }
 
@@ -130,7 +160,7 @@ impl<'de> Deserialize<'de> for CpuEventBuffer {
                     if n == 0 {
                         return Ok(CpuEventBuffer::Empty);
                     }
-                    if n > *CPU_EVENT_BUFFER_CAPACITY && !growable() {
+                    if n > cpu_event_buffer_capacity() && !growable() {
                         return Err(de::Error::custom("Data exceeds buffer capacity"));
                     }
                 }

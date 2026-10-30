@@ -132,6 +132,12 @@ pub fn mle_finalize_emulation() {
     }
 }
 
+/// Ends the current block without a result, so its lanes drain and exit (see
+/// `GlobalScheduler::abort`).
+pub fn mle_abort_run() {
+    get_mle_scheduler().abort();
+}
+
 /// Report a finished convert proof into the proof tree.
 pub fn mle_report_proof(proof: IndexedProof<MleSchedulerProof>, worker_id: &str) {
     if is_mle_secondary() {

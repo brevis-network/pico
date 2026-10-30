@@ -7,27 +7,34 @@
 //! pc, and initial global-cumulative-sum (the septic initial-memory summary) — and folds them
 //! into a single `riscv_vk_digest`.
 //!
-//! The digest is computed with EXACTLY the padding-free rate-8/width-16 overwrite sponge used for
-//! the recursion PV digest (`CombineMachine::verify`) and mirrored in-circuit by
-//! `Builder::hash_poseidon2_fresh`, so the host value and the in-circuit recomputation agree
-//! bit-for-bit. Field order: `[DOMAIN, program_commit(8), pc_start(3), gcs.x(7), gcs.y(7)]`.
+//! The digest is `pico_verifier::VmVk`'s: the padding-free rate-8/width-16 overwrite sponge used
+//! for the recursion PV digest and mirrored in-circuit by `Builder::hash_poseidon2_fresh`, so the
+//! host value and the in-circuit recomputation agree bit-for-bit. Field order:
+//! `[DOMAIN, program_commit(8), pc_start(3), gcs.x(7), gcs.y(7)]`.
 
 use p3_field::PrimeCharacteristicRing;
-use p3_symmetric::Permutation;
-use pico_mle_core::{
-    config::koala_bear_poseidon2::default_koalabear_poseidon2_16, StarkProtocolConfig,
-};
+use pico_mle_core::StarkProtocolConfig;
+pub(crate) use pico_verifier::hash::sponge_hash;
+pub use pico_verifier::vm_vk::RISCV_VK_DIGEST_DOMAIN;
+use pico_verifier::{vm_vk::VM_VK_LEN, VmVk};
+use static_assertions::const_assert_eq;
 
 use crate::{
     compiler::{program::ProgramBehavior, riscv::program::Program},
     emulator::riscv::public_values_compat::encode_public_value_pc_limbs,
-    machine::septic::SepticDigest,
+    machine::septic::{SepticCurve, SepticDigest, SepticExtension},
     mle::machine::riscv::{riscv_program_commit, Kb, Sc},
 };
 
-/// Domain separator for `riscv_vk_digest` (distinguishes this sponge from the PV-digest sponge,
-/// which absorbs no domain tag). Arbitrary fixed constant below the KoalaBear modulus.
-pub const RISCV_VK_DIGEST_DOMAIN: u32 = 0x5256_766B; // "RVvk"
+// `VmVk` hard-codes the 25-limb layout (program commit 8, pc 3, gcs x 7, gcs y 7) because the
+// septic types need nightly; any drift must fail the build here.
+const_assert_eq!(
+    size_of::<<Sc as StarkProtocolConfig>::Digest>(),
+    8 * size_of::<Kb>()
+);
+const_assert_eq!(size_of::<SepticExtension<Kb>>(), 7 * size_of::<Kb>());
+const_assert_eq!(size_of::<RiscvVmVk>(), VM_VK_LEN * size_of::<Kb>());
+const_assert_eq!(size_of::<VmVk>(), size_of::<RiscvVmVk>());
 
 /// VM-layer RISC-V verifying key: the application-identity triple folded into `riscv_vk_digest`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,23 +49,10 @@ pub struct RiscvVmVk {
 }
 
 impl RiscvVmVk {
-    /// [`Self::digest`] as `0x` followed by 64 hex characters: the eight field elements in order,
-    /// each as its canonical `u32` in big-endian.
-    ///
-    /// A stable spelling matters more than which spelling. This string is what a submission carries
-    /// as its `verifier_id` and what anyone checking those submissions compares against their own
-    /// build of the guest; upstream schemas do not constrain it and submission paths do not
-    /// validate it, so nothing but this function stops it from drifting. It lives here, beside the
-    /// digest, rather than at the call site, so there is exactly one spelling to drift from.
+    /// [`Self::digest`] as `0x` followed by 64 hex characters: the `verifier_id` a submission
+    /// carries. The spelling is [`VmVk::digest_hex`]'s.
     pub fn digest_hex(&self) -> String {
-        use p3_field::PrimeField32;
-        let digest = self.digest();
-        let mut out = String::with_capacity(2 + digest.len() * 8);
-        out.push_str("0x");
-        for element in digest.iter() {
-            out.push_str(&format!("{:08x}", element.as_canonical_u32()));
-        }
-        out
+        self.vm_vk().digest_hex()
     }
 
     /// Assemble from the guest program (entry pc + initial memory) and its RISC-V verifying key
@@ -74,52 +68,54 @@ impl RiscvVmVk {
         }
     }
 
-    /// The 26 preimage field elements in canonical order, matching the in-circuit hash input.
-    pub fn digest_preimage(&self) -> Vec<Kb> {
-        let mut elems = Vec::with_capacity(26);
-        elems.push(Kb::from_u32(RISCV_VK_DIGEST_DOMAIN));
-        elems.extend_from_slice(&self.program_commit);
-        elems.extend_from_slice(&self.pc_start);
-        elems.extend_from_slice(&self.initial_gcs.0.x.0);
-        elems.extend_from_slice(&self.initial_gcs.0.y.0);
-        elems
+    /// The septic-free form the verifier works with: the same 25 limbs, flat.
+    pub fn vm_vk(&self) -> VmVk {
+        VmVk {
+            program_commit: self.program_commit,
+            pc_start: self.pc_start,
+            initial_gcs_x: self.initial_gcs.0.x.0,
+            initial_gcs_y: self.initial_gcs.0.y.0,
+        }
     }
 
-    /// `riscv_vk_digest = sponge(preimage)`. Padding-free rate-8/width-16 overwrite sponge with
-    /// the default KoalaBear Poseidon2 permutation; digest = first 8 lanes. Byte-identical to the
-    /// in-circuit `hash_poseidon2_fresh` over the same preimage (and to the PV-digest recompute in
-    /// `CombineMachine::verify`).
+    /// Inverse of [`Self::vm_vk`].
+    pub fn from_vm_vk(vm_vk: &VmVk) -> Self {
+        Self {
+            program_commit: vm_vk.program_commit,
+            pc_start: vm_vk.pc_start,
+            initial_gcs: SepticDigest(SepticCurve {
+                x: SepticExtension(vm_vk.initial_gcs_x),
+                y: SepticExtension(vm_vk.initial_gcs_y),
+            }),
+        }
+    }
+
+    /// The 26 preimage field elements in canonical order, matching the in-circuit hash input.
+    pub fn digest_preimage(&self) -> Vec<Kb> {
+        self.vm_vk().digest_preimage()
+    }
+
+    /// `riscv_vk_digest = sponge(preimage)`, byte-identical to the in-circuit recomputation.
     pub fn digest(&self) -> <Sc as StarkProtocolConfig>::Digest {
-        sponge_hash(&self.digest_preimage())
+        self.vm_vk().digest()
     }
 }
 
-/// Padding-free rate-8/width-16 overwrite-mode Poseidon2 sponge (SSOT shared with the PV digest
-/// and the vk-map leaf hash; see `CombineMachine::verify`). No trailing permute when the input
-/// length is an exact multiple of the rate. Byte-identical to the in-circuit
-/// `hash_poseidon2_fresh` over the same elements.
-pub(crate) fn sponge_hash(elems: &[Kb]) -> [Kb; 8] {
-    let perm = default_koalabear_poseidon2_16();
-    let mut state = [Kb::ZERO; 16];
-    let mut absorb_idx = 0usize;
-    for &v in elems {
-        state[absorb_idx] = v;
-        absorb_idx += 1;
-        if absorb_idx == 8 {
-            perm.permute_mut(&mut state);
-            absorb_idx = 0;
-        }
+impl From<&RiscvVmVk> for VmVk {
+    fn from(vk: &RiscvVmVk) -> Self {
+        vk.vm_vk()
     }
-    if absorb_idx != 0 {
-        perm.permute_mut(&mut state);
+}
+
+impl From<RiscvVmVk> for VmVk {
+    fn from(vk: RiscvVmVk) -> Self {
+        vk.vm_vk()
     }
-    std::array::from_fn(|i| state[i])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::machine::septic::{SepticCurve, SepticExtension};
 
     fn sample_vk() -> RiscvVmVk {
         RiscvVmVk {
@@ -132,7 +128,8 @@ mod tests {
         }
     }
 
-    /// The preimage is exactly the 26 elements in the documented order.
+    /// The septic point lands in the preimage x then y, after program commit and entry pc; the
+    /// rest of the digest is `pico_verifier::vm_vk`'s and tested there.
     #[test]
     fn preimage_shape_is_26_ordered_elements() {
         let vk = sample_vk();
@@ -143,49 +140,6 @@ mod tests {
         assert_eq!(&p[9..12], &vk.pc_start[..]);
         assert_eq!(&p[12..19], &vk.initial_gcs.0.x.0[..]);
         assert_eq!(&p[19..26], &vk.initial_gcs.0.y.0[..]);
-    }
-
-    /// `digest()` matches an independent inline reference sponge (pins the exact construction that
-    /// the in-circuit `hash_poseidon2_fresh` must reproduce).
-    #[test]
-    fn digest_matches_reference_sponge() {
-        let vk = sample_vk();
-        let elems = vk.digest_preimage();
-        let perm = default_koalabear_poseidon2_16();
-        let mut state = [Kb::ZERO; 16];
-        // 26 = 3*8 + 2 → three in-loop permutes + one trailing permute for the 2-element tail.
-        let mut i = 0;
-        while i < elems.len() {
-            let end = (i + 8).min(elems.len());
-            for (k, &v) in elems[i..end].iter().enumerate() {
-                state[k] = v;
-            }
-            perm.permute_mut(&mut state);
-            i = end;
-        }
-        let expect: [Kb; 8] = std::array::from_fn(|i| state[i]);
-        assert_eq!(vk.digest(), expect);
-    }
-
-    /// Every field is bound: perturbing any one changes the digest.
-    #[test]
-    fn digest_is_sensitive_to_every_field() {
-        let base = sample_vk().digest();
-
-        let mut v = sample_vk();
-        v.program_commit[0] += Kb::ONE;
-        assert_ne!(v.digest(), base, "program_commit not bound");
-
-        let mut v = sample_vk();
-        v.pc_start[0] += Kb::ONE;
-        assert_ne!(v.digest(), base, "pc_start not bound");
-
-        let mut v = sample_vk();
-        v.initial_gcs.0.x.0[0] += Kb::ONE;
-        assert_ne!(v.digest(), base, "initial_gcs.x not bound");
-
-        let mut v = sample_vk();
-        v.initial_gcs.0.y.0[6] += Kb::ONE;
-        assert_ne!(v.digest(), base, "initial_gcs.y not bound");
+        assert_eq!(RiscvVmVk::from_vm_vk(&vk.vm_vk()), vk);
     }
 }

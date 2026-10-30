@@ -1,7 +1,9 @@
 use crate::{
     chips::chips::alu::event::AluEvent,
     create_event_pool_manager,
-    emulator::riscv::event_pool::{growable, EventBuffer, EventPoolManager, HostAllocFlags},
+    emulator::riscv::event_pool::{
+        growable, EventBuffer, EventPoolManager, HostAllocFlags, Pinning,
+    },
 };
 use once_cell::sync::Lazy;
 use std::{env, fmt};
@@ -10,10 +12,11 @@ use std::{env, fmt};
 const DEFAULT_ALU_EVENT_BUFFER_CAPACITY: usize = 1 << 22;
 
 // static variable of ALU event buffer size for avoiding duplicate initialization
-pub(crate) static ALU_EVENT_BUFFER_CAPACITY: Lazy<usize> = Lazy::new(alu_event_buffer_capacity);
+pub(crate) static ALU_EVENT_BUFFER_CAPACITY: Lazy<usize> =
+    Lazy::new(alu_event_buffer_capacity_from_env);
 
 // get the ALU event buffer size
-fn alu_event_buffer_capacity() -> usize {
+fn alu_event_buffer_capacity_from_env() -> usize {
     // set to ALU_EVENT_BUFFER_SIZE if available, otherwise use CHUNK_SIZE, otherwise use default
     env::var("ALU_EVENT_BUFFER_SIZE")
         .ok()
@@ -35,10 +38,37 @@ create_event_pool_manager!(
 );
 
 /// Initializes the global ALU event buffer pool.
-/// This function should be called once at application startup.
-/// It will panic if called more than once.
+/// A no-op once the pool exists.
 pub fn init_alu_event_buffer_pool(pool_size: usize, flags: HostAllocFlags) {
     AluEventPoolManager::init_pool(pool_size, flags);
+}
+
+/// Makes the global ALU event buffer pool hold exactly `pool_size` buffers of `capacity` events
+/// each (`None`: the environment's default), pinned as `pinning` says, replacing one of another
+/// shape. A caller that cuts
+/// its own chunks passes their size: a chunk larger than the buffers overflows them mid-emulation.
+pub fn size_alu_event_buffer_pool(
+    pool_size: usize,
+    capacity: Option<usize>,
+    pinning: Pinning,
+    flags: HostAllocFlags,
+) {
+    AluEventPoolManager::size_pool(pool_size, capacity, pinning, flags);
+}
+
+/// Buffers the global ALU event pool has lent out and not had back; `None` before any init.
+pub fn alu_event_buffers_outstanding() -> Option<usize> {
+    AluEventPoolManager::outstanding()
+}
+
+/// Events per buffer of the global ALU event pool, or the environment's default before one exists.
+pub fn alu_event_buffer_capacity() -> usize {
+    AluEventPoolManager::buffer_capacity().unwrap_or(*ALU_EVENT_BUFFER_CAPACITY)
+}
+
+/// The global ALU event buffer pool's buffer count; `None` before any init.
+pub fn alu_event_buffer_pool_size() -> Option<usize> {
+    AluEventPoolManager::pool_size()
 }
 
 /// Gets a real buffer from the global pool, wrapped in `AluEventBuffer::Buffer`.
@@ -165,7 +195,7 @@ impl<'de> Deserialize<'de> for AluEventBuffer {
                 write!(
                     f,
                     "a sequence of AluEvent (up to capacity {})",
-                    *ALU_EVENT_BUFFER_CAPACITY
+                    alu_event_buffer_capacity()
                 )
             }
 
@@ -177,7 +207,7 @@ impl<'de> Deserialize<'de> for AluEventBuffer {
                     if n == 0 {
                         return Ok(AluEventBuffer::Empty);
                     }
-                    if n > *ALU_EVENT_BUFFER_CAPACITY && !growable() {
+                    if n > alu_event_buffer_capacity() && !growable() {
                         return Err(de::Error::custom("Data exceeds buffer capacity"));
                     }
                 }

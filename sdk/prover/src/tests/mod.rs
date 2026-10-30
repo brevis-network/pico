@@ -10,13 +10,17 @@ mod chain;
 mod chunks;
 mod committed;
 mod coprocessor;
+mod cost;
 mod emulation_abort;
 mod environment;
 #[cfg(feature = "multi-field-transcript")]
 mod evm;
 mod execute;
 mod exit_code;
+mod export;
 mod fixture;
+#[cfg(feature = "cuda")]
+mod gpu;
 mod options;
 mod poseidon2;
 mod precompiles;

@@ -1,5 +1,7 @@
 use clap::{Parser, ValueEnum};
 
+use super::embed::EmbeddedProgram;
+
 /// Proving step for the single-node MLE/WHIR prover. All three are wired (GPU only for the two
 /// recursion steps): `riscv` = Phase-1 chunk proofs, `convert` = the riscv pipeline with the
 /// streaming convert stage spliced in, `combine` = convert plus the scheduler's aggregation tree,
@@ -43,4 +45,9 @@ pub struct MleSingleNodeConfig {
     /// operating point (23), matching `single_node_mle.sh`.
     #[clap(long, env = "MLE_LOG_STACKED_HEIGHT", default_value = "23")]
     pub log_stacked_height: usize,
+
+    /// Set by [`super::embed`] only: the program and whitelist come from the caller instead of
+    /// `--elf` and the `VK_VERIFICATION` / `MLE_VK_MAP` / `MLE_VK_ROOT` environment.
+    #[clap(skip)]
+    pub embedded: Option<EmbeddedProgram>,
 }

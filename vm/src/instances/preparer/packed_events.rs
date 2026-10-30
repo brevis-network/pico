@@ -40,7 +40,7 @@ use crate::{
     },
     compiler::riscv::opcode::Opcode,
     emulator::riscv::{
-        cpu_event_pool::CPU_EVENT_BUFFER_CAPACITY,
+        cpu_event_pool::cpu_event_buffer_capacity,
         event_pool::{EventPool, PinnedEventBuffer},
         record::EmulationRecord,
     },
@@ -201,7 +201,7 @@ static PACKED_MEM_IDX_POOL: OnceLock<EventPool<usize>> = OnceLock::new();
 static STAGED_BITWISE_POOL: OnceLock<EventPool<AluEvent>> = OnceLock::new();
 static STAGED_SHIFT_LEFT_POOL: OnceLock<EventPool<AluEvent>> = OnceLock::new();
 
-/// Buffer capacities, sized off the shared CHUNK_SIZE-derived cpu capacity.
+/// Buffer capacities, sized off the CPU event pool's buffer capacity.
 ///
 /// The memory streams get the full `cap` because that is their actual bound — `emit_cpu` pushes
 /// exactly one index per memory instruction, so they can never exceed the cpu event count. Sizing
@@ -210,7 +210,7 @@ static STAGED_SHIFT_LEFT_POOL: OnceLock<EventPool<AluEvent>> = OnceLock::new();
 /// ~30% and ~0%); if one is ever exceeded the fallback names it and the need, so the next value
 /// comes from a measurement rather than another guess.
 fn capacities() -> (usize, usize, usize, usize) {
-    let cap = *CPU_EVENT_BUFFER_CAPACITY;
+    let cap = cpu_event_buffer_capacity();
     (cap, cap, cap / 2, cap / 8)
 }
 
@@ -299,7 +299,7 @@ impl StagedAluEvents {
 /// Fat `Vec<AluEvent>` staging capacity (bitwise, shift_left): cap/4 covers the measured
 /// per-chunk counts (~0.8M / ~0.5M events) with headroom; overflow falls back per stream.
 fn fat_alu_capacity() -> usize {
-    *CPU_EVENT_BUFFER_CAPACITY / 4
+    cpu_event_buffer_capacity() / 4
 }
 
 /// Stage the two fat ALU event streams into pinned buffers on the preparer thread. Per-stream

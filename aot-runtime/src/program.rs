@@ -73,6 +73,10 @@ pub enum AotError {
     ForeignFactory,
 }
 
+impl AotError {
+    const STUB_DIGEST: [u8; 32] = AotProgram::STUB.elf_sha256;
+}
+
 impl fmt::Display for AotError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -84,13 +88,22 @@ impl fmt::Display for AotError {
             Self::Conflict {
                 registered,
                 requested,
-            } => write!(
-                f,
-                "this process already registered the AOT program for ELF {}, so it cannot \
-                 register the one for ELF {}: the VM holds one AOT program per process",
-                Sha256Hex(registered),
-                Sha256Hex(requested)
-            ),
+            } => {
+                let name = |digest: &[u8; 32]| {
+                    if *digest == Self::STUB_DIGEST {
+                        "the interpreted AOT runtime (no compiled code)".to_string()
+                    } else {
+                        format!("the AOT program for ELF {}", Sha256Hex(digest))
+                    }
+                };
+                write!(
+                    f,
+                    "this process already registered {}, so it cannot register {}: the VM \
+                     holds one AOT program per process",
+                    name(registered),
+                    name(requested)
+                )
+            }
             Self::ForeignFactory => write!(
                 f,
                 "an AOT factory was installed without `pico_aot_runtime::register`, so the program \

@@ -15,10 +15,13 @@
 //!   host-side acceptance, so that check lives in exactly one place.
 
 pub mod config;
+pub mod embed;
 pub mod ethproofs;
 pub mod two_machine;
+mod watch;
 
 use std::{
+    fmt,
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -39,9 +42,9 @@ use pico_vm::{
         opts::EmulatorOpts,
         record::RecordBehavior,
         riscv::{
-            alu_event_pool::{init_alu_event_buffer_pool, is_alu_pool_initialized},
-            cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
-            event_pool::HostAllocFlags,
+            alu_event_pool::size_alu_event_buffer_pool,
+            cpu_event_pool::size_cpu_event_buffer_pool,
+            event_pool::{pooled_event_buffers, HostAllocFlags, Pinning},
             record::EmulationRecord,
         },
         stdin::EmulatorStdin,
@@ -55,9 +58,12 @@ use pico_vm::{
             riscv::{corrupt_one_record, PreparedChunk, RiscvMachine},
         },
     },
-    proverchain::riscv::emulate_snapshot_pipeline,
+    proverchain::riscv::{
+        emulate_snapshot_pipeline, emulate_snapshot_pipeline_with, DeferredSplit,
+    },
 };
 use tracing::{info, warn};
+use watch::SpawnWatched;
 
 // The streaming convert stage is GPU-only (no CPU path); its types exist only under `cuda`.
 #[cfg(feature = "cuda")]
@@ -74,7 +80,7 @@ use crate::common::{
     global_scheduler::GlobalScheduler,
     machine_role::{get_worker_label, set_mle_chunk_assignment_defaults},
     mle_scheduler_singleton::{
-        get_mle_scheduler, is_mle_secondary, mle_acquire_task_unified_async,
+        get_mle_scheduler, is_mle_secondary, mle_abort_run, mle_acquire_task_unified_async,
         mle_finalize_emulation, mle_register_chunk, mle_report_chunk_terminal,
         mle_report_gcs_digest, reset_mle_scheduler, MleAcquireResult,
     },
@@ -144,6 +150,31 @@ pub struct BlockOutcome {
     /// `None` without `--step combine` (there is no root), and on an MLE secondary (the root is
     /// proved and accepted on the primary by construction).
     pub root: Option<RootProofExport>,
+    /// The bytes the guest committed, from the emulation. Bound to a proof only by the root's
+    /// `committed_value_digest`, which a verifier checks.
+    pub committed: Vec<u8>,
+    /// Embedded runs only: the guest's emulation failed, and the run was drained rather than
+    /// proved. Nothing it held is left behind, so the next block proves normally.
+    pub guest_failure: Option<GuestFailure>,
+}
+
+/// Why a guest ended an embedded run early: its emulation, not the provers, failed.
+#[derive(Debug)]
+pub enum GuestFailure {
+    /// The emulator's own error: a non-zero exit, a limit, a bad syscall, short stdin.
+    Emulation(pico_vm::emulator::riscv::emulator::EmulationError),
+    /// The emulation panicked before any other pipeline thread had failed. Any emulator panic
+    /// counts, a host-side emulator bug included: it ends the run without poisoning.
+    Panicked(String),
+}
+
+impl fmt::Display for GuestFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Emulation(e) => write!(f, "{e}"),
+            Self::Panicked(message) => write!(f, "the emulation panicked: {message}"),
+        }
+    }
 }
 
 /// The combine root, packaged so somebody else can verify it.
@@ -627,7 +658,7 @@ impl ConvertPrebuild {
             workers.push(
                 std::thread::Builder::new()
                     .name(format!("convert-prebuild-{w}"))
-                    .spawn(move || {
+                    .spawn_watched(move || {
                         // Its own lane, of the preparers' role but past their indices: the keygen
                         // this thread does is convert preparation, and a span opened on a thread
                         // that binds no lane is dropped — which would take these keygens out of the
@@ -1181,12 +1212,21 @@ fn load_reth_input(n: u32) -> Vec<u8> {
 /// (mirroring `test_mle_riscv`); it does not pull in any FRI proving.
 /// The guest ELF for the configured program. **Block-independent**: which ELF to run is a property
 /// of `--elf`, not of `--n`, so a process that proves several blocks compiles it once.
-fn load_program_elf(cfg: &MleSingleNodeConfig) -> Vec<u8> {
-    match cfg.elf.as_str() {
-        "fib" | "fibonacci" | "f" => load_elf("fib"),
-        "reth" => load_elf("reth"),
-        other => panic!("unsupported --elf {other} (supported: fib | reth)"),
+///
+/// An ELF from disk is read once per process and name, so a file replaced or deleted under a
+/// running server neither changes nor breaks what it proves.
+fn load_program_elf(cfg: &MleSingleNodeConfig) -> Arc<[u8]> {
+    if let Some(embedded) = &cfg.embedded {
+        return Arc::clone(&embedded.elf);
     }
+    static FIB: std::sync::OnceLock<Arc<[u8]>> = std::sync::OnceLock::new();
+    static RETH: std::sync::OnceLock<Arc<[u8]>> = std::sync::OnceLock::new();
+    let (name, read) = match cfg.elf.as_str() {
+        "fib" | "fibonacci" | "f" => ("fib", &FIB),
+        "reth" => ("reth", &RETH),
+        other => panic!("unsupported --elf {other} (supported: fib | reth)"),
+    };
+    Arc::clone(read.get_or_init(|| load_elf(name).into()))
 }
 
 /// The stdin for **one** block. This is the only thing a sweep changes between blocks; everything
@@ -1353,7 +1393,8 @@ fn vram_census(phase: CensusPhase, epoch: usize, block: u32, cards: usize) {
         // Everything the driver counts that neither pool backs: the plain `cudaMalloc` sites in
         // the `.cu` units, loaded JIT modules, the CUDA context itself.
         let out_of_pool = dev_used.saturating_sub(pools.reserved_total());
-        let resident = RESIDENT.get();
+        let resident = resident_snapshot();
+        let resident = resident.as_deref();
         let (conv_n, conv_cap) = resident
             .and_then(|r| r.converts.get(k))
             .map_or((0, 0), |m| m.cache_len());
@@ -1566,7 +1607,7 @@ fn preparer_pool(kind: &str, env: &str, multi_card_size: usize, cards: usize) ->
 
 /// The block-independent half of the pipeline: the compiled program and the per-card machines.
 ///
-/// Held for the life of the process so a sweep pays for it once. Everything in here is a
+/// Held while the program stays the same, so a sweep pays for it once. Everything in here is a
 /// function of the ELF and the card count alone — `RiscvMachine::new` takes the program and a
 /// config constant and nothing else, and the code below it asserts the keygen is deterministic
 /// across cards, so there is nothing per-block to get wrong by keeping it.
@@ -1604,7 +1645,45 @@ struct Resident {
     shape: (usize, bool, bool),
 }
 
-static RESIDENT: std::sync::OnceLock<Resident> = std::sync::OnceLock::new();
+/// What the resident machines were built from. A block whose key differs gets new machines: the
+/// keys are per program, so reusing them would prove another program.
+#[derive(PartialEq, Eq)]
+struct ResidentKey {
+    elf: Arc<[u8]>,
+    vk_on: bool,
+    log_stacked_height: usize,
+    embedded_root: Option<[KoalaBear; 8]>,
+}
+
+static RESIDENT: std::sync::Mutex<Option<(ResidentKey, Arc<Resident>)>> =
+    std::sync::Mutex::new(None);
+
+/// The resident machines for `key`, built by `build` when the slot holds none or holds another
+/// program's. The old machines are dropped before the new ones are built, so their device memory
+/// returns to the pool first.
+fn resident_for(key: ResidentKey, build: impl FnOnce(Arc<[u8]>) -> Resident) -> Arc<Resident> {
+    let mut slot = RESIDENT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((held, resident)) = slot.as_ref() {
+        if *held == key {
+            return Arc::clone(resident);
+        }
+        info!("MLE resident: program or settings changed; rebuilding the machines");
+    }
+    *slot = None;
+    let resident = Arc::new(build(Arc::clone(&key.elf)));
+    *slot = Some((key, Arc::clone(&resident)));
+    resident
+}
+
+/// The resident machines, if any, for reporting only.
+#[cfg(feature = "cuda")]
+fn resident_snapshot() -> Option<Arc<Resident>> {
+    RESIDENT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|(_, resident)| Arc::clone(resident))
+}
 
 /// The single-node proving pipeline: keygen (+ eager JIT warmup) first on the quiescent main
 /// thread, then an emulate thread streams records to a preparer thread which publishes prepared
@@ -1632,6 +1711,7 @@ fn run_pipeline(
         with_convert || !with_combine,
         "with_combine implies with_convert"
     );
+    watch::reset();
     // Scheduling mode. This used to be an unconditional `set_var("USECASE", "local_single_node")`
     // nail: the GlobalScheduler reads the mode from USECASE / MACHINE_ROLE, and a stray two-machine
     // value (these benchmark hosts also run two-machine FRI) would role-partition chunks so the
@@ -1753,17 +1833,33 @@ fn run_pipeline(
     // smaller than the chunk count deadlocked) to "≥ in-flight chunks": when emulation runs
     // ahead of proving, `get_buffer` blocking on an empty pool is natural backpressure, released
     // as workers finish chunks and drop their records.
-    let pool_size = std::env::var("MLE_EVENT_POOL_SIZE")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(256);
+    //
+    // The embedded entry states its size; the CLI reads `MLE_EVENT_POOL_SIZE`. Sized rather than
+    // initialised-if-absent, so pools a host emulation left empty earlier in the process (growable
+    // mode) do not leave this run unbounded; the scope keeps such an emulation out while it runs.
+    let _pooled = pooled_event_buffers();
+    let pool_size = match &cfg.embedded {
+        Some(embedded) => embedded.event_pool_size.get(),
+        None => std::env::var("MLE_EVENT_POOL_SIZE")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(256),
+    };
+    // One buffer holds one chunk's events, so the embedded entry sizes them from the chunk it cuts;
+    // the CLI's chunk and buffers both follow `CHUNK_SIZE`.
+    let buffer_capacity = cfg
+        .embedded
+        .as_ref()
+        .map(|e| e.emulator_opts.chunk_size as usize);
     let t_pools = Instant::now();
-    if !is_pool_initialized() {
-        init_cpu_event_buffer_pool(pool_size, HostAllocFlags::DEFAULT);
-    }
-    if !is_alu_pool_initialized() {
-        init_alu_event_buffer_pool(pool_size, HostAllocFlags::DEFAULT);
-    }
+    // The embedded entry pins on demand, so a small guest pins only the few buffers it uses.
+    let pinning = if cfg.embedded.is_some() {
+        Pinning::OnDemand
+    } else {
+        Pinning::UpFront
+    };
+    size_cpu_event_buffer_pool(pool_size, buffer_capacity, pinning, HostAllocFlags::DEFAULT);
+    size_alu_event_buffer_pool(pool_size, buffer_capacity, pinning, HostAllocFlags::DEFAULT);
     // MLE_PACKED_EVENTS=1: pinned staging pools for the packed FFI event mirror. The buffers live
     // only from the preparers packing to that chunk's upload, so a small pool suffices. Its own
     // `initialized` check, not the alu pool's: nesting it there would silently leave packing off
@@ -1804,21 +1900,32 @@ fn run_pipeline(
     // (proving keys are device-resident). Card 0 compiles the JIT kernels; later cards load the
     // same cubins from the shared disk cache and only pay the module load.
     //
-    // Built once per process and held. The block a machine proves is an argument to
-    // `prove_chunk`, not a property of the machine, so nothing below this line is per-block —
-    // which is exactly why it can be hoisted and why the per-block state above it must not be.
-    let resident = RESIDENT.get_or_init(|| {
+    // Held across blocks while the program and settings stay the same (see `resident_for`). The
+    // block a machine proves is an argument to `prove_chunk`, not a property of the machine, so
+    // nothing below this line is per-block — which is exactly why it can be hoisted and why the
+    // per-block state above it must not be.
+    let embedded = cfg.embedded.as_ref();
+    let vk_on = embedded.is_some() || vk_verification();
+    let resident_key = ResidentKey {
+        elf: load_program_elf(cfg),
+        vk_on,
+        log_stacked_height: cfg.log_stacked_height,
+        embedded_root: embedded.map(|e| e.trusted_root),
+    };
+    let resident = resident_for(resident_key, |elf| {
         let t_compile = Instant::now();
-        let program: Arc<Program> = Compiler::new(SourceType::RISCV, &load_program_elf(cfg))
+        let program: Arc<Program> = Compiler::new(SourceType::RISCV, &elf)
             .expect("failed to parse RISC-V ELF")
             .compile();
         info!(
             "MLE program compile done in {:.3}s",
             t_compile.elapsed().as_secs_f64()
         );
-        let vk_on = vk_verification();
         #[cfg(feature = "cuda")]
-        let vk_map: Option<Arc<MleVkMap>> = vk_on.then(whitelist_map);
+        let vk_map: Option<Arc<MleVkMap>> = match embedded {
+            Some(e) => Some(Arc::clone(&e.whitelist)),
+            None => vk_on.then(whitelist_map),
+        };
         let t_keygen = Instant::now();
         let mut provers: Vec<Arc<RiscvMachine>> = Vec::with_capacity(prover_count);
         for k in 0..prover_count {
@@ -1952,7 +2059,10 @@ fn run_pipeline(
         #[cfg(feature = "cuda")]
         let apex = match (&vk_map, &riscv_vm_vk) {
             (Some(map), Some(vm_vk)) if with_combine => {
-                let trusted_root = pinned_root_from_env().unwrap_or_else(|| map.root());
+                let trusted_root = match embedded {
+                    Some(e) => e.trusted_root,
+                    None => pinned_root_from_env().unwrap_or_else(|| map.root()),
+                };
                 Some(Arc::new(MleApexVerifier::new(
                     pico_vm::mle::recursion_params_with_100_bits_security(),
                     Arc::clone(map),
@@ -2128,11 +2238,19 @@ fn run_pipeline(
     // `NUM_THREADS > 1` in the emulator — so it is the stamp that downstream restores order from.
     // Where the stamp comes from is at the send below.
     let (record_tx, record_rx) = crossbeam::channel::unbounded::<(usize, EmulationRecord)>();
+    // Set once the guest's emulation fails in an embedded run: the run drains instead of proving.
+    let guest_failed = Arc::new(AtomicBool::new(false));
+    let emulator_opts = embedded
+        .map(|e| e.emulator_opts)
+        .unwrap_or_else(EmulatorOpts::bench_riscv_ops);
+    let emulation_workers = embedded.map(|e| e.emulation_workers);
     let emulate_handle = {
         let program = program.clone();
+        let guest_failed = Arc::clone(&guest_failed);
+        let embedded_run = embedded.is_some();
         thread::Builder::new()
             .name("mle-emulate".into())
-            .spawn(move || {
+            .spawn_watched(move || {
             let t = Instant::now();
             // Inside the thread, so the window the phase probes localised the leak to can be split
             // between this thread's own work and everything running beside it. The first of these
@@ -2141,12 +2259,15 @@ fn run_pipeline(
             vram_probe("emu_start", iteration.unwrap_or(0), prover_count);
             let corrupted = Arc::new(AtomicBool::new(false));
             let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<KoalaBear>, Vec<u8>>::
-                setup_for_mle_riscv(program, stdin, EmulatorOpts::bench_riscv_ops());
+                setup_for_mle_riscv(program, stdin, emulator_opts);
             vram_probe("emu_witness", iteration.unwrap_or(0), prover_count);
-            let emulated_cycles = {
+            let emulated = {
                 let corrupted = Arc::clone(&corrupted);
-                let (_reports, total_cycles, _pv_stream) =
-                    emulate_snapshot_pipeline(&witness, move |mut record, _done| {
+                let on_record = move |mut record: EmulationRecord, _done: bool| {
+                    // Nothing downstream will take it: end the emulation rather than run on.
+                    if watch::failed() {
+                        panic!("emulation stopped: the pipeline failed");
+                    }
                     if corrupt_memory && !corrupted.load(Ordering::Relaxed) {
                         // Tamper the first tamperable record (exactly one).
                         if corrupt_one_record(&mut record) {
@@ -2160,22 +2281,52 @@ fn run_pipeline(
                     // the same field.
                     let seq = record.chunk_index() - 1;
                     record_tx.send((seq, record)).expect("preparer hung up");
-                })
-                .expect("snapshot pipeline failed");
+                };
+                // The embedded entry states its replay workers; the CLI reads `NUM_THREADS`.
+                let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    match emulation_workers {
+                        Some(workers) => emulate_snapshot_pipeline_with(
+                            &witness,
+                            workers,
+                            DeferredSplit::FromChunk16,
+                            on_record,
+                        ),
+                        None => emulate_snapshot_pipeline(&witness, on_record),
+                    }
+                }));
                 // record_tx drops here → the preparer sees the end of the stream.
                 //
                 // The cycle count used to go with it: the whole tuple was discarded by the
                 // `.expect`, and ethproofs requires `proving_cycles` on every submission, so there
                 // was no way to fill that field without re-emulating the block.
-                total_cycles
+                match run {
+                    Ok(Ok((_reports, total_cycles, pv_stream))) => Ok((total_cycles, pv_stream)),
+                    // An embedded caller gets the guest's failure back and the run drains; the
+                    // CLI still stops on it.
+                    Ok(Err(e)) if embedded_run => Err(GuestFailure::Emulation(e)),
+                    Ok(Err(e)) => panic!("snapshot pipeline failed: {e:?}"),
+                    // A panic is the emulation's own unless another pipeline thread failed first.
+                    Err(payload) if embedded_run && !watch::failed() => Err(
+                        GuestFailure::Panicked(watch::panic_message(&*payload)),
+                    ),
+                    Err(payload) => std::panic::resume_unwind(payload),
+                }
             };
-            if corrupt_memory && !corrupted.load(Ordering::Relaxed) {
+            let (emulated_cycles, committed, failure) = match emulated {
+                Ok((cycles, committed)) => (cycles, committed, None),
+                Err(failure) => {
+                    guest_failed.store(true, Ordering::SeqCst);
+                    mle_abort_run();
+                    (0, Vec::new(), Some(failure))
+                }
+            };
+            if corrupt_memory && failure.is_none() && !corrupted.load(Ordering::Relaxed) {
                 panic!(
                     "CORRUPT_MEMORY: no pass-through cell found to tamper; negative test could not run"
                 );
             }
             vram_probe("emu_end", iteration.unwrap_or(0), prover_count);
-            (t.elapsed(), emulated_cycles)
+            (t.elapsed(), emulated_cycles, committed, failure)
         })
         .expect("spawn mle-emulate")
     };
@@ -2222,16 +2373,24 @@ fn run_pipeline(
             let record_rx = record_rx.clone();
             let store = Arc::clone(&store);
             let shaper = Arc::clone(&provers[0]);
+            let guest_failed = Arc::clone(&guest_failed);
             hs.push(
                 thread::Builder::new()
                     .name(format!("mle-riscv-preparer-{pidx}"))
-                    .spawn(move || {
+                    .spawn_watched(move || {
                         spans::bind_lane(LaneId::new(Role::RiscvPreparer, pidx));
                         let t = Instant::now();
                         let mut n = 0usize;
                         while let Some((idx, record)) =
                             recv_idle(&record_rx, WorkKind::PrepareRiscv)
                         {
+                            if watch::failed() {
+                                break;
+                            }
+                            // A drained run: drop the record, which returns its event buffers.
+                            if guest_failed.load(Ordering::SeqCst) {
+                                continue;
+                            }
                             // This lane has no `Wait`: `prepare_chunk` takes no gate (`:505-506`
                             // records that it allocates no device memory) and its downstream is
                             // unbounded, so it can only ever block for want of input.
@@ -2272,7 +2431,7 @@ fn run_pipeline(
         // preparers, and owns finalize_emulation.
         thread::Builder::new()
             .name("mle-riscv-preparer-join".into())
-            .spawn(move || {
+            .spawn_watched(move || {
                 let mut total = 0usize;
                 let mut wall = Duration::ZERO;
                 for h in hs {
@@ -2322,11 +2481,14 @@ fn run_pipeline(
             handles.push(
                 thread::Builder::new()
                     .name(format!("mle-convert-preparer-{p}"))
-                    .spawn(move || {
+                    .spawn_watched(move || {
                         spans::bind_lane(LaneId::new(Role::ConvertPreparer, p));
                         while let Some((chunk_idx, riscv_proof)) =
                             recv_idle(&convert_rx, WorkKind::PrepareConvert)
                         {
+                            if watch::failed() {
+                                break;
+                            }
                             // A keygen miss inside `prepare_one` opens its own span, which splits
                             // this one around it — see the span module on why that is automatic.
                             let _b = spans::busy(WorkKind::PrepareConvert, Some(chunk_idx as u32));
@@ -2419,10 +2581,13 @@ fn run_pipeline(
             handles.push(
                 thread::Builder::new()
                     .name(format!("mle-combine-preparer-{p}"))
-                    .spawn(move || {
+                    .spawn_watched(move || {
                         spans::bind_lane(LaneId::new(Role::CombinePreparer, p));
                         while let Some(task) = recv_idle(&combine_task_rx, WorkKind::PrepareCombine)
                         {
+                            if watch::failed() {
+                                break;
+                            }
                             let (start, end) = (task.left.start_chunk, task.right.end_chunk);
                             // A node spans a chunk range; the span is labelled with its first, which
                             // is what orders it against the riscv work.
@@ -2541,7 +2706,7 @@ fn run_pipeline(
         workers.push(
             thread::Builder::new()
                 .name(dispatch_id.into())
-                .spawn(move || {
+                .spawn_watched(move || {
                     spans::bind_lane(LaneId::new(Role::Dispatch, 0));
                     let rt = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
@@ -2704,7 +2869,7 @@ fn run_pipeline(
             workers.push(
                 thread::Builder::new()
                     .name(worker_id.clone())
-                    .spawn(move || {
+                    .spawn_watched(move || {
                         bind_prover_lane(k, Role::Prove);
                         let mut items = items;
                         let mut drain = drain;
@@ -2853,7 +3018,7 @@ fn run_pipeline(
         workers.push(
             thread::Builder::new()
                 .name(worker_id.clone())
-                .spawn(move || {
+                .spawn_watched(move || {
                     bind_prover_lane(k, role);
                     let mut items = rec_items;
                     let mut ready = convert_ready_rx;
@@ -2932,15 +3097,46 @@ fn run_pipeline(
     drop(combine_task_tx);
     drop(combine_ready_rxs);
 
-    let (emulate_wall, emulated_cycles) = emulate_handle.join().expect("emulate thread panicked");
+    let (emulate_wall, emulated_cycles, committed, guest_failure) =
+        watch::join(emulate_handle, "emulate thread");
     vram_probe("emulate_joined", iteration.unwrap_or(0), prover_count);
-    let (chunk_count, prepare_wall) = preparer_handle.join().expect("preparer thread panicked");
+    let (chunk_count, prepare_wall) = watch::join(preparer_handle, "preparer thread");
     vram_probe("after_preparer", iteration.unwrap_or(0), prover_count);
     info!(
         "MLE emulate done in {:.3}s, prepare in {:.3}s ({chunk_count} chunk(s))",
         emulate_wall.as_secs_f64(),
         prepare_wall.as_secs_f64(),
     );
+
+    // The guest failed: the scheduler is aborted, so every lane drains and exits. Join them all,
+    // then drop what the run prepared and the cross-chunk sums it accumulated, so the resident
+    // machines and the event pools serve the next block as if this one never ran.
+    if let Some(failure) = guest_failure {
+        for h in workers {
+            watch::join(h, "worker thread");
+        }
+        #[cfg(feature = "cuda")]
+        {
+            if let Some(pb) = convert_prebuild.as_ref() {
+                pb.shutdown();
+            }
+            for h in convert_stage {
+                watch::join(h, "convert stage thread");
+            }
+            for h in combine_stage {
+                watch::join(h, "combine preparer thread");
+            }
+        }
+        store.clear();
+        let _ = RiscvMachine::drain_cross_chunk_gcs_over(provers.iter().map(|p| p.as_ref()));
+        info!("MLE run drained after the guest failed: {failure}");
+        return BlockOutcome {
+            cycles: emulated_cycles,
+            committed,
+            guest_failure: Some(failure),
+            ..Default::default()
+        };
+    }
 
     // Nothing to prove (degenerate empty program): the scheduler never completes with zero
     // chunks, so return without joining the workers — process exit reaps them.
@@ -2951,6 +3147,7 @@ fn run_pipeline(
         // says so; handing back a default outcome here would also claim zero cycles.
         return BlockOutcome {
             cycles: emulated_cycles,
+            committed,
             ..Default::default()
         };
     }
@@ -2970,7 +3167,7 @@ fn run_pipeline(
     );
 
     for h in workers {
-        h.join().expect("worker thread panicked");
+        watch::join(h, "worker thread");
     }
     vram_probe("after_workers", iteration.unwrap_or(0), prover_count);
     // Every proof exists: each lane only exits once its own feeds are closed, so joining the
@@ -3046,7 +3243,7 @@ fn run_pipeline(
     #[cfg(feature = "cuda")]
     if !converts.is_empty() {
         for h in convert_stage {
-            h.join().expect("convert stage thread panicked");
+            watch::join(h, "convert stage thread");
         }
         let done = convert_done.load(Ordering::SeqCst);
         // Single-node proves every chunk it emulated, so convert count == chunk count. Under
@@ -3086,7 +3283,7 @@ fn run_pipeline(
     #[cfg(feature = "cuda")]
     if !combines.is_empty() {
         for h in combine_stage {
-            h.join().expect("combine preparer thread panicked");
+            watch::join(h, "combine preparer thread");
         }
         let nodes = combine_count.load(Ordering::SeqCst);
         // A binary tree over N chunks has N-1 internal nodes, and single-node proves all of them.
@@ -3338,6 +3535,8 @@ fn run_pipeline(
         e2e_wall,
         root_accept,
         root: root_export,
+        committed,
+        guest_failure: None,
     }
 }
 

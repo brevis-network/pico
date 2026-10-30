@@ -6,10 +6,10 @@
 
 use std::ffi::CString;
 
-#[link(name = "nvToolsExt")]
+// Wrappers in `cuda/src/nvtx.cu`, built against the header-only NVTX3.
 extern "C" {
-    fn nvtxRangePushA(message: *const std::os::raw::c_char) -> std::os::raw::c_int;
-    fn nvtxRangePop() -> std::os::raw::c_int;
+    fn pico_nvtx_range_push(message: *const std::os::raw::c_char) -> std::os::raw::c_int;
+    fn pico_nvtx_range_pop() -> std::os::raw::c_int;
 }
 
 /// An open NVTX range; pops on drop. Held by value at the site being measured, so the range's extent
@@ -23,7 +23,7 @@ impl Drop for Range {
         // SAFETY: pairs with the push in `range`. NVTX push/pop is per-thread, and `Range` is neither
         // `Send` nor `Sync` (the `()` field keeps it so), so the pop cannot happen on another thread.
         unsafe {
-            nvtxRangePop();
+            pico_nvtx_range_pop();
         }
     }
 }
@@ -36,7 +36,7 @@ pub fn range(name: &str) -> Option<Range> {
     let c = CString::new(name).ok()?;
     // SAFETY: `c` outlives the call; NVTX copies the string.
     unsafe {
-        nvtxRangePushA(c.as_ptr());
+        pico_nvtx_range_push(c.as_ptr());
     }
     Some(Range { _private: () })
 }

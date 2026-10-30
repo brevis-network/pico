@@ -1,7 +1,10 @@
 use crossbeam::channel::{bounded, Receiver, Sender};
 #[cfg(feature = "cuda")]
 use cudart::{memory::HostAllocation, slice::CudaSlice};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    atomic::{AtomicU64, AtomicUsize, Ordering},
+    Condvar, Mutex,
+};
 
 /// Allocation flags for event buffers: CUDA's pinned-host flags in the GPU build, a placeholder
 /// in the CPU build, where buffers are ordinary heap memory.
@@ -77,26 +80,94 @@ impl<T> std::ops::IndexMut<usize> for HostAllocation<T> {
     }
 }
 
-/// When set, buffers do not come from the pools: each starts small and grows as events arrive, and
-/// is freed when returned. For callers that hold every record of a run (the host prover): fixed
-/// pools would block once every buffer is held, and full-size buffers would pin a chunk's worth of
-/// memory per record however few events it has. Process-wide and never cleared, so a process that
-/// sets it must not also run the GPU pipeline, which relies on the pools' blocking for backpressure.
-static GROWABLE: AtomicBool = AtomicBool::new(false);
+/// Live [`GrowableEventBuffers`] scopes. While any is open, buffers do not come from the pools:
+/// each starts small, grows as events arrive and is freed when returned. For callers that hold
+/// every record of a run (the host prover): fixed pools would block once every buffer is held.
+static GROWABLE_SCOPES: AtomicUsize = AtomicUsize::new(0);
+
+/// Which scopes are open; a growable scope and a [`PooledEventBuffers`] run exclude each other, so
+/// a host emulation cannot take the backpressure away from a GPU pipeline running beside it.
+struct Scopes {
+    growable: usize,
+    pooled: bool,
+}
+
+static SCOPES: Mutex<Scopes> = Mutex::new(Scopes {
+    growable: 0,
+    pooled: false,
+});
+static SCOPES_CHANGED: Condvar = Condvar::new();
+
+fn scopes() -> std::sync::MutexGuard<'static, Scopes> {
+    SCOPES.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// First capacity of a growable buffer.
 const GROWABLE_INITIAL_CAPACITY: usize = 1 << 12;
 
-/// Switch every event buffer in this process to growable, unpooled allocations. See [`GROWABLE`].
-pub fn use_growable_event_buffers() {
-    GROWABLE.store(true, Ordering::Relaxed);
+/// Event buffers handed out while this lives are growable and unpooled; waits for a running
+/// [`PooledEventBuffers`] to end. Scopes nest and may overlap across threads.
+#[must_use = "buffers are growable only while the scope lives"]
+pub struct GrowableEventBuffers(());
+
+pub fn growable_event_buffers() -> GrowableEventBuffers {
+    let mut s = SCOPES_CHANGED
+        .wait_while(scopes(), |s| s.pooled)
+        .unwrap_or_else(|e| e.into_inner());
+    s.growable += 1;
+    GROWABLE_SCOPES.fetch_add(1, Ordering::SeqCst);
+    GrowableEventBuffers(())
+}
+
+impl Drop for GrowableEventBuffers {
+    fn drop(&mut self) {
+        let mut s = scopes();
+        s.growable -= 1;
+        GROWABLE_SCOPES.fetch_sub(1, Ordering::SeqCst);
+        SCOPES_CHANGED.notify_all();
+    }
+}
+
+/// A run that relies on the pools' blocking for backpressure (the GPU pipeline): while this lives,
+/// no growable scope is open, so every buffer comes from a pool. Waits for open growable scopes and
+/// for another pooled run to end.
+#[must_use = "the pools bound buffers only while the scope lives"]
+pub struct PooledEventBuffers(());
+
+pub fn pooled_event_buffers() -> PooledEventBuffers {
+    let mut s = SCOPES_CHANGED
+        .wait_while(scopes(), |s| s.pooled || s.growable > 0)
+        .unwrap_or_else(|e| e.into_inner());
+    s.pooled = true;
+    PooledEventBuffers(())
+}
+
+impl Drop for PooledEventBuffers {
+    fn drop(&mut self) {
+        scopes().pooled = false;
+        SCOPES_CHANGED.notify_all();
+    }
 }
 
 /// Always on in the CPU build: without a GPU pipeline there is no backpressure to keep, and
 /// fixed pools would reserve a chunk's worth of memory per buffer up front.
 #[inline]
 pub(crate) fn growable() -> bool {
-    cfg!(not(feature = "cuda")) || GROWABLE.load(Ordering::Relaxed)
+    cfg!(not(feature = "cuda")) || GROWABLE_SCOPES.load(Ordering::Relaxed) > 0
+}
+
+/// Tells pools apart, so a buffer outliving a replaced pool is freed rather than returned to its
+/// successor, whose bounded channel it would overfill.
+static NEXT_POOL_ID: AtomicU64 = AtomicU64::new(1);
+
+/// When a pool pins its buffers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pinning {
+    /// All of them when the pool is made.
+    UpFront,
+    /// One whenever none is free, up to the pool size: a run that never needs them all, a small
+    /// guest's, never pins them all.
+    OnDemand,
 }
 
 /// A generic pool of reusable event buffers (pinned memory in the GPU build).
@@ -106,19 +177,38 @@ pub struct EventPool<T> {
     receiver: Receiver<PinnedEventBuffer<T>>,
     buffer_capacity: usize,
     flags: HostAllocFlags,
+    pool_size: usize,
+    /// Buffers made so far, never more than `pool_size`.
+    pinned: AtomicUsize,
+    id: u64,
 }
 
 impl<T: std::fmt::Debug> EventPool<T> {
     pub fn new(pool_size: usize, buffer_capacity: usize, flags: HostAllocFlags) -> Self {
+        Self::with_pinning(pool_size, buffer_capacity, flags, Pinning::UpFront)
+    }
+
+    pub fn with_pinning(
+        pool_size: usize,
+        buffer_capacity: usize,
+        flags: HostAllocFlags,
+        pinning: Pinning,
+    ) -> Self {
         // The CPU build's buffers never come from the pool, so there is nothing to preallocate.
         let pool_size = if cfg!(feature = "cuda") { pool_size } else { 0 };
         // Create a bounded channel with the same size as the pool
         let (sender, receiver) = bounded(pool_size);
+        let id = NEXT_POOL_ID.fetch_add(1, Ordering::Relaxed);
+        let up_front = if pinning == Pinning::UpFront {
+            pool_size
+        } else {
+            0
+        };
 
-        for _ in 0..pool_size {
+        for _ in 0..up_front {
             let mut buffer = PinnedEventBuffer::new(buffer_capacity, flags)
                 .expect("Failed to create event buffer");
-            buffer.pooled = true;
+            buffer.pool = Some(id);
             // Fill the channel with initial buffers.
             // This is infallible as we are filling up to exact capacity.
             sender.send(buffer).unwrap();
@@ -129,26 +219,44 @@ impl<T: std::fmt::Debug> EventPool<T> {
             receiver,
             buffer_capacity,
             flags,
+            pool_size,
+            pinned: AtomicUsize::new(up_front),
+            id,
         }
     }
 
-    /// Blocks the current thread until a buffer becomes available, unless buffers are growable.
-    /// Returns None only if the pool is disconnected/dropped.
+    /// Blocks the current thread until a buffer becomes available, unless buffers are growable or
+    /// the pool is empty by construction (it could never serve). Returns None only if the pool is
+    /// disconnected/dropped.
     pub fn get(&self) -> Option<PinnedEventBuffer<T>> {
-        if growable() {
+        if growable() || self.pool_size == 0 {
             return Some(
                 PinnedEventBuffer::new(GROWABLE_INITIAL_CAPACITY, self.flags)
                     .expect("Failed to allocate an event buffer"),
             );
         }
-        // `recv()` blocks the thread if the channel is empty.
-        // It waits until a buffer is returned via `return_buffer`.
+        if let Ok(buffer) = self.receiver.try_recv() {
+            return Some(buffer);
+        }
+        // None free: pin another while under the pool size, else wait for one to come back.
+        let under_size = self
+            .pinned
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < self.pool_size).then_some(n + 1)
+            })
+            .is_ok();
+        if under_size {
+            let mut buffer = PinnedEventBuffer::new(self.buffer_capacity, self.flags)
+                .expect("Failed to create event buffer");
+            buffer.pool = Some(self.id);
+            return Some(buffer);
+        }
         self.receiver.recv().ok()
     }
 
     pub fn return_buffer(&self, mut buffer: PinnedEventBuffer<T>) {
-        if !buffer.pooled {
-            // A growable buffer, not one of the pool's: dropping it frees the memory.
+        if buffer.pool != Some(self.id) {
+            // Growable, or from a replaced pool: dropping it frees the memory.
             return;
         }
         buffer.clear();
@@ -160,6 +268,18 @@ impl<T: std::fmt::Debug> EventPool<T> {
 
     pub fn buffer_capacity(&self) -> usize {
         self.buffer_capacity
+    }
+
+    /// How many buffers the pool was made with.
+    pub fn pool_size(&self) -> usize {
+        self.pool_size
+    }
+
+    /// Buffers lent out and not yet returned.
+    pub fn outstanding(&self) -> usize {
+        self.pinned
+            .load(Ordering::Acquire)
+            .saturating_sub(self.receiver.len())
     }
 
     /// Drain and drop all buffers currently in the pool.
@@ -178,8 +298,8 @@ impl<T: std::fmt::Debug> EventPool<T> {
 pub struct PinnedEventBuffer<T> {
     host: HostAllocation<T>,
     len: usize,
-    /// Made by a pool, and goes back to it; a growable buffer is freed instead.
-    pooled: bool,
+    /// The pool that made it, which it goes back to; `None` is a growable buffer, freed instead.
+    pool: Option<u64>,
     flags: HostAllocFlags,
 }
 
@@ -194,7 +314,7 @@ impl<T> PinnedEventBuffer<T> {
         Ok(Self {
             host,
             len: 0,
-            pooled: false,
+            pool: None,
             flags,
         })
     }
@@ -262,7 +382,7 @@ impl<T> PinnedEventBuffer<T> {
         if total <= self.capacity() {
             return Ok(());
         }
-        if !growable() {
+        if self.pool.is_some() {
             return Err("Not enough capacity");
         }
         self.grow(total)
@@ -270,7 +390,7 @@ impl<T> PinnedEventBuffer<T> {
 
     pub fn push(&mut self, event: T) -> Result<(), &'static str> {
         if self.len >= self.capacity() {
-            if !growable() {
+            if self.pool.is_some() {
                 return Err("Buffer is full");
             }
             self.grow(self.len + 1)?;
@@ -300,7 +420,7 @@ impl<T> PinnedEventBuffer<T> {
         T: Copy,
     {
         if self.len + events.len() > self.capacity() {
-            if !growable() {
+            if self.pool.is_some() {
                 return Err("Not enough capacity to extend");
             }
             self.grow(self.len + events.len())?;
@@ -320,6 +440,9 @@ impl<T> PinnedEventBuffer<T> {
 impl<T> PinnedEventBuffer<T> {
     #[inline]
     pub fn remaining_capacity(&self) -> usize {
+        if self.pool.is_none() {
+            return usize::MAX;
+        }
         self.capacity() - self.len()
     }
 }
@@ -425,10 +548,11 @@ impl<T> EventBuffer<T> {
 
     #[inline]
     pub fn remaining_capacity(&self) -> usize {
-        if growable() {
-            return usize::MAX;
+        match self {
+            Self::Buffer(b) => b.remaining_capacity(),
+            Self::Empty if growable() => usize::MAX,
+            Self::Empty => 0,
         }
-        self.capacity().saturating_sub(self.len())
     }
 
     #[inline]
@@ -536,6 +660,21 @@ impl<T> CudaSlice<T> for EventBuffer<T> {
 /// A trait for managing global event pools
 pub trait EventPoolManager<T> {
     fn init_pool(pool_size: usize, flags: HostAllocFlags);
+    /// Make the pool hold exactly `pool_size` buffers of `capacity` events (`None`: the
+    /// environment's default), pinned as `pinning` says, replacing one of another shape. Buffers the old pool lent out are
+    /// freed when returned.
+    fn size_pool(
+        pool_size: usize,
+        capacity: Option<usize>,
+        pinning: Pinning,
+        flags: HostAllocFlags,
+    );
+    /// The current pool's buffer count; `None` before any init.
+    fn pool_size() -> Option<usize>;
+    /// The current pool's events per buffer; `None` before any init.
+    fn buffer_capacity() -> Option<usize>;
+    /// The current pool's buffers lent out and not yet returned; `None` before any init.
+    fn outstanding() -> Option<usize>;
     fn get_buffer() -> Option<EventBuffer<T>>;
     fn return_buffer(buffer: EventBuffer<T>);
     fn shutdown_pool();
@@ -554,10 +693,16 @@ macro_rules! create_event_pool_manager {
         );
     };
     ($name:ident, $event_type:ty, $pool_name:ident, $capacity:expr) => {
-        use std::sync::OnceLock;
+        use std::sync::{Arc, RwLock};
         use $crate::emulator::riscv::event_pool::EventPool;
 
-        static $pool_name: OnceLock<EventPool<$event_type>> = OnceLock::new();
+        // Replaceable, for `size_pool`; callers clone the `Arc` out, so a blocked `get` holds no
+        // lock.
+        static $pool_name: RwLock<Option<Arc<EventPool<$event_type>>>> = RwLock::new(None);
+
+        fn current_pool() -> Option<Arc<EventPool<$event_type>>> {
+            $pool_name.read().unwrap_or_else(|e| e.into_inner()).clone()
+        }
 
         pub struct $name;
 
@@ -566,28 +711,74 @@ macro_rules! create_event_pool_manager {
                 pool_size: usize,
                 flags: $crate::emulator::riscv::event_pool::HostAllocFlags,
             ) {
-                let event_pool_capacity = *$capacity;
-                tracing::info!(
-                    "initializing event pool {} with capacity {event_pool_capacity}",
-                    stringify!($pool_name)
-                );
-                let new_pool = EventPool::new(pool_size, event_pool_capacity, flags);
-                // Idempotent on purpose: `set` fails only when another site initialised first, and
-                // every site passes the same pool_size and flags, so the two pools are
-                // interchangeable and dropping this one is correct. The previous `.expect` turned
-                // that harmless race into a panic.
-                if $pool_name.set(new_pool).is_err() {
+                // Idempotent on purpose: the first site to initialise wins and later calls keep
+                // its pool. `size_pool` is the one way to change the size.
+                let mut slot = $pool_name.write().unwrap_or_else(|e| e.into_inner());
+                if slot.is_some() {
                     tracing::debug!(
                         "event pool {} was already initialized; keeping the existing pool",
                         stringify!($pool_name)
                     );
+                    return;
                 }
+                let event_pool_capacity = *$capacity;
+                tracing::info!(
+                    "initializing event pool {} with {pool_size} buffers of capacity \
+                     {event_pool_capacity}",
+                    stringify!($pool_name)
+                );
+                *slot = Some(Arc::new(EventPool::new(
+                    pool_size,
+                    event_pool_capacity,
+                    flags,
+                )));
+            }
+
+            fn size_pool(
+                pool_size: usize,
+                capacity: Option<usize>,
+                pinning: $crate::emulator::riscv::event_pool::Pinning,
+                flags: $crate::emulator::riscv::event_pool::HostAllocFlags,
+            ) {
+                let event_pool_capacity = capacity.unwrap_or(*$capacity);
+                let mut slot = $pool_name.write().unwrap_or_else(|e| e.into_inner());
+                if slot.as_ref().is_some_and(|p| {
+                    p.pool_size() == pool_size && p.buffer_capacity() == event_pool_capacity
+                }) {
+                    return;
+                }
+                // Free the old buffers before pinning the new ones.
+                if let Some(old) = slot.take() {
+                    old.shutdown();
+                }
+                tracing::info!(
+                    "sizing event pool {} to {pool_size} buffers of capacity {event_pool_capacity} \
+                     ({pinning:?})",
+                    stringify!($pool_name)
+                );
+                *slot = Some(Arc::new(EventPool::with_pinning(
+                    pool_size,
+                    event_pool_capacity,
+                    flags,
+                    pinning,
+                )));
+            }
+
+            fn pool_size() -> Option<usize> {
+                current_pool().map(|p| p.pool_size())
+            }
+
+            fn buffer_capacity() -> Option<usize> {
+                current_pool().map(|p| p.buffer_capacity())
+            }
+
+            fn outstanding() -> Option<usize> {
+                current_pool().map(|p| p.outstanding())
             }
 
             fn get_buffer() -> Option<$crate::emulator::riscv::event_pool::EventBuffer<$event_type>>
             {
-                $pool_name
-                    .get()
+                current_pool()
                     .and_then(|p| p.get())
                     .map($crate::emulator::riscv::event_pool::EventBuffer::Buffer)
             }
@@ -598,20 +789,20 @@ macro_rules! create_event_pool_manager {
                 if let $crate::emulator::riscv::event_pool::EventBuffer::Buffer(real_buffer) =
                     buffer
                 {
-                    if let Some(pool) = $pool_name.get() {
+                    if let Some(pool) = current_pool() {
                         pool.return_buffer(real_buffer);
                     }
                 }
             }
 
             fn shutdown_pool() {
-                if let Some(pool) = $pool_name.get() {
+                if let Some(pool) = current_pool() {
                     pool.shutdown();
                 }
             }
 
             fn is_pool_initialized() -> bool {
-                $pool_name.get().is_some()
+                current_pool().is_some()
             }
         }
     };

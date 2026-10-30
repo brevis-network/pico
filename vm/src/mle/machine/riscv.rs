@@ -80,13 +80,13 @@ use crate::{
         record::RecordBehavior,
         riscv::{
             alu_event_pool::{
-                init_alu_event_buffer_pool, is_alu_pool_initialized, ALU_EVENT_BUFFER_CAPACITY,
+                alu_event_buffer_capacity, init_alu_event_buffer_pool, is_alu_pool_initialized,
             },
             cpu_event_pool::{
-                init_cpu_event_buffer_pool, is_pool_initialized, CPU_EVENT_BUFFER_CAPACITY,
+                cpu_event_buffer_capacity, init_cpu_event_buffer_pool, is_pool_initialized,
             },
             emulator::{EmulationError, RiscvEmulator},
-            event_pool::use_growable_event_buffers,
+            event_pool::{growable_event_buffers, GrowableEventBuffers},
             public_values::RecordFinalPvsState,
             record::EmulationRecord,
         },
@@ -100,7 +100,7 @@ use crate::{
         witness::ProvingWitness,
     },
     primitives::consts::{MAX_NUM_PVS, RISCV_NUM_PVS},
-    proverchain::riscv::{emulate_snapshot_pipeline_with, DeferredSplit},
+    proverchain::riscv::{emulate_snapshot_pipeline_with_selector, DeferredSplit, TraceKind},
 };
 use pico_mle_core::{
     config::{
@@ -341,7 +341,9 @@ pub mod air_id {
     pub const MEM_FINAL: usize = 17;
     pub const GLOBAL: usize = 18;
     pub const POSEIDON2: usize = 19;
-    // Precompile / SyscallPrecompile AIR ids (20..=44) are literal indices in `INCLUDED`.
+    /// First and last of the precompile and `SyscallPrecompile` AIR ids, literal in `INCLUDED`.
+    pub const PRECOMPILE_FIRST: usize = 20;
+    pub const PRECOMPILE_LAST: usize = 44;
     /// Dedicated Ecall chip; appended after the precompile block so the literal
     /// precompile indices stay valid.
     pub const ECALL: usize = 45;
@@ -736,8 +738,9 @@ pub enum EmulateError {
 /// The chunk size and the caller's `log_stacked_height` are one decision: a chunk holds one CPU row
 /// per instruction, so a full chunk of `2^n` instructions needs a stacked height of at least `n`.
 ///
-/// Every record is held until the caller drops the output, so this switches the process's pinned
-/// event buffers from the fixed pools to growable ones; [`emulate_each`] streams instead.
+/// Every record is held until the caller drops the output, so the buffers this emulation takes are
+/// growable rather than pooled; [`emulate_each`] streams instead. While it runs, a GPU pipeline in
+/// the same process waits, and it waits for one.
 pub fn emulate_with_opts(
     program: Arc<Program>,
     stdin: &EmulatorStdin<Program, Vec<u8>>,
@@ -746,7 +749,7 @@ pub fn emulate_with_opts(
     if opts.snapshot_main != SnapshotMainMode::Interpreter {
         return Err(EmulateError::UnsupportedSnapshotMain(opts.snapshot_main));
     }
-    hold_records_in_growable_buffers();
+    let _growable = hold_records_in_growable_buffers();
     let final_pvs_state = Arc::new(RecordFinalPvsState::default());
     let mut emulator = RiscvEmulator::new_single::<Kb>(program, final_pvs_state, opts, None);
     emulator.write_stdin(stdin);
@@ -769,11 +772,12 @@ pub fn emulate_with_opts(
     })
 }
 
-/// Switches the process's pinned event buffers from the fixed pools, which a caller holding every
-/// record would run dry, to growable ones, and claims the pools empty before an emulator would
-/// fill them with full-size buffers it never uses.
-fn hold_records_in_growable_buffers() {
-    use_growable_event_buffers();
+/// Switches the event buffers this emulation takes from the fixed pools, which a caller holding
+/// every record would run dry, to growable ones, for as long as the returned scope lives; a GPU
+/// pipeline later in the process gets its bounded pools back. Claims the pools empty before an
+/// emulator would fill them with full-size buffers it never uses.
+fn hold_records_in_growable_buffers() -> GrowableEventBuffers {
+    let scope = growable_event_buffers();
     if !is_pool_initialized() {
         init_cpu_event_buffer_pool(
             0,
@@ -786,6 +790,7 @@ fn hold_records_in_growable_buffers() {
             crate::emulator::riscv::event_pool::HostAllocFlags::DEFAULT,
         );
     }
+    scope
 }
 
 /// [`emulate_with_opts`] through the snapshot pipeline: one snapshot thread, running the
@@ -808,6 +813,63 @@ pub fn emulate_with_pipeline(
     opts: EmulatorOpts,
     workers: NonZeroUsize,
 ) -> Result<EmulationOutput, EmulateError> {
+    let records = Mutex::new(Vec::new());
+    let (reports, cycles, committed_bytes) =
+        pipeline_emulation(program, stdin, opts, workers, TraceKind::Full, |record| {
+            records
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(record)
+        })?;
+    let records = records.into_inner().unwrap_or_else(PoisonError::into_inner);
+    let chunks = records.iter().filter(|record| record.is_cpu_chunk).count() as u32;
+    Ok(EmulationOutput {
+        records,
+        chunks,
+        committed_bytes,
+        cycles,
+        reports,
+    })
+}
+
+/// [`emulate_with_pipeline`] for a caller that needs what the run did, not its witness: the
+/// replays make light-trace records, without CPU and ALU events, and each goes to `on_record` and
+/// is dropped. `records` comes back empty; `chunks`, `cycles`, `committed_bytes` and `reports` are
+/// [`emulate_with_pipeline`]'s, and so is every record's chunk boundary and precompile event.
+pub fn execute_with_pipeline(
+    program: Arc<Program>,
+    stdin: &EmulatorStdin<Program, Vec<u8>>,
+    opts: EmulatorOpts,
+    workers: NonZeroUsize,
+    on_record: impl Fn(&EmulationRecord) + Send + Sync,
+) -> Result<EmulationOutput, EmulateError> {
+    let chunks = std::sync::atomic::AtomicU32::new(0);
+    let (reports, cycles, committed_bytes) =
+        pipeline_emulation(program, stdin, opts, workers, TraceKind::Light, |record| {
+            if record.is_cpu_chunk {
+                chunks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            on_record(&record);
+        })?;
+    Ok(EmulationOutput {
+        records: Vec::new(),
+        chunks: chunks.into_inner(),
+        committed_bytes,
+        cycles,
+        reports,
+    })
+}
+
+/// The snapshot pipeline under `opts`, splitting the deferred pool after every chunk and handing
+/// each record to `sink`; the reports come back sorted by `start_chunk`.
+fn pipeline_emulation(
+    program: Arc<Program>,
+    stdin: &EmulatorStdin<Program, Vec<u8>>,
+    opts: EmulatorOpts,
+    workers: NonZeroUsize,
+    trace: TraceKind,
+    sink: impl Fn(EmulationRecord) + Send + Sync,
+) -> Result<(Vec<EmulationReport>, u64, Vec<u8>), EmulateError> {
     if opts.chunk_batch_size != 1 {
         return Err(EmulateError::UnsupportedChunkBatchSize(
             opts.chunk_batch_size,
@@ -820,7 +882,7 @@ pub fn emulate_with_pipeline(
     if opts.snapshot_main == SnapshotMainMode::Aot && !aot_ready {
         return Err(EmulateError::AotUnavailable);
     }
-    hold_records_in_growable_buffers();
+    let _growable = hold_records_in_growable_buffers();
     let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<Kb>, Vec<u8>> {
         program: Some(program),
         vk_root: None,
@@ -830,28 +892,15 @@ pub fn emulate_with_pipeline(
         opts: Some(opts),
         records: Vec::new(),
     };
-    let records = Mutex::new(Vec::new());
-    let (mut reports, cycles, committed_bytes) = emulate_snapshot_pipeline_with(
+    let (mut reports, cycles, committed_bytes) = emulate_snapshot_pipeline_with_selector(
         &witness,
         workers,
         DeferredSplit::AfterEveryChunk,
-        |record, _done| {
-            records
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(record)
-        },
+        |record, _done| sink(record),
+        |_| trace,
     )?;
     reports.sort_by_key(|report| report.start_chunk);
-    let records = records.into_inner().unwrap_or_else(PoisonError::into_inner);
-    let chunks = records.iter().filter(|record| record.is_cpu_chunk).count() as u32;
-    Ok(EmulationOutput {
-        records,
-        chunks,
-        committed_bytes,
-        cycles,
-        reports,
-    })
+    Ok((reports, cycles, committed_bytes))
 }
 
 /// Emulate the program to completion, collecting one [`EmulationRecord`] per chunk.
@@ -901,7 +950,7 @@ pub fn emulate_each(
     // `CHUNK_SIZE` for the ALU pool, and a caller that named no size inherits a RAM-derived chunk
     // that can exceed the 2^22 default. Clamp rather than panic, but say so — it silently shrinks
     // the chunk a caller asked for.
-    let buffer_cap = u32::try_from((*CPU_EVENT_BUFFER_CAPACITY).min(*ALU_EVENT_BUFFER_CAPACITY))
+    let buffer_cap = u32::try_from(cpu_event_buffer_capacity().min(alu_event_buffer_capacity()))
         .unwrap_or(u32::MAX);
     if opts.chunk_size > buffer_cap {
         tracing::warn!(
@@ -967,7 +1016,14 @@ pub fn augmented_record(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
     record: &EmulationRecord,
 ) -> EmulationRecord {
-    let mut record = record.clone();
+    augment_record(chips, record.clone())
+}
+
+/// [`augmented_record`] on a record the caller gives up, without the clone.
+pub fn augment_record(
+    chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
+    mut record: EmulationRecord,
+) -> EmulationRecord {
     for chip in chips.iter() {
         if air_id_for(&chip.name()).is_none() {
             continue;
@@ -979,6 +1035,32 @@ pub fn augmented_record(
         }
     }
     record
+}
+
+/// The main-trace rows each AIR of `record` fills at natural heights (`verify_keys(false)`), as
+/// `(air id, rows)` in chip order: what `generate_main` writes before padding, after the same
+/// extra-record pass [`build_ctx`] runs. Counts events; generates no trace. The byte table is
+/// always its full `NUM_ROWS`, the program table one row per instruction.
+pub fn natural_air_rows(
+    chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
+    record: EmulationRecord,
+) -> Vec<(usize, usize)> {
+    let record = augment_record(chips, record);
+    let natural = crate::mle::machine::shape::mle_natural_heights(&record);
+    chips
+        .iter()
+        .filter(|chip| chip.is_active(&record))
+        .filter_map(|chip| {
+            let name = chip.name();
+            let id = air_id_for(&name)?;
+            let rows = match id {
+                air_id::BYTE => crate::chips::chips::byte::traces::NUM_ROWS,
+                air_id::PROGRAM => record.program.instructions.len(),
+                _ => natural.get(&name).copied().unwrap_or(0),
+            };
+            Some((id, rows))
+        })
+        .collect()
 }
 
 /// Build the proving context of one record: the extra-record pass first (as
@@ -2785,5 +2867,37 @@ mod tests {
             ],
             "the orchestrator's positional tail moved"
         );
+    }
+
+    /// `natural_air_rows` names the AIRs `build_ctx` generates, and each trace is its row count
+    /// padded: the count is what the trace holds before padding.
+    #[test]
+    fn natural_air_rows_match_the_generated_traces() {
+        use p3_matrix::Matrix;
+
+        let out = emulate_with_opts(fib_program(), &fib_stdin(10), fixed_opts(1 << 12))
+            .expect("fib emulation");
+        assert!(out.records.len() > 1, "want CPU and memory records");
+        let chips = RiscvChipType::<Kb>::all_chips();
+        for (i, record) in out.records.iter().enumerate() {
+            let rows = natural_air_rows(&chips, record.clone());
+            let ctx = build_ctx(&chips, record, false);
+            let traced: Vec<(usize, usize)> = ctx
+                .per_trace
+                .iter()
+                .map(|(id, air)| (*id, air.common_main.height()))
+                .collect();
+            assert_eq!(
+                rows.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+                traced.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+                "record {i}: AIR sets differ"
+            );
+            for ((id, rows), (_, height)) in rows.iter().zip(&traced) {
+                assert!(
+                    *rows <= *height && *height <= rows.next_power_of_two().max(16),
+                    "record {i}, air {id}: {rows} natural rows, trace height {height}"
+                );
+            }
+        }
     }
 }

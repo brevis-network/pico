@@ -74,7 +74,7 @@ pub enum ProveError {
 
     /// The process cannot take this AOT program: it holds a different one, or AOT code installed
     /// without `pico_aot_runtime::register`.
-    #[cfg(feature = "aot")]
+    #[cfg(any(feature = "aot", feature = "cuda"))]
     #[error("cannot register the AOT program: {0}")]
     AotRegistration(#[source] pico_aot_runtime::AotError),
 
@@ -128,6 +128,19 @@ pub enum ProveError {
     /// encoded.
     #[error("not a readable proof artifact: {0}")]
     Format(String),
+
+    /// The GPU pipeline failed or produced no root.
+    #[cfg(feature = "cuda")]
+    #[error("GPU proving failed: {0}")]
+    Gpu(String),
+
+    /// A previous GPU prove failed in this process other than by its guest (a device error, a
+    /// failed pipeline stage) and may have left the pipeline mid-run; restart the process to prove
+    /// on the GPU again. A guest whose emulation fails is reported as on the CPU path, and does not
+    /// poison the process.
+    #[cfg(feature = "cuda")]
+    #[error("a previous GPU prove failed in this process; restart the process to prove again")]
+    GpuPoisoned,
 
     /// The container was written by a different container format.
     #[error("proof artifact format version mismatch: expected {expected}, file claims {found}")]
@@ -215,6 +228,18 @@ pub enum ProveError {
     )]
     EvmNoCommittedDigest,
 
+    /// `what` exists only for a whitelist-mode proof or prover: the VK bundle and the v3 envelope
+    /// name the whitelist a verifier pins, and outside whitelist mode there is none.
+    #[error(
+        "{what} needs whitelist mode: build the prover with `shipped_whitelist()`, or \
+         `verify_keys(true)` with `vk_map(path)` and `trusted_vk_root(root)`"
+    )]
+    WhitelistModeRequired { what: &'static str },
+
+    /// [`crate::Proof::export_v3`] on a proof that does not stop at [`Phase::Combine`].
+    #[error("only a Combine root exports as a v3 envelope; this proof stops at {phase:?}")]
+    NotARootProof { phase: Phase },
+
     /// The phase has no verification path that works from a container alone, in any configuration.
     #[error("a {phase:?} proof cannot be verified from a file in a fresh process")]
     UnverifiableInFreshProcess { phase: Phase },
@@ -267,6 +292,21 @@ impl ProveError {
             };
         }
         Self::Emulate(error)
+    }
+
+    /// Lift a GPU pipeline failure, keeping a poisoned process distinguishable.
+    #[cfg(feature = "cuda")]
+    pub(crate) fn from_embed(error: distributed_vm::mle::embed::EmbedError) -> Self {
+        use distributed_vm::mle::{embed::EmbedError, GuestFailure};
+        match error {
+            EmbedError::Poisoned => Self::GpuPoisoned,
+            // The guest's own failure, reported as the CPU path reports it.
+            EmbedError::Guest(GuestFailure::Emulation(e)) => {
+                Self::from_emulate(pico_vm::mle::machine::riscv::EmulateError::Emulation(e))
+            }
+            EmbedError::Guest(GuestFailure::Panicked(message)) => Self::EmulationAborted(message),
+            other => Self::Gpu(other.to_string()),
+        }
     }
 }
 

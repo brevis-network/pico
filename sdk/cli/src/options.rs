@@ -192,10 +192,7 @@ pub fn build(builder: ProverBuilder) -> Result<Prover> {
         prover.concurrency(),
         prover.verify_keys()
     );
-    #[cfg(feature = "aot")]
-    if let Some(workers) = prover.emulation_workers() {
-        eprintln!("prover: aot, {workers} emulation worker(s)");
-    }
+    eprintln!("prover: {} emulation worker(s)", prover.emulation_workers());
     Ok(prover)
 }
 

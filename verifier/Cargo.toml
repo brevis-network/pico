@@ -1,0 +1,39 @@
+[package]
+name = "pico-verifier"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true
+description = "Stable-Rust verifier for Pico MLE whitelist-mode root proofs"
+# Builds on stable: it must not depend on `pico-vm`, which needs nightly.
+rust-version = "1.91"
+
+[dependencies]
+pico-mle-core = { path = "../mle-core", default-features = false }
+pico-mle-cpu = { path = "../mle-cpu", default-features = false }
+
+p3-field.workspace = true
+p3-koala-bear.workspace = true
+p3-symmetric.workspace = true
+
+sha2.workspace = true
+thiserror.workspace = true
+# The wire formats only: zstd builds C, which a zkVM guest cannot.
+bincode = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+zstd = { workspace = true, optional = true }
+
+[dev-dependencies]
+pico-mle-core = { path = "../mle-core", default-features = false, features = ["test-utils"] }
+p3-air.workspace = true
+p3-matrix.workspace = true
+
+[features]
+default = ["parallel", "codec"]
+# `pico-vm` turns this off without `rayon`, so its dependency here must not force it back on.
+parallel = ["pico-mle-core/parallel", "pico-mle-cpu/parallel"]
+# The VK bundle and v3 envelope codecs and the `verify` entry points that take their bytes.
+# `pico-vm` enables it off-guest only.
+codec = ["dep:bincode", "dep:serde", "dep:zstd"]

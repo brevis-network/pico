@@ -5,7 +5,7 @@ use std::{
     num::NonZeroUsize,
     panic::AssertUnwindSafe,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex, PoisonError},
 };
 
 use pico_mle_core::{
@@ -40,20 +40,22 @@ use pico_vm::{
         convert::{ConvertMachine, ProofWithVk},
         exe::RiscvVmVk,
         riscv::{self, RiscvMachine, RiscvProof},
+        vk_bundle::encode_vk_bundle_v2,
         vk_map::{vk_identity, MleVkMap, VkMapError},
     },
     primitives::consts::MAX_LOG_NUMBER_OF_CHUNKS,
+    proverchain::riscv::{check_pipeline, default_pipeline_workers, max_pipeline_workers},
 };
 #[cfg(feature = "aot")]
 use {
     pico_aot_runtime::AotProgram,
-    pico_vm::proverchain::riscv::{check_pipeline, max_pipeline_workers},
     sha2::{Digest, Sha256},
 };
 
 use crate::{
     artifact::{LoadedPayload, ProofArtifact},
     binding,
+    cost::CostEstimate,
     error::ProveError,
     phase::Phase,
     proof::{digest_words, Payload, Proof},
@@ -204,15 +206,41 @@ pub(crate) struct Emulation {
     pub(crate) execution: Execution,
 }
 
-/// Which emulator makes a run's records.
+/// Where a whitelist-mode prover's whitelist comes from.
+enum VkMapSource {
+    Path(PathBuf),
+    Shipped,
+}
+
+/// Which emulator makes a run's records. Either way `execute`, and a `cuda` build's GPU prove,
+/// run the snapshot pipeline with `workers` interpreters replaying its snapshot thread.
 #[derive(Clone, Copy, Debug)]
 enum EmulationPath {
-    /// One interpreter.
-    Interpreter,
-    /// The snapshot pipeline: the registered AOT program runs ahead, and `workers` interpreters
-    /// replay its snapshots into the records.
-    #[cfg(feature = "aot")]
+    /// One interpreter makes the records; the interpreter runs the pipeline's snapshot thread.
+    Interpreter { workers: NonZeroUsize },
+    /// The registered AOT program runs the pipeline's snapshot thread, records included.
+    /// The AOT runtime runs the pipeline's snapshot thread: the registered program's compiled
+    /// code, or in a `cuda` build without one, the runtime interpreting every block.
+    #[cfg(any(feature = "aot", feature = "cuda"))]
     Aot { workers: NonZeroUsize },
+}
+
+impl EmulationPath {
+    fn workers(self) -> NonZeroUsize {
+        match self {
+            Self::Interpreter { workers } => workers,
+            #[cfg(any(feature = "aot", feature = "cuda"))]
+            Self::Aot { workers } => workers,
+        }
+    }
+
+    fn snapshot_main(self) -> SnapshotMainMode {
+        match self {
+            Self::Interpreter { .. } => SnapshotMainMode::Interpreter,
+            #[cfg(any(feature = "aot", feature = "cuda"))]
+            Self::Aot { .. } => SnapshotMainMode::Aot,
+        }
+    }
 }
 
 /// Options for a [`Prover`].
@@ -231,12 +259,15 @@ pub struct ProverBuilder {
     chunk_size: Option<u32>,
     concurrency: NonZeroUsize,
     verify_keys: bool,
-    vk_map_path: Option<PathBuf>,
+    vk_map: Option<VkMapSource>,
     trusted_vk_root: Option<[u32; 8]>,
     #[cfg(feature = "aot")]
     aot: Option<&'static AotProgram>,
-    #[cfg(feature = "aot")]
     emulation_workers: Option<NonZeroUsize>,
+    #[cfg(feature = "cuda")]
+    gpu_event_pool_size: NonZeroUsize,
+    #[cfg(feature = "cuda")]
+    interpreted_aot_runtime: bool,
 }
 
 impl ProverBuilder {
@@ -247,12 +278,15 @@ impl ProverBuilder {
             chunk_size: None,
             concurrency: DEFAULT_CONCURRENCY,
             verify_keys: false,
-            vk_map_path: None,
+            vk_map: None,
             trusted_vk_root: None,
             #[cfg(feature = "aot")]
             aot: None,
-            #[cfg(feature = "aot")]
             emulation_workers: None,
+            #[cfg(feature = "cuda")]
+            gpu_event_pool_size: distributed_vm::mle::embed::DEFAULT_EVENT_POOL_SIZE,
+            #[cfg(feature = "cuda")]
+            interpreted_aot_runtime: true,
         }
     }
 
@@ -309,7 +343,15 @@ impl ProverBuilder {
     /// The whitelist artifact as `mle_build_vk_map` writes it: the `.bin` form, which is what the
     /// repo ships (`vm/src/mle/shape_vk_bins/`), or its `.json` twin. Read by extension.
     pub fn vk_map(mut self, path: impl Into<PathBuf>) -> Self {
-        self.vk_map_path = Some(path.into());
+        self.vk_map = Some(VkMapSource::Path(path.into()));
+        self
+    }
+
+    /// Whitelist mode under the whitelist compiled into this build, pinned to the root shipped
+    /// beside it; no file is read at runtime. A [`Self::trusted_vk_root`], when set, must match.
+    pub fn shipped_whitelist(mut self) -> Self {
+        self.verify_keys = true;
+        self.vk_map = Some(VkMapSource::Shipped);
         self
     }
 
@@ -346,30 +388,89 @@ impl ProverBuilder {
         self
     }
 
-    /// Replay workers the AOT pipeline runs beside its snapshot thread. Needs [`Self::aot`], the
-    /// one path with workers.
+    /// Replay workers the snapshot pipeline runs beside its snapshot thread: the pipeline that
+    /// [`Self::execute`] always runs, that makes the records with [`Self::aot`], and that a `cuda`
+    /// build's GPU prove runs. Proving without [`Self::aot`] on the CPU interprets in one thread.
     ///
-    /// Defaults to this machine's core count, the most [`Self::build`] accepts: the pipeline runs
-    /// one replay worker per core at most.
+    /// Defaults to this machine's core count for the records [`Self::aot`] makes, and otherwise,
+    /// the GPU prove included, to
+    /// [`default_pipeline_workers`](pico_vm::proverchain::riscv::default_pipeline_workers); the
+    /// most [`Self::build`] accepts is the core count, since the pipeline runs one replay worker
+    /// per core at most.
     ///
-    /// A worker keeps an emulator memory from a pool of `MEMORY_POOL_SIZE` between its batches, so
-    /// the pool needs one per worker plus the batch being cut: unset, it is raised to that, and
-    /// [`Self::build`] refuses a smaller one.
-    #[cfg(feature = "aot")]
+    /// With [`Self::aot`], or in a `cuda` build on the interpreted AOT runtime, a worker keeps an
+    /// emulator memory from a pool of `MEMORY_POOL_SIZE` between its batches, so the pool needs
+    /// one per worker plus the batch being cut: unset, it is raised to that, and [`Self::build`]
+    /// refuses a smaller one.
     pub fn emulation_workers(mut self, n: NonZeroUsize) -> Self {
         self.emulation_workers = Some(n);
         self
     }
 
+    /// Pinned host event buffers the GPU prove keeps, each one chunk's worth of CPU or ALU events;
+    /// they bound how far emulation runs ahead of the cards, and stay allocated once a GPU prove
+    /// has run. Defaults to [`distributed_vm::mle::embed::DEFAULT_EVENT_POOL_SIZE`];
+    /// `MLE_EVENT_POOL_SIZE` does not apply here. A size that cannot hold one chunk's replay, two
+    /// ALU buffers per segment, is refused when proving starts, without poisoning the process.
+    #[cfg(feature = "cuda")]
+    pub fn gpu_event_pool_size(mut self, n: NonZeroUsize) -> Self {
+        self.gpu_event_pool_size = n;
+        self
+    }
+
+    /// Whether, without [`Self::aot`], the snapshot thread is the AOT runtime interpreting every
+    /// block (no compiled code, any ELF) rather than the VM's interpreter. Defaults to `true`:
+    /// the runtime's interpreter and precompile backends emulate a reth block in about half the
+    /// time. It changes how records are made, not what is proved.
+    ///
+    /// The runtime, like an [`Self::aot`] program, is registered once per process, whichever
+    /// comes first, by `build`, `execute` or `estimate_cost`: after a default builder, a builder
+    /// with [`Self::aot`] is refused ([`ProveError::AotRegistration`]), and after one with
+    /// [`Self::aot`], a default builder is refused the same way; `interpreted_aot_runtime(false)`
+    /// registers nothing and works after either.
+    #[cfg(feature = "cuda")]
+    pub fn interpreted_aot_runtime(mut self, on: bool) -> Self {
+        self.interpreted_aot_runtime = on;
+        self
+    }
+
     /// Emulate without proving: no keygen, no whitelist. Chunks exactly as the built prover would.
+    ///
+    /// Runs the snapshot pipeline (see [`Self::emulation_workers`]) and makes no witness: the
+    /// records it reads the counts from carry no CPU or ALU events and are dropped as they come.
     ///
     /// The whitelist options go unchecked: they bind proving only.
     pub fn execute(&self, stdin: Stdin) -> Result<Execution, ProveError> {
+        let (program, opts, path) = self.emulation_setup()?;
+        execute_program(program, opts, path, stdin)
+    }
+
+    /// Emulate without proving, and report what proving the run would fill per RISC-V AIR. No
+    /// keygen and no trace generation: see [`CostEstimate`] for what the rows count.
+    pub fn estimate_cost(&self, stdin: Stdin) -> Result<CostEstimate, ProveError> {
+        self.emulate(stdin).map(CostEstimate::from_emulation)
+    }
+
+    /// The emulation behind [`Self::execute`] and [`Self::estimate_cost`], with the options
+    /// [`Self::build`] would give the prover.
+    fn emulate(&self, stdin: Stdin) -> Result<Emulation, ProveError> {
+        let (program, opts, path) = self.emulation_setup()?;
+        emulate_program(program, opts, path, stdin)
+    }
+
+    /// What an emulation of [`Self::execute`] or [`Self::emulate`] runs with.
+    fn emulation_setup(&self) -> Result<(Arc<Program>, EmulatorOpts, EmulationPath), ProveError> {
         let opts = emulator_opts(self.resolved_chunk_size()?);
         let path = self.resolved_emulation()?;
         let program = compile(&self.elf)?;
         self.register_aot()?;
-        emulate_program(program, opts, path, stdin).map(|emulated| emulated.execution)
+        // The tier latches on first read, so a whitelist builder that emulates before `build`
+        // must pick the cards' tier here, not lock in the default.
+        #[cfg(feature = "cuda")]
+        if self.verify_keys {
+            latch_gpu_memory_tier()?;
+        }
+        Ok((program, opts, path))
     }
 
     /// Keygen the RISC-V air set and check the options against each other.
@@ -386,29 +487,41 @@ impl ProverBuilder {
                     self.log_stacked_height
                 )));
             }
-            let path = self.vk_map_path.as_ref().ok_or_else(|| {
+            let source = self.vk_map.as_ref().ok_or_else(|| {
                 ProveError::InconsistentOptions(
-                    "verify_keys(true) needs vk_map(path): the whitelist is an artifact, and a \
-                     whitelist built from this run's own keys would only be as trustworthy as \
-                     this run"
+                    "verify_keys(true) needs vk_map(path) or shipped_whitelist(): the whitelist \
+                     is an artifact, and a whitelist built from this run's own keys would only \
+                     be as trustworthy as this run"
                         .into(),
                 )
             })?;
-            let pinned = self.trusted_vk_root.ok_or_else(|| {
-                ProveError::InconsistentOptions(
-                    "verify_keys(true) needs trusted_vk_root(root): the artifact carries its own \
-                     root, so loading it proves consistency, never authenticity"
-                        .into(),
-                )
-            })?;
-            let map = load_vk_map(path)?;
+            let (map, pinned) = match source {
+                VkMapSource::Path(path) => {
+                    let pinned = self.trusted_vk_root.ok_or_else(|| {
+                        ProveError::InconsistentOptions(
+                            "verify_keys(true) needs trusted_vk_root(root): the artifact carries \
+                             its own root, so loading it proves consistency, never authenticity"
+                                .into(),
+                        )
+                    })?;
+                    (load_vk_map(path)?, pinned)
+                }
+                // Checked against the shipped root on load; a caller's root pins it further.
+                VkMapSource::Shipped => {
+                    let map = MleVkMap::shipped()?;
+                    let pinned = self
+                        .trusted_vk_root
+                        .unwrap_or_else(|| digest_words(&map.root()));
+                    (map, pinned)
+                }
+            };
             let loaded = digest_words(&map.root());
             if loaded != pinned {
                 return Err(ProveError::VkRootMismatch { loaded, pinned });
             }
             Some(Arc::new(map))
         } else {
-            if self.vk_map_path.is_some() || self.trusted_vk_root.is_some() {
+            if self.vk_map.is_some() || self.trusted_vk_root.is_some() {
                 return Err(ProveError::InconsistentOptions(
                     "a whitelist was supplied with verify_keys(false); nothing would read it"
                         .into(),
@@ -417,7 +530,18 @@ impl ProverBuilder {
             None
         };
 
+        // A whitelist prover proves Combine on the GPU: latch the cards' memory tier before any
+        // emulation of this prover reads the default.
+        #[cfg(feature = "cuda")]
+        if vk_map.is_some() {
+            latch_gpu_memory_tier()?;
+        }
+
         let program = compile(&self.elf)?;
+
+        // The riscv machine below keygens on the GPU in a `cuda` build, which needs the pool.
+        #[cfg(feature = "cuda")]
+        pico_vm::mle::machine::riscv::init_mle_gpu_pool(0);
 
         // Built once and handed on: the fit check and keygen need the same air set, and in
         // whitelist mode building it pads the program table to its bucket.
@@ -476,6 +600,15 @@ impl ProverBuilder {
             apex,
             #[cfg(feature = "multi-field-transcript")]
             embed: None,
+            #[cfg(feature = "cuda")]
+            elf: Arc::from(self.elf.as_slice()),
+            #[cfg(feature = "cuda")]
+            gpu_event_pool_size: self.gpu_event_pool_size,
+            // Beside the GPU's preparers and provers, not the AOT path's one per core.
+            #[cfg(feature = "cuda")]
+            gpu_emulation_workers: self
+                .emulation_workers
+                .unwrap_or_else(default_pipeline_workers),
         })
     }
 
@@ -539,56 +672,62 @@ impl ProverBuilder {
     /// The emulator these options resolve to, with an AOT program checked against the ELF and the
     /// pipeline against this machine. Shared by [`Self::build`] and [`Self::execute`], so the two
     /// emulate alike; neither registers the program before its last fallible step.
-    #[cfg(feature = "aot")]
     fn resolved_emulation(&self) -> Result<EmulationPath, ProveError> {
-        let Some(program) = self.aot else {
-            if let Some(workers) = self.emulation_workers {
-                return Err(ProveError::InconsistentOptions(format!(
-                    "emulation_workers({workers}) was set without aot(program); only the AOT \
-                     pipeline runs workers"
-                )));
-            }
-            return Ok(EmulationPath::Interpreter);
-        };
-
-        // Checked here because the pipeline would refuse it only once a prove had started.
+        // Checked here because the pipeline would refuse it only once a run had started.
         let cores = max_pipeline_workers();
-        let workers = self
-            .emulation_workers
-            .unwrap_or(NonZeroUsize::new(cores).unwrap_or(NonZeroUsize::MIN));
-        if workers.get() > cores {
+        if let Some(workers) = self.emulation_workers.filter(|w| w.get() > cores) {
             return Err(ProveError::InconsistentOptions(format!(
                 "emulation_workers({workers}) exceeds this machine's {cores} cores; the pipeline \
                  runs at most one replay worker per core"
             )));
         }
-        // The pipeline refuses the same, but only once a prove has started.
-        check_pipeline(workers, SnapshotMainMode::Aot)
+
+        #[cfg(feature = "aot")]
+        if let Some(program) = self.aot {
+            let workers = self
+                .emulation_workers
+                .unwrap_or(NonZeroUsize::new(cores).unwrap_or(NonZeroUsize::MIN));
+            // The pipeline refuses the same, but only once a prove has started.
+            check_pipeline(workers, SnapshotMainMode::Aot)
+                .map_err(|e| ProveError::InconsistentOptions(e.to_string()))?;
+
+            if program.is_stub() {
+                return Err(ProveError::AotNotGenerated);
+            }
+            let elf: [u8; 32] = Sha256::digest(&self.elf).into();
+            if program.elf_sha256() != elf {
+                return Err(ProveError::AotElfMismatch {
+                    generated_from: program.elf_sha256(),
+                    elf,
+                });
+            }
+            return Ok(EmulationPath::Aot { workers });
+        }
+
+        let workers = self
+            .emulation_workers
+            .unwrap_or_else(default_pipeline_workers);
+        #[cfg(feature = "cuda")]
+        if self.interpreted_aot_runtime {
+            check_pipeline(workers, SnapshotMainMode::Aot)
+                .map_err(|e| ProveError::InconsistentOptions(e.to_string()))?;
+            return Ok(EmulationPath::Aot { workers });
+        }
+        check_pipeline(workers, SnapshotMainMode::Interpreter)
             .map_err(|e| ProveError::InconsistentOptions(e.to_string()))?;
-
-        if program.is_stub() {
-            return Err(ProveError::AotNotGenerated);
-        }
-        let elf: [u8; 32] = Sha256::digest(&self.elf).into();
-        if program.elf_sha256() != elf {
-            return Err(ProveError::AotElfMismatch {
-                generated_from: program.elf_sha256(),
-                elf,
-            });
-        }
-        Ok(EmulationPath::Aot { workers })
+        Ok(EmulationPath::Interpreter { workers })
     }
 
-    #[cfg(not(feature = "aot"))]
-    fn resolved_emulation(&self) -> Result<EmulationPath, ProveError> {
-        Ok(EmulationPath::Interpreter)
-    }
-
-    /// Registers the AOT program, if there is one, for the process: what the pipeline will run.
+    /// Registers the AOT program, or in a `cuda` build the interpreted runtime, for the process:
+    /// what the pipeline's snapshot thread will run.
     fn register_aot(&self) -> Result<(), ProveError> {
         #[cfg(feature = "aot")]
         if let Some(program) = self.aot {
-            pico_aot_runtime::register(program).map_err(ProveError::AotRegistration)?;
+            return pico_aot_runtime::register(program).map_err(ProveError::AotRegistration);
+        }
+        #[cfg(feature = "cuda")]
+        if self.interpreted_aot_runtime {
+            pico_aot_runtime::register_interpreted().map_err(ProveError::AotRegistration)?;
         }
         Ok(())
     }
@@ -613,6 +752,15 @@ fn compile(elf: &[u8]) -> Result<Arc<Program>, ProveError> {
 /// Any abort the emulator still has on guest or caller input is returned as an error, and every
 /// record's digests are made final. The emulator is built inside the call and dropped with it, so
 /// nothing an unwind interrupted outlives it.
+/// Latch the visible cards' memory tier (`PICO_GPU_MEM` overrides) before any emulation reads
+/// the default.
+#[cfg(feature = "cuda")]
+fn latch_gpu_memory_tier() -> Result<(), ProveError> {
+    distributed_vm::mle::embed::init_memory_tier()
+        .map(drop)
+        .map_err(ProveError::from_embed)
+}
+
 fn emulate_program(
     program: Arc<Program>,
     opts: EmulatorOpts,
@@ -622,8 +770,8 @@ fn emulate_program(
     check_stdin(&stdin)?;
     let stdin = stdin.into_emulator_stdin();
     let mut emulated = std::panic::catch_unwind(AssertUnwindSafe(|| match path {
-        EmulationPath::Interpreter => riscv::emulate_with_opts(program, &stdin, opts),
-        #[cfg(feature = "aot")]
+        EmulationPath::Interpreter { .. } => riscv::emulate_with_opts(program, &stdin, opts),
+        #[cfg(any(feature = "aot", feature = "cuda"))]
         EmulationPath::Aot { workers } => riscv::emulate_with_pipeline(
             program,
             &stdin,
@@ -637,7 +785,10 @@ fn emulate_program(
     .map_err(|payload| ProveError::EmulationAborted(panic_message(&*payload)))?
     .map_err(ProveError::from_emulate)?;
     binding::backfill_final_digests(&mut emulated.records);
-    let precompile_calls = precompile_calls(&emulated.records);
+    let mut precompile_calls = BTreeMap::new();
+    for record in &emulated.records {
+        count_precompile_calls(&mut precompile_calls, record);
+    }
     Ok(Emulation {
         records: emulated.records,
         execution: Execution {
@@ -650,34 +801,64 @@ fn emulate_program(
     })
 }
 
-/// Calls per precompile across `records`, by the code the guest called.
+/// [`emulate_program`]'s [`Execution`] from the snapshot pipeline, without the records: they are
+/// light-trace, and dropped once counted.
+fn execute_program(
+    program: Arc<Program>,
+    opts: EmulatorOpts,
+    path: EmulationPath,
+    stdin: Stdin,
+) -> Result<Execution, ProveError> {
+    check_stdin(&stdin)?;
+    let stdin = stdin.into_emulator_stdin();
+    let calls = Mutex::new(BTreeMap::new());
+    let opts = EmulatorOpts {
+        snapshot_main: path.snapshot_main(),
+        ..opts
+    };
+    let executed = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        riscv::execute_with_pipeline(program, &stdin, opts, path.workers(), |record| {
+            count_precompile_calls(
+                &mut calls.lock().unwrap_or_else(PoisonError::into_inner),
+                record,
+            )
+        })
+    }))
+    .map_err(|payload| ProveError::EmulationAborted(panic_message(&*payload)))?
+    .map_err(ProveError::from_emulate)?;
+    Ok(Execution {
+        committed_bytes: executed.committed_bytes,
+        cycles: executed.cycles,
+        chunks: executed.chunks,
+        reports: executed.reports,
+        precompile_calls: calls.into_inner().unwrap_or_else(PoisonError::into_inner),
+    })
+}
+
+/// Adds `record`'s calls per precompile to `calls`, by the code the guest called.
 ///
 /// Read from each event's own id rather than from the group it is filed under, because the
 /// field-arithmetic precompiles file a `SUB` or `MUL` event under their `ADD`'s code. The id is the
 /// low byte of the code, and the codes one group coalesces differ in nothing else.
-fn precompile_calls(records: &[EmulationRecord]) -> BTreeMap<SyscallCode, u64> {
-    let mut calls = BTreeMap::new();
-    for record in records {
-        for (&filed_under, events) in &record.precompile_events.events {
-            for (event, _) in events {
-                let called = if event.syscall_id == filed_under.syscall_id() {
-                    filed_under
-                } else {
-                    SyscallCode::try_from_u32((filed_under as u32 & !0xff) | event.syscall_id)
-                        .filter(|code| code.count_map() == filed_under.count_map())
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "a precompile event with syscall id {:#x} is filed under \
-                                 {filed_under}, which does not coalesce it",
-                                event.syscall_id
-                            )
-                        })
-                };
-                *calls.entry(called).or_insert(0) += 1;
-            }
+fn count_precompile_calls(calls: &mut BTreeMap<SyscallCode, u64>, record: &EmulationRecord) {
+    for (&filed_under, events) in &record.precompile_events.events {
+        for (event, _) in events {
+            let called = if event.syscall_id == filed_under.syscall_id() {
+                filed_under
+            } else {
+                SyscallCode::try_from_u32((filed_under as u32 & !0xff) | event.syscall_id)
+                    .filter(|code| code.count_map() == filed_under.count_map())
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "a precompile event with syscall id {:#x} is filed under \
+                             {filed_under}, which does not coalesce it",
+                            event.syscall_id
+                        )
+                    })
+            };
+            *calls.entry(called).or_insert(0) += 1;
         }
     }
-    calls
 }
 
 /// Load a whitelist artifact by extension, the naming `mle_build_vk_map` writes: `.bin` is the
@@ -807,6 +988,14 @@ pub struct Prover {
     apex: Option<MleApexVerifier>,
     #[cfg(feature = "multi-field-transcript")]
     embed: Option<pico_vm::mle::machine::embed::EmbedMachine>,
+    /// The ELF the GPU pipeline compiles for itself.
+    #[cfg(feature = "cuda")]
+    elf: Arc<[u8]>,
+    #[cfg(feature = "cuda")]
+    gpu_event_pool_size: NonZeroUsize,
+    /// The GPU prove's replay workers.
+    #[cfg(feature = "cuda")]
+    gpu_emulation_workers: NonZeroUsize,
 }
 
 impl std::fmt::Debug for Prover {
@@ -859,18 +1048,34 @@ impl Prover {
         self.opts.chunk_size
     }
 
-    /// How many replay workers the AOT pipeline runs; `None` when this prover interprets.
-    #[cfg(feature = "aot")]
-    pub fn emulation_workers(&self) -> Option<NonZeroUsize> {
-        match self.emulation {
-            EmulationPath::Interpreter => None,
-            EmulationPath::Aot { workers } => Some(workers),
-        }
+    /// The v2 VK bundle (`pico_verifier::bundle`) a verifier of this prover's proofs is handed:
+    /// the program's exe identity, the pinned whitelist root, and the membership of every key a
+    /// root proof can carry. Whitelist mode only. See [`Proof::export_v3`].
+    pub fn vk_bundle(&self) -> Result<Vec<u8>, ProveError> {
+        let map = self
+            .vk_map
+            .as_ref()
+            .ok_or(ProveError::WhitelistModeRequired {
+                what: "a VK bundle",
+            })?;
+        encode_vk_bundle_v2(&self.riscv_vm_vk, map)
+            .map_err(|e| ProveError::Format(format!("cannot encode the VK bundle: {e}")))
+    }
+
+    /// How many replay workers this prover's snapshot pipeline runs (see
+    /// [`ProverBuilder::emulation_workers`]).
+    pub fn emulation_workers(&self) -> NonZeroUsize {
+        self.emulation.workers()
     }
 
     /// Emulate without proving. [`ProverBuilder::execute`] does the same without keygen.
     pub fn execute(&self, stdin: Stdin) -> Result<Execution, ProveError> {
-        self.emulate(stdin).map(|emulated| emulated.execution)
+        execute_program(self.program.clone(), self.opts, self.emulation, stdin)
+    }
+
+    /// [`ProverBuilder::estimate_cost`] with this prover's options.
+    pub fn estimate_cost(&self, stdin: Stdin) -> Result<CostEstimate, ProveError> {
+        self.emulate(stdin).map(CostEstimate::from_emulation)
     }
 
     /// Prove to [`Phase::Combine`]: a single complete root proof over the whole execution.
@@ -883,11 +1088,21 @@ impl Prover {
     /// The returned [`Proof`] has been verified; there is no separate `verify` step and no way to
     /// obtain an unverified one.
     ///
+    /// A `cuda` build proves on the GPU only: a whitelist-mode [`Phase::Combine`] on every visible
+    /// card, anything else on card 0, because the feature swaps the proving engine for the whole
+    /// process. Build without `cuda` to prove on the CPU.
+    ///
     /// A [`Phase::Wrap`] proof made with `verify_keys(false)` is not accepted by the on-chain
     /// verifier: the wrap circuit bakes in the whitelist root only when there is one, so without it
     /// the circuit, and therefore its Groth16 key, is a different one.
     pub fn prove_to(&mut self, stdin: Stdin, phase: Phase) -> Result<Proof, ProveError> {
         phase.ensure_available()?;
+
+        // Whitelist Combine goes to every visible card; the rest prove on card 0 (see `cuda`).
+        #[cfg(feature = "cuda")]
+        if matches!(phase, Phase::Combine) && self.vk_map.is_some() {
+            return self.prove_combine_gpu(stdin);
+        }
 
         let emulated = self.emulate(stdin)?;
         let committed = emulated.execution.committed_bytes;
@@ -1180,6 +1395,77 @@ impl Prover {
         ))
     }
 
+    /// [`Phase::Combine`] on every visible GPU, in whitelist mode. The root is verified by the GPU
+    /// pipeline and again here, by the checks [`Self::verify_artifact`] runs on a loaded root.
+    #[cfg(feature = "cuda")]
+    fn prove_combine_gpu(&mut self, stdin: Stdin) -> Result<Proof, ProveError> {
+        use pico_mle_core::codec::Decode;
+
+        let Some(vk_map) = &self.vk_map else {
+            return Err(ProveError::WhitelistModeRequired {
+                what: "GPU proving",
+            });
+        };
+        let program = distributed_vm::mle::embed::EmbeddedProgram {
+            elf: Arc::clone(&self.elf),
+            whitelist: Arc::clone(vk_map),
+            trusted_root: vk_map.root(),
+            // The GPU's deferred split, which its memory tiers are calibrated for; the chunk size,
+            // and so the program id, stay this prover's.
+            emulator_opts: EmulatorOpts {
+                split_opts: SplitOpts::new(
+                    pico_vm::primitives::consts::BENCH_MAX_DEFERRED_SPLIT_THRESHOLD,
+                ),
+                snapshot_main: self.emulation.snapshot_main(),
+                ..self.opts
+            },
+            event_pool_size: self.gpu_event_pool_size,
+            emulation_workers: self.gpu_emulation_workers,
+        };
+        let out = distributed_vm::mle::embed::prove(program, stdin.into_emulator_stdin())
+            .map_err(ProveError::from_embed)?;
+
+        let root_vk = out
+            .root
+            .root_vk
+            .ok_or_else(|| ProveError::Gpu("whitelist root exported without its vk".into()))?;
+        let proof = crate::types::InnerProof::decode_from_bytes(&out.root.proof)
+            .map_err(|e| ProveError::Gpu(format!("cannot decode the root proof: {e}")))?;
+        let vk: VerifyingKey = bincode::deserialize(&root_vk)
+            .map_err(|e| ProveError::Gpu(format!("cannot decode the root vk: {e}")))?;
+        let root: Box<ProofWithVk> = Box::new((proof, Arc::new(vk)));
+
+        self.verify_root(&root)?;
+        self.combine_proof(root, out.committed, None, None)
+    }
+
+    /// A root this prover did not just prove on the CPU: it must be complete, then pass the apex
+    /// or, without a whitelist, the combine machine that keygen'd its shape.
+    fn verify_root(&self, root: &ProofWithVk) -> Result<(), ProveError> {
+        let phase = Phase::Combine;
+        if !binding::is_complete_root(&root.0.public_values) {
+            return Err(ProveError::Incomplete);
+        }
+        match &self.apex {
+            // The whitelist authenticates the supplied key by membership, which is what lets a
+            // machine that keygen'd nothing accept this proof.
+            Some(apex) => apex
+                .verify(root)
+                .map_err(|e| ProveError::verification(phase, format!("{e:#}"))),
+            // Otherwise only the machine that keygen'd the shape can select an honest key for it.
+            // Deriving one from the file would be letting the file choose the circuit it is
+            // checked against.
+            None => {
+                if self.combine.honest_root_vk(&root.1).is_none() {
+                    return Err(ProveError::WhitelistRequired { phase });
+                }
+                self.combine
+                    .verify(root)
+                    .map_err(|e| ProveError::verification(phase, format!("{e:#}")))
+            }
+        }
+    }
+
     /// A verified combine root as a [`Proof`], once `committed` is bound to it.
     fn combine_proof(
         &self,
@@ -1275,27 +1561,7 @@ impl Prover {
                 self.riscv_proof(bundle, committed, None)
             }
             LoadedPayload::Combine(root) => {
-                if !binding::is_complete_root(&root.0.public_values) {
-                    return Err(ProveError::Incomplete);
-                }
-                match &self.apex {
-                    // The whitelist authenticates the supplied key by membership, which is what
-                    // lets a machine that keygen'd nothing accept this proof.
-                    Some(apex) => apex
-                        .verify(&root)
-                        .map_err(|e| ProveError::verification(phase, format!("{e:#}")))?,
-                    // Otherwise only the machine that keygen'd the shape can select an honest key
-                    // for it. Deriving one from the file would be letting the file choose the
-                    // circuit it is checked against.
-                    None => {
-                        if self.combine.honest_root_vk(&root.1).is_none() {
-                            return Err(ProveError::WhitelistRequired { phase });
-                        }
-                        self.combine
-                            .verify(&root)
-                            .map_err(|e| ProveError::verification(phase, format!("{e:#}")))?
-                    }
-                }
+                self.verify_root(&root)?;
                 self.combine_proof(root, committed, None, None)
             }
         }

@@ -2,7 +2,9 @@ use crate::{
     chips::utils::indices_arr,
     compiler::word::Word,
     machine::septic::SepticDigest,
-    primitives::consts::{DIGEST_SIZE, MAX_NUM_PVS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS},
+    primitives::consts::{
+        DIGEST_SIZE, MAX_NUM_PVS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS, WORD_SIZE,
+    },
 };
 use core::fmt::Debug;
 use pico_derive::AlignedBorrow;
@@ -28,6 +30,40 @@ pub const RECURSION_PUBLIC_VALUES_COL_MAP: RecursionPublicValues<usize> = make_c
 
 // All the fields before `digest` are hashed to produce the digest.
 pub const NUM_PV_ELMS_TO_HASH: usize = RECURSION_PUBLIC_VALUES_COL_MAP.digest[0];
+
+// `pico_verifier` hard-codes the offsets it reads, since this struct holds a nightly-only septic
+// type; any layout drift must fail the build here.
+const_assert_eq!(
+    pico_verifier::public_values::RECURSION_NUM_PVS,
+    RECURSION_NUM_PVS
+);
+const_assert_eq!(
+    pico_verifier::public_values::NUM_PV_ELMS_TO_HASH,
+    NUM_PV_ELMS_TO_HASH
+);
+const_assert_eq!(
+    pico_verifier::public_values::RECURSION_PV_OFFSETS.flag_complete,
+    RECURSION_PUBLIC_VALUES_COL_MAP.flag_complete
+);
+const _: () = {
+    let v = pico_verifier::public_values::RECURSION_PV_OFFSETS;
+    let col = RECURSION_PUBLIC_VALUES_COL_MAP;
+    let mut i = 0;
+    while i < DIGEST_SIZE {
+        assert!(v.riscv_vk_digest[i] == col.riscv_vk_digest[i]);
+        assert!(v.vk_root[i] == col.vk_root[i]);
+        assert!(v.digest[i] == col.digest[i]);
+        i += 1;
+    }
+    let mut i = 0;
+    while i < PV_DIGEST_NUM_WORDS * WORD_SIZE {
+        assert!(
+            v.committed_value_digest[i]
+                == col.committed_value_digest[i / WORD_SIZE].0[i % WORD_SIZE]
+        );
+        i += 1;
+    }
+};
 
 // Recursive proof has more public values than core proof, so the max number constant defined in
 // pico_core should be set to `RECURSION_NUM_PVS`.

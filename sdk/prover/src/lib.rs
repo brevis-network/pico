@@ -33,7 +33,15 @@
 //! whitelist mode only, and returns an `EvmBundle`: the gnark inputs and the wrap circuit's two
 //! public inputs. [`Prover::execute`] emulates without proving, and returns an [`Execution`] whose
 //! bytes are explicitly *not* authenticated. [`ProverBuilder::execute`] does the same without
-//! keygen.
+//! keygen. [`ProverBuilder::estimate_cost`] emulates and reports the trace rows proving would fill,
+//! per RISC-V AIR.
+//!
+//! # Verifying outside this crate
+//!
+//! In whitelist mode ([`ProverBuilder::shipped_whitelist`] needs no files), [`Prover::vk_bundle`]
+//! and [`Proof::export_v3`] give the bytes `pico_verifier::verify(bundle, envelope, committed)`
+//! takes, on stable Rust and without this crate. Under a whitelist other than the shipped one,
+//! `pico_verifier::verify_with_root` takes its root.
 //!
 //! # Persisting a proof
 //!
@@ -67,18 +75,19 @@
 //! | `RECURSION_EARLY_EXIT_TS` | recursion emulation | **yes, and it breaks proving**: it truncates the recursion run, and a value that does not parse aborts |
 //! | `MLE_WITNESS_HASH`, `MLE_TRANSCRIPT_PROF`, `MLE_WALKER_XCHECK` | recursion witness generation | **yes**, and deliberately |
 //! | `MLE_REC_PARALLEL_CHILDREN` | recursion node interpretation | **yes**, and deliberately |
-//! | `MEMORY_POOL_SIZE` | the AOT pipeline's memory pool | **yes, with the `aot` feature**: the pool holds this many emulator memories. A replay worker keeps one between its batches, so the run needs one per worker plus one per segment of the batch being cut: unset, it is raised to that, and a smaller value is refused by `build` and `execute` |
-//! | `MEMORY_POOL_EAGER`, `MEMORY_POOL_LOW_WATER`, `MEMORY_RECYCLER_THREADS` | the AOT pipeline's memory pool | **yes, with the `aot` feature**: how the pool is filled and recycled. A setting that leaves the pool empty, or `MEMORY_RECYCLER_THREADS=0`, which never returns a memory to it, is refused by `build` and `execute` |
-//! | `MLE_SPLIT_REPLAY`, `MLE_SPLIT_CHUNKS`, `NUM_THREADS`, `PROVER_COUNT` | the AOT snapshot thread | **yes, with the `aot` feature**: whether the replay of the leading chunks is cut into segments, which the workers fold back into one record per chunk. `NUM_THREADS` and `PROVER_COUNT` cut only together, and neither sets the worker count. A cut into more segments than the pool holds is refused by `build` and `execute` |
-//! | `MLE_RECORD_DIGEST` | the AOT pipeline's workers | with the `aot` feature, as a diagnostic only: `1` logs a digest of every record |
+//! | `MEMORY_POOL_SIZE` | the snapshot pipeline's memory pool | **yes**: the pool holds this many emulator memories, one per batch the snapshot thread cuts until a recycler returns it. With the `aot` or `cuda` feature a replay worker keeps one between its batches, so the run needs one per worker plus one per segment of the batch being cut: unset, it is raised to that, and a smaller value is refused by `build` and `execute`. `0` is always refused |
+//! | `MEMORY_POOL_EAGER`, `MEMORY_POOL_LOW_WATER`, `MEMORY_RECYCLER_THREADS` | the snapshot pipeline's memory pool | **yes**: how the pool is filled and recycled. A setting that leaves the pool empty, or `MEMORY_RECYCLER_THREADS=0`, which never returns a memory to it, is refused by `build` and `execute` |
+//! | `MLE_SPLIT_REPLAY`, `MLE_SPLIT_CHUNKS`, `NUM_THREADS`, `PROVER_COUNT` | the AOT snapshot thread | **yes, with the `aot` or `cuda` feature**: whether the replay of the leading chunks is cut into segments, which the workers fold back into one record per chunk. `NUM_THREADS` and `PROVER_COUNT` cut only together, and neither sets the worker count. A cut into more segments than the memory pool holds is refused by `build` and `execute`, and one into more than the GPU prove's event pool holds by the prove, up front |
+//! | `MLE_RECORD_DIGEST` | the snapshot pipeline's workers | as a diagnostic only: `1` logs a digest of every record |
 //! | `MLE_SHAPE_MARGIN`, `CHUNK_SPLIT_DEBUG`, `DEBUG_MEMORY_EVENTS`, `DEBUG_LOCAL_MEMORY` | logging | yes, as diagnostics only |
 //!
 //! The six proof-changing variables are experiment or test knobs; leave them unset. A caller that
 //! sets one of the four not refused gets proofs another process with the same options would not
 //! produce.
 //! `CHUNK_EVENT_LIMITS_OFF`, `CHUNK_EVENT_LIMIT_SCALE` and `DEFERRED_TAIL_MERGE` are read once per
-//! process, the other three on every use. The AOT pipeline's variables take effect once per
-//! process, on its first run.
+//! process, the other three on every use. The snapshot pipeline's variables take effect once per
+//! process, on its first run: [`ProverBuilder::execute`] runs it in every build, and proving does
+//! with the `aot` feature or on the GPU.
 //!
 //! The witness and interpretation rows are four process-global diagnostics and controls, each
 //! resolved once per process on first use — the VM lists them as one table, `witness_flags`. Three
@@ -98,6 +107,18 @@
 //! replay its snapshots into the records. It changes how the records are made, not what is
 //! proved.
 //!
+//! A `cuda` build runs the AOT runtime without compiled code by default: its snapshot thread
+//! interprets every block with the runtime's own interpreter and precompile backends, for any ELF.
+//! `ProverBuilder::interpreted_aot_runtime(false)` uses the VM's interpreter instead.
+//!
+//! # Build features for speed
+//!
+//! `bigint-rug`, `tcmalloc` and `mmap-memory` forward `pico-vm`'s features of those names: GMP for
+//! the curve precompiles' big-integer arithmetic, tcmalloc as the global allocator, and an emulator
+//! memory reset in place. None changes a proof. Emulation bounds a GPU prove, and the precompiles'
+//! arithmetic bounds emulating a block heavy in them: on four RTX 5090s, a p99 reth block's
+//! `execute` went from 21-39 s to 9-13 s with the three, and its `prove` from 27-44 s to 14-17 s.
+//!
 //! # Not here
 //!
 //! The Groth16 proving key, the Groth16 proof and the on-chain verifier are made outside this
@@ -108,6 +129,7 @@
 mod artifact;
 mod binding;
 mod committed;
+mod cost;
 mod error;
 #[cfg(feature = "multi-field-transcript")]
 mod evm;
@@ -119,6 +141,7 @@ mod types;
 
 pub use artifact::{ProofArtifact, FORMAT_VERSION};
 pub use committed::CommittedValues;
+pub use cost::{ChipCost, CostComponent, CostEstimate};
 pub use error::{ProveError, ReadError};
 #[cfg(feature = "multi-field-transcript")]
 pub use evm::EvmBundle;
@@ -134,9 +157,9 @@ pub use stdin::Stdin;
 pub use pico_mle_core::proof::CODEC_VERSION;
 
 /// The variables the crate documentation's table marks, in bold, as reaching it, each with what
-/// setting one does; the logging diagnostics are left out, and the AOT pipeline's are listed only
-/// with the `aot` feature. No [`ProverBuilder`] option overrides them, so a caller that reads its
-/// options from the environment warns about these.
+/// setting one does; the logging diagnostics are left out, and the AOT snapshot thread's are
+/// listed only with the `aot` or `cuda` feature. No [`ProverBuilder`] option overrides them, so a
+/// caller that reads its options from the environment warns about these.
 pub const ENV_READ_BY_PROVER: &[(&str, &str)] = &[
     (
         "CHUNK_EVENT_LIMITS_OFF",
@@ -163,42 +186,38 @@ pub const ENV_READ_BY_PROVER: &[(&str, &str)] = &[
         "MLE_REC_PARALLEL_CHILDREN",
         "selects how recursion nodes are interpreted",
     ),
-    #[cfg(feature = "aot")]
     (
         "MEMORY_POOL_SIZE",
-        "caps the AOT replay workers running at once; 0 is refused",
+        "sizes the snapshot pipeline's memory pool; 0 is refused",
     ),
-    #[cfg(feature = "aot")]
     (
         "MEMORY_POOL_EAGER",
-        "sizes how the AOT memory pool is filled",
+        "sizes how the snapshot pipeline's memory pool is filled",
     ),
-    #[cfg(feature = "aot")]
     (
         "MEMORY_POOL_LOW_WATER",
-        "sizes how the AOT memory pool is filled",
+        "sizes how the snapshot pipeline's memory pool is filled",
     ),
-    #[cfg(feature = "aot")]
     (
         "MEMORY_RECYCLER_THREADS",
-        "sizes how the AOT memory pool is recycled; 0 is refused",
+        "sizes how the snapshot pipeline's memory pool is recycled; 0 is refused",
     ),
-    #[cfg(feature = "aot")]
+    #[cfg(any(feature = "aot", feature = "cuda"))]
     (
         "MLE_SPLIT_REPLAY",
         "decides whether AOT chunk replays are cut into segments",
     ),
-    #[cfg(feature = "aot")]
+    #[cfg(any(feature = "aot", feature = "cuda"))]
     (
         "MLE_SPLIT_CHUNKS",
         "decides how many AOT chunk replays are cut into segments",
     ),
-    #[cfg(feature = "aot")]
+    #[cfg(any(feature = "aot", feature = "cuda"))]
     (
         "NUM_THREADS",
         "with PROVER_COUNT, decides whether AOT chunk replays are cut into segments",
     ),
-    #[cfg(feature = "aot")]
+    #[cfg(any(feature = "aot", feature = "cuda"))]
     (
         "PROVER_COUNT",
         "with NUM_THREADS, decides whether AOT chunk replays are cut into segments",

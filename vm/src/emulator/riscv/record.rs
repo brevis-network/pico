@@ -576,18 +576,60 @@ impl ProverHardwareConfig {
 
 static PROVER_HARDWARE_CONFIG: OnceLock<ProverHardwareConfig> = OnceLock::new();
 
+/// The tier `PICO_GPU_MEM` names, if set: `5090`, `32gb` or `high` is the 32 GB tier, anything
+/// else the 24 GB one.
+pub fn gpu_memory_tier_from_env() -> Option<GpuMemoryTier> {
+    let value = env::var("PICO_GPU_MEM").ok()?.to_lowercase();
+    Some(match value.as_str() {
+        "5090" | "32gb" | "high" => GpuMemoryTier::Tier32GB,
+        _ => GpuMemoryTier::Tier24GB,
+    })
+}
+
+/// [`init_prover_hardware_config`] found the config already latched to another tier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "the prover hardware config is already latched to {latched:?}, not {requested:?}: an earlier \
+     emulation in this process read it first (set PICO_GPU_MEM to pin it)"
+)]
+pub struct TierAlreadySet {
+    pub latched: GpuMemoryTier,
+    pub requested: GpuMemoryTier,
+}
+
+/// Latch `tier` for the rest of the process. The config is read by every emulation's record split
+/// and latched on first use, so a GPU prover calls this before its first emulation. Ok if the
+/// config already holds `tier`.
+pub fn init_prover_hardware_config(tier: GpuMemoryTier) -> Result<(), TierAlreadySet> {
+    let latched = PROVER_HARDWARE_CONFIG
+        .get_or_init(|| ProverHardwareConfig::logged(tier))
+        .tier;
+    if latched == tier {
+        Ok(())
+    } else {
+        Err(TierAlreadySet {
+            latched,
+            requested: tier,
+        })
+    }
+}
+
+/// The process's hardware config; latched on first use from `PICO_GPU_MEM` unless
+/// [`init_prover_hardware_config`] ran first.
 pub fn get_prover_hardware_config() -> &'static ProverHardwareConfig {
     PROVER_HARDWARE_CONFIG.get_or_init(|| {
         // Unset means the 32 GB tier, the one the release is calibrated on; the CPU build has no
         // card to size for and keeps that default too.
-        let tier = match env::var("PICO_GPU_MEM")
-            .map(|v| v.to_lowercase())
-            .as_deref()
-        {
-            Err(_) | Ok("5090" | "32gb" | "high") => GpuMemoryTier::Tier32GB,
-            Ok(_) => GpuMemoryTier::Tier24GB,
-        };
+        ProverHardwareConfig::logged(gpu_memory_tier_from_env().unwrap_or(GpuMemoryTier::Tier32GB))
+    })
+}
 
+impl ProverHardwareConfig {
+    pub fn tier(&self) -> GpuMemoryTier {
+        self.tier
+    }
+
+    fn logged(tier: GpuMemoryTier) -> Self {
         let config = ProverHardwareConfig { tier };
 
         info!(
@@ -634,7 +676,7 @@ pub fn get_prover_hardware_config() -> &'static ProverHardwareConfig {
         );
 
         config
-    })
+    }
 }
 
 /// A record of the emulation of a program.

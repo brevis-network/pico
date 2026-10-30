@@ -13,8 +13,12 @@ pico-vm = { path = "../../vm", default-features = false, features = ["rayon", "s
 # The protocol core, for the proof codec and the verifying-key type a stored proof carries.
 # `default-features = false` mirrors `vm/Cargo.toml`: `parallel` reaches it through `pico-vm`.
 pico-mle-core = { path = "../../mle-core", default-features = false }
-# The AOT program registry, for `aot`.
+# The committed-value binding is the stable verifier's, so the two cannot disagree.
+pico-verifier = { workspace = true, features = ["codec"] }
+# The AOT program registry, for `aot`, and the interpreted AOT runtime `cuda` emulates with.
 pico-aot-runtime = { path = "../../aot-runtime", default-features = false, optional = true }
+# The multi-card GPU pipeline, for `cuda`.
+distributed-vm = { path = "../../distributed-vm", optional = true }
 
 bincode.workspace = true
 serde = { workspace = true, features = ["derive"] }
@@ -31,3 +35,21 @@ default = ["multi-field-transcript"]
 multi-field-transcript = ["pico-vm/multi-field-transcript"]
 # Emulates through the snapshot pipeline with a guest's AOT-compiled code: `ProverBuilder::aot`.
 aot = ["pico-vm/aot-emulator", "dep:pico-aot-runtime"]
+# Build-time speed-ups of the emulator, forwarded from `pico-vm`; none changes a proof. The GPU
+# benchmark builds with all three. `bigint-rug` runs the curve precompiles' big-integer arithmetic
+# on GMP, which bounds emulating a block heavy in them; `tcmalloc` makes it the global allocator;
+# `mmap-memory` backs the emulator's memory with a mapping it resets in place.
+bigint-rug = ["pico-vm/bigint-rug"]
+tcmalloc = ["pico-vm/tcmalloc"]
+mmap-memory = ["pico-vm/mmap-memory"]
+# Proves on the GPU only: a whitelist-mode `Phase::Combine` on every visible card through
+# `distributed-vm`, other modes and phases on card 0, since `pico-vm/cuda` swaps the proving engine
+# process-wide. Emulation and `execute` stay on the CPU, on the AOT runtime interpreting every
+# block (`ProverBuilder::interpreted_aot_runtime`). Needs the CUDA Toolkit and an NVIDIA GPU.
+cuda = [
+    "pico-vm/cuda",
+    "dep:distributed-vm",
+    "distributed-vm/cuda",
+    "pico-vm/aot-emulator",
+    "dep:pico-aot-runtime",
+]

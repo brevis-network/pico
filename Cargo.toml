@@ -1,7 +1,7 @@
 [workspace]
-members = ["derive", "mle-core", "mle-cpu", "cuda-mle", "vm", "aot-codegen", "aot-runtime", "sdk/*", "gnark/field-ffi", "perf", "distributed-vm", "gpu-api"]
+members = ["derive", "mle-core", "mle-cpu", "verifier", "cuda-mle", "vm", "aot-codegen", "aot-runtime", "sdk/*", "gnark/field-ffi", "perf", "distributed-vm", "gpu-api"]
 # `cuda-mle` and `gpu-api` need a CUDA toolkit; they build only through `pico-vm/cuda`.
-default-members = ["derive", "mle-core", "mle-cpu", "vm", "aot-codegen", "aot-runtime", "sdk/*", "gnark/field-ffi", "perf", "distributed-vm"]
+default-members = ["derive", "mle-core", "mle-cpu", "verifier", "vm", "aot-codegen", "aot-runtime", "sdk/*", "gnark/field-ffi", "perf", "distributed-vm"]
 resolver = "2"
 
 [workspace.package]
@@ -49,6 +49,7 @@ pico-cli = { path = "sdk/cli" }
 pico-patch-libs = { path = "sdk/patch-libs" }
 pico-perf = { path = "perf" }
 pico-gpu-api = { path = "gpu-api" }
+pico-verifier = { path = "verifier", default-features = false }
 
 # p3
 

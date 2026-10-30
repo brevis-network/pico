@@ -61,12 +61,14 @@ env:
   CPU_FEATURES: >-
     pico-mle-core/metrics,pico-mle-core/multi-field-transcript,pico-mle-core/parallel,
     pico-mle-core/soundness-bchks25-optimized,pico-mle-core/test-utils,pico-mle-cpu/parallel,
+    pico-verifier/codec,pico-verifier/parallel,
     pico-vm/aot-emulator,pico-vm/bigint-rug,pico-vm/debug,pico-vm/debug-lookups,pico-vm/jemalloc,
     pico-vm/metrics,pico-vm/mmap-memory,pico-vm/multi-field-transcript,pico-vm/parallel,
     pico-vm/rayon,pico-vm/single-threaded,pico-vm/soundness-bchks25-optimized,pico-vm/strict,
     pico-vm/tcmalloc,pico-vm/test-utils,pico-vm/two-round-chunks,
     pico-aot-runtime/bigint-rug,pico-aot-runtime/mmap-memory,
-    pico-cli/aot,pico-cli/multi-field-transcript,pico-prover/aot,pico-prover/multi-field-transcript,
+    pico-cli/aot,pico-cli/multi-field-transcript,pico-prover/aot,pico-prover/bigint-rug,
+    pico-prover/mmap-memory,pico-prover/multi-field-transcript,pico-prover/tcmalloc,
     pico-sdk/coprocessor,pico-sdk/kb,pico-sdk/libm,pico-sdk/prover,pico-perf/aot,pico-perf/jemalloc,
     pico-aot-dispatch/bigint-rug,pico-aot-dispatch/mmap-memory,
     distributed-vm/aot-emulator,distributed-vm/bigint-rug,distributed-vm/chunk-priority,
@@ -115,8 +117,9 @@ jobs:
         run: |
           # `--tests` lints each binary only in its test profile, where `cfg(test)` code is in and
           # `cfg(not(test))` code is out; `--bins` lints the binary that ships.
-          # Every feature but `cuda` (and its alias), which needs the CUDA toolkit and is linted
-          # by `GPU · CUDA build and clippy` (build-cuda.yml); add a new feature here when one appears.
+          # Every feature but `cuda` (and its alias, and `pico-prover/cuda`), which needs the CUDA
+          # toolkit and is linted by `GPU · CUDA build and clippy` (build-cuda.yml); add a new
+          # feature here when one appears.
           cargo clippy --workspace --exclude cuda-mle --exclude pico-gpu-api \
             --lib --bins --examples --tests --benches --features "$CPU_FEATURES" --locked -- -D warnings
       - name: Clippy host prover and CLI without the outer phases
@@ -133,3 +136,20 @@ jobs:
           # item that only `coprocessor` uses shows up as an unused-item warning. Both are host
           # builds: neither compiles the `target_os = "zkvm"` paths a guest runs.
           cargo clippy -p pico-sdk --features prover,libm --locked -- -D warnings
+
+  # `pico-verifier` is what out-of-process verifiers (ere) build, on stable. Everything else here
+  # runs on the nightly pin, so this is the only lane that catches a nightly feature creeping in.
+  stable-verifier:
+    name: CPU · pico-verifier on stable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          toolchain: "1.91.1"
+      - name: Check and test on stable
+        run: |
+          set -eux
+          cargo +1.91.1 check -p pico-verifier --locked
+          cargo +1.91.1 check -p pico-verifier --no-default-features --tests --locked
+          cargo +1.91.1 test -p pico-verifier --locked

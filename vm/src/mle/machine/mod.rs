@@ -16,6 +16,9 @@ pub mod exe;
 pub mod recursion;
 pub mod riscv;
 pub mod shape;
+// Needs `pico-verifier/codec`, which a guest build leaves out.
+#[cfg(not(target_os = "zkvm"))]
+pub mod vk_bundle;
 pub mod vk_map;
 // Wrap artifact builder: embed proof -> gnark constraints + witness.
 #[cfg(feature = "multi-field-transcript")]

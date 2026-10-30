@@ -32,7 +32,6 @@ pub use layout::{
     recursion_vk_layouts_equal, stacking_layout_for_commit,
 };
 pub use root_check::{check_complete_root_public_values, recursion_public_values};
-pub(crate) use witness::digest_to_u32s;
 pub use witness::{
     setup_for_combine_with_program, setup_for_convert, setup_for_convert_with_program,
     setup_for_deferred_with_program, witness_flags, CombineChild,

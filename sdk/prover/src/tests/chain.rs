@@ -177,6 +177,10 @@ fn as_proof(facts: &Facts, phase: Phase, payload: Payload) -> Proof {
 /// other. The container round-trips through a fresh process, and its two version fields are
 /// checked before any verification runs.
 #[test]
+#[cfg_attr(
+    feature = "cuda",
+    ignore = "the fresh child process cannot get memory on the card the parent holds"
+)]
 fn the_facade_proves_what_the_direct_chain_proves() {
     if std::env::var(CHILD_VAR).is_ok() {
         return fresh_process_cases();

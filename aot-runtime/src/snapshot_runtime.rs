@@ -50,6 +50,9 @@ impl SharedSnapshotAot {
         let dispatches = self.emulator.compiled_block_dispatches();
         let cycles = self.emulator.insn_count;
         match &self.elf_sha256 {
+            Some(digest) if *digest == AotProgram::STUB.elf_sha256() => log::info!(
+                "AOT runtime finished interpreting every block (no compiled code): {cycles} cycles"
+            ),
             Some(digest) => log::info!(
                 "AOT program for ELF {} finished: {dispatches} compiled-block dispatches in \
                  {cycles} cycles",
@@ -148,6 +151,21 @@ pub fn register(program: &'static AotProgram) -> Result<(), AotError> {
     if program.is_stub() {
         return Err(AotError::Stub);
     }
+    install(program)
+}
+
+/// The runtime with no compiled code, which [`register_interpreted`] installs.
+static INTERPRETED: AotProgram = AotProgram::STUB;
+
+/// Registers the AOT runtime without compiled code: the snapshot thread interprets every block
+/// with the runtime's own interpreter and precompile backends, for any ELF. It runs no generated
+/// code and reports none (`0 compiled-block dispatches`). Same one-per-process rule as
+/// [`register`]: a compiled program is refused once this is in, and this once one is.
+pub fn register_interpreted() -> Result<(), AotError> {
+    install(&INTERPRETED)
+}
+
+fn install(program: &'static AotProgram) -> Result<(), AotError> {
     let mut registered = REGISTERED.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(current) = *registered {
         return if current.elf_sha256 == program.elf_sha256 {

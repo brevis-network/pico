@@ -159,10 +159,7 @@ fn interpreter_probes() -> u8 {
 
 // ─── Witness packing ──────────────────────────────────────────────────────────
 
-/// Convert a digest `[Kb; 8]` to `[u32; 8]`.
-pub(crate) fn digest_to_u32s(digest: &[Kb; 8]) -> [u32; 8] {
-    digest.map(|b| b.as_canonical_u32())
-}
+pub(crate) use pico_verifier::hash::digest_to_u32s;
 
 /// Every `Hint` output consumes exactly one witness block — one instruction may carry several
 /// (batched hints), so this counts outputs, not instructions. A mismatch means the program and the

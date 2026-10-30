@@ -20,6 +20,9 @@ pico-gpu-api = { workspace = true, optional = true }
 pico-mle-core = { path = "../mle-core", default-features = false }
 # Row-major CPU device; the engine the MLE RISCV path proves on.
 pico-mle-cpu = { path = "../mle-cpu", default-features = false }
+# The stable verifier the apex, whitelist hashing and exe identity live in. Its `codec` (zstd, C)
+# is enabled below for host builds only, so a guest build stays free of it.
+pico-verifier.workspace = true
 # GPU CUDA MLE/WHIR backend, pulled in only under the `cuda` feature.
 cuda-mle = { path = "../cuda-mle", optional = true }
 
@@ -112,6 +115,9 @@ tcmalloc = { workspace = true, optional = true }
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { workspace = true, optional = true }
 
+[target.'cfg(not(target_os = "zkvm"))'.dependencies]
+pico-verifier = { workspace = true, features = ["codec"] }
+
 [dev-dependencies]
 alloy-primitives = "1.2.1"
 # Cargo unions this with the `[dependencies]` entry, so `default-features = false` must be repeated
@@ -152,7 +158,7 @@ cuda = ["dep:cuda-mle", "dep:pico-gpu-api", "dep:cudart", "dep:cudart-sys"]
 # two things of its own on them: `multi-field-transcript` the EVM path (the embed and wrap stages
 # and the BN254 config they prove under), so it is on by default, and `test-utils` the Ecall
 # trace's `CVD_FORGE_K` forgery hook.
-parallel = ["pico-mle-core/parallel", "pico-mle-cpu/parallel"]
+parallel = ["pico-mle-core/parallel", "pico-mle-cpu/parallel", "pico-verifier/parallel"]
 metrics = ["dep:metrics", "pico-mle-core/metrics"]
 multi-field-transcript = ["pico-mle-core/multi-field-transcript"]
 soundness-bchks25-optimized = ["pico-mle-core/soundness-bchks25-optimized"]
