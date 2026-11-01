@@ -13,4 +13,4 @@ alloy-sol-types = "0.8.0"
 fibonacci-lib = { path = "../lib" }
 tiny-keccak = { git = "https://github.com/brevis-network/tiny-keccak.git", features = [
     "keccak",
-], branch = "patch-v1.0.0" }
+], rev = "804f077a9a8b31e11f08b5cc039536f3ffded877" } # patch-v1.0.0-rv64
