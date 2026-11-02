@@ -13,15 +13,18 @@ pico-sdk = { path = "../../sdk/sdk"}
 pico-patch-libs = { path = "../../sdk/patch-libs" }
 
 [patch.crates-io]
-# precompile patches
-sha2 = { git = "https://github.com/brevis-network/hashes.git", package = "sha2", branch = "sha2-0.10.9"}
-curve25519-dalek-ng = { git = "https://github.com/brevis-network/curve25519-dalek-ng", branch = "patch-v1.0.1"  }
-ecdsa-core = { git = "https://github.com/brevis-network/signatures", package = "ecdsa", branch = "patch-v1.0.1" }
-tiny-keccak = { git = "https://github.com/brevis-network/tiny-keccak", branch = "patch-v1.0.0" }
-bn = { git = "https://github.com/brevis-network/bn", branch = "patch-v1.0.1", package = "substrate-bn" }
-bls12_381 = { git = "https://github.com/brevis-network/bls12_381", branch = "patch-v1.0.1" }
-kzg-rs = { git = "https://github.com/brevis-network/kzg-rs.git", branch = "pico-v0.2.7" }
-sha3 = { git = "https://github.com/brevis-network/hashes.git", branch = "sha3-0.10.8-v1.0.0"}
+# Precompile patches for the rv64 guest target (`riscv64im-pico-zkvm-elf`), each pinned to the head
+# of its `-rv64` branch. The earlier branches were written for the 32-bit guest target and do not
+# reach the precompiles here. The k256 and p256 forks bring their own patched `ecdsa`, and kzg-rs
+# its own `bls12_381` (patch-v1.0.1-rv64), so neither needs an entry of its own.
+bn ={ git = "https://github.com/brevis-network/bn", package = "substrate-bn", rev = "1455d63953ba9f7231043c57c7077cee6a10dc89" } # patch-v1.0.2-rv64
+curve25519-dalek-ng = { git = "https://github.com/brevis-network/curve25519-dalek-ng", rev = "1d1c268fcf7e10255cf2c51dc814da9caf37d888" } # patch-v1.0.1-rv64
+k256 = { git = "https://github.com/brevis-network/elliptic-curves", rev = "d0c56392e728fd0df321820fb0cb495272d38673" } # k256-0.13.4-rv64
+kzg-rs = { git = "https://github.com/brevis-network/kzg-rs.git", rev = "9e49fbad5986c45bb23736923f33f7ab6281422b" } # pico-v0.2.8-rv64
+p256 = { git = "https://github.com/brevis-network/elliptic-curves", rev = "94ffb195ad1d91a0d6678dfbc3432f83e25162b4" } # p256-0.13.2-rv64
+sha2 = { git = "https://github.com/brevis-network/hashes.git", package = "sha2", rev = "b0144c6cffccf93c019089d8998a8889ea516e7b" } # sha2-0.10.9-rv64
+sha3 = { git = "https://github.com/brevis-network/hashes.git", rev = "feaa4594f83704b797e8ec8eb476f2918da556b8" } # sha3-0.10.8-v1.0.0-rv64
+tiny-keccak = { git = "https://github.com/brevis-network/tiny-keccak", rev = "804f077a9a8b31e11f08b5cc039536f3ffded877" } # patch-v1.0.0-rv64
 
 # elf optimization
 [profile.release]

@@ -1065,7 +1065,7 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.8.0"
-source = "git+https://github.com/brevis-network/bls12_381?branch=patch-v1.0.1#4738552f987d748367fd6a055f3ae08797739fba"
+source = "git+https://github.com/brevis-network/bls12_381?branch=patch-v1.0.1-rv64#79fbbface08629528c9ef6e326d98e38901c39bf"
 dependencies = [
  "cfg-if",
  "ff 0.13.1",
@@ -1529,7 +1529,7 @@ dependencies = [
 [[package]]
 name = "curve25519-dalek-ng"
 version = "4.1.1"
-source = "git+https://github.com/brevis-network/curve25519-dalek-ng?branch=patch-v1.0.1#483a6f0e2a3f63aed44f7f8cbd818281982d6ee7"
+source = "git+https://github.com/brevis-network/curve25519-dalek-ng?rev=1d1c268fcf7e10255cf2c51dc814da9caf37d888#1d1c268fcf7e10255cf2c51dc814da9caf37d888"
 dependencies = [
  "anyhow",
  "byteorder",
@@ -1858,15 +1858,26 @@ checksum = "1c7a8fb8a9fbf66c1f703fe16184d10ca0ee9d23be5b4436400408ba54a95005"
 [[package]]
 name = "ecdsa"
 version = "0.16.9"
-source = "git+https://github.com/brevis-network/signatures?branch=patch-v1.0.1#a074ada80115c4f6443856f379b0105cfacab4cf"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee27f32b5c5292967d2d4a9d7f1e0b0aed2c15daded5a60300e4abb9d8020bca"
 dependencies = [
- "cfg-if",
  "der",
  "digest 0.10.7",
  "elliptic-curve",
- "hex-literal 0.4.1",
- "pico-patch-libs",
- "rfc6979",
+ "rfc6979 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "signature",
+ "spki",
+]
+
+[[package]]
+name = "ecdsa"
+version = "0.16.9"
+source = "git+https://github.com/brevis-network/signatures?branch=patch-v1.1.0-rv64#3d810107f744520ebcf56ae655bb894bd5860c9a"
+dependencies = [
+ "der",
+ "digest 0.10.7",
+ "elliptic-curve",
+ "rfc6979 0.4.0 (git+https://github.com/brevis-network/signatures?branch=patch-v1.1.0-rv64)",
  "serdect",
  "signature",
  "spki",
@@ -2404,12 +2415,6 @@ dependencies = [
 
 [[package]]
 name = "hex-literal"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
-
-[[package]]
-name = "hex-literal"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e712f64ec3850b98572bffac52e2c6f282b29fe6c5fa6d42334b30be438d95c1"
@@ -2737,13 +2742,15 @@ dependencies = [
 [[package]]
 name = "k256"
 version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6e3919bbaa2945715f0bb6d3934a173d1e9a59ac23767fbaaef277265a7411b"
+source = "git+https://github.com/brevis-network/elliptic-curves?rev=d0c56392e728fd0df321820fb0cb495272d38673#d0c56392e728fd0df321820fb0cb495272d38673"
 dependencies = [
  "cfg-if",
- "ecdsa",
+ "ecdsa 0.16.9 (git+https://github.com/brevis-network/signatures?branch=patch-v1.1.0-rv64)",
  "elliptic-curve",
+ "getrandom 0.2.16",
+ "hex",
  "once_cell",
+ "pico-patch-libs",
  "serdect",
  "sha2 0.10.9",
  "signature",
@@ -2770,12 +2777,13 @@ dependencies = [
 
 [[package]]
 name = "kzg-rs"
-version = "0.2.7"
-source = "git+https://github.com/brevis-network/kzg-rs.git?branch=pico-v0.2.7#924c953b9374f71f496ace469815b37b579d186c"
+version = "0.2.8"
+source = "git+https://github.com/brevis-network/kzg-rs.git?rev=9e49fbad5986c45bb23736923f33f7ab6281422b#9e49fbad5986c45bb23736923f33f7ab6281422b"
 dependencies = [
  "bls12_381 0.8.0",
  "ff 0.13.1",
  "hex",
+ "serde_arrays",
  "sha2 0.10.9",
  "spin 0.9.8",
 ]
@@ -3111,11 +3119,13 @@ checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 [[package]]
 name = "p256"
 version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
+source = "git+https://github.com/brevis-network/elliptic-curves?rev=94ffb195ad1d91a0d6678dfbc3432f83e25162b4#94ffb195ad1d91a0d6678dfbc3432f83e25162b4"
 dependencies = [
- "ecdsa",
+ "ecdsa 0.16.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "elliptic-curve",
+ "getrandom 0.2.16",
+ "hex",
+ "pico-patch-libs",
  "primeorder",
  "sha2 0.10.9",
 ]
@@ -3646,7 +3656,7 @@ dependencies = [
  "getset",
  "hashbrown 0.14.5",
  "hex",
- "hex-literal 1.1.0",
+ "hex-literal",
  "hybrid-array",
  "itertools 0.13.0",
  "k256",
@@ -3780,9 +3790,8 @@ dependencies = [
 
 [[package]]
 name = "primeorder"
-version = "0.13.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
+version = "0.13.1"
+source = "git+https://github.com/brevis-network/elliptic-curves?rev=94ffb195ad1d91a0d6678dfbc3432f83e25162b4#94ffb195ad1d91a0d6678dfbc3432f83e25162b4"
 dependencies = [
  "elliptic-curve",
 ]
@@ -4680,7 +4689,17 @@ dependencies = [
 [[package]]
 name = "rfc6979"
 version = "0.4.0"
-source = "git+https://github.com/brevis-network/signatures?branch=patch-v1.0.1#a074ada80115c4f6443856f379b0105cfacab4cf"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8dd2a808d456c4a54e300a23e9f5a67e122c3024119acbfd73e3bf664491cb2"
+dependencies = [
+ "hmac",
+ "subtle",
+]
+
+[[package]]
+name = "rfc6979"
+version = "0.4.0"
+source = "git+https://github.com/brevis-network/signatures?branch=patch-v1.1.0-rv64#3d810107f744520ebcf56ae655bb894bd5860c9a"
 dependencies = [
  "hmac",
  "subtle",
@@ -5008,6 +5027,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_arrays"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94a16b99c5ea4fe3daccd14853ad260ec00ea043b2708d1fd1da3106dcd8d9df"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_bytes"
 version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5118,7 +5146,7 @@ dependencies = [
 [[package]]
 name = "sha2"
 version = "0.10.9"
-source = "git+https://github.com/brevis-network/hashes.git?branch=sha2-0.10.9#2d0f0f9f4abde803c07801ca2fa02fd7911c6b30"
+source = "git+https://github.com/brevis-network/hashes.git?rev=b0144c6cffccf93c019089d8998a8889ea516e7b#b0144c6cffccf93c019089d8998a8889ea516e7b"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
@@ -5128,7 +5156,7 @@ dependencies = [
 [[package]]
 name = "sha3"
 version = "0.10.8"
-source = "git+https://github.com/brevis-network/hashes.git?branch=sha3-0.10.8-v1.0.0#3294ab1708c215c3f6a9463c94128b102805ac84"
+source = "git+https://github.com/brevis-network/hashes.git?rev=feaa4594f83704b797e8ec8eb476f2918da556b8#feaa4594f83704b797e8ec8eb476f2918da556b8"
 dependencies = [
  "digest 0.10.7",
  "keccak",
@@ -5290,7 +5318,7 @@ dependencies = [
 [[package]]
 name = "substrate-bn"
 version = "0.6.0"
-source = "git+https://github.com/brevis-network/bn?branch=patch-v1.0.1#47efca6936828ae38c485d496abf4f332373627c"
+source = "git+https://github.com/brevis-network/bn?rev=1455d63953ba9f7231043c57c7077cee6a10dc89#1455d63953ba9f7231043c57c7077cee6a10dc89"
 dependencies = [
  "bytemuck",
  "byteorder",
@@ -5563,7 +5591,7 @@ dependencies = [
 [[package]]
 name = "tiny-keccak"
 version = "2.0.2"
-source = "git+https://github.com/brevis-network/tiny-keccak?branch=patch-v1.0.0#fe487503bf562dc1a67ec702b9935ff0699ea62b"
+source = "git+https://github.com/brevis-network/tiny-keccak?rev=804f077a9a8b31e11f08b5cc039536f3ffded877#804f077a9a8b31e11f08b5cc039536f3ffded877"
 dependencies = [
  "cfg-if",
  "crunchy",
