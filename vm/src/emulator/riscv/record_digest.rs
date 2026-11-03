@@ -5,11 +5,11 @@
 //! same code differ — so this, not a proof comparison, is what a change to how a chunk is
 //! replayed has to be judged against.
 //!
-//! Two fields are drained from hash maps and carry no meaningful order (`bump_record`: "output
-//! order is irrelevant"), so they are canonicalised before digesting. Without that the gate
-//! fires on two runs of the *same* code and sends the reader after a bug that is not there.
+//! `byte_lookups` and `precompile_events` reach the record out of a hash map and carry no
+//! meaningful order, so both are canonicalised before digesting. Without that the gate fires on
+//! two runs of the *same* code and sends the reader after a bug that is not there.
 
-use std::io::Write;
+use std::{collections::HashMap, io::Write};
 
 use crate::chips::chips::riscv_memory::event::MemoryRecord;
 
@@ -45,6 +45,22 @@ impl Write for Fnv {
     }
 }
 
+/// FNV-1a over a stream of 32-bit words, two to a step as [`Fnv`] folds bytes: the stage ledger's
+/// per-chip trace digest, over each cell's canonical value.
+pub fn digest_words(words: impl IntoIterator<Item = u32>) -> u64 {
+    let mut h = FNV_OFFSET;
+    let mut words = words.into_iter();
+    while let Some(lo) = words.next() {
+        let word = match words.next() {
+            Some(hi) => u64::from(lo) | (u64::from(hi) << 32),
+            None => u64::from(lo),
+        };
+        h ^= word;
+        h = h.wrapping_mul(FNV_PRIME);
+    }
+    h
+}
+
 /// Digest of anything the record can serialise. Serialisation rather than raw bytes because the
 /// event structs carry padding, and padding is not guaranteed to be initialised — hashing it
 /// would make the gate flap.
@@ -54,10 +70,21 @@ fn digest<T: serde::Serialize + ?Sized>(value: &T) -> u64 {
     sink.0
 }
 
+/// One row of [`field_digests`]: `(field, element count, digest)`.
+pub type FieldDigest = (&'static str, usize, u64);
+
+/// The one field the pipeline's sequencer writes after a replay: it stamps the public values.
+const PUBLIC_VALUES: &str = "public_values";
+
+/// The row [`field_digests`] adds for a record's execution history.
+pub const HISTORY: &str = "history";
+
 /// `(field, element count, digest)` for every field a replay fills in.
 ///
-/// `program` is left out: it is a shared `Arc` that the replay never writes.
-pub fn field_digests(record: &EmulationRecord) -> Vec<(&'static str, usize, u64)> {
+/// `program` is left out: it is a shared `Arc` that the replay never writes. A record carrying an
+/// execution history ends on one more row, its steps and `ExecutionHistory::digest`; deferred
+/// records have no history row.
+pub fn field_digests(record: &EmulationRecord) -> Vec<FieldDigest> {
     let precompiles: Vec<(u64, u64)> = record
         .precompile_events
         .sorted_groups()
@@ -76,10 +103,8 @@ pub fn field_digests(record: &EmulationRecord) -> Vec<(&'static str, usize, u64)
     // Collapsing them is what makes this comparable across a split, which adds exactly such a
     // pair. What it must not collapse is a window that went missing: its neighbours then do not
     // meet, and the chain stays two links where the unsplit replay had one.
-    let mut windows_by_addr: std::collections::HashMap<
-        u64,
-        Vec<(u32, u64, MemoryRecord, MemoryRecord)>,
-    > = std::collections::HashMap::new();
+    let mut windows_by_addr: HashMap<u64, Vec<(u32, u64, MemoryRecord, MemoryRecord)>> =
+        HashMap::new();
     for event in &record.cpu_local_memory_access {
         windows_by_addr.entry(event.addr).or_default().push((
             event.final_mem_access.timestamp,
@@ -115,51 +140,11 @@ pub fn field_digests(record: &EmulationRecord) -> Vec<(&'static str, usize, u64)
         .collect();
     byte_lookups.sort_unstable();
 
-    vec![
+    let mut rows = vec![
         (
-            "cpu_events",
-            record.cpu_events.len(),
-            digest(record.cpu_events.as_slice()),
-        ),
-        (
-            "memory_read_write_event_indices",
-            record.memory_read_write_event_indices.len(),
-            digest(&record.memory_read_write_event_indices),
-        ),
-        (
-            "add_sub_events",
-            record.add_sub_events.len(),
-            digest(record.add_sub_events.as_slice()),
-        ),
-        (
-            "mul_events",
-            record.mul_events.len(),
-            digest(&record.mul_events),
-        ),
-        (
-            "bitwise_events",
-            record.bitwise_events.len(),
-            digest(&record.bitwise_events),
-        ),
-        (
-            "shift_left_events",
-            record.shift_left_events.len(),
-            digest(&record.shift_left_events),
-        ),
-        (
-            "shift_right_events",
-            record.shift_right_events.len(),
-            digest(&record.shift_right_events),
-        ),
-        (
-            "divrem_events",
-            record.divrem_events.len(),
-            digest(&record.divrem_events),
-        ),
-        (
-            "lt_events",
-            record.lt_events.len(),
-            digest(record.lt_events.as_slice()),
+            "add_events",
+            record.add_events.len(),
+            digest(&record.add_events),
         ),
         ("byte_lookups", byte_lookups.len(), digest(&byte_lookups)),
         (
@@ -184,11 +169,6 @@ pub fn field_digests(record: &EmulationRecord) -> Vec<(&'static str, usize, u64)
             0,
         ),
         (
-            "syscall_events",
-            record.syscall_events.len(),
-            digest(&record.syscall_events),
-        ),
-        (
             "poseidon2_events",
             record.poseidon2_events.len(),
             digest(&record.poseidon2_events),
@@ -199,11 +179,78 @@ pub fn field_digests(record: &EmulationRecord) -> Vec<(&'static str, usize, u64)
             digest(&record.global_lookup_events),
         ),
         ("precompile_events", precompiles.len(), digest(&precompiles)),
-        ("public_values", 1, digest(&record.public_values)),
+        (PUBLIC_VALUES, 1, digest(&record.public_values)),
         ("is_cpu_chunk", 1, digest(&record.is_cpu_chunk)),
         ("is_last", 1, digest(&record.is_last)),
         ("shape", 1, digest(&record.shape)),
+    ];
+    if let Some(history) = &record.history {
+        rows.push((HISTORY, history.steps.len(), history.digest()));
+    }
+    rows
+}
+
+/// Redo `digests`' public-values row from `record`, for digests taken before the public values
+/// were stamped: every other field is what it was, so the rest of the work is not done twice.
+pub fn restamp_public_values(digests: &mut [FieldDigest], record: &EmulationRecord) {
+    for row in digests.iter_mut().filter(|row| row.0 == PUBLIC_VALUES) {
+        row.2 = digest(&record.public_values);
+    }
+}
+
+/// `(stream, elements, bytes)` for retained event collections, excluding the execution history,
+/// so the stage ledger avoids [`field_digests`]' hashing cost. Bytes are
+/// `len × size_of` of the element: what the record holds in place, not its vectors' spare capacity
+/// and not heap an element points to.
+pub fn record_streams(record: &EmulationRecord) -> Vec<(&'static str, usize, usize)> {
+    fn vec<T>(name: &'static str, events: &[T]) -> (&'static str, usize, usize) {
+        (name, events.len(), std::mem::size_of_val(events))
+    }
+    fn map<K, V>(
+        name: &'static str,
+        events: &hashbrown::HashMap<K, V>,
+    ) -> (&'static str, usize, usize) {
+        (
+            name,
+            events.len(),
+            events.len() * std::mem::size_of::<(K, V)>(),
+        )
+    }
+    let precompile_events: Vec<_> = record.precompile_events.events.values().collect();
+    vec![
+        vec("add_events", &record.add_events),
+        map("byte_lookups", &record.byte_lookups),
+        vec("memory_initialize_events", &record.memory_initialize_events),
+        vec("memory_finalize_events", &record.memory_finalize_events),
+        vec("cpu_local_memory_access", &record.cpu_local_memory_access),
+        vec("poseidon2_events", &record.poseidon2_events),
+        vec("global_lookup_events", &record.global_lookup_events),
+        (
+            "precompile_events",
+            precompile_events.iter().map(|events| events.len()).sum(),
+            precompile_events
+                .iter()
+                .map(|events| std::mem::size_of_val(events.as_slice()))
+                .sum(),
+        ),
     ]
+}
+
+/// `(stream, element count)` for retained event collections, excluding the execution history.
+pub fn record_counts(record: &EmulationRecord) -> Vec<(&'static str, usize)> {
+    record_streams(record)
+        .into_iter()
+        .map(|(name, len, _)| (name, len))
+        .collect()
+}
+
+/// The bytes `record`'s event streams hold in place, summed over the streams of
+/// [`record_counts`].
+pub fn record_bytes(record: &EmulationRecord) -> usize {
+    record_streams(record)
+        .into_iter()
+        .map(|(_, _, bytes)| bytes)
+        .sum()
 }
 
 /// Fields reported but not compared.
@@ -232,10 +279,9 @@ pub fn is_compared(field: &str) -> bool {
 /// First rather than all: a merge bug usually corrupts one field, and the rest differ only
 /// because they were built from it.
 pub fn first_difference(left: &EmulationRecord, right: &EmulationRecord) -> Option<String> {
-    for ((field, l_len, l_hash), (_, r_len, r_hash)) in
-        field_digests(left).into_iter().zip(field_digests(right))
-    {
-        if NOT_COMPARED.contains(&field) {
+    let (left, right) = (field_digests(left), field_digests(right));
+    for ((field, l_len, l_hash), (_, r_len, r_hash)) in left.iter().zip(&right) {
+        if NOT_COMPARED.contains(field) {
             continue;
         }
         if l_len != r_len || l_hash != r_hash {
@@ -244,15 +290,27 @@ pub fn first_difference(left: &EmulationRecord, right: &EmulationRecord) -> Opti
             ));
         }
     }
-    None
+    (left.len() != right.len()).then(|| {
+        format!(
+            "{HISTORY}: carried by the {} record alone",
+            if left.len() > right.len() {
+                "left"
+            } else {
+                "right"
+            }
+        )
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chips::chips::{
-        alu::event::AluEvent,
-        riscv_memory::event::{MemoryLocalEvent, MemoryRecord},
+    use crate::{
+        chips::chips::{
+            alu::event::AluEvent,
+            riscv_memory::event::{MemoryLocalEvent, MemoryRecord},
+        },
+        emulator::riscv::history::{ExecutionHistory, Step},
     };
 
     fn access(value: u64, timestamp: u32) -> MemoryRecord {
@@ -281,7 +339,7 @@ mod tests {
     #[test]
     fn a_record_does_not_differ_from_itself() {
         let mut record = EmulationRecord::default();
-        record.mul_events.push(AluEvent::default());
+        record.add_events.push(AluEvent::default());
         record.cpu_local_memory_access.push(local_event(0x100, 7));
         assert_eq!(first_difference(&record, &record.clone()), None);
     }
@@ -290,19 +348,27 @@ mod tests {
     /// the same code — and then every real finding is buried in false ones.
     #[test]
     fn local_memory_order_is_not_a_difference() {
-        let mut left = EmulationRecord::default();
-        left.cpu_local_memory_access = vec![local_event(0x100, 1), local_event(0x200, 2)];
-        let mut right = EmulationRecord::default();
-        right.cpu_local_memory_access = vec![local_event(0x200, 2), local_event(0x100, 1)];
+        let left = EmulationRecord {
+            cpu_local_memory_access: vec![local_event(0x100, 1), local_event(0x200, 2)],
+            ..Default::default()
+        };
+        let right = EmulationRecord {
+            cpu_local_memory_access: vec![local_event(0x200, 2), local_event(0x100, 1)],
+            ..Default::default()
+        };
         assert_eq!(first_difference(&left, &right), None);
     }
 
     #[test]
     fn a_changed_outermost_value_is_a_difference() {
-        let mut left = EmulationRecord::default();
-        left.cpu_local_memory_access = vec![local_event(0x100, 1)];
-        let mut right = EmulationRecord::default();
-        right.cpu_local_memory_access = vec![local_event(0x100, 2)];
+        let left = EmulationRecord {
+            cpu_local_memory_access: vec![local_event(0x100, 1)],
+            ..Default::default()
+        };
+        let right = EmulationRecord {
+            cpu_local_memory_access: vec![local_event(0x100, 2)],
+            ..Default::default()
+        };
         let reported = first_difference(&left, &right).expect("a changed value must be reported");
         assert!(
             reported.starts_with("cpu_local_memory_chain:"),
@@ -315,16 +381,20 @@ mod tests {
     /// exactly such an access — and it cancels against its neighbour, so the bus cannot see it.
     #[test]
     fn an_interior_access_is_deliberately_not_compared() {
-        let mut left = EmulationRecord::default();
-        left.cpu_local_memory_access = vec![
-            window(0x100, access(1, 5), access(2, 40)),
-            window(0x100, access(2, 40), access(3, 90)),
-        ];
-        let mut right = EmulationRecord::default();
-        right.cpu_local_memory_access = vec![
-            window(0x100, access(1, 5), access(0xdead, 40)),
-            window(0x100, access(0xdead, 40), access(3, 90)),
-        ];
+        let left = EmulationRecord {
+            cpu_local_memory_access: vec![
+                window(0x100, access(1, 5), access(2, 40)),
+                window(0x100, access(2, 40), access(3, 90)),
+            ],
+            ..Default::default()
+        };
+        let right = EmulationRecord {
+            cpu_local_memory_access: vec![
+                window(0x100, access(1, 5), access(0xdead, 40)),
+                window(0x100, access(0xdead, 40), access(3, 90)),
+            ],
+            ..Default::default()
+        };
         assert_eq!(first_difference(&left, &right), None);
     }
 
@@ -332,13 +402,17 @@ mod tests {
     /// where the unsplit replay had one. Same span, so not a difference.
     #[test]
     fn a_window_split_in_two_at_the_same_span_is_not_a_difference() {
-        let mut unsplit = EmulationRecord::default();
-        unsplit.cpu_local_memory_access = vec![window(0x100, access(1, 5), access(9, 90))];
-        let mut split = EmulationRecord::default();
-        split.cpu_local_memory_access = vec![
-            window(0x100, access(1, 5), access(4, 40)),
-            window(0x100, access(4, 40), access(9, 90)),
-        ];
+        let unsplit = EmulationRecord {
+            cpu_local_memory_access: vec![window(0x100, access(1, 5), access(9, 90))],
+            ..Default::default()
+        };
+        let split = EmulationRecord {
+            cpu_local_memory_access: vec![
+                window(0x100, access(1, 5), access(4, 40)),
+                window(0x100, access(4, 40), access(9, 90)),
+            ],
+            ..Default::default()
+        };
         assert_eq!(first_difference(&unsplit, &split), None);
     }
 
@@ -348,13 +422,17 @@ mod tests {
     /// unsplit replay of the same execution disagree for no real reason.
     #[test]
     fn windows_are_ordered_by_when_they_close() {
-        let mut split = EmulationRecord::default();
-        split.cpu_local_memory_access = vec![
-            window(0x100, access(1, 9_000), access(2, 10)),
-            window(0x100, access(2, 10), access(3, 20)),
-        ];
-        let mut unsplit = EmulationRecord::default();
-        unsplit.cpu_local_memory_access = vec![window(0x100, access(1, 9_000), access(3, 20))];
+        let split = EmulationRecord {
+            cpu_local_memory_access: vec![
+                window(0x100, access(1, 9_000), access(2, 10)),
+                window(0x100, access(2, 10), access(3, 20)),
+            ],
+            ..Default::default()
+        };
+        let unsplit = EmulationRecord {
+            cpu_local_memory_access: vec![window(0x100, access(1, 9_000), access(3, 20))],
+            ..Default::default()
+        };
         assert_eq!(first_difference(&split, &unsplit), None);
     }
 
@@ -362,13 +440,17 @@ mod tests {
     /// ends that address on a different access.
     #[test]
     fn a_split_window_that_ends_elsewhere_is_a_difference() {
-        let mut unsplit = EmulationRecord::default();
-        unsplit.cpu_local_memory_access = vec![window(0x100, access(1, 5), access(9, 90))];
-        let mut split = EmulationRecord::default();
-        split.cpu_local_memory_access = vec![
-            window(0x100, access(1, 5), access(4, 40)),
-            window(0x100, access(4, 40), access(9, 110)),
-        ];
+        let unsplit = EmulationRecord {
+            cpu_local_memory_access: vec![window(0x100, access(1, 5), access(9, 90))],
+            ..Default::default()
+        };
+        let split = EmulationRecord {
+            cpu_local_memory_access: vec![
+                window(0x100, access(1, 5), access(4, 40)),
+                window(0x100, access(4, 40), access(9, 110)),
+            ],
+            ..Default::default()
+        };
         let reported =
             first_difference(&unsplit, &split).expect("a changed final access must be reported");
         assert!(
@@ -382,17 +464,21 @@ mod tests {
     /// The chain does not: its neighbours no longer meet, so it stays two links.
     #[test]
     fn a_dropped_middle_window_is_a_difference() {
-        let mut whole = EmulationRecord::default();
-        whole.cpu_local_memory_access = vec![
-            window(0x100, access(1, 5), access(2, 40)),
-            window(0x100, access(2, 40), access(3, 90)),
-            window(0x100, access(3, 90), access(4, 150)),
-        ];
-        let mut dropped = EmulationRecord::default();
-        dropped.cpu_local_memory_access = vec![
-            window(0x100, access(1, 5), access(2, 40)),
-            window(0x100, access(3, 90), access(4, 150)),
-        ];
+        let whole = EmulationRecord {
+            cpu_local_memory_access: vec![
+                window(0x100, access(1, 5), access(2, 40)),
+                window(0x100, access(2, 40), access(3, 90)),
+                window(0x100, access(3, 90), access(4, 150)),
+            ],
+            ..Default::default()
+        };
+        let dropped = EmulationRecord {
+            cpu_local_memory_access: vec![
+                window(0x100, access(1, 5), access(2, 40)),
+                window(0x100, access(3, 90), access(4, 150)),
+            ],
+            ..Default::default()
+        };
         let reported =
             first_difference(&whole, &dropped).expect("a dropped window must be reported");
         assert!(
@@ -405,43 +491,147 @@ mod tests {
     /// reduce to the one span an unsplit replay would have left.
     #[test]
     fn a_chain_of_windows_reduces_to_the_unsplit_span() {
-        let mut split = EmulationRecord::default();
-        split.cpu_local_memory_access = vec![
-            window(0x100, access(1, 5), access(2, 40)),
-            window(0x100, access(2, 40), access(3, 90)),
-            window(0x100, access(3, 90), access(4, 150)),
-        ];
-        let mut unsplit = EmulationRecord::default();
-        unsplit.cpu_local_memory_access = vec![window(0x100, access(1, 5), access(4, 150))];
+        let split = EmulationRecord {
+            cpu_local_memory_access: vec![
+                window(0x100, access(1, 5), access(2, 40)),
+                window(0x100, access(2, 40), access(3, 90)),
+                window(0x100, access(3, 90), access(4, 150)),
+            ],
+            ..Default::default()
+        };
+        let unsplit = EmulationRecord {
+            cpu_local_memory_access: vec![window(0x100, access(1, 5), access(4, 150))],
+            ..Default::default()
+        };
         assert_eq!(first_difference(&split, &unsplit), None);
     }
 
-    /// The merge hazard this gate exists for: the indices point into `cpu_events`, so a segment
-    /// appended without rebasing them leaves this field — and only this field — wrong.
     #[test]
     fn an_unrebased_index_is_a_difference() {
-        let mut left = EmulationRecord::default();
-        left.memory_read_write_event_indices = vec![0, 5, 9];
-        let mut right = EmulationRecord::default();
-        right.memory_read_write_event_indices = vec![0, 5, 8];
+        let left = EmulationRecord {
+            history: Some(ExecutionHistory {
+                steps: vec![Step::default(); 10].into(),
+                chip_steps: crate::emulator::riscv::history::ChipSteps {
+                    memory: vec![0, 5, 9].into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut right = left.clone();
+        right.history.as_mut().unwrap().chip_steps.memory[2] = 8;
         let reported =
             first_difference(&left, &right).expect("an unrebased index must be reported");
         assert!(
-            reported.starts_with("memory_read_write_event_indices:"),
+            reported.starts_with("history:"),
             "reported the wrong field: {reported}"
         );
     }
 
     #[test]
     fn a_missing_event_is_a_difference() {
-        let mut left = EmulationRecord::default();
-        left.mul_events = vec![AluEvent::default(), AluEvent::default()];
-        let mut right = EmulationRecord::default();
-        right.mul_events = vec![AluEvent::default()];
+        let left = EmulationRecord {
+            add_events: vec![AluEvent::default(), AluEvent::default()],
+            ..Default::default()
+        };
+        let right = EmulationRecord {
+            add_events: vec![AluEvent::default()],
+            ..Default::default()
+        };
         let reported = first_difference(&left, &right).expect("a dropped event must be reported");
         assert!(
-            reported.starts_with("mul_events:"),
+            reported.starts_with("add_events:"),
             "reported the wrong field: {reported}"
         );
+    }
+
+    #[test]
+    fn counts_and_bytes_come_from_lengths() {
+        let record = EmulationRecord {
+            add_events: vec![AluEvent::default(); 3],
+            cpu_local_memory_access: vec![local_event(0x100, 1), local_event(0x108, 2)],
+            ..Default::default()
+        };
+        let counts = record_counts(&record);
+        assert!(counts.contains(&("add_events", 3)));
+        assert!(counts.contains(&("cpu_local_memory_access", 2)));
+        assert_eq!(
+            record_bytes(&record),
+            3 * std::mem::size_of::<AluEvent>() + 2 * std::mem::size_of::<MemoryLocalEvent>()
+        );
+    }
+
+    #[test]
+    fn a_history_ends_the_rows_on_its_digest_and_leaves_the_others_alone() {
+        let streams = EmulationRecord {
+            add_events: vec![AluEvent::default()],
+            ..Default::default()
+        };
+        let history = ExecutionHistory {
+            chunk: 3,
+            steps: vec![Step::default(); 2].into(),
+            ..Default::default()
+        };
+        let carrying = EmulationRecord {
+            history: Some(history.clone()),
+            ..streams.clone()
+        };
+        let mut rows = field_digests(&carrying);
+        assert_eq!(rows.pop(), Some((HISTORY, 2, history.digest())));
+        assert_eq!(rows, field_digests(&streams));
+
+        let reported =
+            first_difference(&streams, &carrying).expect("a history on one side must be reported");
+        assert!(
+            reported.starts_with("history:"),
+            "reported the wrong field: {reported}"
+        );
+        let mut other = carrying.clone();
+        other.history.as_mut().unwrap().chunk = 4;
+        let reported =
+            first_difference(&carrying, &other).expect("a changed history must be reported");
+        assert!(
+            reported.starts_with("history:"),
+            "reported the wrong field: {reported}"
+        );
+    }
+
+    /// A digest taken before the public values were stamped, then restamped, is the digest of the
+    /// stamped record.
+    #[test]
+    fn restamping_matches_digesting_the_stamped_record() {
+        let mut record = EmulationRecord {
+            add_events: vec![AluEvent::default()],
+            ..Default::default()
+        };
+        let mut digests = field_digests(&record);
+        record.public_values.chunk = 7;
+        restamp_public_values(&mut digests, &record);
+        assert_eq!(digests, field_digests(&record));
+    }
+
+    /// Every stream `field_digests` digests is counted, so a stream added to the record and to the
+    /// gate cannot go missing from the ledger's facts.
+    #[test]
+    fn every_digested_stream_is_counted() {
+        const NOT_STREAMS: &[&str] = &[
+            "cpu_local_memory_chain",
+            PUBLIC_VALUES,
+            "is_cpu_chunk",
+            "is_last",
+            "shape",
+        ];
+        let record = EmulationRecord::default();
+        let digested: Vec<&str> = field_digests(&record)
+            .into_iter()
+            .map(|(name, _, _)| name)
+            .filter(|name| !NOT_STREAMS.contains(name))
+            .collect();
+        let counted: Vec<&str> = record_counts(&record)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(digested, counted);
     }
 }

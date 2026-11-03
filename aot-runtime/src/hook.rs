@@ -321,7 +321,6 @@ mod tests {
             program,
             Arc::new(RecordFinalPvsState::default()),
             EmulatorOpts::default(),
-            None,
         );
 
         let aot_hooks = default_hook_map();

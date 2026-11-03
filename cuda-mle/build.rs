@@ -31,9 +31,13 @@ fn main() {
     let pico_src = format!("{pico_root}/src");
     let prover = format!("{pico_src}/prover");
     // The directory as well as its files: a .cu added there must re-run this script, and the
-    // per-file watches `.file()` registers only cover files that already existed.
+    // per-file watches `.file()` registers only cover files that already existed. Include roots
+    // watch nothing, so these lines and the `.watch()` calls below are the whole set.
+    let src_watches = watched_src_entries(&pico_src);
     println!("cargo:rerun-if-changed={sppark}");
-    println!("cargo:rerun-if-changed={pico_src}");
+    for entry in &src_watches {
+        println!("cargo:rerun-if-changed={entry}");
+    }
 
     // ── mle-kernels: hashing, device info and NVTX ───────────────────────────
     //
@@ -92,8 +96,27 @@ fn main() {
         .file(format!("{prover}/mle_interpolate.cu"))
         .file(format!("{prover}/stacked_reduction.cu"))
         .watch(&sppark)
-        .watch(&pico_src)
+        .watch_all(&src_watches)
         .build();
+}
+
+/// The entries of the pico-gpu `src/` to watch: all but `tracegen`. That directory is compiled
+/// by `pico-gpu-api` (which fingerprints what it includes by content), and nothing built here
+/// includes from it, so watching it would recompile every kernel here for an edit that reaches
+/// none of them. A header under `tracegen` that a source built here starts to include would go
+/// stale unnoticed.
+fn watched_src_entries(pico_src: &str) -> Vec<String> {
+    let mut entries: Vec<String> = std::fs::read_dir(pico_src)
+        .and_then(|dir| dir.collect::<Result<Vec<_>, _>>())
+        .unwrap_or_else(|err| panic!("cannot list {pico_src}: {err}"))
+        .into_iter()
+        .map(|entry| entry.path())
+        .filter(|path| path.file_name().is_some_and(|name| name != "tracegen"))
+        .map(|path| path.to_string_lossy().to_string())
+        .collect();
+    // read_dir order is unspecified; a stable list keeps the script's output reproducible.
+    entries.sort();
+    entries
 }
 
 /// nvcc build helper: collects sources, include paths, flags and watches, compiles a static
@@ -171,11 +194,11 @@ mod builder {
             self
         }
 
-        /// Adds an include root (also watched for changes).
+        /// Adds an include root. It is not watched: a root can hold more than the library reads,
+        /// so reruns come only from `watch` and `file`.
         pub fn include<P: AsRef<Path>>(mut self, path: P) -> Self {
-            let dir = path.as_ref().to_string_lossy().to_string();
-            self.include_dirs.push(dir.clone());
-            self.rerun_paths.push(dir);
+            self.include_dirs
+                .push(path.as_ref().to_string_lossy().to_string());
             self
         }
 
@@ -220,6 +243,15 @@ mod builder {
         pub fn watch<P: AsRef<Path>>(mut self, path: P) -> Self {
             self.rerun_paths
                 .push(path.as_ref().to_string_lossy().to_string());
+            self
+        }
+
+        /// Watches several paths, in iteration order.
+        pub fn watch_all<P: AsRef<Path>, I: IntoIterator<Item = P>>(mut self, paths: I) -> Self {
+            for entry in paths {
+                self.rerun_paths
+                    .push(entry.as_ref().to_string_lossy().to_string());
+            }
             self
         }
 

@@ -16,7 +16,7 @@ use std::{
     process::{Command, Output},
 };
 
-use pico_cli::source::PICO_SOURCE_ENV;
+use pico_cli::source::{release_has_aot, release_has_codegen_stamp, PICO_SOURCE_ENV};
 use sha2::{Digest, Sha256};
 
 const FIB_ELF: &str = concat!(
@@ -91,6 +91,17 @@ fn stand_in_pico(path: &Path, tag: Option<&str>) -> PathBuf {
         git(path, &["tag", tag, &commit]);
     }
     path.to_path_buf()
+}
+
+/// Why this CLI refuses to take Pico from its release whatever the tags, or `None`.
+fn release_refusal() -> Option<&'static str> {
+    if !release_has_aot() {
+        Some("the first Pico release with AOT")
+    } else if !release_has_codegen_stamp() {
+        Some("without the codegen stamp")
+    } else {
+        None
+    }
 }
 
 /// Takes Pico from the release, which git finds in `stand_in`.

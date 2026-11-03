@@ -157,10 +157,10 @@ mod gpu_tests {
         let mut precompile_events = PrecompileEvents::default();
         precompile_events.insert(SyscallCode::UINT256_MUL, events);
 
-        let mut record = EmulationRecord::default();
-        record.precompile_events = precompile_events;
-
-        record
+        EmulationRecord {
+            precompile_events,
+            ..Default::default()
+        }
     }
 
     fn gpu_generate_extra_record_and_main(

@@ -17,12 +17,15 @@ fn main() {
     }));
     // Register the AOT emulation factory when built with `aot-emulator` (no-op otherwise).
     distributed_vm::init_optional_aot();
+    // The replay workers' engine is resolved here, after that registration `MLE_REPLAY_WORKERS=aot`
+    // needs, so a value this process cannot honour refuses to start before any setup.
+    mle::replay_workers();
     let cfg = MleSingleNodeConfig::parse();
 
     // `MLE_REPEAT=N` proves the same block N times, sequentially, in one process. A single run only
     // measures the first block, which pays every process-wide one-shot cost (mem-pool high-water
-    // mark, nvrtc JIT, event-buffer pool, background pool filler). Iteration 2+ is what a long-
-    // running prover's steady state looks like -- compare the per-iteration "MLE bench:" lines.
+    // mark, nvrtc JIT, background pool filler). Iteration 2+ is what a long-running prover's
+    // steady state looks like -- compare the per-iteration "MLE bench:" lines.
     let repeat = std::env::var("MLE_REPEAT")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())

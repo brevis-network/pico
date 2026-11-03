@@ -1,6 +1,6 @@
 use pico_vm::chips::chips::riscv_memory::event::MemoryAccessPosition;
 
-use super::{types::RegisterRecord, AotEmulatorCore};
+use super::{sink::by_sink, types::RegisterRecord, AotEmulatorCore};
 
 impl AotEmulatorCore {
     // ========================================================================
@@ -52,12 +52,6 @@ impl AotEmulatorCore {
         self.accessed_regs = [false; 32];
     }
 
-    /// Read a register value with lazy materialization and access tracking.
-    #[inline(always)]
-    pub fn read_reg(&mut self, reg: usize) -> u64 {
-        self.read_reg_pos(reg, MemoryAccessPosition::B)
-    }
-
     /// Read a register value at position C (for operand C in instruction encoding).
     #[inline(always)]
     pub fn read_reg_c(&mut self, reg: usize) -> u64 {
@@ -78,17 +72,29 @@ impl AotEmulatorCore {
 
     #[inline(always)]
     fn read_reg_pos(&mut self, reg: usize, position: MemoryAccessPosition) -> u64 {
+        by_sink!(self.read_reg_at(reg, position))
+    }
+
+    /// The read of `reg` in operand `position`, its access written when `EMIT`.
+    #[inline(always)]
+    pub(crate) fn read_reg_at<const EMIT: bool>(
+        &mut self,
+        reg: usize,
+        position: MemoryAccessPosition,
+    ) -> u64 {
         self.mark_reg_accessed(reg);
         if !self.reg_present[reg] {
             self.reg_present[reg] = true;
             self.registers[reg] = 0;
         }
-        self.set_reg_record(reg, self.clk.wrapping_add(position as u32));
-        if reg == 0 {
-            0
-        } else {
-            self.registers[reg]
+        let prev = self.register_records[reg];
+        let timestamp = self.clk.wrapping_add(position as u32);
+        self.set_reg_record(reg, timestamp);
+        let value = if reg == 0 { 0 } else { self.registers[reg] };
+        if EMIT {
+            self.record_reg_read(reg, position, value, prev, timestamp);
         }
+        value
     }
 
     /// Read a register value without materialization or access tracking.
@@ -118,20 +124,30 @@ impl AotEmulatorCore {
         }
     }
 
+    /// Writes `value` to `reg` at operand `a`'s timestamp, `x0` keeping 0, its access written
+    /// when `EMIT`: what every write variant below does before its event counting.
+    #[inline(always)]
+    pub(crate) fn set_reg<const EMIT: bool>(&mut self, reg: usize, value: u64) {
+        self.track_chunk_split_address(reg as u64);
+        let prev_value = self.read_reg_unsafe(reg);
+        let prev = self.register_records[reg];
+        self.reg_present[reg] = true;
+        if reg != 0 {
+            self.registers[reg] = value;
+        }
+        self.mark_reg_accessed(reg);
+        let timestamp = self.clk.wrapping_add(MemoryAccessPosition::A as u32);
+        self.set_reg_record(reg, timestamp);
+        if EMIT {
+            let written = if reg == 0 { 0 } else { value };
+            self.record_reg_write(reg, written, prev_value, prev, timestamp);
+        }
+    }
+
     /// Write to a register (writes to x0 are ignored).
     #[inline(always)]
     pub fn write_reg(&mut self, reg: usize, value: u64) {
-        self.track_chunk_split_address(reg as u64);
-        if reg != 0 {
-            self.reg_present[reg] = true;
-            self.registers[reg] = value;
-        } else {
-            self.reg_present[reg] = true;
-        }
-
-        self.mark_reg_accessed(reg);
-        // Update register metadata for snapshot compatibility
-        self.set_reg_record(reg, self.clk.wrapping_add(MemoryAccessPosition::A as u32));
+        self.write_reg_no_count(reg, value);
 
         // Account for register write event to match simple-mode behavior.
         // Simple-mode: rw_simple() calls mw_cpu_simple() which always increments.
@@ -142,110 +158,13 @@ impl AotEmulatorCore {
         }
     }
 
-    /// Read a register value at position A with unconditional tracking (batch-mode optimized).
-    ///
-    /// This variant uses unconditional tracking for better performance.
-    #[inline(always)]
-    pub fn read_reg_a_tracked(&mut self, reg: usize) -> u64 {
-        self.mark_reg_accessed(reg);
-        if !self.reg_present[reg] {
-            self.reg_present[reg] = true;
-            self.registers[reg] = 0;
-        }
-        self.set_reg_record(reg, self.clk.wrapping_add(MemoryAccessPosition::A as u32));
-        if reg == 0 {
-            0
-        } else {
-            self.registers[reg]
-        }
-    }
-
-    /// Read a register value at position B with unconditional tracking (batch-mode optimized).
-    #[inline(always)]
-    pub fn read_reg_b_tracked(&mut self, reg: usize) -> u64 {
-        self.mark_reg_accessed(reg);
-        if !self.reg_present[reg] {
-            self.reg_present[reg] = true;
-            self.registers[reg] = 0;
-        }
-        self.set_reg_record(reg, self.clk.wrapping_add(MemoryAccessPosition::B as u32));
-        if reg == 0 {
-            0
-        } else {
-            self.registers[reg]
-        }
-    }
-
-    /// Read a register value at position C with unconditional tracking (batch-mode optimized).
-    #[inline(always)]
-    pub fn read_reg_c_tracked(&mut self, reg: usize) -> u64 {
-        self.mark_reg_accessed(reg);
-        if !self.reg_present[reg] {
-            self.reg_present[reg] = true;
-            self.registers[reg] = 0;
-        }
-        self.set_reg_record(reg, self.clk.wrapping_add(MemoryAccessPosition::C as u32));
-        if reg == 0 {
-            0
-        } else {
-            self.registers[reg]
-        }
-    }
-
-    /// Write to a register with unconditional tracking (batch-mode optimized).
-    #[inline(always)]
-    pub fn write_reg_tracked(&mut self, reg: usize, value: u64) {
-        self.track_chunk_split_address(reg as u64);
-        if reg != 0 {
-            self.reg_present[reg] = true;
-            self.registers[reg] = value;
-        } else {
-            self.reg_present[reg] = true;
-        }
-        self.mark_reg_accessed(reg);
-        self.set_reg_record(reg, self.clk.wrapping_add(MemoryAccessPosition::A as u32));
-
-        // Account for register write event to match simple-mode behavior (same as write_reg).
-        if !self.is_unconstrained_mode() {
-            self.chunk_split_state.add_memory_rw_events(1);
-        }
-    }
-
-    /// Write to a register in constrained mode (block-level unconstrained check already done).
-    ///
-    /// This variant skips the per-operation is_unconstrained_mode() check because the
-    /// generated block has already verified we're not in unconstrained mode at entry.
-    /// Always increments the memory RW event counter.
-    #[inline(always)]
-    pub fn write_reg_constrained(&mut self, reg: usize, value: u64) {
-        self.track_chunk_split_address(reg as u64);
-        if reg != 0 {
-            self.reg_present[reg] = true;
-            self.registers[reg] = value;
-        } else {
-            self.reg_present[reg] = true;
-        }
-        self.mark_reg_accessed(reg);
-        self.set_reg_record(reg, self.clk.wrapping_add(MemoryAccessPosition::A as u32));
-        // Unconditionally increment - we know we're not in unconstrained mode
-        self.chunk_split_state.add_memory_rw_events(1);
-    }
-
     /// Write to a register without incrementing event counter (for block-level batching).
     ///
     /// Event counting is deferred to block end via `add_memory_rw_events()`.
     /// Only use this when the block tracks static event counts.
     #[inline(always)]
     pub fn write_reg_no_count(&mut self, reg: usize, value: u64) {
-        self.track_chunk_split_address(reg as u64);
-        if reg != 0 {
-            self.reg_present[reg] = true;
-            self.registers[reg] = value;
-        } else {
-            self.reg_present[reg] = true;
-        }
-        self.mark_reg_accessed(reg);
-        self.set_reg_record(reg, self.clk.wrapping_add(MemoryAccessPosition::A as u32));
+        by_sink!(self.set_reg(reg, value));
         // NO increment - deferred to block end
     }
 

@@ -12,8 +12,7 @@ use pico_vm::{
 };
 
 /// Default options with `CHUNK_SIZE`, or `default_chunk_size` when it is unset, as the chunk
-/// size. The pinned CPU/ALU event buffers size themselves from `CHUNK_SIZE` on first use, so it is
-/// set here when absent: every later chunk in this process must fit what the first one sized.
+/// size. It is set here when absent, so every later emulation in this process takes the same.
 pub fn opts_from_env_chunk_size(default_chunk_size: u32) -> EmulatorOpts {
     if std::env::var_os("CHUNK_SIZE").is_none() {
         std::env::set_var("CHUNK_SIZE", default_chunk_size.to_string());

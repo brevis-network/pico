@@ -73,14 +73,14 @@ export WORKER_LABEL="${WORKER_LABEL:-$ROLE}"
 # Secondary only. Loopback still traverses the network stack, so this is real gRPC.
 export PRIMARY_IP="${PRIMARY_IP:-127.0.0.1}"
 
-# Event buffer pools. `single_node_mle.sh` defaults these to 64 on the reasoning that streaming
-# only needs ">= in-flight chunks", since a chunk's pooled buffer comes back when a worker proves
-# it and drops its record. A split run needs more than that, and 64 against reth-239's 95 chunks
+# Records held at once. `single_node_mle.sh` defaults this to 64 on the reasoning that streaming
+# only needs ">= in-flight chunks", since a chunk's slot comes back when a worker proves it and
+# drops its record. A split run needs more than that, and 64 against reth-239's 95 chunks
 # measures badly on both sides of the pipeline:
 #
 #   - Before the preparer learned to drop chunks it cannot prove, the other machine's half stayed
-#     pinned until the peer proved it and said so, so the emulator blocked in `get_buffer` waiting
-#     on the network: emulate 61.7s against single-node's 6.6s.
+#     held until the peer proved it and said so, so the emulator blocked on a slot only the network
+#     could free: emulate 61.7s against single-node's 6.6s.
 #   - That is fixed in the pipeline now, and emulate at 64 is healthy (6.0s). But the run is still
 #     roughly 2x worse end to end (21.9s vs 10.7s), because the prove lanes starve instead:
 #     occupancy 21% against 50% at 128. The mechanism there is NOT established — the emulator
@@ -88,16 +88,11 @@ export PRIMARY_IP="${PRIMARY_IP:-127.0.0.1}"
 #     an empirical floor, not a derived one, and do not "optimise" it back down on the strength of
 #     the first bullet having been fixed.
 #
-# The buffers are pinned host memory pre-allocated before keygen at ~0.95s each, so 64 -> 128 costs
-# 43s -> 121s of startup: a one-time process cost amortised over every block the process serves,
-# against a per-block stall. Raise it for blocks with more than ~128 chunks.
-export MLE_EVENT_POOL_SIZE="${MLE_EVENT_POOL_SIZE:-128}"
-
-# The packed staging pools follow the line above by default — at 128 that is twice the ~88 GiB
-# `single_node_mle.sh` pays, per process. Pin them at the 16 every measurement above was taken
-# at; past 16 in-flight chunks events upload unpacked and bitwise/shift_left go pageable on the
-# prove thread.
-export MLE_PACKED_POOL_SIZE="${MLE_PACKED_POOL_SIZE:-16}"
+# Each slot is a chunk's history in pinned memory, about 0.7 GB, all pinned at startup: 128 pin
+# about 89 GB. Raise it for blocks with more than ~128 chunks, and the pinned memory with it.
+# MLE_EVENT_POOL_SIZE, the variable's former name, still sets the count; the default here must not
+# shadow it, as the two set to different counts refuse to start.
+export MLE_HISTORY_SLOTS="${MLE_HISTORY_SLOTS:-${MLE_EVENT_POOL_SIZE:-128}}"
 
 # NUMA: do not assume 0-3 -> node 0. Check `nvidia-smi topo -m` and set NUMA_NODE to
 # bind; left unset the run is correct but pays cross-socket memory traffic on a two-socket box.

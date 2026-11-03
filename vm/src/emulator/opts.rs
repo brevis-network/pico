@@ -1,7 +1,6 @@
 use crate::primitives::consts::{
-    BENCH_MAX_CHUNK_BATCH_SIZE, BENCH_MAX_CHUNK_SIZE, BENCH_MAX_DEFERRED_SPLIT_THRESHOLD,
-    BENCH_RECURSION_MAX_CHUNK_SIZE, MAX_LOG_NUMBER_OF_CHUNKS, TEST_CHUNK_BATCH_SIZE,
-    TEST_CHUNK_SIZE, TEST_DEFERRED_SPLIT_THRESHOLD,
+    BENCH_MAX_CHUNK_BATCH_SIZE, BENCH_MAX_CHUNK_SIZE, MAX_LOG_NUMBER_OF_CHUNKS,
+    TEST_CHUNK_BATCH_SIZE, TEST_CHUNK_SIZE,
 };
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -15,6 +14,14 @@ pub enum SnapshotMainMode {
     Aot,
 }
 
+/// Which emulator the replay workers of `emulate_snapshot_pipeline` run.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReplayWorkers {
+    #[default]
+    Interpreter,
+    Aot,
+}
+
 /// Options for the core prover.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmulatorOpts {
@@ -22,8 +29,6 @@ pub struct EmulatorOpts {
     pub chunk_size: u32,
     /// The size of a batch of chunks in terms of cycles.
     pub chunk_batch_size: u32,
-    /// Options for splitting deferred events.
-    pub split_opts: SplitOpts,
     /// The maximum number of cpu cycles to use for emulation.
     pub max_cycles: Option<u64>,
     /// Whether or not to honor vm cycle tracking requests
@@ -33,6 +38,9 @@ pub struct EmulatorOpts {
     /// Backend used for the snapshot-main phase of the pipeline.
     #[serde(default)]
     pub snapshot_main: SnapshotMainMode,
+    /// Selects which emulator replays each snapshot in the pipeline's workers.
+    #[serde(default)]
+    pub replay_workers: ReplayWorkers,
 }
 
 impl Default for EmulatorOpts {
@@ -43,10 +51,6 @@ impl Default for EmulatorOpts {
         let auto_chunk_size = chunk_size(total_available_mem);
         let auto_chunk_batch_size = chunk_batch_size(total_available_mem);
         debug!("Total available memory: {:?}", total_available_mem);
-
-        let split_threshold = env::var("SPLIT_THRESHOLD")
-            .map(|s| s.parse::<usize>().unwrap_or(auto_chunk_size as usize >> 2))
-            .unwrap_or(auto_chunk_size as usize >> 2);
 
         let default_chunk_size = env::var("CHUNK_SIZE").map_or_else(
             |_| auto_chunk_size,
@@ -61,11 +65,11 @@ impl Default for EmulatorOpts {
         Self {
             chunk_size: default_chunk_size,
             chunk_batch_size: default_chunk_batch_size,
-            split_opts: SplitOpts::new(split_threshold),
             max_cycles: default_max_cycles.into(),
             cycle_tracker: false,
             cost_estimator: false,
             snapshot_main: SnapshotMainMode::Interpreter,
+            replay_workers: ReplayWorkers::default(),
         }
     }
 }
@@ -107,39 +111,20 @@ impl EmulatorOpts {
                 |_| TEST_CHUNK_BATCH_SIZE,
                 |s| s.parse::<u32>().unwrap_or(TEST_CHUNK_BATCH_SIZE),
             ),
-            split_opts: SplitOpts::new(TEST_DEFERRED_SPLIT_THRESHOLD),
             ..Default::default()
         }
     }
 
-    fn bench_default_opts() -> (usize, u32, u32) {
-        let split_threshold = env::var("SPLIT_THRESHOLD")
-            .map(|s| {
-                s.parse::<usize>()
-                    .unwrap_or(BENCH_MAX_DEFERRED_SPLIT_THRESHOLD)
-            })
-            .unwrap_or(BENCH_MAX_DEFERRED_SPLIT_THRESHOLD);
-
-        (
-            split_threshold,
-            BENCH_MAX_CHUNK_SIZE,
-            BENCH_MAX_CHUNK_BATCH_SIZE,
-        )
-    }
-
     pub fn bench_riscv_ops() -> Self {
-        let (split_threshold, default_chunk_size, default_chunk_batch_size) =
-            Self::bench_default_opts();
         Self {
             chunk_size: env::var("CHUNK_SIZE").map_or_else(
-                |_| default_chunk_size,
-                |s| s.parse::<u32>().unwrap_or(default_chunk_size),
+                |_| BENCH_MAX_CHUNK_SIZE,
+                |s| s.parse::<u32>().unwrap_or(BENCH_MAX_CHUNK_SIZE),
             ),
             chunk_batch_size: env::var("CHUNK_BATCH_SIZE").map_or_else(
-                |_| default_chunk_batch_size,
-                |s| s.parse::<u32>().unwrap_or(default_chunk_batch_size),
+                |_| BENCH_MAX_CHUNK_BATCH_SIZE,
+                |s| s.parse::<u32>().unwrap_or(BENCH_MAX_CHUNK_BATCH_SIZE),
             ),
-            split_opts: SplitOpts::new(split_threshold),
             snapshot_main: Self::default_snapshot_main_mode(),
             ..Default::default()
         }
@@ -151,19 +136,6 @@ impl EmulatorOpts {
             return SnapshotMainMode::Aot;
         }
         SnapshotMainMode::Interpreter
-    }
-
-    pub fn bench_recursion_opts() -> Self {
-        let (split_threshold, _, default_chunk_batch_size) = Self::bench_default_opts();
-        Self {
-            chunk_size: BENCH_RECURSION_MAX_CHUNK_SIZE,
-            chunk_batch_size: env::var("CHUNK_BATCH_SIZE").map_or_else(
-                |_| default_chunk_batch_size,
-                |s| s.parse::<u32>().unwrap_or(default_chunk_batch_size),
-            ),
-            split_opts: SplitOpts::new(split_threshold),
-            ..Default::default()
-        }
     }
 
     pub fn with_cycle_tracker(self) -> Self {
@@ -180,19 +152,38 @@ impl EmulatorOpts {
         }
     }
 
-    pub fn with_max_cycles(self, max_cycles: u64) -> Self {
-        Self {
-            max_cycles: Some(max_cycles),
-            ..self
-        }
-    }
-
     pub fn with_snapshot_main(self, snapshot_main: SnapshotMainMode) -> Self {
         Self {
             snapshot_main,
             ..self
         }
     }
+
+    pub fn with_replay_workers(self, replay_workers: ReplayWorkers) -> Self {
+        Self {
+            replay_workers,
+            ..self
+        }
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn chunk_size(total_available_mem: u64) -> u32 {
+    let log_shard_size = match total_available_mem {
+        0..=15 => 17,
+        m => ((m as f64).log2() + 13.2).floor() as usize,
+    };
+    std::cmp::min(1 << log_shard_size, BENCH_MAX_CHUNK_SIZE)
+}
+
+/// One chunk per batch, whatever the host has.
+///
+/// The sequencer hands `EmulationRecord::split` the batch index it has committed, and
+/// `SyscallEvent.chunk` counts chunks, so the `chunk <= committed + 1` filter admits a batch's
+/// own precompile events only while a batch is a single chunk -- a larger batch would drop the
+/// rest of them in silence. The sequencer asserts on what it is handed.
+fn chunk_batch_size(_total_available_mem: u64) -> u32 {
+    BENCH_MAX_CHUNK_BATCH_SIZE
 }
 
 #[cfg(test)]
@@ -233,52 +224,62 @@ mod tests {
         let back: EmulatorOpts = serde_json::from_value(stripped).expect("deserialize");
         assert_eq!(back.snapshot_main, SnapshotMainMode::Interpreter);
     }
-}
 
-/// Options for splitting deferred events.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SplitOpts {
-    /// The threshold for default events.
-    pub deferred: usize,
-    /// The threshold for keccak events.
-    pub keccak: usize,
-    /// The threshold for sha extend events.
-    pub sha_extend: usize,
-    /// The threshold for sha compress events.
-    pub sha_compress: usize,
-    /// The threshold for memory events.
-    pub memory: usize,
-}
-
-impl SplitOpts {
-    /// Create a new [`SplitOpts`] with the given threshold.
-    #[must_use]
-    pub fn new(deferred_shift_threshold: usize) -> Self {
-        Self {
-            deferred: deferred_shift_threshold,
-            keccak: 4 * deferred_shift_threshold / 24,
-            sha_extend: 16 * deferred_shift_threshold / 48,
-            sha_compress: 16 * deferred_shift_threshold / 80,
-            memory: 8 * deferred_shift_threshold * 4,
-        }
+    #[test]
+    fn replay_workers_default_is_interpreter() {
+        assert_eq!(
+            EmulatorOpts::default().replay_workers,
+            ReplayWorkers::Interpreter
+        );
     }
-}
 
-#[allow(clippy::cast_precision_loss)]
-fn chunk_size(total_available_mem: u64) -> u32 {
-    let log_shard_size = match total_available_mem {
-        0..=15 => 17,
-        m => ((m as f64).log2() + 13.2).floor() as usize,
-    };
-    std::cmp::min(1 << log_shard_size, BENCH_MAX_CHUNK_SIZE)
-}
+    /// Options serialized before `replay_workers` existed still load, and select the interpreter.
+    #[test]
+    fn serde_backward_compat_deserializes_without_replay_workers() {
+        let opts = EmulatorOpts::default().with_snapshot_main(SnapshotMainMode::Aot);
+        let mut value = serde_json::to_value(opts).expect("serialize");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("replay_workers")
+            .expect("replay_workers is serialized");
+        let back: EmulatorOpts = serde_json::from_value(value).expect("deserialize");
+        assert_eq!(back.replay_workers, ReplayWorkers::Interpreter);
+        assert_eq!(back, opts);
+    }
 
-/// One chunk per batch, whatever the host has.
-///
-/// The sequencer hands `EmulationRecord::split` the batch index it has committed, and
-/// `SyscallEvent.chunk` counts chunks, so the `chunk <= committed + 1` filter admits a batch's
-/// own precompile events only while a batch is a single chunk -- a larger batch would drop the
-/// rest of them in silence. The sequencer asserts on what it is handed.
-fn chunk_batch_size(_total_available_mem: u64) -> u32 {
-    BENCH_MAX_CHUNK_BATCH_SIZE
+    /// Options saved with the deferred-split thresholds still load, the thresholds ignored. This
+    /// holds for a self-describing format only while `EmulatorOpts` accepts unknown fields.
+    #[test]
+    fn serde_backward_compat_ignores_saved_split_opts() {
+        let saved = r#"{
+            "chunk_size": 2048,
+            "chunk_batch_size": 1,
+            "split_opts": {
+                "deferred": 512,
+                "keccak": 85,
+                "sha_extend": 170,
+                "sha_compress": 102,
+                "memory": 16384
+            },
+            "max_cycles": 4294967296,
+            "cycle_tracker": false,
+            "cost_estimator": false,
+            "snapshot_main": "Aot",
+            "replay_workers": "Interpreter"
+        }"#;
+        let back: EmulatorOpts = serde_json::from_str(saved).expect("deserialize");
+        assert_eq!(
+            back,
+            EmulatorOpts {
+                chunk_size: 2048,
+                chunk_batch_size: 1,
+                max_cycles: Some(1 << 32),
+                cycle_tracker: false,
+                cost_estimator: false,
+                snapshot_main: SnapshotMainMode::Aot,
+                replay_workers: ReplayWorkers::Interpreter,
+            }
+        );
+    }
 }

@@ -3,12 +3,19 @@
 //! Documentation for these syscalls can be found in the zkVM entrypoint
 //! `pico_sdk::riscv_ecalls` module.
 
+// The C failure entry points are weak symbols (`c_runtime`).
+#![cfg_attr(target_os = "zkvm", feature(linkage))]
+
 extern crate alloc;
+
+#[cfg(target_os = "zkvm")]
+mod c_runtime;
 
 pub mod command;
 pub mod heap;
 pub mod io;
 mod logger;
+pub mod zkvm_io;
 
 pub use logger::init_logger;
 #[doc(hidden)]
@@ -72,28 +79,49 @@ mod zkvm {
     #[allow(static_mut_refs)]
     pub static mut DEFERRED_PROOFS_DIGEST: Option<[F; 8]> = None;
 
-    #[no_mangle]
-    unsafe extern "C" fn __start() {
-        {
-            PUBLIC_VALUES_HASHER = Some(Sha256::new());
-
-            COPROCESSOR_OUTPUT_VALUES_HASHER = Some(Sha256::new());
-
-            DEFERRED_PROOFS_DIGEST = Some([F::ZERO; 8]);
-
-            extern "C" {
-                fn main();
-            }
-            main()
+    /// Runs every function in a linker-built table, `[start, end)`.
+    unsafe fn run_table(start: *const u8, end: *const u8, reverse: bool) {
+        type Entry = unsafe extern "C" fn();
+        let len = (end as usize - start as usize) / core::mem::size_of::<Entry>();
+        let table = core::slice::from_raw_parts(start as *const Entry, len);
+        if reverse {
+            table.iter().rev().for_each(|f| f());
+        } else {
+            table.iter().for_each(|f| f());
         }
+    }
 
-        syscall_halt(0);
+    /// What `_start` calls once `sp` and `gp` are set: IO, the C++ static constructors, `main`,
+    /// the static destructors, then the halt with `main`'s return value.
+    #[no_mangle]
+    unsafe extern "C" fn __start() -> ! {
+        PUBLIC_VALUES_HASHER = Some(Sha256::new());
+        COPROCESSOR_OUTPUT_VALUES_HASHER = Some(Sha256::new());
+        DEFERRED_PROOFS_DIGEST = Some([F::ZERO; 8]);
+
+        // `int main(void)`, and the tables `pico.ld` builds.
+        extern "C" {
+            fn main() -> i32;
+            static __preinit_array_start: u8;
+            static __preinit_array_end: u8;
+            static __init_array_start: u8;
+            static __init_array_end: u8;
+            static __fini_array_start: u8;
+            static __fini_array_end: u8;
+        }
+        run_table(&__preinit_array_start, &__preinit_array_end, false);
+        run_table(&__init_array_start, &__init_array_end, false);
+        let exit_code = main();
+        run_table(&__fini_array_start, &__fini_array_end, true);
+
+        // The host sees the 32-bit two's complement: `return -1` arrives as 0xffff_ffff.
+        syscall_halt(exit_code as u32);
     }
 
     core::arch::global_asm!(include_str!("memset.s"));
     core::arch::global_asm!(include_str!("memcpy.s"));
 
-    static STACK_TOP: u64 = 0x7800_0000;
+    // `_stack_top` and `__global_pointer$` come from `pico.ld`.
     core::arch::global_asm!(
         r#"
     .section .text._start;
@@ -103,11 +131,9 @@ mod zkvm {
         .option norelax;
         la gp, __global_pointer$;
         .option pop;
-        la sp, {0}
-        ld sp, 0(sp)
+        la sp, _stack_top;
         call __start;
-    "#,
-        sym STACK_TOP
+    "#
     );
 
     pub fn zkvm_getrandom(_s: &mut [u8]) -> Result<(), getrandom::Error> {
@@ -134,10 +160,32 @@ mod zkvm {
     }
 }
 
+/// What a guest's entry function may return: nothing, for success, or a C-style exit code, where
+/// zero is success and anything else ends the run abnormally with that code.
+pub trait MainReturn {
+    fn exit_code(self) -> i32;
+}
+
+impl MainReturn for () {
+    fn exit_code(self) -> i32 {
+        0
+    }
+}
+
+impl MainReturn for i32 {
+    fn exit_code(self) -> i32 {
+        self
+    }
+}
+
+/// Declares the guest's entry function, `fn()` or `fn() -> i32` (see [`MainReturn`]), and the
+/// `int main(void)` that `_start` calls with it.
 #[macro_export]
 macro_rules! entrypoint {
     ($path:path) => {
-        const ZKVM_ENTRY: fn() = $path;
+        fn __pico_zkvm_entry() -> i32 {
+            $crate::MainReturn::exit_code($path())
+        }
 
         use $crate::heap::SimpleAlloc;
 
@@ -147,7 +195,7 @@ macro_rules! entrypoint {
         mod zkvm_generated_main {
 
             #[no_mangle]
-            fn main() {
+            extern "C" fn main() -> i32 {
                 // Link to the actual entrypoint only when compiling for zkVM. Doing this avoids
                 // compilation errors when building for the host target.
                 //
@@ -156,11 +204,14 @@ macro_rules! entrypoint {
                 // result in an error, which can happen when building a Cargo workspace containing
                 // zkVM program crates.
                 #[cfg(target_os = "zkvm")]
-                super::ZKVM_ENTRY();
+                return super::__pico_zkvm_entry();
                 // Named on the host too, or the guest's own `main` is dead code there and a
                 // workspace lint under `-D warnings` fails on it.
                 #[cfg(not(target_os = "zkvm"))]
-                let _ = super::ZKVM_ENTRY;
+                {
+                    let _ = super::__pico_zkvm_entry;
+                    0
+                }
             }
         }
     };

@@ -235,7 +235,7 @@ fn main() {
         "built with soundness-bchks25-optimized: the manifest is written by the default \
          calculator, the one CI compares every component against"
     );
-    for var in ["MLE_LOG_STACKED_HEIGHT", "CHUNK_SIZE", "SPLIT_THRESHOLD"] {
+    for var in ["MLE_LOG_STACKED_HEIGHT", "CHUNK_SIZE"] {
         assert!(
             std::env::var(var).is_err(),
             "{var} is set: it moves the keys, and the manifest is keyed to the defaults the prover \

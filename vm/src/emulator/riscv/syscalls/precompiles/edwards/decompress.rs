@@ -17,18 +17,19 @@ use crate::chips::gadgets::{
 use crate::emulator::riscv::{
     event_types::RvValue,
     syscalls::{
-        precompiles::{EdDecompressEvent, PrecompileEvent},
-        syscall_context::SyscallContext,
-        Syscall, SyscallCode,
+        host::{Precompile, SyscallHost},
+        precompiles::{assert_dword_aligned_precompile, EdDecompressEvent, PrecompileEvent},
+        SyscallCode,
     },
 };
 
-pub(crate) struct EdwardsDecompressSyscall<E: EdwardsParameters> {
+pub struct EdwardsDecompressSyscall<E: EdwardsParameters> {
     _phantom: PhantomData<E>,
 }
 
 impl<E: EdwardsParameters> EdwardsDecompressSyscall<E> {
     /// Create a new instance of the [`EdwardsDecompressSyscall`].
+    #[allow(clippy::new_without_default)]
     pub const fn new() -> Self {
         Self {
             _phantom: PhantomData,
@@ -36,17 +37,17 @@ impl<E: EdwardsParameters> EdwardsDecompressSyscall<E> {
     }
 }
 
-impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
-    fn emulate(
+impl<E: EdwardsParameters> Precompile for EdwardsDecompressSyscall<E> {
+    fn emulate<H: SyscallHost>(
         &self,
-        ctx: &mut SyscallContext,
+        ctx: &mut H,
         syscall_code: SyscallCode,
         arg1: RvValue,
         arg2: RvValue,
     ) -> Option<RvValue> {
-        let start_clk = ctx.clk;
+        let start_clk = ctx.clk();
         let slice_ptr = arg1;
-        SyscallContext::assert_dword_aligned_precompile(slice_ptr, "edwards decompress slice_ptr");
+        assert_dword_aligned_precompile(slice_ptr, "edwards decompress slice_ptr");
         let sign =
             u32::try_from(arg2).unwrap_or_else(|_| panic!("ed decompress sign overflow: {}", arg2));
         assert!(sign <= 1, "Sign bit must be 0 or 1.");
@@ -118,9 +119,7 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
             y_memory_records: y_memory_records.try_into().unwrap(),
             local_mem_access: ctx.postprocess(),
         };
-        let syscall_event = ctx
-            .rt
-            .syscall_event(start_clk, syscall_code.syscall_id(), arg1, arg2);
+        let syscall_event = ctx.syscall_event(start_clk, syscall_code.syscall_id(), arg1, arg2);
         ctx.record_mut().add_precompile_event(
             syscall_code,
             syscall_event,

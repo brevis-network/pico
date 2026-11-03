@@ -30,9 +30,11 @@ pub use aot_common::{recycle_snapshot_memory, register_with_vm, AotRun};
 #[cfg(feature = "aot")]
 pub use pico_aot_dispatch::run_aot as run_aot_dispatch;
 
+/// Registers the generated program as this process's AOT code. Refused for the bootstrap stub and
+/// for code generated against another codegen stamp, which a bench of the AOT path cannot run on.
 #[cfg(feature = "aot")]
-pub fn register_snapshot_aot_factory() {
-    pico_aot_runtime::register_snapshot_aot_factory(run_aot_dispatch);
+pub fn register_aot() -> Result<(), pico_aot_runtime::AotError> {
+    pico_aot_runtime::register(&pico_aot_dispatch::AOT)
 }
 
 pub const INPUT_VALUE: u32 = 9_000_000u32;

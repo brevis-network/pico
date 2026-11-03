@@ -1,12 +1,17 @@
 use super::{columns::NUM_DIVREM_COLS, DivRemChip};
 #[cfg(feature = "cuda")]
 use crate::{
-    chips::trace::TraceData,
+    chips::{
+        chips::alu::add::traces::{chunk_history, chunk_history_reader},
+        trace::TraceData,
+    },
     cuda_adaptor::resource_pool::{
         mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
     },
-    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    emulator::riscv::{history_fill::HISTORY_LAYOUT, history_view::HistoryView},
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::chip::GpuChipBehavior,
+    mle::{machine::trace_oracle::history_launch, spans::device},
 };
 use crate::{
     chips::{
@@ -15,9 +20,10 @@ use crate::{
                 divrem::{
                     columns::{DivRemValueCols, NUM_DIVREM_VALUE_COLS},
                     utils::{
-                        get_msb, get_quotient_and_remainder, is_signed_64bit_operation,
-                        is_signed_word_operation, is_unsigned_64bit_operation,
-                        is_unsigned_word_operation, is_word_operation, DivremExtraEventIndices,
+                        derived_add_rows, get_msb, get_quotient_and_remainder,
+                        is_signed_64bit_operation, is_signed_word_operation,
+                        is_unsigned_64bit_operation, is_unsigned_word_operation, is_word_operation,
+                        DivremExtraEventIndices,
                     },
                 },
                 event::AluEvent,
@@ -30,7 +36,7 @@ use crate::{
         riscv::{opcode::Opcode, program::Program},
         word::Word,
     },
-    emulator::riscv::record::EmulationRecord,
+    emulator::riscv::record::{AluStream, EmulationRecord},
     iter::{PicoIterator, PicoSlice},
     machine::{
         chip::ChipBehavior,
@@ -41,23 +47,23 @@ use crate::{
 use core::borrow::BorrowMut;
 #[cfg(feature = "cuda")]
 use cudart::{
+    event::{CudaEvent, CudaEventCreateFlags},
     memory_pools::DevicePoolAllocation,
     slice::{CudaSlice, CudaSliceMut},
-    stream::{CudaStream, CudaStreamCreateFlags},
+    stream::{CudaStream, CudaStreamCreateFlags, CudaStreamWaitEventFlags},
 };
 #[cfg(feature = "cuda")]
 use cudart_sys::*;
 use hashbrown::HashMap;
-use itertools::Itertools;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 #[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 #[cfg(feature = "cuda")]
-use pico_gpu_api::{
-    cuda_divrem_generate_extra_record_and_main, cuda_divrem_generate_extra_record_and_main_packed,
-};
+use pico_gpu_api::history_add_sub_divrem::cuda_divrem_generate_extra_record_and_main_history;
+#[cfg(feature = "cuda")]
+use std::ffi::c_void;
 use std::num::Wrapping;
 #[cfg(feature = "cuda")]
 use tracing::info;
@@ -81,8 +87,8 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
         input: &EmulationRecord,
         output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
-        let events = input.divrem_events.iter().collect::<Vec<_>>();
-        let nrows = events.len().div_ceil(DIVREM_DATAPAR);
+        let ops = input.alu_ops(AluStream::DivRem);
+        let nrows = ops.len().div_ceil(DIVREM_DATAPAR);
         let log2_nrows = input.shape_chip_size(&self.name());
         let padded_nrows = match log2_nrows {
             Some(log2_nrows) => 1 << log2_nrows,
@@ -91,11 +97,12 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
 
         let mut values = vec![F::ZERO; padded_nrows * NUM_DIVREM_COLS];
 
-        let populate_len = events.len() * NUM_DIVREM_VALUE_COLS;
+        let populate_len = ops.len() * NUM_DIVREM_VALUE_COLS;
         values[..populate_len]
             .chunks_mut(NUM_DIVREM_VALUE_COLS)
-            .zip_eq(events)
-            .for_each(|(row, event)| {
+            .enumerate()
+            .for_each(|(index, row)| {
+                let event = ops.get(index);
                 let cols: &mut DivRemValueCols<_> = row.borrow_mut();
 
                 // Get the correct computational values of `b`.
@@ -447,7 +454,7 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
         if let Some(shape) = record.shape.as_ref() {
             return shape.included::<F, _>(self);
         }
-        !record.divrem_events.is_empty()
+        !record.alu_ops(AluStream::DivRem).is_empty()
     }
 
     fn local_only(&self) -> bool {
@@ -457,36 +464,6 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
 
 #[cfg(feature = "cuda")]
 impl<F: PrimeField32> GpuChipBehavior<F> for DivRemChip<F> {
-    fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
-        counter.num_divrem_events += record.divrem_events.len();
-        if counter.num_divrem_events == 0 {
-            return;
-        }
-
-        let chunk_size = std::cmp::max(record.divrem_events.len() / num_cpus::get(), 1);
-        let divrem_counts: Vec<DivremExtraEventIndices> = record
-            .divrem_events
-            .as_slice()
-            .pico_chunks(chunk_size)
-            .flat_map_iter(|chunk| chunk.iter().map(|e| Self::count_event(e)))
-            .collect();
-        let divrem_add = divrem_counts
-            .as_slice()
-            .pico_chunks(chunk_size)
-            .map(|chunk| chunk.iter().fold(0, |a0, c| a0 + c.add))
-            .pico_reduce(|| 0, |a0, b0| a0 + b0);
-        counter.num_add_sub_events += divrem_add;
-        counter.num_add_events += divrem_add;
-        let mut divrem_extra_event_indices = divrem_counts;
-        for i in 1..(divrem_extra_event_indices.len() - 1) {
-            divrem_extra_event_indices[i].add += divrem_extra_event_indices[i - 1].add;
-            divrem_extra_event_indices[i].lt += divrem_extra_event_indices[i - 1].lt;
-        }
-        divrem_extra_event_indices.insert(0, DivremExtraEventIndices { add: 0, lt: 0 });
-        divrem_extra_event_indices.pop();
-        counter.divrem_extra_event_indices = divrem_extra_event_indices;
-    }
-
     fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
         record.event_counter.num_divrem_events > 0
     }
@@ -498,9 +475,43 @@ impl<F: PrimeField32> GpuChipBehavior<F> for DivRemChip<F> {
         prepared_gpu_events: &PreparedGpuEvents,
         preallocated_gpu_memory: &mut PreallocatedGpuMemory,
     ) -> TraceData<'_, F> {
-        let events = &input.divrem_events;
+        let history = input
+            .history_view()
+            .expect("a CPU chunk's record carries its execution history");
+        self.gpu_generate_from_history(
+            device_id,
+            input,
+            history,
+            prepared_gpu_events,
+            preallocated_gpu_memory,
+        )
+    }
+}
 
-        let nrows = events.len().div_ceil(DIVREM_DATAPAR);
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> DivRemChip<F> {
+    /// The trace from the chunk's history on the device, the div/rem list's rows, and the ADD rows
+    /// they derive appended there in row order for the add chip, which takes them from
+    /// `d_divrem_add_rows`. The fill's descriptor counts the appended rows; the device sets the
+    /// error word if it appends another count, and the count is read back and held to it here too.
+    fn gpu_generate_from_history(
+        &self,
+        device_id: usize,
+        input: &EmulationRecord,
+        history: HistoryView<'_>,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let event_size = history.history.chip_steps.alu(AluStream::DivRem).len();
+        assert_eq!(
+            prepared_gpu_events.event_counter.num_divrem_events, event_size,
+            "the counter's div/rem height is not the history's div/rem list"
+        );
+        let derived_rows = chunk_history(preallocated_gpu_memory)
+            .descriptor()
+            .divrem_add_rows as usize;
+
+        let nrows = event_size.div_ceil(DIVREM_DATAPAR);
         let log2_nrows = input.shape_chip_size(&self.name());
         let padded_nrows = match log2_nrows {
             Some(log2_nrows) => 1 << log2_nrows,
@@ -511,128 +522,165 @@ impl<F: PrimeField32> GpuChipBehavior<F> for DivRemChip<F> {
 
         let sync_mem_pool = get_global_mem_pool(device_id);
         let mem_pool = &sync_mem_pool.0;
-        // TODO: check error
-        // gpu generate trace
-        let event_size = events.len();
-        let mut d_events =
-            DevicePoolAllocation::<AluEvent>::alloc_from_pool_async(event_size, mem_pool, stream)
-                .unwrap();
-        unsafe {
-            let _ = cudaMemcpyAsync(
-                d_events.as_mut_c_void_ptr(),
-                events.as_c_void_ptr(),
-                event_size * size_of::<AluEvent>(),
-                CudaMemoryCopyKind::HostToDevice,
-                stream.into(),
-            );
-        }
-        let mut d_divrem_extra_event_indices =
-            DevicePoolAllocation::<DivremExtraEventIndices>::alloc_from_pool_async(
-                event_size, mem_pool, stream,
-            )
-            .unwrap();
-        unsafe {
-            let _ = cudaMemcpyAsync(
-                d_divrem_extra_event_indices.as_mut_c_void_ptr(),
-                prepared_gpu_events
-                    .event_counter
-                    .divrem_extra_event_indices
-                    .as_c_void_ptr(),
-                event_size * size_of::<DivremExtraEventIndices>(),
-                CudaMemoryCopyKind::HostToDevice,
-                stream.into(),
-            );
-        }
+
         let trace_size = padded_nrows * NUM_DIVREM_COLS;
         let mut d_trace =
             DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
                 .unwrap();
-        let PreallocatedGpuMemory {
-            d_add_sub_events,
-            d_byte_trace,
-            ..
-        } = preallocated_gpu_memory;
-        // DIV/REM rows dispatch an ADD into the shared add/sub buffer, so it is allocated whenever
-        // this chip has events; tolerate an absent buffer anyway, like the Cpu chip does, instead
-        // of unwrapping. The kernel only writes it on rows that forced the count above zero.
-        let d_add_sub_events: *mut std::ffi::c_void = d_add_sub_events
+        let mut d_derived = (derived_rows > 0).then(|| {
+            DevicePoolAllocation::<AluEvent>::alloc_from_pool_async(derived_rows, mem_pool, stream)
+                .unwrap()
+        });
+        let mut d_appended =
+            DevicePoolAllocation::<u32>::alloc_from_pool_async(1, mem_pool, stream).unwrap();
+        let d_byte_trace = preallocated_gpu_memory
+            .d_byte_trace
             .as_mut()
-            .map_or(std::ptr::null_mut(), |b| b.as_mut_ptr() as *mut _);
-        let d_byte_trace = d_byte_trace.as_mut().unwrap();
+            .unwrap()
+            .as_mut_ptr();
 
-        if prepared_gpu_events.packed.is_some() {
-            // MLE_PACKED_EVENTS: the event buffer holds packed entries.
-            unsafe {
-                let err = cuda_divrem_generate_extra_record_and_main_packed(
-                    NUM_DIVREM_COLS,
-                    event_size,
-                    trace_size,
-                    d_events.as_ptr() as *const _,
-                    d_trace.as_mut_ptr() as *mut _,
-                    stream.into(),
-                    d_divrem_extra_event_indices.as_ptr() as *const _,
-                    d_byte_trace.as_mut_ptr() as *mut _,
-                    d_add_sub_events,
-                    prepared_gpu_events
-                        .event_counter
-                        .start_indices
-                        .divrem_extra_add_sub_start_index,
-                    crate::instances::preparer::PACKED_EVENT_FORMAT_V1,
-                );
-                assert_eq!(err.code, 0, "cuda_divrem_generate_extra_record_and_main_packed failed (packed format mismatch?)");
-            }
-        } else {
-            unsafe {
-                cuda_divrem_generate_extra_record_and_main(
-                    NUM_DIVREM_COLS,
-                    event_size,
-                    trace_size,
-                    d_events.as_ptr() as *const _,
-                    d_trace.as_mut_ptr() as *mut _,
-                    stream.into(),
-                    d_divrem_extra_event_indices.as_ptr() as *const _,
-                    d_byte_trace.as_mut_ptr() as *mut _,
-                    d_add_sub_events,
-                    prepared_gpu_events
-                        .event_counter
-                        .start_indices
-                        .divrem_extra_add_sub_start_index,
-                );
-            }
-        }
+        let reader = chunk_history_reader(preallocated_gpu_memory, stream);
+        let args = reader.args();
+        let kernels = device::start(stream);
+        let err = unsafe {
+            cuda_divrem_generate_extra_record_and_main_history(
+                std::ptr::from_ref(&args).cast(),
+                HISTORY_LAYOUT,
+                NUM_DIVREM_COLS,
+                trace_size,
+                d_trace.as_mut_ptr() as *mut _,
+                d_byte_trace as *mut _,
+                d_derived
+                    .as_mut()
+                    .map_or(std::ptr::null_mut(), |rows| rows.as_mut_ptr() as *mut _),
+                derived_rows,
+                d_appended.as_mut_ptr() as *mut _,
+                stream.into(),
+            )
+        };
+        assert_eq!(
+            err.code, 0,
+            "cuda_divrem_generate_extra_record_and_main_history failed: {err}"
+        );
+        history_launch::note(&self.name());
+        drop(reader);
+        let appended = CudaEvent::create_with_flags(CudaEventCreateFlags::DISABLE_TIMING).unwrap();
+        appended.record(stream).unwrap();
 
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
-        let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
+        device::launched(kernels, stream);
+        device::wait(stream).unwrap();
 
-        info!("[divrem-chip] generate_extra_record_and_main on GPU");
+        let mut appended_rows = 0u32;
+        let copied = unsafe {
+            cudaMemcpyAsync(
+                std::ptr::from_mut(&mut appended_rows).cast(),
+                d_appended.as_c_void_ptr(),
+                size_of::<u32>(),
+                CudaMemoryCopyKind::DeviceToHost,
+                stream.into(),
+            )
+        };
+        assert_eq!(
+            copied,
+            CudaError::Success,
+            "reading back div/rem's appended count"
+        );
+        stream.synchronize().unwrap();
+        assert_eq!(
+            appended_rows as usize, derived_rows,
+            "div/rem appended {appended_rows} derived ADD row(s) on the device, and the fill's \
+             descriptor counts {derived_rows}"
+        );
+
+        let d_trace = d_trace.swap_stream(main_stream);
+        preallocated_gpu_memory.d_divrem_add_rows = Some(DivRemAddRows {
+            rows: d_derived.map(|rows| rows.swap_stream(main_stream)),
+            len: derived_rows,
+            owner: main_stream,
+            appended,
+        });
+        device::wait(stream).unwrap();
+        device::wait(main_stream).unwrap();
+
+        info!("[divrem-chip] generate_extra_record_and_main from the history on GPU");
 
         TraceData::Gpu(NUM_DIVREM_COLS, d_trace)
     }
 }
 
+#[cfg(feature = "cuda")]
+/// The ADD rows div/rem derives, appended on the device in its rows' order when it reads the
+/// chunk's history, for the add chip to read after its own. They live on the device's main stream,
+/// as a finished trace does; `appended` is recorded on the div/rem stream once they are written.
+pub struct DivRemAddRows<'a> {
+    rows: Option<DevicePoolAllocation<'a, AluEvent>>,
+    len: usize,
+    owner: &'a CudaStream,
+    appended: CudaEvent,
+}
+
+#[cfg(feature = "cuda")]
+impl DivRemAddRows<'_> {
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// The rows on the device, or null when there are none.
+    #[must_use]
+    pub fn as_ptr(&self) -> *const c_void {
+        self.rows
+            .as_ref()
+            .map_or(std::ptr::null(), |rows| rows.as_c_void_ptr())
+    }
+
+    /// Makes `stream` wait for the rows to have been appended.
+    pub fn wait_appended(&self, stream: &CudaStream) {
+        stream
+            .wait_event(&self.appended, CudaStreamWaitEventFlags::DEFAULT)
+            .unwrap_or_else(|e| panic!("waiting for div/rem's derived ADD rows: {e}"));
+    }
+
+    /// Frees the rows once the kernels enqueued on `reader` so far have run. If that point cannot
+    /// be marked, `reader` is waited for on the host, so the free never overtakes a read.
+    pub fn release_after(self, reader: &CudaStream) {
+        let ordered =
+            CudaEvent::create_with_flags(CudaEventCreateFlags::DISABLE_TIMING).and_then(|read| {
+                read.record(reader)?;
+                self.owner
+                    .wait_event(&read, CudaStreamWaitEventFlags::DEFAULT)
+            });
+        if let Err(e) = ordered {
+            reader.synchronize().unwrap_or_else(|sync| {
+                panic!(
+                    "div/rem's derived ADD rows could neither be ordered after their reader ({e}) \
+                     nor waited for: {sync}"
+                )
+            });
+        }
+    }
+}
+
 impl<F> EventCapture for DivRemChip<F> {
     fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
-        event_counter.num_divrem_events += record.divrem_events.len();
+        let ops = record.alu_ops(AluStream::DivRem);
+        event_counter.num_divrem_events += ops.len();
         if event_counter.num_divrem_events == 0 {
             return;
         }
 
-        let chunk_size = std::cmp::max(record.divrem_events.len() / num_cpus::get(), 1);
-        let divrem_counts: Vec<(usize, usize)> = record
-            .divrem_events
-            .as_slice()
-            .pico_chunks(chunk_size)
-            .flat_map_iter(|chunk| {
-                chunk.iter().map(|e| {
-                    let e = Self::count_event(e);
-                    (e.add, e.lt)
-                })
-            })
-            .collect();
+        let chunk_size = std::cmp::max(ops.len() / num_cpus::get(), 1);
+        let divrem_counts: Vec<(usize, usize)> = ops.par_flat_map(|event, counts| {
+            let e = Self::count_event(event);
+            counts.push((e.add, e.lt));
+        });
         let (divrem_add, _divrem_lt) = divrem_counts
             .as_slice()
             .pico_chunks(chunk_size)
@@ -649,30 +697,8 @@ impl<F> EventCapture for DivRemChip<F> {
 impl<F> DivRemChip<F> {
     #[inline(always)]
     fn count_event(event: &AluEvent) -> DivremExtraEventIndices {
-        let mut add_events = 0;
-        let is_real = 1;
-        let mut c_neg = 0;
-        let (_, remainder) = get_quotient_and_remainder(event.b, event.c, event.opcode);
-        let mut rem_neg = 0;
-        if is_signed_64bit_operation(event.opcode) {
-            c_neg = get_msb(event.c);
-            rem_neg = get_msb(remainder);
-        } else if is_signed_word_operation(event.opcode) {
-            c_neg = get_msb((event.c as i32) as i64 as u64);
-            rem_neg = get_msb((remainder as i32) as i64 as u64);
-        }
-        let abs_c_alu_event = c_neg * is_real;
-        if abs_c_alu_event == 1 {
-            add_events += 1;
-        }
-
-        let abs_rem_alu_event = rem_neg * is_real;
-        if abs_rem_alu_event == 1 {
-            add_events += 1;
-        }
-
         DivremExtraEventIndices {
-            add: add_events,
+            add: derived_add_rows(event.opcode, event.b, event.c),
             lt: 0,
         }
     }

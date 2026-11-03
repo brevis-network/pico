@@ -6,9 +6,8 @@ compile_error!(
 );
 
 use aot::{
-    aot_snapshot_opts, build_witness, load_elf_bytes, register_snapshot_aot_factory,
-    run_aot_only_benchmark, run_pipeline_benchmark, AotOnlyBenchSummary, PipelineBenchSummary,
-    INPUT_VALUE,
+    aot_snapshot_opts, build_witness, load_elf_bytes, register_aot, run_aot_only_benchmark,
+    run_pipeline_benchmark, AotOnlyBenchSummary, PipelineBenchSummary, INPUT_VALUE,
 };
 
 const DEFAULT_WARMUP_RUNS: usize = 1;
@@ -144,10 +143,9 @@ fn main() {
     let elf_bytes = load_elf_bytes();
     let opts = aot_snapshot_opts();
     println!(
-        "Opts: chunk_size={}, chunk_batch_size={}, split_threshold={}, num_threads={}",
+        "Opts: chunk_size={}, chunk_batch_size={}, num_threads={}",
         opts.chunk_size,
         opts.chunk_batch_size,
-        opts.split_opts.deferred,
         std::env::var("NUM_THREADS").unwrap_or_else(|_| "1".to_string()),
     );
 
@@ -163,7 +161,9 @@ fn main() {
         .expect("witness.stdin not set")
         .inputs
         .to_vec();
-    register_snapshot_aot_factory();
+    if let Err(err) = register_aot() {
+        panic!("register the generated AOT program: {err}");
+    }
 
     println!("\nAOT-only timed runs:");
     let aot_only_results = run_aot_only_benchmark(

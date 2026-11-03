@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Memory addresses must be lower than the KoalaBear prime; this cap is below it.
-const MAX_MEMORY: usize = 0x78000000;
-
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
 pub unsafe extern "C" fn sys_alloc_aligned(bytes: usize, align: usize) -> *mut u8 {
+    // The heap region `pico.ld` reserves, between the program image and the stack guard.
     extern "C" {
-        // https://lld.llvm.org/ELF/linker_script.html#sections-command
-        static _end: u8;
+        static _heap_start: u8;
+        static _heap_end: u8;
     }
 
     // Pointer to next heap address to use, or 0 if the heap has not yet been
@@ -31,7 +29,7 @@ pub unsafe extern "C" fn sys_alloc_aligned(bytes: usize, align: usize) -> *mut u
     let mut heap_pos = unsafe { HEAP_POS };
 
     if heap_pos == 0 {
-        heap_pos = unsafe { (&_end) as *const u8 as usize };
+        heap_pos = unsafe { (&_heap_start) as *const u8 as usize };
     }
 
     let offset = heap_pos & (align - 1);
@@ -42,8 +40,12 @@ pub unsafe extern "C" fn sys_alloc_aligned(bytes: usize, align: usize) -> *mut u
     let ptr = heap_pos as *mut u8;
     let (heap_pos, overflowed) = heap_pos.overflowing_add(bytes);
 
-    if overflowed || MAX_MEMORY < heap_pos {
-        panic!("Memory limit exceeded (0x78000000)");
+    let heap_end = unsafe { (&_heap_end) as *const u8 as usize };
+    if overflowed || heap_end < heap_pos {
+        // Not a panic: the panic machinery may allocate. Report it and halt as out of memory.
+        const MSG: &str = "Memory limit exceeded: the heap is full\n";
+        super::sys_write(2, MSG.as_ptr(), MSG.len());
+        super::halt_with_reason(super::exit_code::ABORT, super::halt_reason::OUT_OF_MEMORY);
     }
 
     unsafe { HEAP_POS = heap_pos };

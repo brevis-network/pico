@@ -27,6 +27,18 @@ pub fn read_vec() -> Vec<u8> {
     pico_patch_libs::io::read_vec()
 }
 
+/// The guest's private input as one block: what the zkevm-standards `read_input` returns, the same
+/// slice on every call. The host hands it over with `pico_prover::Stdin::from_input`.
+///
+/// The first call of this or of `read_input` reads the next element of the input stream; see
+/// [`crate::zkvm_io`].
+pub fn input() -> &'static [u8] {
+    let (ptr, len) = crate::zkvm_io::input_block();
+    // SAFETY: the block is `len` bytes at `ptr`, at least one word even when `len` is 0, and is
+    // neither freed nor written after it is read.
+    unsafe { core::slice::from_raw_parts(ptr, len) }
+}
+
 /// Reads a buffer from the input stream and deserializes it into a type `T`.
 ///
 /// ### Examples
@@ -72,7 +84,7 @@ fn commit_coprocessor_output<T: Serialize>(value: &T) {
     bincode::serialize_into(writer, value).expect("serialization failed");
 }
 
-/// Commit bytes to the public values stream.
+/// Commit bytes to the public values stream: the same as the zkevm-standards `write_output`.
 ///
 /// ### Examples
 /// ```ignore

@@ -28,7 +28,7 @@ use crate::{
     },
     instances::{compiler::shapes::riscv_shape::RiscvPadShape, preparer::EventCounter},
 };
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 #[derive(Clone, Debug, Default)]
 #[repr(C)]
@@ -78,14 +78,6 @@ pub struct PreparedGpuEvents {
     pub event_counter: EventCounter,
 
     pub shape: Option<RiscvPadShape>,
-
-    /// Packed compact staging of the cpu/mem/add_sub/lt event families
-    /// (`MLE_PACKED_EVENTS=1`; `None` = fat path for this chunk).
-    pub packed: Option<Arc<super::packed_events::PackedEventStage>>,
-
-    /// Pinned re-staging of the fat bitwise/shift_left uploads. Independent of `packed` on
-    /// purpose (see `StagedAluEvents`): it must survive `try_stage`'s all-or-nothing fallback.
-    pub staged_alu: Arc<super::packed_events::StagedAluEvents>,
 }
 
 impl PreparedGpuEvents {
@@ -165,22 +157,12 @@ impl PreparedGpuEvents {
             event_counter: counter,
 
             shape: None,
-            packed: None,
-            staged_alu: Arc::default(),
         }
     }
 
     pub fn new(record: &EmulationRecord, counter: EventCounter) -> Self {
         let mut prepared_events = PreparedGpuEvents::init_with_event_counter(counter);
         prepared_events.shape = record.shape.clone();
-        // MLE_PACKED_EVENTS=1: stage the compact FFI event mirror on this (preparer) thread;
-        // None means this chunk uses the fat path (gate off, pool busy, or invariant fallback).
-        prepared_events.packed =
-            super::packed_events::try_stage(record, &prepared_events.event_counter).map(Arc::new);
-        prepared_events.staged_alu = Arc::new(super::packed_events::try_stage_alu(
-            record,
-            prepared_events.event_counter.chunk_index,
-        ));
 
         // Pre-fetch all precompile events to avoid repeated HashMap lookups
         // Use with_capacity to avoid reallocations

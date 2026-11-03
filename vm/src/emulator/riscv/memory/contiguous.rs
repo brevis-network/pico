@@ -28,8 +28,7 @@ use super::{
 ///
 /// The storage backend is selected at compile time via feature flags:
 /// - **Default**: Uses `Box<[u8]>` / `Box<[u64]>` for heap allocation.
-/// - **`mmap-memory` feature (Unix only)**: Uses anonymous mmap storage by default, with an
-///   opt-in checkpointable variant for unconstrained-mode CoW.
+/// - **`mmap-memory` feature (Unix only)**: Uses anonymous mmap storage.
 ///
 /// To enable mmap-based storage, compile with:
 /// ```bash
@@ -42,16 +41,6 @@ pub(super) struct MemoryBacking {
     pub(super) metadata: MetadataStorage,
 }
 
-#[cfg(feature = "mmap-memory")]
-use super::storage;
-
-#[cfg(feature = "mmap-memory")]
-#[derive(Debug)]
-pub(super) struct MemoryBackingCheckpoint {
-    values: storage::ValuesStorageCheckpoint,
-    metadata: storage::MetadataStorageCheckpoint,
-}
-
 pub struct ContiguousRiscvMemory {
     /// Unified owner for the physical storage of values and metadata.
     pub(super) backing: MemoryBacking,
@@ -61,18 +50,6 @@ pub struct ContiguousRiscvMemory {
     pub(super) accessed_bitmap: Box<[u64]>,
 }
 
-#[cfg(feature = "mmap-memory")]
-#[derive(Debug)]
-pub struct ContiguousMemoryCheckpoint {
-    pub(super) backing: MemoryBackingCheckpoint,
-}
-
-#[cfg(not(feature = "mmap-memory"))]
-#[derive(Debug)]
-pub struct ContiguousMemoryCheckpoint {
-    pub(super) _private: (),
-}
-
 impl MemoryBacking {
     fn new() -> Self {
         Self {
@@ -80,33 +57,24 @@ impl MemoryBacking {
             metadata: MetadataStorage::new(METADATA_SIZE),
         }
     }
+}
 
-    fn new_checkpointable() -> Self {
-        Self {
-            values: ValuesStorage::new_checkpointable(VALUES_SIZE),
-            metadata: MetadataStorage::new_checkpointable(METADATA_SIZE),
+/// Calls `on_word` with the index of every set word of `bitmap`, then clears that word. A clear
+/// word is only read, never written, so a bitmap page nothing marked takes no write fault.
+#[inline]
+fn clear_marked_words(bitmap: &mut [u64], mut on_word: impl FnMut(usize)) {
+    // A cache line at a time, so the test for a clear line is one vector reduction.
+    const LINE: usize = 8;
+    for (line_idx, line) in bitmap.chunks_mut(LINE).enumerate() {
+        if line.iter().fold(0, |any, bits| any | bits) == 0 {
+            continue;
         }
-    }
-
-    fn supports_cow_checkpoint(&self) -> bool {
-        self.values.supports_cow_checkpoint() && self.metadata.supports_cow_checkpoint()
-    }
-
-    #[cfg(feature = "mmap-memory")]
-    fn fork_cow_checkpoint(&mut self) -> Option<MemoryBackingCheckpoint> {
-        let values_cow = self.values.prepare_cow_checkpoint()?;
-        let metadata_cow = self.metadata.prepare_cow_checkpoint()?;
-
-        Some(MemoryBackingCheckpoint {
-            values: self.values.install_cow_checkpoint(values_cow)?,
-            metadata: self.metadata.install_cow_checkpoint(metadata_cow)?,
-        })
-    }
-
-    #[cfg(feature = "mmap-memory")]
-    fn restore_from_checkpoint(&mut self, checkpoint: MemoryBackingCheckpoint) {
-        self.values.restore_from_checkpoint(checkpoint.values);
-        self.metadata.restore_from_checkpoint(checkpoint.metadata);
+        for (offset, bits) in line.iter_mut().enumerate() {
+            if *bits != 0 {
+                on_word(line_idx * LINE + offset);
+                *bits = 0;
+            }
+        }
     }
 }
 
@@ -126,53 +94,10 @@ impl ContiguousRiscvMemory {
         }
     }
 
-    /// Create a memory instance whose backing can be swapped into zero-copy CoW views during
-    /// unconstrained execution.
-    #[must_use]
-    pub fn new_checkpointable() -> Self {
-        Self {
-            backing: MemoryBacking::new_checkpointable(),
-            accessed_bitmap: vec![0u64; BITMAP_SIZE_U64].into_boxed_slice(),
-        }
-    }
-
-    #[inline(always)]
-    pub fn supports_cow_checkpoint(&self) -> bool {
-        self.backing.supports_cow_checkpoint()
-    }
-
-    #[inline]
-    pub fn fork_cow_checkpoint(&mut self) -> Option<ContiguousMemoryCheckpoint> {
-        #[cfg(feature = "mmap-memory")]
-        {
-            Some(ContiguousMemoryCheckpoint {
-                backing: self.backing.fork_cow_checkpoint()?,
-            })
-        }
-
-        #[cfg(not(feature = "mmap-memory"))]
-        {
-            None
-        }
-    }
-
-    #[inline]
-    pub fn restore_from_checkpoint(&mut self, checkpoint: ContiguousMemoryCheckpoint) {
-        #[cfg(feature = "mmap-memory")]
-        {
-            self.backing.restore_from_checkpoint(checkpoint.backing);
-        }
-
-        #[cfg(not(feature = "mmap-memory"))]
-        {
-            let _ = checkpoint;
-        }
-    }
-
     /// Reset the memory by zeroing values and metadata for all tracked pages.
     #[inline]
     pub fn reset(&mut self) {
-        // Smart reset works for both box-backed and file-backed memory.
+        // Smart reset works for both box-backed and mmap-backed memory.
         let reg_size = NUM_REGISTERS as usize * 8;
         self.backing.values.as_mut_slice()[..reg_size].fill(0);
         self.backing.metadata.as_mut_slice()[..NUM_REGISTERS as usize].fill(0);
@@ -182,18 +107,13 @@ impl ContiguousRiscvMemory {
         // Semantics are identical (set bits' pages are zeroed and the bit cleared; already-zero
         // words are left zero), but the per-batch `memory_snapshot.clear()` path — which usually
         // operates on an already-clean bitmap — no longer pays a full 31 MB memset every batch.
-        let bitmap = &mut self.accessed_bitmap;
         let backing = &mut self.backing;
         let values_slice = backing.values.as_mut_slice();
         let values_len = values_slice.len();
         let metadata_slice = backing.metadata.as_mut_slice();
         let metadata_len = metadata_slice.len();
 
-        for (vec_idx, bits) in bitmap.iter_mut().enumerate() {
-            if *bits == 0 {
-                continue;
-            }
-
+        clear_marked_words(&mut self.accessed_bitmap, |vec_idx| {
             let base_addr = vec_idx << 9;
 
             let end_addr = base_addr + 512;
@@ -206,9 +126,7 @@ impl ContiguousRiscvMemory {
             if meta_end <= metadata_len {
                 metadata_slice[meta_start..meta_end].fill(0);
             }
-
-            *bits = 0;
-        }
+        });
     }
 
     /// Clear the memory (alias for reset for compatibility).
@@ -217,10 +135,11 @@ impl ContiguousRiscvMemory {
         self.reset();
     }
 
-    /// Clear only the accessed bitmap, leaving values/metadata untouched.
+    /// Clear only the accessed bitmap, leaving values/metadata untouched. Sparse, as
+    /// [`Self::reset`] is.
     #[inline]
     pub fn clear_accessed_bitmap(&mut self) {
-        self.accessed_bitmap.fill(0);
+        clear_marked_words(&mut self.accessed_bitmap, |_| {});
     }
 
     /// Get a raw pointer to the values array.

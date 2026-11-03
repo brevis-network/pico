@@ -4,7 +4,6 @@ use crate::{
     emulator::riscv::{
         emulator::RiscvEmulator,
         event_types::{RvAddr, RvClk},
-        record::{EmulationRecord, MemoryAccessRecord},
         state::RuntimeRegisterRecord,
     },
 };
@@ -20,8 +19,6 @@ pub struct UnconstrainedState {
     // Keep registers and memory in separate namespaces to avoid address collisions.
     pub(crate) memory_diff: HashMap<u64, Option<MemoryRecord>>,
     pub(crate) register_diff: HashMap<u8, Option<RuntimeRegisterRecord>>,
-    pub(crate) op_record: MemoryAccessRecord,
-    pub(crate) record: EmulationRecord,
     pub(crate) prev_mode: EmulatorMode,
     pub(crate) commit_in_flight: bool,
     pub(crate) deferred_commits: u32,
@@ -32,7 +29,6 @@ impl UnconstrainedState {
     pub fn new(rt: &mut RiscvEmulator) -> Self {
         let prev_mode = match &rt.mode {
             RiscvEmulatorMode::Simple => EmulatorMode::Simple,
-            RiscvEmulatorMode::LightTrace => EmulatorMode::LightTrace,
             RiscvEmulatorMode::Trace => EmulatorMode::Trace,
             prev_mode => panic!(
                 "Unsupported previous emulator mode enters the Unconstrained block: {prev_mode:?}",
@@ -45,10 +41,8 @@ impl UnconstrainedState {
             pc: rt.state.pc,
             memory_diff: HashMap::default(),
             register_diff: HashMap::default(),
-            record: core::mem::take(&mut rt.record),
             commit_in_flight: rt.chunk_split_state.commit_in_flight,
             deferred_commits: rt.chunk_split_state.deferred_commits,
-            op_record: core::mem::take(&mut rt.memory_accesses),
             prev_mode,
         }
     }

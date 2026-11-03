@@ -114,16 +114,16 @@ mod tests {
             })
             .collect();
 
-        let mut record = EmulationRecord::default();
-        record.memory_initialize_events = memory_initialize_events;
-        record.memory_finalize_events = memory_finalize_events;
-        record.public_values = PublicValues {
-            previous_init_addr_limbs: [0; 3],
-            previous_finalize_addr_limbs: [0; 3],
+        EmulationRecord {
+            memory_initialize_events,
+            memory_finalize_events,
+            public_values: PublicValues {
+                previous_init_addr_limbs: [0; 3],
+                previous_finalize_addr_limbs: [0; 3],
+                ..Default::default()
+            },
             ..Default::default()
-        };
-
-        record
+        }
     }
 
     #[cfg(feature = "cuda")]

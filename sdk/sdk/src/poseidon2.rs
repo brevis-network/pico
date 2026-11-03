@@ -20,9 +20,22 @@
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 use pico_patch_libs::{syscall_poseidon2_permute, Poseidon2State, POSEIDON2_WIDTH};
-pub use pico_vm::primitives::consts::{DIGEST_SIZE, PERMUTATION_RATE as RATE};
 
 use crate::ZkField;
+
+/// Elements in a digest.
+pub const DIGEST_SIZE: usize = 8;
+/// Elements absorbed per permutation.
+pub const RATE: usize = 8;
+
+// Checked against `pico-vm` on the host, since a guest does not compile it. DIGEST_SIZE is the width
+// of pico-vm's `hash_deferred_proof` output. Nothing in pico-vm reads PERMUTATION_RATE: the rate the
+// machine hashes at is pinned by `tests::the_deferred_proof_digest_is_the_machines` instead.
+#[cfg(not(target_os = "zkvm"))]
+const _: () = assert!(
+    DIGEST_SIZE == pico_vm::primitives::consts::DIGEST_SIZE
+        && RATE == pico_vm::primitives::consts::PERMUTATION_RATE
+);
 
 /// The Poseidon2 digest of `inputs`, the machine's `poseidon2_hash_iter` of the same elements.
 ///
@@ -78,4 +91,54 @@ pub(crate) fn permuted<F: PrimeField32>(state: &[F; POSEIDON2_WIDTH]) -> [F; POS
     }
 
     output.0.map(F::from_u32)
+}
+
+/// `pico_vm::primitives::hash_deferred_proof` for [`ZkField`], in software on the same sponge.
+#[cfg(any(target_os = "zkvm", test))]
+pub(crate) fn hash_deferred_proof(
+    prev_digest: &[ZkField; DIGEST_SIZE],
+    vk_digest: &[ZkField; DIGEST_SIZE],
+    pv_digest: &[ZkField; 32],
+) -> [ZkField; DIGEST_SIZE] {
+    use p3_koala_bear::{default_koalabear_poseidon2_16, Poseidon2KoalaBear};
+    use p3_symmetric::{CryptographicHasher, PaddingFreeSponge};
+
+    type Sponge =
+        PaddingFreeSponge<Poseidon2KoalaBear<POSEIDON2_WIDTH>, POSEIDON2_WIDTH, RATE, DIGEST_SIZE>;
+    lazy_static::lazy_static! {
+        static ref HASHER: Sponge = Sponge::new(default_koalabear_poseidon2_16());
+    }
+
+    let mut inputs = Vec::with_capacity(DIGEST_SIZE * 2 + 32);
+    inputs.extend_from_slice(prev_digest);
+    inputs.extend_from_slice(vk_digest);
+    inputs.extend_from_slice(pv_digest);
+    HASHER.hash_iter(inputs)
+}
+
+#[cfg(test)]
+mod tests {
+    use p3_field::PrimeCharacteristicRing;
+
+    use super::*;
+
+    #[test]
+    fn the_deferred_proof_digest_is_the_machines() {
+        let elems = |seed: u32| -> Vec<ZkField> {
+            (0..32u32)
+                .map(|i| {
+                    ZkField::from_u32(seed.wrapping_mul(2_654_435_761).wrapping_add(i * 97) >> 1)
+                })
+                .collect()
+        };
+        for seed in 1..=4 {
+            let prev: [ZkField; DIGEST_SIZE] = elems(seed)[..DIGEST_SIZE].try_into().unwrap();
+            let vk: [ZkField; DIGEST_SIZE] = elems(seed + 10)[..DIGEST_SIZE].try_into().unwrap();
+            let pv: [ZkField; 32] = elems(seed + 20).try_into().unwrap();
+            assert_eq!(
+                hash_deferred_proof(&prev, &vk, &pv),
+                pico_vm::primitives::hash_deferred_proof(&prev, &vk, &pv)
+            );
+        }
+    }
 }

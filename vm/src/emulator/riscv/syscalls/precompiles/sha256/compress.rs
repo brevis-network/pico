@@ -1,9 +1,9 @@
 use crate::emulator::riscv::{
     event_types::RvValue,
     syscalls::{
-        precompiles::{PrecompileEvent, ShaCompressEvent},
-        syscall_context::SyscallContext,
-        Syscall, SyscallCode,
+        host::{Precompile, SyscallHost},
+        precompiles::{assert_dword_aligned_precompile, PrecompileEvent, ShaCompressEvent},
+        SyscallCode,
     },
 };
 
@@ -18,18 +18,18 @@ pub const SHA_COMPRESS_K: [u32; 64] = [
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ];
 
-pub(crate) struct Sha256CompressSyscall;
+pub struct Sha256CompressSyscall;
 
-impl Syscall for Sha256CompressSyscall {
+impl Precompile for Sha256CompressSyscall {
     fn num_extra_cycles(&self) -> u32 {
         1
     }
 
     #[allow(clippy::too_many_lines)]
     #[allow(clippy::many_single_char_names)]
-    fn emulate(
+    fn emulate<H: SyscallHost>(
         &self,
-        ctx: &mut SyscallContext,
+        ctx: &mut H,
         syscall_code: SyscallCode,
         arg1: RvValue,
         arg2: RvValue,
@@ -37,10 +37,10 @@ impl Syscall for Sha256CompressSyscall {
         let w_ptr = arg1;
         let h_ptr = arg2;
         assert_ne!(w_ptr, h_ptr);
-        SyscallContext::assert_dword_aligned_precompile(w_ptr, "sha compress w_ptr");
-        SyscallContext::assert_dword_aligned_precompile(h_ptr, "sha compress h_ptr");
+        assert_dword_aligned_precompile(w_ptr, "sha compress w_ptr");
+        assert_dword_aligned_precompile(h_ptr, "sha compress h_ptr");
 
-        let start_clk = ctx.clk;
+        let start_clk = ctx.clk();
         let mut h_read_records = Vec::new();
         let mut w_i_read_records = Vec::new();
         let mut h_write_records = Vec::new();
@@ -68,11 +68,11 @@ impl Syscall for Sha256CompressSyscall {
         //
         // This costs no extra CPU cycle and no syscall-ABI change: a syscall instruction
         // advances `state.clk` by `4 + num_extra_cycles` (= 5 here, see
-        // `CpuChip::eval_chunk_clk`), while `SyscallContext::clk` is a private copy
+        // `CpuChip::eval_chunk_clk`), while `SyscallHost::clk` is a private copy
         // used only for record timestamps. Offsets 0/1/2 all stay below the next
         // instruction's clk, so `num_extra_cycles` (encoded in byte 2 of the syscall id,
         // which the guest SDK hardcodes) stays at 1.
-        ctx.clk += 1;
+        ctx.advance_clk(1);
 
         let mut original_w = Vec::new();
         // Execute the "compress" phase.
@@ -111,7 +111,7 @@ impl Syscall for Sha256CompressSyscall {
         }
         // Increment the clk again before writing to h: `h` was read at `start_clk` and `w`
         // at `start_clk + 1`, so the writes land on `start_clk + 2`.
-        ctx.clk += 1;
+        ctx.advance_clk(1);
 
         // Execute the "finalize" phase.
         let v = [a, b, c, d, e, f, g, h];
@@ -135,9 +135,7 @@ impl Syscall for Sha256CompressSyscall {
             h_write_records: h_write_records.try_into().unwrap(),
             local_mem_access: ctx.postprocess(),
         });
-        let syscall_event = ctx
-            .rt
-            .syscall_event(start_clk, syscall_code.syscall_id(), arg1, arg2);
+        let syscall_event = ctx.syscall_event(start_clk, syscall_code.syscall_id(), arg1, arg2);
         ctx.record_mut()
             .add_precompile_event(syscall_code, syscall_event, event);
 

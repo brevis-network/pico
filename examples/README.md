@@ -69,7 +69,9 @@ cargo run --release -- verify fibonacci.pico
 Each command decodes the committed bytes as `PublicValuesStruct`, recomputes the sequence from the
 `n` inside it, and refuses bytes that are not exactly its encoding; `execute` and `prove` also
 refuse an answer for any `n` but the one they gave the guest. On an Apple M4 laptop (10 cores,
-24 GB), `execute` takes about a second, `prove` 25 s at a 6.7 GB peak, and `verify` 9 s.
+24 GB), with serial emulation (`ProverBuilder::serial_emulation`), `execute` takes about a second,
+`prove` 25 s at a 6.7 GB peak, and `verify` 9 s. The prover as written emulates on the default
+snapshot pipeline, which these figures do not cover.
 
 ## Tendermint
 
@@ -96,6 +98,11 @@ server with proving limited to 10 threads (`RAYON_NUM_THREADS=10`):
 
 A lower stacked height gives more, smaller chunks. Two chunks at a time at height 20 took as long
 and peaked at 33 GB. None of these fits in 24 GB.
+
+Every figure in this section was taken with serial emulation (`ProverBuilder::serial_emulation`);
+the default snapshot pipeline has not been measured on tendermint. It sets up an emulator memory
+for every chunk, so the smaller chunks of a lower stacked height cost it more than they cost the
+serial path.
 
 ## Aggregator
 

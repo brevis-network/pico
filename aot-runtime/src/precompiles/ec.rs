@@ -4,7 +4,8 @@ use pico_vm::chips::gadgets::{
         curve25519_dalek::CompressedEdwardsY,
         edwards::{ed25519::decompress, EdwardsParameters, WORDS_FIELD_ELEMENT},
         weierstrass::{
-            bls381::bls12381_decompress, secp256k1::secp256k1_decompress,
+            bls381::bls12381_decompress,
+            secp256k1::{secp256k1_add_words, secp256k1_decompress, secp256k1_double_words},
             secp256r1::secp256r1_decompress,
         },
         AffinePoint, CurveType, EllipticCurve, COMPRESSED_POINT_BYTES,
@@ -16,13 +17,13 @@ use pico_vm::chips::gadgets::{
 };
 use typenum::Unsigned;
 
-// libsecp256k1 (the `secp256k1` crate) for the hot secp256k1 add/double precompiles. Its field +
-// safegcd variable-time inversion are ~2-4x faster than k256's constant-time addition-chain
-// inversion (which dominated the snapshot-emulator producer: profiling showed secp256k1 add+double
-// = 33% of producer time, ~93% of which was the modular inversion in `to_affine`). The emulator
-// does not need constant-time crypto. Point-at-infinity never occurs for this ABI (the previous
-// k256 path already `.expect()`-panicked on a coordinate-less identity), so `combine`'s
-// infinity→Err can never fire here; outputs are the identical canonical affine (x, y).
+// libsecp256k1 for the hot secp256k1 add/double precompiles, through `secp256k1_add_words` /
+// `secp256k1_double_words`, which the interpreter shares. Its field + safegcd inversion
+// are ~2-4x faster than k256's constant-time addition-chain inversion (which dominated
+// the snapshot-emulator producer: profiling showed secp256k1 add+double = 33% of producer time,
+// ~93% of which was the modular inversion in `to_affine`). The emulator does not need
+// constant-time crypto. Those two fall back to the generic formula on any input where
+// libsecp256k1 would differ from it, so both emulators write what the chips' traces compute.
 
 // p256 imports for optimized secp256r1 operations.
 // NOTE: the sec1 `FromEncodedPoint`/`ToEncodedPoint` traits (used by the secp256r1 path below) were
@@ -280,9 +281,8 @@ pub fn weierstrass_decompress<E: EllipticCurve>(
 // libsecp256k1-Optimized Secp256k1 Operations
 // ============================================================================
 
-/// secp256k1 point addition via libsecp256k1 (`PublicKey::combine`).
-/// Its hand-optimized field + safegcd variable-time inversion are ~2-4x faster than k256's
-/// constant-time addition-chain inversion (the emulator does not need constant-time crypto).
+/// secp256k1 point addition through [`secp256k1_add_words`], libsecp256k1 where it agrees with
+/// the generic formula.
 pub fn secp256k1_add_optimized(core: &mut AotEmulatorCore, p_ptr: u64, q_ptr: u64) {
     assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
     assert!(q_ptr.is_multiple_of(8), "q_ptr is unaligned");
@@ -298,19 +298,13 @@ pub fn secp256k1_add_optimized(core: &mut AotEmulatorCore, p_ptr: u64, q_ptr: u6
     read_packed_words_snapshot(core, p_ptr, &mut p_words);
     read_packed_words_at_clk(core, q_ptr, &mut q_words, clk);
 
-    // Group addition via libsecp256k1 (`combine(p, q)` = p + q).
-    let p = words_to_secp256k1_pubkey(&p_words);
-    let q = words_to_secp256k1_pubkey(&q_words);
-    let result = p
-        .combine(&q)
-        .expect("secp256k1 add produced the point at infinity");
-    let result_words = secp256k1_pubkey_to_words(&result);
+    let result_words = secp256k1_add_words(&p_words, &q_words);
 
     // Write result back using span operation
     write_packed_words_at_clk(core, p_ptr, &result_words, clk + 1);
 }
 
-/// Optimized secp256k1 point doubling via libsecp256k1 with span memory.
+/// secp256k1 point doubling through [`secp256k1_double_words`], with span memory.
 pub fn secp256k1_double_optimized(core: &mut AotEmulatorCore, p_ptr: u64) {
     assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
 
@@ -321,67 +315,10 @@ pub fn secp256k1_double_optimized(core: &mut AotEmulatorCore, p_ptr: u64) {
     let mut p_words = [0u32; NUM_WORDS];
     read_packed_words_snapshot(core, p_ptr, &mut p_words);
 
-    // Doubling = adding the point to itself (`combine` uses the doubling formula when equal).
-    let p = words_to_secp256k1_pubkey(&p_words);
-    let result = p
-        .combine(&p)
-        .expect("secp256k1 double produced the point at infinity");
-    let result_words = secp256k1_pubkey_to_words(&result);
+    let result_words = secp256k1_double_words(&p_words);
 
     // Write result back using span operation
     write_packed_words_at_clk(core, p_ptr, &result_words, clk);
-}
-
-/// Convert 16 u32 words (x, y coordinates) to a libsecp256k1 `PublicKey`.
-/// Memory layout: [x0..x7, y0..y7] where each coordinate is 8 u32 words (32 bytes) in LE.
-/// (Identical encoding to the former k256 path: SEC1 uncompressed `0x04 || x_be || y_be`.)
-#[inline(always)]
-fn words_to_secp256k1_pubkey(words: &[u32]) -> secp256k1::PublicKey {
-    assert!(words.len() >= 16, "Need 16 words for secp256k1 point");
-
-    let mut x_bytes = [0u8; 32];
-    let mut y_bytes = [0u8; 32];
-    for i in 0..8 {
-        x_bytes[i * 4..(i + 1) * 4].copy_from_slice(&words[i].to_le_bytes());
-        y_bytes[i * 4..(i + 1) * 4].copy_from_slice(&words[i + 8].to_le_bytes());
-    }
-    // Field elements are big-endian on the wire, so reverse the LE bytes.
-    x_bytes.reverse();
-    y_bytes.reverse();
-
-    let mut encoded = [0u8; 65];
-    encoded[0] = 0x04; // Uncompressed point tag
-    encoded[1..33].copy_from_slice(&x_bytes);
-    encoded[33..65].copy_from_slice(&y_bytes);
-
-    secp256k1::PublicKey::from_slice(&encoded).expect("Invalid secp256k1 point")
-}
-
-/// Convert a libsecp256k1 `PublicKey` to 16 u32 words (x, y coordinates in LE).
-#[inline(always)]
-fn secp256k1_pubkey_to_words(point: &secp256k1::PublicKey) -> [u32; 16] {
-    // SEC1 uncompressed: 0x04 || x_be(32) || y_be(32).
-    let encoded = point.serialize_uncompressed();
-    let x_bytes = &encoded[1..33];
-    let y_bytes = &encoded[33..65];
-
-    let mut result = [0u32; 16];
-    for i in 0..8 {
-        let be_idx = 28 - i * 4; // most-significant word first in BE
-        result[i] = u32::from_be_bytes([
-            x_bytes[be_idx],
-            x_bytes[be_idx + 1],
-            x_bytes[be_idx + 2],
-            x_bytes[be_idx + 3],
-        ]);
-        result[i + 8] = u32::from_be_bytes([
-            y_bytes[be_idx],
-            y_bytes[be_idx + 1],
-            y_bytes[be_idx + 2],
-            y_bytes[be_idx + 3],
-        ]);
-    }
-    result
 }
 
 // ============================================================================

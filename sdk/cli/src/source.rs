@@ -6,8 +6,9 @@
 //! second copy, and the generated `AOT` would not typecheck against the project's prover. With
 //! [`PICO_SOURCE_ENV`] set, from that checkout instead, for a CLI built ahead of its tag.
 //!
-//! Only releases from 3.0.0 on have AOT, and a CLI can be built before its release is tagged, so
-//! [`check_release`] confirms both before AOT takes Pico from the release.
+//! Only releases from 3.0.0 on have AOT, only releases after 3.1.0-gpu.1 have the codegen stamp the
+//! generated crates call (`AotProgram::stamped`), and a CLI can be built before its release is
+//! tagged, so [`check_release`] confirms all three before AOT takes Pico from the release.
 
 use std::{env, fs, path::Path, process::Command};
 
@@ -23,6 +24,10 @@ const PICO_REPOSITORY_URL: &str = "https://github.com/brevis-network/pico";
 
 /// The first Pico release with `aot-runtime`, and `pico-cli`'s `aot` feature.
 const FIRST_AOT_RELEASE: Version = Version::new(3, 0, 0);
+
+/// The last Pico release whose `aot-runtime` has no codegen stamp, so none of the generated crates
+/// build against it.
+const LAST_UNSTAMPED_RELEASE: &str = "3.1.0-gpu.1";
 
 /// [`PICO_SOURCE_ENV`] made absolute, or `None` when it is unset or empty.
 pub fn pico_source() -> Result<Option<String>> {
@@ -66,8 +71,14 @@ pub fn release_has_aot() -> bool {
     has_aot(&release_version())
 }
 
-/// Checks that this CLI's release has AOT and that the public repository carries its tag. When
-/// git cannot reach the repository it only warns, for Cargo may have fetched the tag before.
+/// Whether this CLI's release has the codegen stamp the crates its generator writes call.
+pub fn release_has_codegen_stamp() -> bool {
+    has_codegen_stamp(&release_version())
+}
+
+/// Checks that this CLI's release has AOT and the codegen stamp, and that the public repository
+/// carries its tag. When git cannot reach the repository it only warns, for Cargo may have fetched
+/// the tag before.
 pub fn check_release() -> Result<()> {
     check_release_at(PICO_REPOSITORY_URL, &release_version())
 }
@@ -86,12 +97,28 @@ fn has_aot(version: &Version) -> bool {
         )
 }
 
+/// Unlike in [`has_aot`], a pre-release does not count as its release: this line labels its
+/// releases `-gpu.N`, so 3.1.0-gpu.1 and 3.1.0-gpu.2 differ only there. Semver precedence, build
+/// metadata aside.
+fn has_codegen_stamp(version: &Version) -> bool {
+    let last = Version::parse(LAST_UNSTAMPED_RELEASE).expect("the bound is a version");
+    version.cmp_precedence(&last).is_gt()
+}
+
 fn check_release_at(url: &str, version: &Version) -> Result<()> {
     if !has_aot(version) {
         bail!(
             "this CLI's version, {version}, predates {FIRST_AOT_RELEASE}, the first Pico release \
              with AOT, so its release has no AOT crates to build against; set {PICO_SOURCE_ENV} \
              to a Pico checkout"
+        );
+    }
+    if !has_codegen_stamp(version) {
+        bail!(
+            "this CLI's release, {version}, has a pico-aot-runtime without the codegen stamp \
+             (`AotProgram::stamped`) that the crates this CLI generates call, so they would not \
+             build against it; set {PICO_SOURCE_ENV} to a checkout of the Pico source this CLI was \
+             built from"
         );
     }
     let tag = format!("v{version}");
@@ -153,6 +180,45 @@ mod tests {
     }
 
     #[test]
+    fn only_a_release_after_3_1_0_gpu_1_has_the_codegen_stamp() {
+        for without in [
+            "2.1.2",
+            "3.0.0",
+            "3.0.1",
+            "3.1.0-gpu.0",
+            "3.1.0-gpu.1",
+            "3.1.0-gpu.1+build.7",
+        ] {
+            assert!(!has_codegen_stamp(&version(without)), "{without}");
+        }
+        for with in [
+            "3.1.0-gpu.2",
+            "3.1.0-gpu.10",
+            "3.1.0",
+            "3.1.1-gpu.1",
+            "3.2.0-gpu.1",
+            "10.0.0",
+        ] {
+            assert!(has_codegen_stamp(&version(with)), "{with}");
+        }
+    }
+
+    /// The order the stamp bound relies on: `-gpu.N` labels compare by their number, not as text,
+    /// and every one of them comes before the release it labels.
+    #[test]
+    fn gpu_labels_order_by_number_and_before_their_release() {
+        let ordered = ["3.1.0-gpu.1", "3.1.0-gpu.2", "3.1.0-gpu.10", "3.1.0"];
+        for pair in ordered.windows(2) {
+            assert!(
+                version(pair[0]).cmp_precedence(&version(pair[1])).is_lt(),
+                "{} before {}",
+                pair[0],
+                pair[1]
+            );
+        }
+    }
+
+    #[test]
     fn a_release_has_aot_from_the_first_release_with_it_and_its_pre_releases() {
         for without in ["2.1.2", "2.99.99", "0.3.0"] {
             assert!(!has_aot(&version(without)), "{without}");
@@ -193,19 +259,34 @@ mod tests {
     }
 
     #[test]
-    fn a_release_with_aot_and_its_tag_passes() {
-        let repository = repository(&["v3.0.0", "v3.0.1-rc.1"]);
-        check_release_at(url(&repository), &version("3.0.0")).expect("the tag is there");
-        check_release_at(url(&repository), &version("3.0.1-rc.1")).expect("the tag is there");
+    fn a_release_with_aot_the_codegen_stamp_and_its_tag_passes() {
+        let repository = repository(&["v3.1.0-gpu.2", "v3.1.0"]);
+        check_release_at(url(&repository), &version("3.1.0-gpu.2")).expect("the tag is there");
+        check_release_at(url(&repository), &version("3.1.0")).expect("the tag is there");
+    }
+
+    #[test]
+    fn a_release_without_the_codegen_stamp_is_refused_even_when_tagged() {
+        let repository = repository(&["v3.0.0", "v3.1.0-gpu.1"]);
+        for unstamped in ["3.0.0", "3.1.0-gpu.1"] {
+            let error = check_release_at(url(&repository), &version(unstamped))
+                .expect_err("no codegen stamp")
+                .to_string();
+            assert!(
+                error.contains("without the codegen stamp"),
+                "{unstamped}: {error}"
+            );
+            assert!(error.contains(PICO_SOURCE_ENV), "{unstamped}: {error}");
+        }
     }
 
     #[test]
     fn a_release_whose_tag_is_missing_is_refused() {
-        let repository = repository(&["v3.0.0", "v3.0.10"]);
-        let error = check_release_at(url(&repository), &version("3.0.1"))
-            .expect_err("no tag v3.0.1")
+        let repository = repository(&["v3.1.0-gpu.1", "v3.1.0-gpu.20"]);
+        let error = check_release_at(url(&repository), &version("3.1.0-gpu.2"))
+            .expect_err("no tag v3.1.0-gpu.2")
             .to_string();
-        assert!(error.contains("has no tag `v3.0.1`"), "{error}");
+        assert!(error.contains("has no tag `v3.1.0-gpu.2`"), "{error}");
         assert!(error.contains(PICO_SOURCE_ENV), "{error}");
     }
 
@@ -227,7 +308,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temporary directory");
         let missing = dir.path().join("missing");
         let missing = missing.to_str().expect("a UTF-8 path");
-        assert!(has_tag(missing, "v3.0.0").is_err(), "git reached nothing");
-        check_release_at(missing, &version("3.0.0")).expect("a warning, not an error");
+        assert!(
+            has_tag(missing, "v3.1.0-gpu.2").is_err(),
+            "git reached nothing"
+        );
+        check_release_at(missing, &version("3.1.0-gpu.2")).expect("a warning, not an error");
     }
 }

@@ -1,9 +1,11 @@
-pub mod alu_event_pool;
 pub mod chunk_split;
-pub mod cpu_event_pool;
 pub mod emulator;
-pub mod event_pool;
 pub mod event_types;
+pub mod history;
+pub mod history_arena;
+pub mod history_dump;
+pub mod history_fill;
+pub mod history_view;
 pub mod hook;
 pub mod memory;
 pub mod public_values;
@@ -11,6 +13,8 @@ pub mod public_values_compat;
 pub mod record;
 pub mod record_digest;
 pub mod record_merge;
+pub mod record_slots;
+pub mod sink;
 pub mod state;
 pub mod syscalls;
 

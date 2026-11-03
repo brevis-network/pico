@@ -5,8 +5,9 @@ use pico_vm::{
     emulator::riscv::{
         chunk_split::{ChunkSplitConfig, ChunkSplitState},
         memory::{ContiguousRiscvMemory, Memory},
-        riscv_emulator::EmulationError,
+        riscv_emulator::{AbnormalTermination, EmulationError, TerminationReason},
     },
+    mle::ledger::CoreRole,
     primitives::consts::{CHUNK_CLK_START, DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
 };
 use std::sync::Arc;
@@ -18,7 +19,30 @@ use crate::{
     types::BlockFn,
 };
 
-use super::types::RegisterRecord;
+use super::{types::RegisterRecord, AotSink};
+
+/// Running totals over a run's batches. A first touch is the one access per batch that records an
+/// address's prior state in the batch's prestate. A load and a store narrower than the doubleword
+/// both need that prior value — the store keeps the bytes it does not write — while a doubleword
+/// store needs only the record it overwrites, so the three are counted apart.
+#[derive(Debug, Default)]
+pub struct SnapshotCounts {
+    pub first_touch_loads: u64,
+    /// Byte, halfword and word stores.
+    pub first_touch_partial_stores: u64,
+    /// Doubleword stores, hint writes included: a hint's prior state is the zero record.
+    pub first_touch_full_stores: u64,
+    /// Registers whose batch-start record the snapshot restores, counted once per segment.
+    pub first_touch_registers: u64,
+}
+
+/// Which kind of access touched an address first, as [`SnapshotCounts`] counts it.
+#[derive(Clone, Copy)]
+pub(crate) enum Touch {
+    Load,
+    PartialStore,
+    FullStore,
+}
 
 /// Core AOT Emulator struct with all base functionality.
 ///
@@ -78,12 +102,16 @@ pub struct AotEmulatorCore {
     /// redundant ~31.5 MB `clear()` bitmap scan: after each batch `fill_snapshot_memory_*` swaps in
     /// a fresh (clean) pooled memory, so the next batch starts clean and the scan finds nothing.
     pub memory_snapshot_clean: bool,
-    /// Bitmap of registers snapshotted in this batch (0-31).
-    pub snapshot_registers_bitmap: u32,
     /// Instruction count at which `should_yield` fires *without* a chunk boundary, so the batch
     /// can hand out a mid-chunk snapshot and the replay of one chunk can be split across threads.
     /// `u64::MAX` — the default — is split replay switched off.
     pub next_sub_yield: u64,
+    /// The instruction count a replay stops at, exactly; `u64::MAX` when the core is not
+    /// replaying. A compiled block that would run past it falls back to the interpreter
+    /// (`can_fit_block`), and `should_yield` stops there through `next_sub_yield`.
+    pub(crate) replay_target: u64,
+    /// Whether the replay ends its chunk, rather than one of the chunk's segments.
+    pub(crate) final_segment: bool,
     /// A stream of public values from the program (global to entire program).
     pub public_values_stream: Vec<u8>,
     /// Committed value digest updated by COMMIT syscall.
@@ -96,6 +124,18 @@ pub struct AotEmulatorCore {
     pub(crate) unconstrained_state: Option<UnconstrainedState>,
     /// Compiled blocks entered by `run_blocks`, so a run can show it executed generated code.
     pub(crate) compiled_block_dispatches: u64,
+    /// Instructions the fallback interpreter ran. A generated block that does not fit what is left
+    /// of the chunk falls back, so a run that cuts chunks interprets some of its instructions; how
+    /// many, against its cycles, is what shows the generated code ran the rest. An unconstrained
+    /// region rolls it back with `insn_count`, so it counts cycles.
+    pub(crate) fallback_insns: u64,
+    /// Where the instructions' events go.
+    pub(crate) sink: AotSink,
+    /// What the snapshot thread's batches cost in prestate, for the stage ledger.
+    pub(crate) snapshot_counts: SnapshotCounts,
+    /// The pipeline core this is, for the ledger's precompile timers: a replay worker once it has
+    /// recovered a snapshot, the snapshot thread's (or a whole run's) until then.
+    pub(crate) role: CoreRole,
     /// The typed error behind the `Err` the run is returning. The generated entry point carries
     /// only a `String`, so the batch takes the error the interpreter would have returned from here.
     pub(crate) fault: Option<EmulationError>,
@@ -106,6 +146,7 @@ pub struct UnconstrainedState {
     pub(crate) pc: u64,
     pub(crate) clk: u32,
     pub(crate) insn_count: u64,
+    pub(crate) fallback_insns: u64,
     pub(crate) current_chunk: u32,
     pub(crate) batch_chunks_emulated: u32,
     pub(crate) batch_stop: bool,
@@ -131,10 +172,29 @@ impl AotEmulatorCore {
     ///
     /// Initializes all state including registers, memory, syscall tables, and batch tracking.
     pub fn new(program: Arc<Program>, input_stream: Vec<Vec<u8>>) -> Self {
+        let mut emu = Self::unloaded(program.clone(), input_stream);
+
+        // Initialize memory from Program struct (consolidated value + metadata)
+        for (addr, value) in program.memory_image.iter() {
+            emu.memory.insert_u64(
+                *addr,
+                MemoryRecord {
+                    value: *value,
+                    chunk: 0,
+                    timestamp: 0,
+                },
+            );
+        }
+
+        emu
+    }
+
+    /// [`Self::new`] before the program's memory image is loaded.
+    pub(crate) fn unloaded(program: Arc<Program>, input_stream: Vec<Vec<u8>>) -> Self {
         let max_syscall_cycles = max_syscall_extra_cycles();
         let hook_map = default_hook_map();
 
-        let mut emu = Self {
+        Self {
             program: program.clone(),
             registers: [0; 32],
             reg_present: [false; 32],
@@ -162,30 +222,21 @@ impl AotEmulatorCore {
             accessed_regs: [false; 32],
             memory_snapshot: ContiguousRiscvMemory::new(),
             memory_snapshot_clean: true,
-            snapshot_registers_bitmap: 0,
             next_sub_yield: u64::MAX,
+            replay_target: u64::MAX,
+            final_segment: true,
             public_values_stream: Vec::new(),
             committed_value_digest: [0; PV_DIGEST_NUM_WORDS],
             deferred_proofs_digest: [0; DIGEST_SIZE],
             chunk_split_state: ChunkSplitState::default(),
             unconstrained_state: None,
             compiled_block_dispatches: 0,
+            fallback_insns: 0,
+            sink: AotSink::Off,
+            snapshot_counts: SnapshotCounts::default(),
+            role: CoreRole::Snapshot,
             fault: None,
-        };
-
-        // Initialize memory from Program struct (consolidated value + metadata)
-        for (addr, value) in program.memory_image.iter() {
-            emu.memory.insert_u64(
-                *addr,
-                MemoryRecord {
-                    value: *value,
-                    chunk: 0,
-                    timestamp: 0,
-                },
-            );
         }
-
-        emu
     }
 
     #[inline(always)]
@@ -196,11 +247,6 @@ impl AotEmulatorCore {
     #[inline(always)]
     pub fn program_len(&self) -> usize {
         self.program.instructions.len()
-    }
-
-    /// Get the result value (typically in x10/a0).
-    pub fn get_result(&self) -> u64 {
-        self.registers[10]
     }
 
     /// Save current state for later differencing and clear access tracking.
@@ -217,7 +263,6 @@ impl AotEmulatorCore {
             self.memory_snapshot_clean = true;
         }
         self.clear_accessed_regs();
-        self.snapshot_registers_bitmap = 0;
     }
 
     /// Look up a block function for the given program counter.
@@ -233,6 +278,18 @@ impl AotEmulatorCore {
         let message = error.to_string();
         self.fault = Some(error);
         message
+    }
+
+    /// `ebreak` at `pc`, failed the way the interpreter fails it.
+    #[cold]
+    pub fn breakpoint(&mut self, pc: u64) -> String {
+        self.fail(AbnormalTermination::fault(TerminationReason::Breakpoint { pc }).into())
+    }
+
+    /// `unimp` at `pc`, failed the way the interpreter fails it.
+    #[cold]
+    pub fn illegal_instruction(&mut self, pc: u64) -> String {
+        self.fail(AbnormalTermination::fault(TerminationReason::IllegalInstruction { pc }).into())
     }
 }
 
@@ -324,7 +381,7 @@ mod tests {
 
         emu.write_reg(10, wide_value);
         emu.pc = u64::from(u32::MAX) + 0x40;
-        assert_eq!(emu.read_reg(10), wide_value);
+        assert_eq!(emu.read_reg_b(10), wide_value);
         assert_eq!(emu.read_reg_snapshot(10), wide_value);
 
         emu.enter_unconstrained_mode();
@@ -332,7 +389,7 @@ mod tests {
         emu.pc = 0x44;
         let next_pc = emu.exit_unconstrained_mode().unwrap();
 
-        assert_eq!(emu.read_reg(10), wide_value);
+        assert_eq!(emu.read_reg_b(10), wide_value);
         assert_eq!(emu.pc, u64::from(u32::MAX) + 0x40);
         assert_eq!(next_pc, u64::from(u32::MAX) + 0x44);
     }
@@ -421,41 +478,19 @@ mod tests {
         emu.write_mem_word(0x100, 0xffff_ff80);
         emu.write_mem_word(0x104, 0x1234_5678);
 
-        emu.lw(2, 1, 0, 0x1004).unwrap();
+        emu.lw_no_count(false, 2, 1, 0, 0x1004).unwrap();
         assert_eq!(emu.read_reg_unsafe(2), 0xffff_ffff_ffff_ff80);
 
-        emu.lwu(3, 1, 0, 0x1008).unwrap();
+        emu.lwu_no_count(false, 3, 1, 0, 0x1008).unwrap();
         assert_eq!(emu.read_reg_unsafe(3), 0x0000_0000_ffff_ff80);
 
-        emu.ld(4, 1, 0, 0x100c).unwrap();
+        emu.ld_no_count(false, 4, 1, 0, 0x100c).unwrap();
         assert_eq!(emu.read_reg_unsafe(4), 0x1234_5678_ffff_ff80);
 
         emu.write_reg(5, 0x0123_4567_89ab_cdef);
-        emu.sd(5, 1, 8, 0x1010).unwrap();
+        emu.sd_no_count(false, 5, 1, 8, 0x1010).unwrap();
         assert_eq!(emu.read_mem_word_unsafe(0x108), 0x89ab_cdef);
         assert_eq!(emu.read_mem_word_unsafe(0x10c), 0x0123_4567);
-
-        let mut tracked = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        tracked.write_reg_tracked(1, 0x100);
-        tracked.write_mem_word(0x100, 0xffff_ff80);
-        tracked.write_mem_word(0x104, 0x1234_5678);
-        tracked.lw_tracked(2, 1, 0, 0x1004).unwrap();
-        tracked.lwu_tracked(3, 1, 0, 0x1008).unwrap();
-        tracked.ld_tracked(4, 1, 0, 0x100c).unwrap();
-        assert_eq!(tracked.read_reg_unsafe(2), 0xffff_ffff_ffff_ff80);
-        assert_eq!(tracked.read_reg_unsafe(3), 0x0000_0000_ffff_ff80);
-        assert_eq!(tracked.read_reg_unsafe(4), 0x1234_5678_ffff_ff80);
-
-        let mut no_count = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        no_count.write_reg_no_count(1, 0x100);
-        no_count.write_mem_word(0x100, 0xffff_ff80);
-        no_count.write_mem_word(0x104, 0x1234_5678);
-        no_count.lw_no_count(2, 1, 0, 0x1004).unwrap();
-        no_count.lwu_no_count(3, 1, 0, 0x1008).unwrap();
-        no_count.ld_no_count(4, 1, 0, 0x100c).unwrap();
-        assert_eq!(no_count.read_reg_unsafe(2), 0xffff_ffff_ffff_ff80);
-        assert_eq!(no_count.read_reg_unsafe(3), 0x0000_0000_ffff_ff80);
-        assert_eq!(no_count.read_reg_unsafe(4), 0x1234_5678_ffff_ff80);
     }
 
     #[test]
@@ -464,46 +499,20 @@ mod tests {
         emu.write_reg(1, 0x100);
         emu.write_mem_dword(0x100, 0x8877_6655_4433_2211);
 
-        emu.lb(2, 1, 4, 0x1004);
-        emu.lbu(3, 1, 5, 0x1008);
-        emu.lh(4, 1, 6, 0x100c).unwrap();
-        emu.lhu(5, 1, 2, 0x1010).unwrap();
+        emu.lb_no_count(false, 2, 1, 4, 0x1004);
+        emu.lbu_no_count(false, 3, 1, 5, 0x1008);
+        emu.lh_no_count(false, 4, 1, 6, 0x100c).unwrap();
+        emu.lhu_no_count(false, 5, 1, 2, 0x1010).unwrap();
         assert_eq!(emu.read_reg_unsafe(2), 0x55);
         assert_eq!(emu.read_reg_unsafe(3), 0x66);
         assert_eq!(emu.read_reg_unsafe(4), 0xffff_ffff_ffff_8877);
         assert_eq!(emu.read_reg_unsafe(5), 0x4433);
 
         emu.write_reg(6, 0xaa);
-        emu.sb(6, 1, 5, 0x1014);
+        emu.sb_no_count(false, 6, 1, 5, 0x1014);
         emu.write_reg(7, 0xbbcc);
-        emu.sh(7, 1, 6, 0x1018).unwrap();
+        emu.sh_no_count(false, 7, 1, 6, 0x1018).unwrap();
         assert_eq!(emu.read_mem_dword_unsafe(0x100), 0xbbcc_aa55_4433_2211);
-
-        let mut tracked = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        tracked.write_reg_tracked(1, 0x100);
-        tracked.write_mem_dword(0x100, 0x8877_6655_4433_2211);
-        tracked.lb_tracked(2, 1, 4, 0x1004);
-        tracked.lbu_tracked(3, 1, 5, 0x1008);
-        tracked.lh_tracked(4, 1, 6, 0x100c).unwrap();
-        tracked.lhu_tracked(5, 1, 2, 0x1010).unwrap();
-        tracked.write_reg_tracked(6, 0xaa);
-        tracked.sb_tracked(6, 1, 5, 0x1014);
-        tracked.write_reg_tracked(7, 0xbbcc);
-        tracked.sh_tracked(7, 1, 6, 0x1018).unwrap();
-        assert_eq!(tracked.read_mem_dword_unsafe(0x100), 0xbbcc_aa55_4433_2211);
-
-        let mut no_count = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        no_count.write_reg_no_count(1, 0x100);
-        no_count.write_mem_dword(0x100, 0x8877_6655_4433_2211);
-        no_count.lb_no_count(2, 1, 4, 0x1004);
-        no_count.lbu_no_count(3, 1, 5, 0x1008);
-        no_count.lh_no_count(4, 1, 6, 0x100c).unwrap();
-        no_count.lhu_no_count(5, 1, 2, 0x1010).unwrap();
-        no_count.write_reg_no_count(6, 0xaa);
-        no_count.sb_no_count(6, 1, 5, 0x1014);
-        no_count.write_reg_no_count(7, 0xbbcc);
-        no_count.sh_no_count(7, 1, 6, 0x1018).unwrap();
-        assert_eq!(no_count.read_mem_dword_unsafe(0x100), 0xbbcc_aa55_4433_2211);
     }
 
     #[test]
@@ -511,50 +520,20 @@ mod tests {
         let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
         emu.write_reg(1, u64::MAX);
         emu.write_reg(2, 1);
-        emu.slti(3, 1, 1, 0x1004);
-        emu.sltr(4, 1, 2, 0x1008);
+        emu.slti_no_count(false, 3, 1, 1, 0x1004);
+        emu.sltr_no_count(false, 4, 1, 2, 0x1008);
         assert_eq!(emu.read_reg_unsafe(3), 1);
         assert_eq!(emu.read_reg_unsafe(4), 1);
-
-        let mut tracked = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        tracked.write_reg_tracked(1, u64::MAX);
-        tracked.write_reg_tracked(2, 1);
-        tracked.slti_tracked(3, 1, 1, 0x1004);
-        tracked.sltr_tracked(4, 1, 2, 0x1008);
-        assert_eq!(tracked.read_reg_unsafe(3), 1);
-        assert_eq!(tracked.read_reg_unsafe(4), 1);
-
-        let mut no_count = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        no_count.write_reg_no_count(1, u64::MAX);
-        no_count.write_reg_no_count(2, 1);
-        no_count.slti_no_count(3, 1, 1, 0x1004);
-        no_count.sltr_no_count(4, 1, 2, 0x1008);
-        assert_eq!(no_count.read_reg_unsafe(3), 1);
-        assert_eq!(no_count.read_reg_unsafe(4), 1);
     }
 
     #[test]
     fn phase3_helper_immediates_sign_extend_from_low_32_bits() {
         let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
         emu.write_reg(1, 0x20f1f8);
-        emu.adi(2, 1, u64::from(0xffff_fef8u32), 0x1004);
-        emu.apc(3, 0x2021f8, u64::from(0x0000_d000u32), 0x1008);
+        emu.adi_no_count(false, 2, 1, u64::from(0xffff_fef8u32), 0x1004);
+        emu.apc_no_count(false, 3, 0x2021f8, u64::from(0x0000_d000u32), 0x1008);
         assert_eq!(emu.read_reg_unsafe(2), 0x20f0f0);
         assert_eq!(emu.read_reg_unsafe(3), 0x20f1f8);
-
-        let mut tracked = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        tracked.write_reg_tracked(1, 0x20f1f8);
-        tracked.adi_tracked(2, 1, u64::from(0xffff_fef8u32), 0x1004);
-        tracked.apc_tracked(3, 0x2021f8, u64::from(0x0000_d000u32), 0x1008);
-        assert_eq!(tracked.read_reg_unsafe(2), 0x20f0f0);
-        assert_eq!(tracked.read_reg_unsafe(3), 0x20f1f8);
-
-        let mut no_count = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        no_count.write_reg_no_count(1, 0x20f1f8);
-        no_count.adi_no_count(2, 1, u64::from(0xffff_fef8u32), 0x1004);
-        no_count.apc_no_count(3, 0x2021f8, u64::from(0x0000_d000u32), 0x1008);
-        assert_eq!(no_count.read_reg_unsafe(2), 0x20f0f0);
-        assert_eq!(no_count.read_reg_unsafe(3), 0x20f1f8);
     }
 
     #[test]
@@ -562,30 +541,12 @@ mod tests {
         let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
         emu.write_reg(1, 1);
         emu.write_reg(2, 40);
-        emu.slr(3, 1, 2, 0x1004);
+        emu.slr_no_count(false, 3, 1, 2, 0x1004);
         assert_eq!(emu.read_reg_unsafe(3), 1u64 << 40);
 
         emu.write_reg(4, 0x8000_0000_0000_0000);
-        emu.sai(5, 4, 63, 0x1008);
+        emu.sai_no_count(false, 5, 4, 63, 0x1008);
         assert_eq!(emu.read_reg_unsafe(5), u64::MAX);
-
-        let mut tracked = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        tracked.write_reg_tracked(1, 1);
-        tracked.write_reg_tracked(2, 40);
-        tracked.slr_tracked(3, 1, 2, 0x1004);
-        tracked.write_reg_tracked(4, 0x8000_0000_0000_0000);
-        tracked.sai_tracked(5, 4, 63, 0x1008);
-        assert_eq!(tracked.read_reg_unsafe(3), 1u64 << 40);
-        assert_eq!(tracked.read_reg_unsafe(5), u64::MAX);
-
-        let mut no_count = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        no_count.write_reg_no_count(1, 1);
-        no_count.write_reg_no_count(2, 40);
-        no_count.slr_no_count(3, 1, 2, 0x1004);
-        no_count.write_reg_no_count(4, 0x8000_0000_0000_0000);
-        no_count.sai_no_count(5, 4, 63, 0x1008);
-        assert_eq!(no_count.read_reg_unsafe(3), 1u64 << 40);
-        assert_eq!(no_count.read_reg_unsafe(5), u64::MAX);
     }
 
     #[test]
@@ -671,26 +632,10 @@ mod tests {
         let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
         emu.write_reg(1, 0x1_0000_0000);
         emu.write_reg(2, 0xffff_ffff);
-        emu.addw(3, 1, 2, 0x1004);
-        emu.subw(4, 1, 2, 0x1008);
+        emu.addw_no_count(false, 3, 1, 2, 0x1004);
+        emu.subw_no_count(false, 4, 1, 2, 0x1008);
         assert_eq!(emu.read_reg_unsafe(3), u64::MAX);
         assert_eq!(emu.read_reg_unsafe(4), 1);
-
-        let mut tracked = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        tracked.write_reg_tracked(1, 0x1_0000_0000);
-        tracked.write_reg_tracked(2, 0xffff_ffff);
-        tracked.addw_tracked(3, 1, 2, 0x1004);
-        tracked.subw_tracked(4, 1, 2, 0x1008);
-        assert_eq!(tracked.read_reg_unsafe(3), u64::MAX);
-        assert_eq!(tracked.read_reg_unsafe(4), 1);
-
-        let mut no_count = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        no_count.write_reg_no_count(1, 0x1_0000_0000);
-        no_count.write_reg_no_count(2, 0xffff_ffff);
-        no_count.addw_no_count(3, 1, 2, 0x1004);
-        no_count.subw_no_count(4, 1, 2, 0x1008);
-        assert_eq!(no_count.read_reg_unsafe(3), u64::MAX);
-        assert_eq!(no_count.read_reg_unsafe(4), 1);
     }
 
     #[test]
@@ -699,34 +644,12 @@ mod tests {
         emu.write_reg(1, 1);
         emu.write_reg(2, 40);
         emu.write_reg(3, 0x8000_0000);
-        emu.sllw(4, 1, 2, 0x1004);
-        emu.srlw(5, 3, 2, 0x1008);
-        emu.sraw(6, 3, 2, 0x100c);
+        emu.sllw_no_count(false, 4, 1, 2, 0x1004);
+        emu.srlw_no_count(false, 5, 3, 2, 0x1008);
+        emu.sraw_no_count(false, 6, 3, 2, 0x100c);
         assert_eq!(emu.read_reg_unsafe(4), 1 << 8);
         assert_eq!(emu.read_reg_unsafe(5), 0x0080_0000);
         assert_eq!(emu.read_reg_unsafe(6), 0xffff_ffff_ff80_0000);
-
-        let mut tracked = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        tracked.write_reg_tracked(1, 1);
-        tracked.write_reg_tracked(2, 40);
-        tracked.write_reg_tracked(3, 0x8000_0000);
-        tracked.sllw_tracked(4, 1, 2, 0x1004);
-        tracked.srlw_tracked(5, 3, 2, 0x1008);
-        tracked.sraw_tracked(6, 3, 2, 0x100c);
-        assert_eq!(tracked.read_reg_unsafe(4), 1 << 8);
-        assert_eq!(tracked.read_reg_unsafe(5), 0x0080_0000);
-        assert_eq!(tracked.read_reg_unsafe(6), 0xffff_ffff_ff80_0000);
-
-        let mut no_count = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        no_count.write_reg_no_count(1, 1);
-        no_count.write_reg_no_count(2, 40);
-        no_count.write_reg_no_count(3, 0x8000_0000);
-        no_count.sllw_no_count(4, 1, 2, 0x1004);
-        no_count.srlw_no_count(5, 3, 2, 0x1008);
-        no_count.sraw_no_count(6, 3, 2, 0x100c);
-        assert_eq!(no_count.read_reg_unsafe(4), 1 << 8);
-        assert_eq!(no_count.read_reg_unsafe(5), 0x0080_0000);
-        assert_eq!(no_count.read_reg_unsafe(6), 0xffff_ffff_ff80_0000);
     }
 
     #[test]
@@ -737,50 +660,16 @@ mod tests {
         emu.write_reg(3, 0x8000_0000);
         emu.write_reg(4, u64::MAX);
         emu.write_reg(5, 0);
-        emu.mulw(6, 1, 2, 0x1004);
-        emu.divw(7, 3, 4, 0x1008);
-        emu.divuw(8, 3, 5, 0x100c);
-        emu.remw(9, 3, 4, 0x1010);
-        emu.remuw(10, 3, 5, 0x1014);
+        emu.mulw_no_count(false, 6, 1, 2, 0x1004);
+        emu.divw_no_count(false, 7, 3, 4, 0x1008);
+        emu.divuw_no_count(false, 8, 3, 5, 0x100c);
+        emu.remw_no_count(false, 9, 3, 4, 0x1010);
+        emu.remuw_no_count(false, 10, 3, 5, 0x1014);
         assert_eq!(emu.read_reg_unsafe(6), 0xffff_ffff_ffff_fffe);
         assert_eq!(emu.read_reg_unsafe(7), 0xffff_ffff_8000_0000);
         assert_eq!(emu.read_reg_unsafe(8), u64::MAX);
         assert_eq!(emu.read_reg_unsafe(9), 0);
         assert_eq!(emu.read_reg_unsafe(10), 0xffff_ffff_8000_0000);
-
-        let mut tracked = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        tracked.write_reg_tracked(1, 0xffff_ffff);
-        tracked.write_reg_tracked(2, 2);
-        tracked.write_reg_tracked(3, 0x8000_0000);
-        tracked.write_reg_tracked(4, u64::MAX);
-        tracked.write_reg_tracked(5, 0);
-        tracked.mulw_tracked(6, 1, 2, 0x1004);
-        tracked.divw_tracked(7, 3, 4, 0x1008);
-        tracked.divuw_tracked(8, 3, 5, 0x100c);
-        tracked.remw_tracked(9, 3, 4, 0x1010);
-        tracked.remuw_tracked(10, 3, 5, 0x1014);
-        assert_eq!(tracked.read_reg_unsafe(6), 0xffff_ffff_ffff_fffe);
-        assert_eq!(tracked.read_reg_unsafe(7), 0xffff_ffff_8000_0000);
-        assert_eq!(tracked.read_reg_unsafe(8), u64::MAX);
-        assert_eq!(tracked.read_reg_unsafe(9), 0);
-        assert_eq!(tracked.read_reg_unsafe(10), 0xffff_ffff_8000_0000);
-
-        let mut no_count = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        no_count.write_reg_no_count(1, 0xffff_ffff);
-        no_count.write_reg_no_count(2, 2);
-        no_count.write_reg_no_count(3, 0x8000_0000);
-        no_count.write_reg_no_count(4, u64::MAX);
-        no_count.write_reg_no_count(5, 0);
-        no_count.mulw_no_count(6, 1, 2, 0x1004);
-        no_count.divw_no_count(7, 3, 4, 0x1008);
-        no_count.divuw_no_count(8, 3, 5, 0x100c);
-        no_count.remw_no_count(9, 3, 4, 0x1010);
-        no_count.remuw_no_count(10, 3, 5, 0x1014);
-        assert_eq!(no_count.read_reg_unsafe(6), 0xffff_ffff_ffff_fffe);
-        assert_eq!(no_count.read_reg_unsafe(7), 0xffff_ffff_8000_0000);
-        assert_eq!(no_count.read_reg_unsafe(8), u64::MAX);
-        assert_eq!(no_count.read_reg_unsafe(9), 0);
-        assert_eq!(no_count.read_reg_unsafe(10), 0xffff_ffff_8000_0000);
     }
 
     #[test]
@@ -832,35 +721,11 @@ mod tests {
         emu.write_reg(1, 0x104);
         emu.write_reg(2, 0x0123_4567_89ab_cdef);
         assert!(emu
-            .ld(3, 1, 0, 0x1004)
+            .ld_no_count(false, 3, 1, 0, 0x1004)
             .unwrap_err()
             .contains("Unaligned LD"));
         assert!(emu
-            .sd(2, 1, 0, 0x1008)
-            .unwrap_err()
-            .contains("Unaligned SD"));
-
-        let mut tracked = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        tracked.write_reg_tracked(1, 0x104);
-        tracked.write_reg_tracked(2, 0x0123_4567_89ab_cdef);
-        assert!(tracked
-            .ld_tracked(3, 1, 0, 0x1004)
-            .unwrap_err()
-            .contains("Unaligned LD"));
-        assert!(tracked
-            .sd_tracked(2, 1, 0, 0x1008)
-            .unwrap_err()
-            .contains("Unaligned SD"));
-
-        let mut no_count = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        no_count.write_reg_no_count(1, 0x104);
-        no_count.write_reg_no_count(2, 0x0123_4567_89ab_cdef);
-        assert!(no_count
-            .ld_no_count(3, 1, 0, 0x1004)
-            .unwrap_err()
-            .contains("Unaligned LD"));
-        assert!(no_count
-            .sd_no_count(2, 1, 0, 0x1008)
+            .sd_no_count(false, 2, 1, 0, 0x1008)
             .unwrap_err()
             .contains("Unaligned SD"));
 
@@ -884,5 +749,81 @@ mod tests {
         store_emu.write_reg(2, 0x0123_4567_89ab_cdef);
         let store_err = store_emu.interpret_from_current_pc().err().unwrap();
         assert!(store_err.contains("Unaligned doubleword store"));
+    }
+
+    /// An instruction that reads one register twice leaves it at the interpreter's later read: `b`
+    /// (clk + 2) after `c` (clk + 1), and a store's value, operand `a` (clk + 3), after its base.
+    /// The helpers the generated code calls and the fallback interpreter both.
+    #[test]
+    fn a_register_read_twice_keeps_the_interpreters_last_timestamp() {
+        let program = test_program_with_instructions(
+            0x1000,
+            0x1000,
+            vec![
+                Instruction::new(Opcode::ADDW, 1, 2, 2, false, false),
+                Instruction::new(Opcode::DIVW, 3, 2, 2, false, false),
+                Instruction::new(Opcode::REM, 3, 2, 2, false, false),
+                Instruction::new(Opcode::SD, 4, 4, 0, false, true),
+                Instruction::new(Opcode::SB, 4, 4, 9, false, true),
+            ],
+        );
+        let setup = || {
+            let mut emu = AotEmulatorCore::new(program.clone(), Vec::new());
+            emu.write_reg(2, 7);
+            emu.write_reg(4, 0x200);
+            emu.update_insn_clock();
+            emu
+        };
+        // (register read twice, its timestamp's offset from the instruction's clock)
+        let expected = [(2, 2), (2, 2), (2, 2), (4, 3), (4, 3)];
+
+        let mut emu = setup();
+        let helpers: [fn(&mut AotEmulatorCore); 5] = [
+            |emu| emu.addw_no_count(false, 1, 2, 2, 0x1004),
+            |emu| emu.divw_no_count(false, 3, 2, 2, 0x1008),
+            |emu| emu.rem_no_count(false, 3, 2, 2, 0x100c),
+            |emu| emu.sd_no_count(false, 4, 4, 0, 0x1010).unwrap(),
+            |emu| emu.sb_no_count(false, 4, 4, 9, 0x1014),
+        ];
+        for (helper, (reg, offset)) in helpers.into_iter().zip(expected) {
+            let clk = emu.clk;
+            helper(&mut emu);
+            assert_eq!(emu.register_records[reg].timestamp, clk + offset);
+        }
+
+        let mut emu = setup();
+        for (reg, offset) in expected {
+            let clk = emu.clk;
+            emu.debug_interpret_single_step().unwrap();
+            assert_eq!(emu.register_records[reg].timestamp, clk + offset);
+        }
+    }
+
+    /// The generated stores read the dword before writing a byte, halfword or word into it; that
+    /// read is the store's first touch, not a load's.
+    #[test]
+    fn a_first_touch_is_counted_as_the_access_that_made_it() {
+        let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
+        emu.write_reg_no_count(1, 0x200);
+        emu.write_reg_no_count(2, 0x7f);
+        emu.lw_no_count(false, 3, 1, 0, 0x1004).unwrap();
+        emu.sb_no_count(false, 2, 1, 8, 0x1008);
+        emu.sh_no_count(false, 2, 1, 16, 0x100c).unwrap();
+        emu.sw_no_count(false, 2, 1, 24, 0x1010).unwrap();
+        emu.sd_no_count(false, 2, 1, 32, 0x1014).unwrap();
+        emu.write_mem_word_constrained(0x228, 1);
+        emu.write_mem_word_syscall(0x230, 1);
+        // A second touch of an address the batch has seen records nothing.
+        emu.sd_no_count(false, 2, 1, 0, 0x1018).unwrap();
+
+        let counts = &emu.snapshot_counts;
+        assert_eq!(
+            (
+                counts.first_touch_loads,
+                counts.first_touch_partial_stores,
+                counts.first_touch_full_stores,
+            ),
+            (1, 5, 1)
+        );
     }
 }

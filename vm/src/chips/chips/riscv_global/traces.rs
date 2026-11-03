@@ -11,6 +11,7 @@ use crate::{
     },
     instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
     machine::{chip::GpuChipBehavior, field::FieldSpecificPoseidon2Config},
+    mle::spans::device,
 };
 use crate::{
     chips::{
@@ -25,7 +26,7 @@ use crate::{
     emulator::riscv::record::EmulationRecord,
     iter::{
         IndexedPicoIterator, IntoPicoIterator, IntoPicoRefMutIterator, PicoBridge, PicoIterator,
-        PicoScanIterator,
+        PicoScanIterator, PicoSlice,
     },
     machine::{
         chip::ChipBehavior,
@@ -49,7 +50,9 @@ use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 #[cfg(feature = "cuda")]
-use pico_gpu_api::cuda_riscv_global_generate_extra_record_and_main;
+use pico_gpu_api::{
+    cuda_riscv_global_generate_extra_record_and_main, step_events::RISCV_GLOBAL_STEPS,
+};
 use std::borrow::BorrowMut;
 #[cfg(feature = "cuda")]
 use tracing::info;
@@ -68,8 +71,7 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
 
         let (blu_batches, poseidon2_events): (Vec<_>, Vec<_>) = events
-            .chunks(chunk_size)
-            .pico_bridge()
+            .pico_chunks(chunk_size)
             .map(|events| {
                 let mut blu: Vec<ByteLookupEvent> = vec![];
                 let mut poseidon2: Vec<Poseidon2Event> = vec![];
@@ -304,6 +306,8 @@ impl<F: PrimeField32> GpuChipBehavior<F> for GlobalChip<F> {
                 )),
                 _ => None,
             };
+        let kernels = device::start(stream);
+        let mut steps = device::steps(&kernels, &RISCV_GLOBAL_STEPS);
         if let Some((d_global_events, d_poseidon2_events)) = d_events_ptr {
             unsafe {
                 cuda_riscv_global_generate_extra_record_and_main(
@@ -320,16 +324,19 @@ impl<F: PrimeField32> GpuChipBehavior<F> for GlobalChip<F> {
                         .start_indices
                         .global_extra_poseidon2_start_index,
                     d_round_constants.as_ptr() as *const _,
+                    steps.ffi(),
                 );
             }
         }
 
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
+        device::launched(kernels, stream);
+        device::stepped(steps, stream);
+        device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
+        device::wait(main_stream).unwrap();
 
         info!("[riscv-global-chip] generate_extra_record_and_main on GPU");
         TraceData::Gpu(NUM_GLOBAL_COLS, d_trace)

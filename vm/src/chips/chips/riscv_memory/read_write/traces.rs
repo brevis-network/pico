@@ -7,12 +7,14 @@ use super::{
 };
 #[cfg(feature = "cuda")]
 use crate::{
-    chips::trace::TraceData,
+    chips::{chips::riscv_cpu::traces::chunk_history_reader, trace::TraceData},
     cuda_adaptor::resource_pool::{
         mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
     },
-    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    emulator::riscv::{history::ExecutionHistory, history_fill::HISTORY_LAYOUT},
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::chip::GpuChipBehavior,
+    mle::{machine::trace_oracle::history_launch, spans::device},
 };
 use crate::{
     chips::{
@@ -29,7 +31,7 @@ use crate::{
     },
     compiler::riscv::{opcode::Opcode, program::Program},
     emulator::riscv::record::EmulationRecord,
-    iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSlice, PicoSliceMut},
+    iter::{IndexedPicoIterator, PicoIterator, PicoSliceMut},
     machine::{
         chip::ChipBehavior,
         estimator::{EventCapture, EventSizeCapture},
@@ -39,20 +41,15 @@ use crate::{
 #[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
-    slice::{CudaSlice, CudaSliceMut},
+    slice::CudaSliceMut,
     stream::{CudaStream, CudaStreamCreateFlags},
 };
-#[cfg(feature = "cuda")]
-use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
 use p3_field::{Field, PrimeField32};
 #[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 #[cfg(feature = "cuda")]
-use pico_gpu_api::{
-    cuda_memory_read_write_generate_extra_record_and_main_u64,
-    cuda_memory_read_write_generate_extra_record_and_main_u64_packed,
-};
+use pico_gpu_api::history_cpu_memory_lt::cuda_memory_read_write_generate_extra_record_and_main_history;
 use std::borrow::BorrowMut;
 #[cfg(feature = "cuda")]
 use tracing::info;
@@ -73,15 +70,9 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        // Parallelize the initial filtering and collection
-        let events: Vec<_> = input
-            .cpu_events
-            .as_slice()
-            .pico_iter()
-            .filter(|e| e.instruction.is_memory_instruction())
-            .collect();
+        let steps = input.cpu_steps().memory();
 
-        let nrows = events.len().div_ceil(MEMORY_RW_DATAPAR);
+        let nrows = steps.len().div_ceil(MEMORY_RW_DATAPAR);
         let log2_nrows = input.shape_chip_size(&self.name());
         let padded_nrows = match log2_nrows {
             Some(log2_nrows) => 1 << log2_nrows,
@@ -92,42 +83,31 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
         let mut values = vec![F::ZERO; padded_nrows * NUM_MEMORY_CHIP_COLS];
 
         // Calculate actual population length and handle type conversion
-        let populate_len = events.len() * NUM_MEMORY_CHIP_VALUE_COLS;
+        let populate_len = steps.len() * NUM_MEMORY_CHIP_VALUE_COLS;
 
         values[..populate_len]
             .pico_chunks_mut(NUM_MEMORY_CHIP_VALUE_COLS)
-            .zip_eq(events.pico_iter())
-            .for_each(|(row, event)| {
+            .enumerate()
+            .for_each(|(index, row)| {
                 let cols: &mut MemoryChipValueCols<_> = row.borrow_mut();
-                self.event_to_row(event, cols, &mut vec![]);
+                self.event_to_row(&steps.get(index), cols, &mut vec![]);
             });
 
         RowMajorMatrix::new(values, NUM_MEMORY_CHIP_COLS)
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
-        // We only care about the CPU events of memory instructions.
-        let mem_events = input
-            .cpu_events
-            .as_slice()
-            .iter()
-            .filter(|e| e.instruction.is_memory_instruction())
-            .collect::<Box<[_]>>();
         // Generate the trace rows for each event. The only extra records are byte lookups: the
         // address addition is proven in-chip, so no ALU ADD event is dispatched.
-        let chunk_size = std::cmp::max(mem_events.len() / num_cpus::get(), 1);
-        let blu_events: Vec<Vec<ByteLookupEvent>> = mem_events
-            .pico_chunks(chunk_size)
-            .map(|ops: &[&CpuEvent]| {
-                let mut blu: Vec<ByteLookupEvent> = Vec::new();
-                ops.iter().for_each(|op| {
+        let blu_events =
+            input
+                .cpu_steps()
+                .memory()
+                .par_runs(|op, blu: &mut Vec<ByteLookupEvent>| {
                     let mut row = [F::ZERO; NUM_MEMORY_CHIP_VALUE_COLS];
                     let cols: &mut MemoryChipValueCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(op, cols, &mut blu);
+                    self.event_to_row(op, cols, blu);
                 });
-                blu
-            })
-            .collect();
         for blu_events_chunk in blu_events {
             extra.add_byte_lookup_events(blu_events_chunk);
         }
@@ -140,26 +120,12 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
         if let Some(shape) = record.shape.as_ref() {
             return shape.included::<F, _>(self);
         }
-        record
-            .cpu_events
-            .as_slice()
-            .iter()
-            .any(|e| e.instruction.is_memory_instruction())
+        record.cpu_steps().any_memory()
     }
 }
 
 #[cfg(feature = "cuda")]
 impl<F: PrimeField32> GpuChipBehavior<F> for MemoryReadWriteChip<F> {
-    fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
-        // The address addition is proven in-chip, so memory instructions dispatch no ALU event;
-        // this chip only contributes its own row count.
-        let num_memory_rw_events = record.memory_read_write_event_indices.len();
-        if num_memory_rw_events == 0 {
-            return;
-        }
-        counter.num_memory_read_writes = num_memory_rw_events;
-    }
-
     fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
         record.event_counter.num_memory_read_writes > 0
     }
@@ -171,8 +137,38 @@ impl<F: PrimeField32> GpuChipBehavior<F> for MemoryReadWriteChip<F> {
         prepared_gpu_events: &PreparedGpuEvents,
         preallocated_gpu_memory: &mut PreallocatedGpuMemory,
     ) -> TraceData<'_, F> {
-        // Get memory events using indices to avoid duplication
-        let event_size = input.memory_read_write_event_indices.len();
+        let view = input
+            .history_view()
+            .expect("a CPU chunk's record carries its execution history");
+        self.gpu_generate_from_history(
+            device_id,
+            input,
+            view.history,
+            prepared_gpu_events,
+            preallocated_gpu_memory,
+        )
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> MemoryReadWriteChip<F> {
+    /// The trace from the chunk's history on the device: the kernel reads the memory list and
+    /// rebuilds each row's CPU event there, so neither the CPU events nor an index array into them
+    /// is uploaded. The list's length sizes the trace; the counter the activity check read must have
+    /// counted the same list.
+    fn gpu_generate_from_history(
+        &self,
+        device_id: usize,
+        input: &EmulationRecord,
+        history: &ExecutionHistory,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let event_size = history.chip_steps.memory.len();
+        assert_eq!(
+            prepared_gpu_events.event_counter.num_memory_read_writes, event_size,
+            "the counter's memory read/write height is not the history's memory list"
+        );
 
         let nrows = event_size.div_ceil(MEMORY_RW_DATAPAR);
         let log2_nrows = input.shape_chip_size(&self.name());
@@ -183,98 +179,47 @@ impl<F: PrimeField32> GpuChipBehavior<F> for MemoryReadWriteChip<F> {
         let sync_mem_pool = get_global_mem_pool(device_id);
         let mem_pool = &sync_mem_pool.0;
 
-        let mut d_event_indices =
-            DevicePoolAllocation::<usize>::alloc_from_pool_async(event_size, mem_pool, stream)
-                .unwrap();
-        // MLE_PACKED_EVENTS: the index array rides the pinned staging (same bytes).
-        let packed_stage = prepared_gpu_events.packed.as_deref();
-        let event_indices_src: *const std::ffi::c_void = match packed_stage {
-            Some(pk) if pk.mem_event_indices().len() == event_size => {
-                pk.mem_event_indices().as_ptr() as *const _
-            }
-            _ => input.memory_read_write_event_indices.as_c_void_ptr(),
-        };
-        unsafe {
-            let _ = cudaMemcpyAsync(
-                d_event_indices.as_mut_c_void_ptr(),
-                event_indices_src,
-                event_size * size_of::<usize>(),
-                CudaMemoryCopyKind::HostToDevice,
-                stream.into(),
-            );
-        }
+        let d_byte_trace = preallocated_gpu_memory
+            .d_byte_trace
+            .as_mut()
+            .unwrap()
+            .as_mut_ptr();
 
         let trace_size = padded_nrows * NUM_MEMORY_CHIP_COLS;
         let mut d_trace =
             DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
                 .unwrap();
 
-        let d_cpu_events = preallocated_gpu_memory.d_cpu_events.as_mut().unwrap();
-        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
-
-        if let Some(packed) = prepared_gpu_events.packed.as_deref() {
-            // MLE_PACKED_EVENTS: d_cpu_events holds the 80B packed stream; the memory_record
-            // side stream is dense in exactly this chip's event_indices order.
-            use crate::instances::preparer::{MemRecordPacked, PACKED_EVENT_FORMAT_V1};
-            let mem_src = packed.mem_records();
-            assert_eq!(
-                mem_src.len(),
-                event_size,
-                "packed mem side-stream length mismatch"
-            );
-            let mut d_mem_records = DevicePoolAllocation::<MemRecordPacked>::alloc_from_pool_async(
-                event_size, mem_pool, stream,
+        let reader = chunk_history_reader(preallocated_gpu_memory, stream);
+        let args = reader.args();
+        let kernels = device::start(stream);
+        let err = unsafe {
+            cuda_memory_read_write_generate_extra_record_and_main_history(
+                std::ptr::from_ref(&args).cast(),
+                HISTORY_LAYOUT,
+                NUM_MEMORY_CHIP_VALUE_COLS,
+                trace_size,
+                d_trace.as_mut_ptr() as *mut _,
+                d_byte_trace as *mut _,
+                stream.into(),
             )
-            .unwrap();
-            unsafe {
-                let _ = cudaMemcpyAsync(
-                    d_mem_records.as_mut_c_void_ptr(),
-                    mem_src.as_ptr() as *const _,
-                    event_size * size_of::<MemRecordPacked>(),
-                    CudaMemoryCopyKind::HostToDevice,
-                    stream.into(),
-                );
-                let err = cuda_memory_read_write_generate_extra_record_and_main_u64_packed(
-                    NUM_MEMORY_CHIP_VALUE_COLS,
-                    event_size,
-                    trace_size,
-                    d_cpu_events.as_ptr() as *const _,
-                    d_mem_records.as_ptr() as *const _,
-                    packed.chunk as usize,
-                    d_event_indices.as_ptr() as *const _,
-                    d_trace.as_mut_ptr() as *mut _,
-                    stream.into(),
-                    d_byte_trace.as_mut_ptr() as *mut _,
-                    PACKED_EVENT_FORMAT_V1,
-                );
-                assert_eq!(
-                    err.code, 0,
-                    "cuda_memory_read_write_generate_extra_record_and_main_u64_packed failed (packed format mismatch?)"
-                );
-            }
-        } else {
-            unsafe {
-                cuda_memory_read_write_generate_extra_record_and_main_u64(
-                    NUM_MEMORY_CHIP_VALUE_COLS,
-                    event_size,
-                    trace_size,
-                    d_cpu_events.as_ptr() as *const _,
-                    d_event_indices.as_ptr() as *const _,
-                    d_trace.as_mut_ptr() as *mut _,
-                    stream.into(),
-                    d_byte_trace.as_mut_ptr() as *mut _,
-                );
-            }
-        }
+        };
+        assert_eq!(
+            err.code, 0,
+            "cuda_memory_read_write_generate_extra_record_and_main_history failed: {err}"
+        );
+        history_launch::note(&self.name());
+        drop(reader);
+        device::launched(kernels, stream);
 
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
+        device::wait(main_stream).unwrap();
 
-        info!("[memory-rw-chip] generate_extra_record_and_main on GPU");
+        info!("[memory-rw-chip] generate_extra_record_and_main from the history on GPU");
 
         TraceData::Gpu(NUM_MEMORY_CHIP_COLS, d_trace)
     }
@@ -676,6 +621,41 @@ fn populate_timestamp_diff(
     (prev_clk, diff_16bit_limb, diff_hi9)
 }
 
+/// The byte lookups an access row's timestamp limbs raise, for a caller that needs them and not the
+/// row.
+pub(crate) fn timestamp_diff_lookups(
+    record: MemoryRecordEnum,
+    output: &mut impl ByteRecordBehavior,
+) {
+    let (current_record, prev_record) = match record {
+        MemoryRecordEnum::Read(read) => (
+            MemoryRecord {
+                value: read.value,
+                chunk: read.chunk,
+                timestamp: read.timestamp,
+            },
+            MemoryRecord {
+                value: read.value,
+                chunk: read.prev_chunk,
+                timestamp: read.prev_timestamp,
+            },
+        ),
+        MemoryRecordEnum::Write(write) => (
+            MemoryRecord {
+                value: write.value,
+                chunk: write.chunk,
+                timestamp: write.timestamp,
+            },
+            MemoryRecord {
+                value: write.prev_value,
+                chunk: write.prev_chunk,
+                timestamp: write.prev_timestamp,
+            },
+        ),
+    };
+    populate_timestamp_diff(current_record, prev_record, output);
+}
+
 impl<F: Field> MemoryAccessCols<F> {
     pub(crate) fn populate_access(
         &mut self,
@@ -782,7 +762,7 @@ impl<F> EventCapture for MemoryReadWriteChip<F> {
     fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
         // No extra records: the address addition is proven in-chip (see the `ChipBehavior`
         // `count_extra_records`).
-        event_counter.num_memory_read_writes += record.memory_read_write_event_indices.len();
+        event_counter.num_memory_read_writes += record.cpu_steps().memory().len();
     }
 }
 

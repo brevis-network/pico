@@ -362,7 +362,7 @@ mod tests {
     #[test]
     fn any_other_emulation_failure_keeps_its_variant() {
         let lifted = ProveError::from_emulate(EmulateError::Emulation(
-            EmulationError::HaltWithNonZeroExitCode(1),
+            pico_vm::emulator::riscv::emulator::AbnormalTermination::halt(1, 0).into(),
         ));
         assert!(matches!(lifted, ProveError::Emulate(_)), "got {lifted}");
     }

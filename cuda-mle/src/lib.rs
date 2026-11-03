@@ -16,6 +16,7 @@
 #![allow(clippy::map_identity)] // ntt_field.rs
 #![allow(clippy::redundant_closure)] // whir.rs
 
+pub mod air_times;
 pub mod base;
 pub mod breakdown;
 pub mod nvtx;

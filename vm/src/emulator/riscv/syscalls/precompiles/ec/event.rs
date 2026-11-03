@@ -4,7 +4,8 @@ use crate::{
         gadgets::{
             curves::{
                 weierstrass::{
-                    bls381::bls12381_decompress, secp256k1::secp256k1_decompress,
+                    bls381::bls12381_decompress,
+                    secp256k1::{secp256k1_decompress, secp256k1_double_words},
                     secp256r1::secp256r1_decompress,
                 },
                 AffinePoint, CurveType, EllipticCurve,
@@ -18,8 +19,11 @@ use crate::{
     emulator::riscv::{
         event_types::{RvAddr, RvChunk, RvClk, RvValue},
         syscalls::{
-            precompiles::edwards::event::{FfiEcMemoryReadRecord, FfiEcMemoryWriteRecord},
-            syscall_context::SyscallContext,
+            host::SyscallHost,
+            precompiles::{
+                assert_dword_aligned_precompile,
+                edwards::event::{FfiEcMemoryReadRecord, FfiEcMemoryWriteRecord},
+            },
         },
     },
 };
@@ -210,14 +214,14 @@ impl<P: FieldParameters + NumWords> From<EllipticCurveDecompressEvent>
 ///
 /// It takes a pointer to a memory location, reads the point from memory, doubles it, and writes the
 /// result back to the memory location.
-pub fn create_ec_double_event<E: EllipticCurve>(
-    rt: &mut SyscallContext,
+pub fn create_ec_double_event<E: EllipticCurve, H: SyscallHost>(
+    rt: &mut H,
     arg1: RvAddr,
     _: u64,
 ) -> EllipticCurveDoubleEvent {
-    let start_clk = rt.clk;
+    let start_clk = rt.clk();
     let p_ptr = arg1;
-    SyscallContext::assert_dword_aligned_precompile(p_ptr, "ec double p_ptr");
+    assert_dword_aligned_precompile(p_ptr, "ec double p_ptr");
 
     let num_words = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
     // WordsCurvePoint is now the u64 dword count directly.
@@ -229,11 +233,13 @@ pub fn create_ec_double_event<E: EllipticCurve>(
         .flat_map(|&word| [word as u32, (word >> 32) as u32])
         .collect::<Vec<u32>>();
 
-    let p_affine = AffinePoint::<E>::from_words_le(&p_words);
-
-    let result_affine = E::ec_double(&p_affine);
-
-    let result_words = result_affine.to_words_le();
+    let result_words = match E::CURVE_TYPE {
+        // As the AOT emulator computes it; see `secp256k1_double_words`.
+        CurveType::Secp256k1 => {
+            secp256k1_double_words(p_words.as_slice().try_into().unwrap()).to_vec()
+        }
+        _ => E::ec_double(&AffinePoint::<E>::from_words_le(&p_words)).to_words_le(),
+    };
     let result_dwords = result_words
         .as_chunks::<2>()
         .0
@@ -257,13 +263,13 @@ pub fn create_ec_double_event<E: EllipticCurve>(
 ///
 /// It takes a pointer to a memory location, reads the point from memory, decompresses it, and
 /// writes the result back to the memory location.
-pub fn create_ec_decompress_event<E: EllipticCurve>(
-    rt: &mut SyscallContext,
+pub fn create_ec_decompress_event<E: EllipticCurve, H: SyscallHost>(
+    rt: &mut H,
     slice_ptr: RvAddr,
     sign_bit: u64,
 ) -> EllipticCurveDecompressEvent {
-    let start_clk = rt.clk;
-    SyscallContext::assert_dword_aligned_precompile(slice_ptr, "ec decompress slice_ptr");
+    let start_clk = rt.clk();
+    assert_dword_aligned_precompile(slice_ptr, "ec decompress slice_ptr");
     let sign_bit_u32 = u32::try_from(sign_bit)
         .unwrap_or_else(|_| panic!("ec decompress sign_bit overflow: {sign_bit}"));
     assert!(sign_bit_u32 <= 1, "is_odd must be 0 or 1");

@@ -6,31 +6,35 @@
 //! stub's entry point, which interprets every block: they check the plumbing, and running compiled
 //! code is the AOT harness's to check.
 
-use std::{num::NonZeroUsize, sync::OnceLock, time::Duration};
+use std::{
+    num::NonZeroUsize,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        OnceLock,
+    },
+    time::Duration,
+};
 
 use pico_aot_runtime::{AotEmulatorCore, AotError, AotProgram};
 use pico_vm::{
     emulator::riscv::emulator::error::EmulationError, mle::machine::riscv::EmulateError,
-    proverchain::riscv::max_pipeline_workers,
 };
 use sha2::{Digest, Sha256};
 
 use super::fixture::{
-    assert_is_fib_output, builder, emulate_fib, run_child, run_child_within, small_builder,
-    FIB_ELF, N, OTHER_ELF, SMALL_CHUNK, SMALL_LOG_STACKED_HEIGHT,
+    assert_is_fib_output, builder, default_emulation_workers, emulate_fib, run_child,
+    run_child_within, small_builder, COMMIT_OUT_OF_RANGE_ELF, FIB_ELF, N, OTHER_ELF, SMALL_CHUNK,
+    SMALL_LOG_STACKED_HEIGHT,
 };
 use crate::{prover::emulator_opts, Phase, ProveError, Prover, Stdin};
 
 const CHILD_VAR: &str = "PICO_PROVER_AOT_PROBE";
 
-/// The guest of the emulation-abort test: `COMMIT` for digest word 8 when its input asks for it.
-const COMMIT_OUT_OF_RANGE_ELF: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../perf/bench_data/rv64/commit-out-of-range-elf"
-));
-
 /// What the snapshot pipeline prints when its snapshot thread runs the AOT emulator.
 const AOT_BANNER: &str = "[AOT] snapshot-main = AotMetaEmulator";
+
+/// What it prints when its replay workers run the AOT core.
+const WORKER_BANNER: &str = "[AOT] replay workers = AotReplayMetaEmulator";
 
 fn is_child() -> bool {
     std::env::var(CHILD_VAR).is_ok()
@@ -44,16 +48,30 @@ fn hex(bytes: &[u8; 32]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+/// Runs of the registered program with a sink set: a replay worker's, which writes records, and
+/// never the snapshot thread's. The stub's code makes the interpreter's records, so these runs are
+/// what shows which engine replayed.
+static EMITTING_RUNS: AtomicU64 = AtomicU64::new(0);
+
 /// The bootstrap stub's entry point, as the committed `aot-generated/` crate exports it.
 fn interpret_every_block(emu: &mut AotEmulatorCore) -> Result<(), String> {
+    if emu.is_emitting() {
+        EMITTING_RUNS.fetch_add(1, Ordering::Relaxed);
+    }
     AotProgram::STUB.run(emu)
 }
 
 fn program_for(elf: &[u8], slot: &'static OnceLock<AotProgram>) -> &'static AotProgram {
-    slot.get_or_init(|| AotProgram::new(sha256(elf), interpret_every_block))
+    slot.get_or_init(|| {
+        AotProgram::stamped(
+            sha256(elf),
+            AotProgram::CODEGEN_STAMP,
+            interpret_every_block,
+        )
+    })
 }
 
-fn fib_program() -> &'static AotProgram {
+pub(super) fn fib_program() -> &'static AotProgram {
     static PROGRAM: OnceLock<AotProgram> = OnceLock::new();
     program_for(FIB_ELF, &PROGRAM)
 }
@@ -139,9 +157,9 @@ fn a_failed_build_registers_nothing_and_a_second_program_is_refused() {
         .build()
         .expect("the same program registers again");
     assert_eq!(
-        again.emulation_workers().get(),
-        max_pipeline_workers(),
-        "the worker count defaults to the core count"
+        again.emulation_workers().map(NonZeroUsize::get),
+        Some(default_emulation_workers()),
+        "the worker count defaults to the core count, at most 16"
     );
     let err = Prover::builder(OTHER_ELF)
         .log_stacked_height(SMALL_LOG_STACKED_HEIGHT)
@@ -196,60 +214,42 @@ fn a_factory_installed_without_the_registry_is_refused() {
     println!("{MARKER}");
 }
 
-/// A memory pool the pipeline would wait on forever is refused at `build` and `execute`, rather
-/// than by the pipeline once a prove has started.
+/// The AOT workers run the program `aot` registers, so they are refused without it; and as AOT
+/// code, the serial path cannot take them either.
 #[test]
-fn a_memory_pool_that_can_never_serve_the_run_is_refused() {
-    const TEST_NAME: &str = "tests::aot::a_memory_pool_that_can_never_serve_the_run_is_refused";
-    const MARKER: &str = "[aot] the pool that never refills was refused";
-    if !is_child() {
-        let mut envs = child_env();
-        envs.push(("MEMORY_RECYCLER_THREADS", "0".to_string()));
-        run_child(TEST_NAME, MARKER, &envs);
-        return;
-    }
-    let refused = |result: Result<(), ProveError>, call: &str| match result {
-        Err(ProveError::InconsistentOptions(message)) => assert!(
-            message.contains("MEMORY_RECYCLER_THREADS=0"),
-            "{call}: {message}"
-        ),
-        Err(other) => panic!("{call}: expected InconsistentOptions, got {other}"),
-        Ok(()) => panic!("{call}: a pool that never refills was accepted"),
-    };
-    refused(
-        small_builder().aot(fib_program()).build().map(drop),
-        "build",
-    );
-    refused(
-        small_builder()
-            .aot(fib_program())
-            .execute(Stdin::from(&N))
-            .map(drop),
-        "execute",
-    );
-    println!("{MARKER}");
-}
-
-/// More workers than cores is refused at `build`, rather than by the pipeline once a prove has
-/// started; without AOT the count sizes `execute`'s pipeline, and is checked the same way.
-#[test]
-fn workers_beyond_the_core_count_are_refused() {
-    let workers = max_pipeline_workers() + 1;
+fn aot_workers_are_refused_without_aot_and_with_serial_emulation() {
     let err = small_builder()
-        .aot(fib_program())
-        .emulation_workers(NonZeroUsize::new(workers).expect("non-zero"))
+        .aot_workers()
         .build()
-        .expect_err("more workers than cores must be refused");
+        .expect_err("the workers have no program to run");
     assert!(
-        matches!(&err, ProveError::InconsistentOptions(m)
-            if m.starts_with(&format!("emulation_workers({workers}) exceeds"))),
+        matches!(&err, ProveError::InconsistentOptions(m) if m.contains("aot_workers()")),
         "{err}"
     );
+    let err = small_builder()
+        .aot(fib_program())
+        .aot_workers()
+        .serial_emulation()
+        .build()
+        .expect_err("serial emulation has no replay workers");
+    assert!(
+        matches!(&err, ProveError::InconsistentOptions(m) if m.contains("serial_emulation()")),
+        "{err}"
+    );
+}
 
-    small_builder()
-        .emulation_workers(NonZeroUsize::MIN)
-        .execute(Stdin::from(&N))
-        .expect("workers without aot size execute's pipeline");
+/// AOT code runs on the pipeline's snapshot thread only, so the serial path cannot take it.
+#[test]
+fn serial_emulation_is_refused_with_aot() {
+    let err = small_builder()
+        .aot(fib_program())
+        .serial_emulation()
+        .build()
+        .expect_err("serial emulation has no snapshot thread to run AOT code on");
+    assert!(
+        matches!(&err, ProveError::InconsistentOptions(m) if m.contains("serial_emulation()")),
+        "{err}"
+    );
 }
 
 /// Proves and verifies fib to [`Phase::Combine`] through the AOT pipeline, with the output bytes
@@ -275,11 +275,12 @@ fn an_aot_run_proves_and_verifies_to_combine() {
         );
         let workers = format!(
             "Emulator snapshot worker threads: {}\n",
-            max_pipeline_workers()
+            default_emulation_workers()
         );
         assert_eq!(stdout.matches(AOT_BANNER).count(), 2, "{stdout}");
         assert_eq!(stdout.matches(&workers).count(), 2, "{stdout}");
         assert_eq!(stdout.matches(&finished).count(), 2, "{stdout}");
+        assert_eq!(stdout.matches(WORKER_BANNER).count(), 0, "{stdout}");
         return;
     }
     pico_vm::machine::logger::setup_logger();
@@ -288,7 +289,12 @@ fn an_aot_run_proves_and_verifies_to_combine() {
         .aot(fib_program())
         .build()
         .expect("prover");
-    assert_eq!(prover.emulation_workers().get(), max_pipeline_workers());
+    assert_eq!(
+        prover.emulation_workers().map(NonZeroUsize::get),
+        Some(default_emulation_workers())
+    );
+    assert!(prover.emulates_with_aot());
+    assert!(!prover.replays_with_aot());
     let interpreted = emulate_fib(emulator_opts(SMALL_CHUNK));
     assert!(
         interpreted.chunks > 1,
@@ -303,6 +309,84 @@ fn an_aot_run_proves_and_verifies_to_combine() {
     let execution = prover.execute(Stdin::from(&N)).expect("execute");
     assert_eq!(execution.committed_bytes, interpreted.committed_bytes);
     assert_eq!(execution.chunks, interpreted.chunks);
+    assert_eq!(
+        EMITTING_RUNS.load(Ordering::Relaxed),
+        0,
+        "the replay workers ran the AOT program"
+    );
+    println!("{MARKER}");
+}
+
+/// [`an_aot_run_proves_and_verifies_to_combine`] with the replay workers on the AOT program too
+/// ([`crate::ProverBuilder::aot_workers`]): the same banner, worker count and end-of-run line, the
+/// workers' banner beside them, and replays of the program on every chunk, which only an AOT
+/// worker makes.
+#[test]
+fn aot_workers_prove_and_verify_to_combine() {
+    const TEST_NAME: &str = "tests::aot::aot_workers_prove_and_verify_to_combine";
+    const MARKER: &str = "[aot] fib proved with AOT replay workers";
+    if !is_child() {
+        let mut envs = child_env();
+        envs.push((
+            "RUST_LOG",
+            "pico_aot_runtime=info,pico_vm::proverchain::riscv=info".to_string(),
+        ));
+        envs.push(("RUST_LOGGER", "flat".to_string()));
+        let stdout = run_child(TEST_NAME, MARKER, &envs);
+        // A prove and an execute: two emulations, and the stub's code dispatched no compiled block.
+        let finished = format!(
+            "AOT program for ELF {} finished: 0 compiled-block dispatches",
+            hex(&sha256(FIB_ELF))
+        );
+        let workers = format!(
+            "Emulator snapshot worker threads: {}\n",
+            default_emulation_workers()
+        );
+        assert_eq!(stdout.matches(AOT_BANNER).count(), 2, "{stdout}");
+        assert_eq!(stdout.matches(&workers).count(), 2, "{stdout}");
+        assert_eq!(stdout.matches(&finished).count(), 2, "{stdout}");
+        assert_eq!(stdout.matches(WORKER_BANNER).count(), 2, "{stdout}");
+        return;
+    }
+    pico_vm::machine::logger::setup_logger();
+    let mut prover = builder()
+        .chunk_size(SMALL_CHUNK)
+        .aot(fib_program())
+        .aot_workers()
+        .build()
+        .expect("prover");
+    assert_eq!(
+        prover.emulation_workers().map(NonZeroUsize::get),
+        Some(default_emulation_workers())
+    );
+    assert!(prover.emulates_with_aot());
+    assert!(prover.replays_with_aot());
+    let interpreted = emulate_fib(emulator_opts(SMALL_CHUNK));
+    assert!(
+        interpreted.chunks > 1,
+        "a {SMALL_CHUNK}-instruction chunk must split this run across workers"
+    );
+
+    let proof = prover.prove(Stdin::from(&N)).expect("prove");
+    assert_eq!(proof.phase(), Phase::Combine);
+    assert_is_fib_output(proof.committed().as_bytes(), N);
+    assert_eq!(proof.committed().as_bytes(), interpreted.committed_bytes);
+    let proved = EMITTING_RUNS.load(Ordering::Relaxed);
+    assert!(
+        proved >= u64::from(interpreted.chunks),
+        "{proved} AOT replays for {} chunks",
+        interpreted.chunks
+    );
+
+    let execution = prover.execute(Stdin::from(&N)).expect("execute");
+    assert_eq!(execution.committed_bytes, interpreted.committed_bytes);
+    assert_eq!(execution.chunks, interpreted.chunks);
+    let executed = EMITTING_RUNS.load(Ordering::Relaxed) - proved;
+    assert!(
+        executed >= u64::from(interpreted.chunks),
+        "{executed} AOT replays for {} chunks",
+        interpreted.chunks
+    );
     println!("{MARKER}");
 }
 
@@ -337,11 +421,12 @@ fn an_emulator_failure_on_the_aot_path_is_an_error_and_the_prover_still_proves()
         Ok(_) => panic!("{path}: a guest that read no input halted"),
     };
     short_input(prover.execute(Stdin::new()), "aot");
+    let interpreter =
+        || Prover::builder(COMMIT_OUT_OF_RANGE_ELF).log_stacked_height(SMALL_LOG_STACKED_HEIGHT);
+    short_input(interpreter().execute(Stdin::new()), "interpreter pipeline");
     short_input(
-        Prover::builder(COMMIT_OUT_OF_RANGE_ELF)
-            .log_stacked_height(SMALL_LOG_STACKED_HEIGHT)
-            .execute(Stdin::new()),
-        "interpreter",
+        interpreter().serial_emulation().execute(Stdin::new()),
+        "serial interpreter",
     );
 
     assert_aot_failed(prover.execute(out_of_range.clone()), "execute");
@@ -374,7 +459,7 @@ fn failed_aot_runs_leave_the_memory_pool_whole() {
         POOL,
         "MEMORY_POOL_SIZE did not reach the pool"
     );
-    // One worker: a worker keeps a pool memory between its batches, so a pool of two serves one
+    // One worker: a worker holds a pool memory while it replays, so a pool of two serves one
     // worker and the batch being cut.
     let builder = || {
         Prover::builder(COMMIT_OUT_OF_RANGE_ELF)

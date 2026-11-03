@@ -88,9 +88,10 @@ mod tests {
             })
             .collect();
 
-        let mut record = EmulationRecord::default();
-        record.cpu_local_memory_access = events;
-        record
+        EmulationRecord {
+            cpu_local_memory_access: events,
+            ..Default::default()
+        }
     }
 
     #[cfg(feature = "cuda")]
@@ -344,6 +345,7 @@ mod tests {
                     d_global_events.as_mut_ptr() as *mut _,
                     start_index,
                     d_byte_trace_alloc.as_mut_ptr() as *mut _,
+                    std::ptr::null_mut(),
                 );
             }
             stream.synchronize().unwrap();
@@ -419,11 +421,13 @@ mod normalization_tests {
                 value: 0x5555_6666_7777_8888,
             },
         };
-        let mut record = EmulationRecord::default();
-        record.cpu_local_memory_access = vec![
-            entry(1, 9, 3, 40),               // starts earlier  -> sentinel
-            entry(3, CHUNK_CLK_START, 3, 40), // starts here     -> real clk
-        ];
+        let record = EmulationRecord {
+            cpu_local_memory_access: vec![
+                entry(1, 9, 3, 40),               // starts earlier  -> sentinel
+                entry(3, CHUNK_CLK_START, 3, 40), // starts here     -> real clk
+            ],
+            ..Default::default()
+        };
         MemoryLocalChip::<F>::default().generate_main(&record, &mut EmulationRecord::default())
     }
 
@@ -574,11 +578,13 @@ mod normalization_tests {
                 value: 0x5555_6666_7777_8888,
             },
         };
-        let mut record = EmulationRecord::default();
-        record.cpu_local_memory_access = vec![
-            entry(0, 0, 0),                     // fresh: first touch, starts at zero
-            entry(1, 9, 0x1111_2222_3333_4444), // inherited from chunk 1
-        ];
+        let record = EmulationRecord {
+            cpu_local_memory_access: vec![
+                entry(0, 0, 0),                     // fresh: first touch, starts at zero
+                entry(1, 9, 0x1111_2222_3333_4444), // inherited from chunk 1
+            ],
+            ..Default::default()
+        };
         let trace =
             MemoryLocalChip::<F>::default().generate_main(&record, &mut EmulationRecord::default());
         trace.values[..NUM_MEMORY_LOCAL_INIT_COLS].to_vec()

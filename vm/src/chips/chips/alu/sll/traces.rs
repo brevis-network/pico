@@ -5,8 +5,10 @@ use crate::{
     cuda_adaptor::resource_pool::{
         mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
     },
-    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    emulator::riscv::{history::ExecutionHistory, history_fill::HISTORY_LAYOUT},
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents, Readiness},
     machine::chip::GpuChipBehavior,
+    mle::{machine::trace_oracle::history_launch, spans::device},
 };
 use crate::{
     chips::{
@@ -23,8 +25,8 @@ use crate::{
         riscv::{opcode::Opcode, program::Program},
         word::Word,
     },
-    emulator::riscv::record::EmulationRecord,
-    iter::{IndexedPicoIterator, PicoIterator, PicoSlice, PicoSliceMut},
+    emulator::riscv::record::{AluStream, EmulationRecord},
+    iter::{IndexedPicoIterator, PicoIterator, PicoSliceMut},
     machine::{
         chip::ChipBehavior,
         estimator::{EventCapture, EventSizeCapture},
@@ -34,18 +36,16 @@ use crate::{
 #[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
-    slice::{CudaSlice, CudaSliceMut},
+    slice::CudaSliceMut,
     stream::{CudaStream, CudaStreamCreateFlags},
 };
-#[cfg(feature = "cuda")]
-use cudart_sys::*;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 #[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 #[cfg(feature = "cuda")]
-use pico_gpu_api::cuda_sll_generate_extra_record_and_main_u64;
+use pico_gpu_api::history_bitwise_mul_shift::cuda_sll_generate_extra_record_and_main_history;
 use std::{borrow::BorrowMut, marker::PhantomData};
 #[cfg(feature = "cuda")]
 use tracing::info;
@@ -68,8 +68,8 @@ impl<F: PrimeField32> ChipBehavior<F> for SLLChip<F> {
     }
 
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
-        let events = input.shift_left_events.iter().collect::<Vec<_>>();
-        let nrows = events.len().div_ceil(SLL_DATAPAR);
+        let ops = input.alu_ops(AluStream::ShiftLeft);
+        let nrows = ops.len().div_ceil(SLL_DATAPAR);
         let log2_nrows = input.shape_chip_size(&self.name());
         let padded_nrows = match log2_nrows {
             Some(log2_nrows) => 1 << log2_nrows,
@@ -78,13 +78,13 @@ impl<F: PrimeField32> ChipBehavior<F> for SLLChip<F> {
 
         let mut values = vec![F::ZERO; padded_nrows * NUM_SLL_COLS];
 
-        let populate_len = events.len() * NUM_SLL_VALUE_COLS;
+        let populate_len = ops.len() * NUM_SLL_VALUE_COLS;
         values[..populate_len]
             .pico_chunks_mut(NUM_SLL_VALUE_COLS)
-            .zip_eq(events)
-            .for_each(|(row, event)| {
+            .enumerate()
+            .for_each(|(index, row)| {
                 let cols: &mut ShiftLeftValueCols<_> = row.borrow_mut();
-                self.event_to_row(event, cols, &mut vec![]);
+                self.event_to_row(&ops.get(index), cols, &mut vec![]);
             });
 
         let padded_row_template = {
@@ -104,20 +104,12 @@ impl<F: PrimeField32> ChipBehavior<F> for SLLChip<F> {
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
-        let chunk_size = std::cmp::max(input.shift_left_events.len() / num_cpus::get(), 1);
-
         let blu_batches = input
-            .shift_left_events
-            .pico_chunks(chunk_size)
-            .flat_map(|events| {
-                let mut blu_events = vec![];
-                events.iter().for_each(|event| {
-                    let mut dummy = ShiftLeftValueCols::default();
-                    self.event_to_row(event, &mut dummy, &mut blu_events);
-                });
-                blu_events
-            })
-            .collect::<Vec<_>>();
+            .alu_ops(AluStream::ShiftLeft)
+            .par_flat_map(|event, blu| {
+                let mut dummy = ShiftLeftValueCols::default();
+                self.event_to_row(event, &mut dummy, blu);
+            });
 
         extra.add_byte_lookup_events(blu_batches);
     }
@@ -129,7 +121,7 @@ impl<F: PrimeField32> ChipBehavior<F> for SLLChip<F> {
         if let Some(shape) = record.shape.as_ref() {
             return shape.included::<F, _>(self);
         }
-        !record.shift_left_events.is_empty()
+        !record.alu_ops(AluStream::ShiftLeft).is_empty()
     }
 
     fn local_only(&self) -> bool {
@@ -139,10 +131,6 @@ impl<F: PrimeField32> ChipBehavior<F> for SLLChip<F> {
 
 #[cfg(feature = "cuda")]
 impl<F: PrimeField32> GpuChipBehavior<F> for SLLChip<F> {
-    fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
-        counter.num_shift_left_events += record.shift_left_events.len();
-    }
-
     fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
         record.event_counter.num_shift_left_events > 0
     }
@@ -154,9 +142,39 @@ impl<F: PrimeField32> GpuChipBehavior<F> for SLLChip<F> {
         prepared_gpu_events: &PreparedGpuEvents,
         preallocated_gpu_memory: &mut PreallocatedGpuMemory,
     ) -> TraceData<'_, F> {
-        let events = &input.shift_left_events;
+        let view = input
+            .history_view()
+            .expect("a CPU chunk's record carries its execution history");
+        self.gpu_generate_from_history(
+            device_id,
+            input,
+            view.history,
+            prepared_gpu_events,
+            preallocated_gpu_memory,
+        )
+    }
+}
 
-        let nrows = events.len().div_ceil(SLL_DATAPAR);
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> SLLChip<F> {
+    /// The trace from the chunk's history on the device: the kernel reads the shift-left list
+    /// there, so no event is uploaded, and the list's length sizes the trace. The counter the
+    /// activity check read must have counted the same list.
+    fn gpu_generate_from_history(
+        &self,
+        device_id: usize,
+        input: &EmulationRecord,
+        history: &ExecutionHistory,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let event_size = history.chip_steps.alu(AluStream::ShiftLeft).len();
+        assert_eq!(
+            prepared_gpu_events.event_counter.num_shift_left_events, event_size,
+            "the counter's shift-left height is not the history's shift-left list"
+        );
+
+        let nrows = event_size.div_ceil(SLL_DATAPAR);
         let log2_nrows = input.shape_chip_size(&self.name());
         let padded_nrows = match log2_nrows {
             Some(log2_nrows) => 1 << log2_nrows,
@@ -167,54 +185,55 @@ impl<F: PrimeField32> GpuChipBehavior<F> for SLLChip<F> {
 
         let sync_mem_pool = get_global_mem_pool(device_id);
         let mem_pool = &sync_mem_pool.0;
-        // TODO: check error
-        // gpu generate trace
-        let event_size = events.len();
-        let mut d_events =
-            DevicePoolAllocation::<AluEvent>::alloc_from_pool_async(event_size, mem_pool, stream)
-                .unwrap();
-        // Same bytes from the preparer's pinned staging when present (a pageable source
-        // blocks this thread for the whole DMA); unstaged chunks keep the Vec upload.
-        let staged = prepared_gpu_events.staged_alu.shift_left();
-        unsafe {
-            let src_ptr: *const std::ffi::c_void = if staged.len() == event_size && event_size > 0 {
-                staged.as_ptr() as *const _
-            } else {
-                CudaSlice::as_slice(events).as_c_void_ptr()
-            };
-            let _ = cudaMemcpyAsync(
-                d_events.as_mut_c_void_ptr(),
-                src_ptr,
-                event_size * size_of::<AluEvent>(),
-                CudaMemoryCopyKind::HostToDevice,
-                stream.into(),
-            );
-        }
+
+        let d_byte_trace = preallocated_gpu_memory
+            .d_byte_trace
+            .as_mut()
+            .unwrap()
+            .as_mut_ptr();
+
         let trace_size = padded_nrows * NUM_SLL_COLS;
         let mut d_trace =
             DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
                 .unwrap();
-        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
-        unsafe {
-            cuda_sll_generate_extra_record_and_main_u64(
+
+        // Waits on `stream` for the whole fill; dropped after the launch, its end-of-reads mark is
+        // what the fill's error-word read-back and free follow.
+        let reader = preallocated_gpu_memory
+            .d_history
+            .as_ref()
+            .expect("a chunk whose chips read its history has its fill on the device")
+            .reader(stream, Readiness::Complete)
+            .unwrap_or_else(|e| panic!("reading the chunk's device history: {e}"));
+        let args = reader.args();
+        let kernels = device::start(stream);
+        let err = unsafe {
+            cuda_sll_generate_extra_record_and_main_history(
+                std::ptr::from_ref(&args).cast(),
+                HISTORY_LAYOUT,
                 NUM_SLL_VALUE_COLS,
-                event_size,
                 trace_size,
-                d_events.as_ptr() as *const _,
                 d_trace.as_mut_ptr() as *mut _,
-                d_byte_trace.as_mut_ptr() as *mut _,
+                d_byte_trace as *mut _,
                 stream.into(),
-            );
-        }
+            )
+        };
+        assert_eq!(
+            err.code, 0,
+            "cuda_sll_generate_extra_record_and_main_history failed: {err}"
+        );
+        history_launch::note(&self.name());
+        drop(reader);
 
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
+        device::launched(kernels, stream);
+        device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
+        device::wait(main_stream).unwrap();
 
-        info!("[sll-chip] generate_extra_record_and_main on GPU");
+        info!("[sll-chip] generate_extra_record_and_main from the history on GPU");
 
         TraceData::Gpu(NUM_SLL_COLS, d_trace)
     }
@@ -288,6 +307,6 @@ impl<F: Field> SLLChip<F> {
 
 impl<F> EventCapture for SLLChip<F> {
     fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
-        event_counter.num_shift_left_events += record.shift_left_events.len();
+        event_counter.num_shift_left_events += record.alu_ops(AluStream::ShiftLeft).len();
     }
 }

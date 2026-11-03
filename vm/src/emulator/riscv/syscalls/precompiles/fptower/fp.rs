@@ -8,8 +8,9 @@ use crate::{
     emulator::riscv::{
         event_types::RvValue,
         syscalls::{
-            precompiles::{FpEvent, PrecompileEvent},
-            Syscall, SyscallCode, SyscallContext,
+            host::{Precompile, SyscallHost},
+            precompiles::{assert_dword_aligned_precompile, FpEvent, PrecompileEvent},
+            SyscallCode,
         },
     },
 };
@@ -28,17 +29,17 @@ impl<P> FpSyscall<P> {
     }
 }
 
-impl<P: FpOpField> Syscall for FpSyscall<P> {
-    fn emulate(
+impl<P: FpOpField> Precompile for FpSyscall<P> {
+    fn emulate<H: SyscallHost>(
         &self,
-        rt: &mut SyscallContext,
+        rt: &mut H,
         syscall_code: SyscallCode,
         arg1: RvValue,
         arg2: RvValue,
     ) -> Option<RvValue> {
         let x_ptr = arg1;
         let y_ptr = arg2;
-        let clk = rt.clk;
+        let clk = rt.clk();
         assert!(x_ptr.is_multiple_of(4), "x_ptr is unaligned");
         assert!(y_ptr.is_multiple_of(4), "y_ptr is unaligned");
 
@@ -46,14 +47,14 @@ impl<P: FpOpField> Syscall for FpSyscall<P> {
         let num_u64_words = <P as NumWords>::WordsFieldElement::USIZE;
         let num_memory_words = match P::FIELD_TYPE {
             FieldType::Secp256k1 => {
-                SyscallContext::assert_dword_aligned_precompile(x_ptr, "fp x_ptr");
-                SyscallContext::assert_dword_aligned_precompile(y_ptr, "fp y_ptr");
+                assert_dword_aligned_precompile(x_ptr, "fp x_ptr");
+                assert_dword_aligned_precompile(y_ptr, "fp y_ptr");
                 num_u64_words
             }
             // BN/BLS field elements use packed 64-bit dwords in guest memory.
             FieldType::Bn254 | FieldType::Bls381 => {
-                SyscallContext::assert_dword_aligned_precompile(x_ptr, "fp x_ptr");
-                SyscallContext::assert_dword_aligned_precompile(y_ptr, "fp y_ptr");
+                assert_dword_aligned_precompile(x_ptr, "fp x_ptr");
+                assert_dword_aligned_precompile(y_ptr, "fp y_ptr");
                 num_u64_words
             }
         };
@@ -111,13 +112,13 @@ impl<P: FpOpField> Syscall for FpSyscall<P> {
             FieldType::Secp256k1 => {
                 let mut result_u64 = result.to_u64_digits();
                 result_u64.resize(num_u64_words, 0);
-                rt.clk += 1;
+                rt.advance_clk(1);
                 rt.mw_dword_slice(x_ptr, &result_u64)
             }
             FieldType::Bn254 | FieldType::Bls381 => {
                 let mut result = result.to_u64_digits();
                 result.resize(num_memory_words, 0);
-                rt.clk += 1;
+                rt.advance_clk(1);
                 rt.mw_dword_slice(x_ptr, &result)
             }
         };
@@ -151,9 +152,7 @@ impl<P: FpOpField> Syscall for FpSyscall<P> {
                     _ => unreachable!(),
                 };
 
-                let syscall_event = rt
-                    .rt
-                    .syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
+                let syscall_event = rt.syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
                 rt.record_mut().add_precompile_event(
                     syscall_code_key,
                     syscall_event,
@@ -169,9 +168,7 @@ impl<P: FpOpField> Syscall for FpSyscall<P> {
                     _ => unreachable!(),
                 };
 
-                let syscall_event = rt
-                    .rt
-                    .syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
+                let syscall_event = rt.syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
                 rt.record_mut().add_precompile_event(
                     syscall_code_key,
                     syscall_event,
@@ -187,9 +184,7 @@ impl<P: FpOpField> Syscall for FpSyscall<P> {
                     _ => unreachable!(),
                 };
 
-                let syscall_event = rt
-                    .rt
-                    .syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
+                let syscall_event = rt.syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
                 rt.record_mut().add_precompile_event(
                     syscall_code_key,
                     syscall_event,

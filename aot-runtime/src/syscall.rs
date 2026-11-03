@@ -21,8 +21,11 @@ use pico_vm::{
     },
     compiler::riscv::register::Register,
     emulator::riscv::{
-        chunk_split::commit_tail_in_flight, riscv_emulator::EmulationError, syscalls::SyscallCode,
+        chunk_split::commit_tail_in_flight,
+        riscv_emulator::{AbnormalTermination, EmulationError},
+        syscalls::SyscallCode,
     },
+    mle::ledger,
 };
 
 // ============================================================
@@ -284,7 +287,10 @@ impl AotEmulatorCore {
                 ))));
             };
             let existing = self.uninitialized_memory.get(addr).copied();
-            if let Some(old) = existing.filter(|&v| v != 0) {
+            // A replay of the run's last batch starts from the run's final uninitialized memory,
+            // which already holds the words this read writes: a core writing records takes the
+            // same word again, as the interpreter does in trace mode.
+            if let Some(old) = existing.filter(|&v| v != 0 && !(self.is_emitting() && v == word)) {
                 return Err(self.fail(EmulationError::InvalidHintRead(format!(
                     "address is initialized already (uninitialized_memory): addr=0x{addr:016x} \
                      ptr=0x{ptr:016x} chunk_idx={chunk_idx} len={len} stream_ptr={stream_ptr} \
@@ -325,8 +331,11 @@ impl AotEmulatorCore {
             self.committed_value_digest.len(),
             "commit word_idx",
         )?;
-        let slot = &mut self.committed_value_digest[idx];
-        *slot = Self::digest_leaf_word_u32(word, "commit digest word")?;
+        let word = Self::digest_leaf_word_u32(word, "commit digest word")?;
+        self.committed_value_digest[idx] = word;
+        if let Some(record) = self.emitting_record_mut() {
+            record.public_values.committed_value_digest[idx] = word;
+        }
         self.note_digest_word();
         Ok(())
     }
@@ -338,8 +347,13 @@ impl AotEmulatorCore {
             self.deferred_proofs_digest.len(),
             "deferred word_idx",
         )?;
-        let slot = &mut self.deferred_proofs_digest[idx];
-        *slot = Self::digest_leaf_word_u32(word, "deferred digest word")?;
+        let word = Self::digest_leaf_word_u32(word, "deferred digest word")?;
+        self.deferred_proofs_digest[idx] = word;
+        // Into the record too, as the interpreter's COMMIT_DEFERRED_PROOFS writes it: the pipeline
+        // takes a chunk's deferred digest from its record.
+        if let Some(record) = self.emitting_record_mut() {
+            record.public_values.deferred_proofs_digest[idx] = word;
+        }
         self.chunk_split_state.deferred_commits += 1;
         self.note_digest_word();
         Ok(())
@@ -369,6 +383,7 @@ impl AotEmulatorCore {
         };
         if syscall_code.should_send() != 0 {
             self.chunk_split_state.record_syscall_event();
+            self.emit_syscall(syscall_code, arg1, arg2);
         }
         let _guard = SyscallGuard::new(self);
 
@@ -387,7 +402,30 @@ impl AotEmulatorCore {
 
         let next_pc = self.pc.wrapping_add(4);
 
-        match syscall_id_u32 {
+        // A precompile's events are the interpreter's only if the interpreter's implementation
+        // writes them; the arms below are the compute-only copies, for a core that writes nothing.
+        // Each path is timed per kind, so the event path's increment over the compute-only one
+        // can be read from one run.
+        if self.is_emitting() {
+            if let Some(returned) = self.emitting(|emu| {
+                let start = ledger::precompile_start(syscall_code);
+                let returned = emu.emulate_vm_precompile(syscall_code, arg1, arg2);
+                if returned.is_some() {
+                    ledger::precompile_event_path(start, emu.role, syscall_code);
+                }
+                returned
+            }) {
+                return Ok((
+                    returned.unwrap_or(syscall_return),
+                    next_pc,
+                    extra_cycles,
+                    false,
+                ));
+            }
+        }
+
+        let start = ledger::precompile_start(syscall_code);
+        let result = match syscall_id_u32 {
             id if id == SyscallCode::SHA_EXTEND as u32 => {
                 precompiles::sha256::sha256_extend(self, arg1);
                 Ok((syscall_return, next_pc, extra_cycles, false))
@@ -648,12 +686,15 @@ impl AotEmulatorCore {
             id if id == SyscallCode::HALT as u32 => {
                 let exit_code = Self::decode_u32_abi_word(arg1, "halt exit_code")?;
                 if exit_code != 0 {
-                    return Err(self.fail(EmulationError::HaltWithNonZeroExitCode(exit_code)));
+                    // `arg2` is the reason tag the runtime passes in `a1`, as for the interpreter.
+                    return Err(self.fail(AbnormalTermination::halt(exit_code, arg2).into()));
                 }
                 Ok((syscall_return, 0, extra_cycles, true))
             }
             _ => Err(self.fail(EmulationError::UnsupportedSyscall(syscall_id_u32))),
-        }
+        };
+        ledger::precompile_compute(start, self.role, syscall_code);
+        result
     }
 }
 
@@ -685,7 +726,11 @@ mod tests {
     use crate::hook::Hook;
     use pico_vm::{
         compiler::riscv::program::Program,
-        emulator::riscv::{riscv_emulator::EmulationError, syscalls::SyscallCode},
+        emulator::riscv::{
+            emulator::error::halt_reason,
+            riscv_emulator::{AbnormalTermination, EmulationError, TerminationReason},
+            syscalls::SyscallCode,
+        },
     };
     use std::{collections::BTreeMap, sync::Arc};
 
@@ -1045,11 +1090,14 @@ mod tests {
         let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
 
         let err = emu
-            .execute_syscall(SyscallCode::HALT as u64, 1, 0)
+            .execute_syscall(SyscallCode::HALT as u64, 1, halt_reason::PANIC)
             .expect_err("a non-zero exit code fails the run");
-        assert!(matches!(
-            recorded_fault(&mut emu, &err),
-            EmulationError::HaltWithNonZeroExitCode(1)
-        ));
+        assert_eq!(
+            recorded_fault(&mut emu, &err).abnormal_termination(),
+            Some(&AbnormalTermination {
+                reason: TerminationReason::Panic,
+                exit_code: 1
+            })
+        );
     }
 }

@@ -92,6 +92,13 @@ impl Instruction {
         Self::new(Opcode::UNIMP, 0, 0, 0, true, true)
     }
 
+    /// Create the canonical no-op [`Instruction`], `addi x0, x0, 0`: what the `nop` word
+    /// `0x00000013` transpiles to.
+    #[must_use]
+    pub const fn nop() -> Self {
+        Self::new(Opcode::ADD, 0, 0, 0, false, true)
+    }
+
     /// Returns if the [`Instruction`] is an R-type instruction.
     #[inline]
     #[must_use]
@@ -499,8 +506,14 @@ impl InstructionProcessor for InstructionTranspiler {
         Instruction::unimp()
     }
 
+    /// FENCE orders memory accesses between harts and devices. A Pico guest is one hart with no
+    /// devices, so every FENCE has no effect: `fence rw,rw`, `fence.tso`, and `pause`
+    /// (Zihintpause, which `core::hint::spin_loop` emits). The base ISA RV64I includes FENCE, so
+    /// the zkevm-standards RISC-V target (`riscv64im_zicclsm`) requires it to execute, which the
+    /// ACT4 test `I-fence-00` checks. It is transpiled to the canonical no-op, so it needs no
+    /// chip, column or Program-table encoding of its own.
     fn process_fence(&mut self, _: IType) -> Self::InstructionResult {
-        Instruction::unimp()
+        Instruction::nop()
     }
 
     fn process_mret(&mut self) -> Self::InstructionResult {
@@ -632,5 +645,26 @@ mod tests {
             Instruction::new(Opcode::ADD, 5, 0x1000, PC_BASE + 8, true, true),
             "slot 2 must fold pc_base + 8 even though slots 0 and 1 are not AUIPC"
         );
+    }
+
+    /// Every FENCE transpiles to exactly what the `nop` word does, whatever its fm, pred and succ
+    /// bits. `pause` is the one compilers emit: `perf/bench_data/rv64/reth-elf` holds 10.
+    #[test]
+    fn transpile_turns_every_fence_into_the_nop() {
+        // nop ; fence rw,rw ; fence.tso ; pause ; fence 0,0 ; fence iorw,iorw
+        let words = [
+            0x0000_0013,
+            0x0330_000f,
+            0x8330_000f,
+            0x0100_000f,
+            0x0000_000f,
+            0x0ff0_000f,
+        ];
+
+        let out = transpile(&words, PC_BASE);
+        assert_eq!(out[0], Instruction::nop(), "the nop word itself");
+        for (word, instruction) in words.iter().zip(out.iter()).skip(1) {
+            assert_eq!(*instruction, Instruction::nop(), "fence word {word:#010x}");
+        }
     }
 }

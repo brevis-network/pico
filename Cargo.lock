@@ -89,7 +89,7 @@ dependencies = [
  "rapidhash",
  "ruint",
  "rustc-hash 2.1.2",
- "secp256k1 0.31.1",
+ "secp256k1",
  "serde",
  "sha3 0.11.0",
 ]
@@ -3834,7 +3834,6 @@ dependencies = [
  "p3-koala-bear",
  "p3-symmetric",
  "pico-vm",
- "secp256k1 0.30.0",
  "tiny-keccak",
  "typenum",
 ]
@@ -3882,7 +3881,7 @@ dependencies = [
 [[package]]
 name = "pico-gpu"
 version = "0.1.11"
-source = "git+https://github.com/brevis-network/pico-gpu.git?rev=4c9dc387f33a6dfd80704b1ddfaaf6dd6eee5b44#4c9dc387f33a6dfd80704b1ddfaaf6dd6eee5b44"
+source = "git+https://github.com/brevis-network/pico-gpu.git?rev=81b226c4e618f19741357e70b4449884f7ddb1dc#81b226c4e618f19741357e70b4449884f7ddb1dc"
 
 [[package]]
 name = "pico-gpu-api"
@@ -3968,13 +3967,11 @@ dependencies = [
  "anyhow",
  "bincode",
  "log",
- "pico-aot-dispatch",
  "pico-sdk",
  "pico-vm",
  "reqwest",
  "serde",
  "strum",
- "tracing",
 ]
 
 [[package]]
@@ -4009,6 +4006,7 @@ dependencies = [
  "p3-challenger",
  "p3-field",
  "p3-koala-bear",
+ "p3-symmetric",
  "pico-patch-libs",
  "pico-vm",
  "rand 0.10.2",
@@ -4110,6 +4108,7 @@ dependencies = [
  "rrs-lib",
  "rug",
  "rustc-hash 2.1.2",
+ "secp256k1",
  "serde",
  "serde_json",
  "serde_with",
@@ -5039,33 +5038,13 @@ dependencies = [
 
 [[package]]
 name = "secp256k1"
-version = "0.30.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b50c5943d326858130af85e049f2661ba3c78b26589b8ab98e65e80ae44a1252"
-dependencies = [
- "bitcoin_hashes",
- "rand 0.8.6",
- "secp256k1-sys 0.10.1",
-]
-
-[[package]]
-name = "secp256k1"
 version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c3c81b43dc2d8877c216a3fccf76677ee1ebccd429566d3e67447290d0c42b2"
 dependencies = [
  "bitcoin_hashes",
  "rand 0.9.4",
- "secp256k1-sys 0.11.0",
-]
-
-[[package]]
-name = "secp256k1-sys"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4387882333d3aa8cb20530a17c69a3752e97837832f34f6dccc760e715001d9"
-dependencies = [
- "cc",
+ "secp256k1-sys",
 ]
 
 [[package]]

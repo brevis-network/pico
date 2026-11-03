@@ -264,6 +264,15 @@ impl CudaEvent {
     pub fn completed(&self) -> bool {
         self.status() == CudaEventStatus::Completed
     }
+
+    /// Milliseconds from `start` to this event. Never waits: an event still pending makes it
+    /// return not-ready.
+    pub fn elapsed_ms_since(&self, start: &CudaEvent) -> Result<f32, CudaError> {
+        let mut ms = 0f32;
+        // SAFETY: `&mut ms` is a live local; both handles are live per `new`/`drop`.
+        check(unsafe { cudaEventElapsedTime(&mut ms, start.handle, self.handle) })?;
+        Ok(ms)
+    }
 }
 
 impl Drop for CudaEvent {

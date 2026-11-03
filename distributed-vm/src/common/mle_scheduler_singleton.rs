@@ -120,6 +120,13 @@ pub fn mle_register_chunk(chunk_idx: usize) {
     }
 }
 
+/// [`mle_register_chunk`] with the chunk's estimated proving cost, for cost-ordered dispatch.
+pub fn mle_register_chunk_with_cost(chunk_idx: usize, cost: u64) {
+    if !is_mle_secondary() {
+        get_mle_scheduler().register_chunk_with_cost(chunk_idx, cost);
+    }
+}
+
 /// Emulation finished on THIS machine.
 ///
 /// Local-only by design, and not forwarded: the flag means "no more chunks are coming", which is a
@@ -206,12 +213,12 @@ pub enum MleAcquireResult {
 /// Returns the task **and the chunks the scheduler already considers proven**.
 ///
 /// The second half is not bookkeeping — it is what keeps a two-machine run alive. Each machine
-/// emulates the whole block and stores every chunk's prepared record, but only proves
-/// its share, and a pooled event buffer is released only when a worker finishes a chunk and drops
-/// its record. So the records for chunks the OTHER machine proved are never dropped: the pool
-/// drains, `get_buffer` blocks, emulation stalls, registration stops with it, and both machines sit
-/// idle until the scheduler's 300s "system is broken" timeout. Measured on reth-239: stalled at 61
-/// of 122 chunks against `MLE_EVENT_POOL_SIZE=64`.
+/// emulates the whole block and stores every chunk's prepared record, but only proves its share,
+/// and a record's slot goes back only when a worker finishes its chunk and drops the record. So the
+/// records for chunks the OTHER machine proved are never dropped: the slots run out, the take
+/// waits, emulation stalls, registration stops with it, and both machines sit idle until the
+/// scheduler's 300s "system is broken" timeout. Measured on reth-239: stalled at 61 of 122 chunks
+/// against `MLE_HISTORY_SLOTS=64`.
 ///
 /// FRI avoids this by feeding the same list to `record_store::send_proven_chunks` on every acquire.
 /// MLE keeps its prepared chunks in its own store, so the caller does the eviction; the list is

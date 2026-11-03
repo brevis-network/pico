@@ -619,6 +619,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
+name = "bitcoin-consensus-encoding"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9daa31138eb443d5751b207f3f64154e2bb09cd59960562ccc7a7112be38147f"
+dependencies = [
+ "bitcoin-internals",
+ "hex-conservative 1.3.0",
+ "serde",
+]
+
+[[package]]
+name = "bitcoin-internals"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8bea3a9f0cfece4564e37cb49a38cc245ca5184719e50d7d0dda3268722c4e2"
+
+[[package]]
+name = "bitcoin-io"
+version = "0.1.101"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb5de036369d1ac59d3c1819ebc4d850f89466f5401c571a285b6ed564a4cb78"
+dependencies = [
+ "bitcoin-consensus-encoding",
+]
+
+[[package]]
+name = "bitcoin_hashes"
+version = "0.14.101"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bca4c7abb40c8817d77403c880988cfd484f23ab2365726afb2f798363e2c4a2"
+dependencies = [
+ "bitcoin-io",
+ "hex-conservative 0.2.3",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1801,7 +1837,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "guest-chip-coverage"
+version = "1.0.0"
+dependencies = [
+ "pico-sdk",
+]
+
+[[package]]
 name = "guest-commit-out-of-range"
+version = "1.0.0"
+dependencies = [
+ "pico-sdk",
+]
+
+[[package]]
+name = "guest-standard-io"
 version = "1.0.0"
 dependencies = [
  "pico-sdk",
@@ -1881,6 +1931,24 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "hex-conservative"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db3fef046dca3ca91ee1408a8c1b80ab777e80a4d308d1bf4e7adb3fcb047e08"
+dependencies = [
+ "arrayvec",
+]
+
+[[package]]
+name = "hex-conservative"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "271e0d19bcb473b6675739a2b536076b24a082316cb5199ad918edce10c599e8"
+dependencies = [
+ "arrayvec",
+]
 
 [[package]]
 name = "hex-literal"
@@ -2894,7 +2962,7 @@ version = "1.0.0"
 dependencies = [
  "alloy-sol-types 0.8.26",
  "pico-sdk",
- "secp256k1",
+ "secp256k1 0.29.1",
 ]
 
 [[package]]
@@ -3044,6 +3112,7 @@ dependencies = [
  "p3-challenger",
  "p3-field",
  "p3-koala-bear",
+ "p3-symmetric",
  "pico-patch-libs",
  "pico-vm",
  "rand 0.10.2",
@@ -3134,6 +3203,7 @@ dependencies = [
  "rayon-scan",
  "rrs-lib",
  "rustc-hash",
+ "secp256k1 0.31.1",
  "serde",
  "serde_json",
  "serde_with",
@@ -3752,13 +3822,33 @@ dependencies = [
  "cfg-if",
  "ecdsa 0.16.9 (git+https://github.com/brevis-network/signatures?branch=patch-v1.0.1)",
  "k256 0.13.3",
- "secp256k1-sys",
+ "secp256k1-sys 0.10.0",
+]
+
+[[package]]
+name = "secp256k1"
+version = "0.31.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c3c81b43dc2d8877c216a3fccf76677ee1ebccd429566d3e67447290d0c42b2"
+dependencies = [
+ "bitcoin_hashes",
+ "rand 0.9.2",
+ "secp256k1-sys 0.11.0",
 ]
 
 [[package]]
 name = "secp256k1-sys"
 version = "0.10.0"
 source = "git+https://github.com/brevis-network/rust-secp256k1.git?rev=ad8a4503d1d79fbf00293fd1c5bb5109e6ac2631#ad8a4503d1d79fbf00293fd1c5bb5109e6ac2631"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "secp256k1-sys"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dcb913707158fadaf0d8702c2db0e857de66eb003ccfdda5924b5f5ac98efb38"
 dependencies = [
  "cc",
 ]

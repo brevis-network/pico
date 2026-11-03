@@ -11,14 +11,11 @@ use std::{
     process::{Command, Output},
 };
 
-use pico_cli::{
-    aot_helper::{CACHE_ENV, HELPER_ENV},
-    source::release_has_aot,
-};
+use pico_cli::aot_helper::{CACHE_ENV, HELPER_ENV};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    assert_error, cargo_pico, fib_sha256, from_release, git, output,
+    assert_error, cargo_pico, fib_sha256, from_release, git, output, release_refusal,
     scratch::{scratch_dir, ScratchDir},
     stand_in_pico, FIB_ELF, VERSION,
 };
@@ -278,20 +275,17 @@ fn a_release_entry_is_created_only_for_a_release_with_aot_and_its_tag() {
     );
     let untagged = stand_in_pico(&fixture.dir.join("untagged.git"), None);
 
-    if !release_has_aot() {
+    if let Some(refusal) = release_refusal() {
         let (output, _, stderr) = fixture.run("execute", |command| {
             from_release(command, &tagged);
         });
-        assert_error(&output, &stderr, "the first Pico release with AOT");
+        assert_error(&output, &stderr, refusal);
         assert_eq!(
             fixture.log("cargo"),
             None,
-            "cargo ran for a release without AOT"
+            "cargo ran for a refused release"
         );
-        assert!(
-            !fixture.cache().exists(),
-            "an entry for a release without AOT"
-        );
+        assert!(!fixture.cache().exists(), "an entry for a refused release");
         return;
     }
 
@@ -319,7 +313,8 @@ fn a_cached_release_entry_is_not_checked_again() {
         format!("[package]\nname = \"{}\"\n", package(&release_entry())),
     )
     .expect("the entry's manifest");
-    // A check would fail whichever way the version falls: before AOT, or for the missing tag.
+    // A check would fail whichever way the version falls: before AOT, before the codegen stamp,
+    // or for the missing tag.
     let untagged = stand_in_pico(&fixture.dir.join("untagged.git"), None);
 
     let (output, _, stderr) = fixture.run("prove", |command| {

@@ -147,6 +147,22 @@ fn jit_rules_within_gate<F: Field + PrimeField32>(
     true
 }
 
+/// One AIR's decision under one family's size gate, at debug level on the prover readings' target:
+/// the rule count beside the gate in force, whatever the family's switch says.
+fn log_gate_decision(kind: JitKind, air_name: &str, rules: usize, forced: bool, admitted: bool) {
+    tracing::debug!(
+        target: crate::air_times::TARGET,
+        "[jit-gate] air={air_name} family={} rules={rules} gate=({}) on={} forced={forced} \
+         admitted={admitted}",
+        kind.label(),
+        jit_gate(kind).1,
+        match kind {
+            JitKind::G1 => env_flag("G1_JIT", false),
+            JitKind::Z1 => env_flag("Z1_JIT", false),
+        },
+    );
+}
+
 pub struct AirDataGpu<Fv: Field + PrimeField32> {
     pub interaction_rules: InteractionEvalRules,
     pub interaction_round0: InteractionRound0Rules,
@@ -713,6 +729,13 @@ impl InteractionEvalRules {
             } else {
                 None
             };
+        log_gate_decision(
+            JitKind::G1,
+            air_name,
+            prog.rules.len(),
+            false,
+            g1_src.is_some(),
+        );
         let packed = prog.rules.iter().map(|r| r.encode()).collect_vec();
         let dev_rules = packed.to_device()?;
         let dev_outputs = outputs.to_device()?;
@@ -819,6 +842,16 @@ impl<const BUFFER_VARS: bool> ConstraintOnlyRules<BUFFER_VARS> {
         } else {
             None
         };
+        // Only round 0 has a compiled kernel, so the other instantiation has no decision to log.
+        if BUFFER_VARS {
+            log_gate_decision(
+                JitKind::Z1,
+                air_name,
+                rules.rules.len(),
+                forced,
+                jit_source.is_some(),
+            );
+        }
 
         let encoded_rules = rules.rules.iter().map(|c| c.encode()).collect_vec();
         let d_rules = encoded_rules.to_device()?;

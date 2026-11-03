@@ -51,7 +51,7 @@ impl Default for Poseidon2State {
 
 extern "C" {
     /// Halts the program with the given exit code.
-    pub fn syscall_halt(exit_code: u8) -> !;
+    pub fn syscall_halt(exit_code: u32) -> !;
 
     /// Writes the bytes in the given buffer to the given file descriptor.
     pub fn syscall_write(fd: u32, write_buf: *const u8, nbytes: usize);

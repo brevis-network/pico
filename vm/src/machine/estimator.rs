@@ -15,7 +15,8 @@ use crate::{
         utils::next_power_of_two,
     },
     emulator::riscv::{
-        record::EmulationRecord,
+        history_view::AluOps,
+        record::{AluStream, EmulationRecord},
         syscalls::{precompiles::PrecompileLocalMemory, SyscallCode},
     },
     primitives::consts::{
@@ -129,7 +130,6 @@ pub struct EventSizeCapture<'a> {
     u256_mul: PrecompileEstimator,
 
     total_precompile_local_mem_events: usize,
-    total_precompile_events: usize,
 
     // System events
     pub(crate) num_syscall_events: usize,
@@ -143,10 +143,11 @@ pub struct EventSizeCapture<'a> {
 
 impl<'a> EventSizeCapture<'a> {
     pub fn snapshot(record: &'a EmulationRecord, field: &'a str) -> Self {
+        let recorded = |stream| AluOps::recorded(record, stream).len();
         let mut result = Self {
-            num_lt_events: record.lt_events.len(),
-            num_add_sub_events: record.add_sub_events.len(),
-            num_mul_events: record.mul_events.len(),
+            num_lt_events: recorded(AluStream::Lt),
+            num_add_sub_events: recorded(AluStream::Add) + recorded(AluStream::Sub),
+            num_mul_events: recorded(AluStream::Mul),
             num_program_events: record.program.instructions.len(),
             num_global_lookup_events: record.global_lookup_events.len(),
             num_poseidon2_events: record.poseidon2_events.len(),
@@ -211,9 +212,7 @@ impl<'a> EventSizeCapture<'a> {
         ];
 
         let total_precompile_local_mem_events = precompiles.map(|x| x.local_mem).into_iter().sum();
-        let total_precompile_events = precompiles.map(|x| x.events).into_iter().sum();
 
-        result.total_precompile_events = total_precompile_events;
         result.total_precompile_local_mem_events = total_precompile_local_mem_events;
 
         MemoryLocalChip::<()>::count_extra_records(record, &mut result);

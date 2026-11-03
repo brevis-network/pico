@@ -10,7 +10,9 @@ use crate::{
         emulator::util::align_u64,
         event_types::RvValue,
         syscalls::{
-            precompiles::PrecompileEvent, syscall_context::SyscallContext, Syscall, SyscallCode,
+            host::{Precompile, SyscallHost},
+            precompiles::{assert_dword_aligned_precompile, PrecompileEvent},
+            SyscallCode,
         },
     },
     machine::field::FieldSpecificPoseidon2Config,
@@ -40,8 +42,8 @@ fn covered_dword_range(addr: u64, len: usize) -> (u64, usize, usize) {
     (start, start_word_index, num_dwords)
 }
 
-fn read_word_records_via_dwords(
-    ctx: &mut SyscallContext,
+fn read_word_records_via_dwords<H: SyscallHost>(
+    ctx: &mut H,
     addr: u64,
     len: usize,
 ) -> (Vec<MemoryReadRecord>, Vec<u32>) {
@@ -49,9 +51,7 @@ fn read_word_records_via_dwords(
     let (dword_records, dwords) = ctx.mr_dword_slice(start, num_dwords);
 
     if len > num_dwords {
-        ctx.rt
-            .chunk_split_state
-            .add_syscall_memory_events(len - num_dwords);
+        ctx.add_syscall_memory_events(len - num_dwords);
     }
 
     let mut records = Vec::with_capacity(len);
@@ -68,8 +68,8 @@ fn read_word_records_via_dwords(
     (records, values)
 }
 
-fn write_word_records_via_dwords(
-    ctx: &mut SyscallContext,
+fn write_word_records_via_dwords<H: SyscallHost>(
+    ctx: &mut H,
     addr: u64,
     values: &[u32],
 ) -> Vec<MemoryWriteRecord> {
@@ -90,9 +90,7 @@ fn write_word_records_via_dwords(
     let dword_write_records = ctx.mw_dword_slice(start, &final_dwords);
 
     if values.len() > num_dwords {
-        ctx.rt
-            .chunk_split_state
-            .add_syscall_memory_events(values.len() - num_dwords);
+        ctx.add_syscall_memory_events(values.len() - num_dwords);
     }
 
     let mut sequence_offsets = vec![0usize; num_dwords];
@@ -118,9 +116,9 @@ fn write_word_records_via_dwords(
 }
 
 #[allow(clippy::type_complexity)]
-pub(crate) struct Poseidon2PermuteSyscall<F>(pub(crate) PhantomData<fn(F) -> F>);
+pub struct Poseidon2PermuteSyscall<F>(pub PhantomData<fn(F) -> F>);
 
-impl<F> Syscall for Poseidon2PermuteSyscall<F>
+impl<F> Precompile for Poseidon2PermuteSyscall<F>
 where
     F: PrimeField32 + FieldSpecificPoseidon2Config,
 {
@@ -128,14 +126,14 @@ where
         1
     }
 
-    fn emulate(
+    fn emulate<H: SyscallHost>(
         &self,
-        ctx: &mut SyscallContext,
+        ctx: &mut H,
         syscall_code: SyscallCode,
         arg1: RvValue,
         arg2: RvValue,
     ) -> Option<RvValue> {
-        let clk_init = ctx.clk;
+        let clk_init = ctx.clk();
         let input_memory_ptr = arg1;
         let output_memory_ptr = arg2;
 
@@ -147,8 +145,8 @@ where
         // helpers below align down and track a 4-byte offset, so an unaligned pointer emulated
         // fine and then had no provable trace. Failing here says why; failing in the prover
         // showed up only as an unbalanced bus.
-        SyscallContext::assert_dword_aligned_precompile(input_memory_ptr, "poseidon2 input_ptr");
-        SyscallContext::assert_dword_aligned_precompile(output_memory_ptr, "poseidon2 output_ptr");
+        assert_dword_aligned_precompile(input_memory_ptr, "poseidon2 input_ptr");
+        assert_dword_aligned_precompile(output_memory_ptr, "poseidon2 output_ptr");
 
         let (state_records, state_values) =
             read_word_records_via_dwords(ctx, input_memory_ptr, PERMUTATION_WIDTH);
@@ -182,7 +180,7 @@ where
         let state = F::permutation().permute(state);
 
         // Increment the clk by 1 before writing because we read from memory at start_clk.
-        ctx.clk += 1;
+        ctx.advance_clk(1);
 
         let write_vals: Vec<u32> = state.iter().map(|f| f.as_canonical_u32()).collect();
         let state_write_records =
@@ -200,9 +198,7 @@ where
             local_mem_access: ctx.postprocess(),
         };
 
-        let syscall_event = ctx
-            .rt
-            .syscall_event(clk_init, syscall_code.syscall_id(), arg1, arg2);
+        let syscall_event = ctx.syscall_event(clk_init, syscall_code.syscall_id(), arg1, arg2);
         ctx.record_mut().add_precompile_event(
             syscall_code,
             syscall_event,

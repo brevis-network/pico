@@ -1,4 +1,5 @@
 pub mod consts;
+pub mod layout;
 pub mod poseidon2;
 #[cfg(test)]
 mod poseidon2_kat;

@@ -1,4 +1,3 @@
-use crate::types::{BlockClock, NextStep};
 use pico_vm::{
     emulator::riscv::chunk_split::{maybe_debug_split_snapshot, should_check_fast},
     primitives::consts::CHUNK_CLK_START,
@@ -37,7 +36,11 @@ impl AotEmulatorCore {
                 &self.chunk_split_config,
             );
             self.chunk_split_state.clear();
-            self.current_chunk = self.current_chunk.wrapping_add(1);
+            self.cut_emitted_chunk();
+            self.current_chunk = self
+                .current_chunk
+                .checked_add(1)
+                .expect("the chunk counter fits u32");
             self.clk = CHUNK_CLK_START;
             self.batch_chunks_emulated = self.batch_chunks_emulated.wrapping_add(1);
             if self.batch_chunk_target > 0 && self.batch_chunks_emulated >= self.batch_chunk_target
@@ -81,7 +84,9 @@ impl AotEmulatorCore {
         (self.batch_stop || sub_yield) && self.pc != 0
     }
 
-    /// Predict if a block can fit in current chunk without crossing a split boundary.
+    /// Predict if a block can fit in current chunk without crossing a split boundary, and, in a
+    /// replay, without running past the replay's target: `insn_count` bounds the instructions the
+    /// block runs, so one that fits ends at or before it.
     #[inline(always)]
     pub fn can_fit_block(
         &self,
@@ -91,38 +96,15 @@ impl AotEmulatorCore {
         reg_write_mask: u32,
     ) -> bool {
         debug_assert_eq!(CLOCK_INCREMENT_PER_INSN, 4);
-        self.chunk_split_state.can_fit_block(
-            self.clk,
-            insn_count,
-            mem_rw_exact,
-            non_register_global_lookup_base_max,
-            reg_write_mask,
-            &self.chunk_split_config,
-        )
-    }
-
-    /// Finalize a block and check for yield.
-    #[inline(always)]
-    pub fn finalize_block(
-        &mut self,
-        clock: &mut BlockClock,
-        next: NextStep,
-    ) -> Result<NextStep, String> {
-        clock.flush_into(self);
-        self.check_chunk_boundary();
-        if self.should_yield() {
-            Ok(NextStep::Dynamic(self.pc))
-        } else {
-            Ok(next)
-        }
-    }
-
-    /// Handle block failure with clock flush.
-    #[inline(always)]
-    pub fn fail_block(&mut self, clock: &mut BlockClock, err: String) -> Result<NextStep, String> {
-        clock.flush_into(self);
-        self.check_chunk_boundary();
-        Err(err)
+        self.insn_count + u64::from(insn_count) <= self.replay_target
+            && self.chunk_split_state.can_fit_block(
+                self.clk,
+                insn_count,
+                mem_rw_exact,
+                non_register_global_lookup_base_max,
+                reg_write_mask,
+                &self.chunk_split_config,
+            )
     }
 }
 
@@ -176,6 +158,15 @@ mod tests {
             !emu.chunk_split_state.commit_in_flight,
             "the cut clears the flag"
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "the chunk counter fits u32")]
+    fn a_cut_past_the_last_chunk_number_is_refused() {
+        let mut emu = test_emu();
+        emu.current_chunk = u32::MAX;
+        emu.clk = 256;
+        emu.check_chunk_boundary();
     }
 
     #[test]
@@ -284,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn can_fit_block_rejects_superblock_aggregate_crossing() {
+    fn can_fit_block_rejects_multi_instruction_aggregate_crossing() {
         let mut emu = test_emu();
         emu.chunk_split_state.num_memory_read_write_events = 2;
         emu.chunk_split_state.num_global_lookup_base = 1;

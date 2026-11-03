@@ -26,10 +26,10 @@ use cudart::{
 use itertools::Itertools;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
 #[cfg(feature = "cuda")]
 use pico_gpu_api::cuda_byte_generate_preprocessed;
 use std::borrow::BorrowMut;
+use tracing::error;
 #[cfg(feature = "cuda")]
 use tracing::info;
 
@@ -75,21 +75,26 @@ impl<F: PrimeField32> ChipBehavior<F> for ByteChip<F> {
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
         let mut values = vec![F::ZERO; NUM_BYTE_MULT_COLS * NUM_ROWS];
 
-        // Convert HashMap entries to Vec for parallel iteration
-        let lookups: Vec<_> = input.byte_lookups.iter().collect();
-
-        values
-            .par_chunks_mut(NUM_BYTE_MULT_COLS)
-            .enumerate()
-            .for_each(|(row_idx, row)| {
-                for (lookup, mult) in lookups.iter() {
-                    if row_idx == byte_lookup_row(lookup) {
-                        let cols: &mut ByteMultCols<F> = row.borrow_mut();
-                        let index = lookup.opcode as usize;
-                        cols.multiplicities[index] += F::from_usize(**mult);
-                    }
-                }
-            });
+        let (rows, _) = values.as_chunks_mut::<NUM_BYTE_MULT_COLS>();
+        let (mut dropped, mut first_dropped) = (0usize, None);
+        for (lookup, mult) in &input.byte_lookups {
+            let Some(row) = rows.get_mut(byte_lookup_row(lookup)) else {
+                dropped += 1;
+                first_dropped.get_or_insert(lookup);
+                continue;
+            };
+            let cols: &mut ByteMultCols<F> = row.as_mut_slice().borrow_mut();
+            cols.multiplicities[lookup.opcode as usize] += F::from_usize(*mult);
+        }
+        // A `BitRange` value wider than its width can land past the table. It stays uncounted,
+        // so the byte bus fails to balance.
+        if let Some(lookup) = first_dropped {
+            error!(
+                dropped,
+                ?lookup,
+                "byte lookups past the table are not counted"
+            );
+        }
 
         RowMajorMatrix::new(values, NUM_BYTE_MULT_COLS)
     }

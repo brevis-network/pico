@@ -29,10 +29,7 @@ use crate::{
         syscall::SyscallChip,
     },
     compiler::riscv::program::Program,
-    emulator::{
-        record::RecordBehavior,
-        riscv::{record::EmulationRecord, syscalls::SyscallCode},
-    },
+    emulator::riscv::{record::EmulationRecord, syscalls::SyscallCode},
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::chip::ChipBehavior,
     primitives::consts::{LOCAL_MEMORY_DATAPAR, RISCV_POSEIDON2_DATAPAR},
@@ -179,14 +176,6 @@ pub enum RiscvShapeError {
     PreprocessedShapeError,
     #[error("Preprocessed shape already fixed")]
     PreprocessedShapeAlreadyFixed,
-    #[error("no shape found {0:?}")]
-    ShapeError(HashMap<String, usize>),
-    #[error("Preprocessed shape missing")]
-    PreprocessedShapeMissing,
-    #[error("Shape already fixed")]
-    ShapeAlreadyFixed,
-    #[error("Precompile not included in allowed shapes {0:?}")]
-    PrecompileNotIncluded(HashMap<String, usize>),
 }
 
 // helper functions
@@ -261,20 +250,6 @@ fn filter_shapes<F: FieldSpecificPoseidon2Config>(
             _ => false,
         }
     })
-}
-
-fn modify_stats_with_log2(stats: &HashMap<String, usize>) -> HashMap<String, usize> {
-    stats
-        .iter()
-        .map(|(key, &value)| {
-            let log_value = if value > 0 {
-                (value as f64).log2().ceil() as usize
-            } else {
-                0 // log2(0) is undefined; handle it as 0
-            };
-            (key.clone(), log_value)
-        })
-        .collect()
 }
 
 fn add_none_if_missing(shapes: &mut [RiscvShapeSpec]) {
@@ -427,160 +402,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
         Some(shape)
     }
 
-    /// Padding the shape of the proof.
-    pub fn padding_shape(&self, record: &mut EmulationRecord) -> Result<(), RiscvShapeError> {
-        debug!("-------------RISCV Padding Shape-------------");
-        if record.program.preprocessed_shape.is_none() {
-            return Err(RiscvShapeError::PreprocessedShapeMissing);
-        }
-        if record.shape.is_some() {
-            return Err(RiscvShapeError::ShapeAlreadyFixed);
-        }
-
-        // Set the shape of the chips with preprocessed shapes to match the preprocessed shape from the
-        // program.
-        record.shape.clone_from(&record.program.preprocessed_shape);
-
-        // If cpu is included, try to fix the shape as a riscv.
-        if !record.cpu_events.is_empty() {
-            // Get the heights of the core airs in the record.
-            let heights = RiscvChipType::<F>::riscv_heights(record);
-
-            // Try to find a shape within the included shapes.
-            for (i, allowed_log_heights) in self.allowed_log_heights.iter().enumerate() {
-                if let Some(shape) =
-                    Self::find_shape_from_allowed_heights(&heights, allowed_log_heights)
-                {
-                    debug!(
-                        "Chunk Lifted: Index={}, Cluster={}",
-                        record.public_values.chunk, i
-                    );
-                    for (chip_name, height) in heights.iter() {
-                        if shape.inner.contains_key(chip_name) {
-                            debug!(
-                                "Chip {:<20}: {:<3} -> {:<3}, height: {}",
-                                chip_name,
-                                log2_ceil_usize(*height),
-                                shape.inner[chip_name],
-                                height
-                            );
-                        } else if *height != 0 {
-                            warn!(
-                                "Unexpected: Chip {} not found in shape, height: {}, log size: {}",
-                                chip_name,
-                                height,
-                                log2_ceil_usize(*height)
-                            );
-                        }
-                    }
-
-                    record.shape.as_mut().unwrap().extend(shape);
-                    return Ok(());
-                }
-            }
-
-            // No shape found, so return an error.
-            let log2_stats = modify_stats_with_log2(&record.stats());
-            return Err(RiscvShapeError::ShapeError(log2_stats));
-        }
-
-        // If the record is a global memory init/finalize record, try to fix the shape as such.
-        if !record.memory_initialize_events.is_empty() || !record.memory_finalize_events.is_empty()
-        {
-            let heights = RiscvChipType::<F>::get_memory_init_final_heights(record);
-            let shape =
-                Self::find_shape_from_allowed_heights(&heights, &self.memory_allowed_log_heights)
-                    .ok_or(RiscvShapeError::ShapeError(modify_stats_with_log2(
-                    &record.stats(),
-                )))?;
-            for (chip_name, height) in heights.iter() {
-                if shape.inner.contains_key(chip_name) {
-                    debug!(
-                        "Chip {:<20}: {:<3} -> {:<3}",
-                        chip_name,
-                        log2_ceil_usize(*height),
-                        shape.inner[chip_name],
-                    );
-                } else {
-                    warn!(
-                        "Unexpected: Chip {} not found in shape, log size: {}",
-                        chip_name,
-                        log2_ceil_usize(*height)
-                    );
-                }
-            }
-            record.shape.as_mut().unwrap().extend(shape);
-            return Ok(());
-        }
-
-        // Try to pad the shape as a precompile record.
-        for (chip_name, (mem_events_per_row, allowed_log_heights)) in
-            self.precompile_allowed_log_heights.iter()
-        {
-            if let Some((precompile_events, mem_events, num_global_events)) =
-                RiscvChipType::<F>::get_precompile_heights(chip_name, record)
-            {
-                for allowed_log_height in allowed_log_heights {
-                    if precompile_events <= (1usize << allowed_log_height) {
-                        for shape in self.get_precompile_shapes(
-                            chip_name.clone(),
-                            *mem_events_per_row,
-                            *allowed_log_height,
-                        ) {
-                            let mem_events_height = shape[2].1;
-                            let global_events_height = shape[3].1;
-                            if mem_events <= (1 << mem_events_height) * LOCAL_MEMORY_DATAPAR
-                                // Strict: the Global trace's last row must be padding.
-                                && num_global_events < (1 << global_events_height)
-                            {
-                                debug!(
-                                    "Chunk Lifted: Precompile={}, AllowedLogHeight={}",
-                                    chip_name, allowed_log_height
-                                );
-
-                                let old_height_log = log2_ceil_usize(precompile_events);
-                                let new_height_log = allowed_log_height;
-
-                                let old_mem_events_log =
-                                    log2_ceil_usize(mem_events.div_ceil(LOCAL_MEMORY_DATAPAR));
-                                let new_mem_events_log = mem_events_height;
-
-                                let old_global_events_log = log2_ceil_usize(num_global_events + 1);
-                                let new_global_events_log = global_events_height;
-
-                                debug!(
-                                    "Chip {:<20}: precompile height: {:<3} -> {:<3}",
-                                    chip_name, old_height_log, new_height_log
-                                );
-                                debug!(
-                                    "Chip {:<20}: mem local height  : {:<3} -> {:<3}",
-                                    chip_name, old_mem_events_log, new_mem_events_log
-                                );
-                                debug!(
-                                    "Chip {:<20}: global height: {:<3} -> {:<3}",
-                                    chip_name, old_global_events_log, new_global_events_log
-                                );
-
-                                record.shape.as_mut().unwrap().extend(shape);
-                                return Ok(());
-                            }
-                        }
-                    }
-                }
-                warn!(
-                    "Cannot find shape for precompile {:?}, precompile_events {:?}, and mem events {:?}",
-                    chip_name, precompile_events, mem_events
-                );
-                return Err(RiscvShapeError::ShapeError(modify_stats_with_log2(
-                    &record.stats(),
-                )));
-            }
-        }
-        Err(RiscvShapeError::PrecompileNotIncluded(
-            modify_stats_with_log2(&record.stats()),
-        ))
-    }
-
     pub fn get_precompile_shapes(
         &self,
         chip_name: String,
@@ -600,9 +421,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                     + ((1 << allowed_log_height) as usize)
                         .div_ceil(precompile_rows_per_event(&chip_name));
 
-                // First five entries must stay in this order: callers in
-                // `padding_shape` index `shape[2]` (memory_local) and `shape[3]`
-                // (global) directly.
                 let mut shape = vec![
                     (chip_name.clone(), allowed_log_height),
                     (

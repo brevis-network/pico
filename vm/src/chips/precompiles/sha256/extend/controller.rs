@@ -1,4 +1,6 @@
 use super::ShaExtendControlChip;
+#[cfg(feature = "cuda")]
+use crate::mle::spans::device;
 use crate::{
     chips::{
         chips::byte::event::ByteRecordBehavior,
@@ -211,6 +213,7 @@ impl<F: PrimeField32> GpuChipBehavior<F> for ShaExtendControlChip<F> {
 
         let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
         info!("[precompile-sha256-extend-control-chip] gpu_generate_extra_record_and_main on GPU");
+        let kernels = device::start(stream);
         unsafe {
             cuda_precompile_sha256_extend_control_generate_extra_record_and_main(
                 d_events.as_ptr() as *const _,
@@ -225,10 +228,11 @@ impl<F: PrimeField32> GpuChipBehavior<F> for ShaExtendControlChip<F> {
 
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
+        device::launched(kernels, stream);
+        device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
+        device::wait(main_stream).unwrap();
 
         TraceData::Gpu(num_cols_per_row, d_trace)
     }

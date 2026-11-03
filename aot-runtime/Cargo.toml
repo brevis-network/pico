@@ -29,8 +29,6 @@ once_cell.workspace = true
 halo2curves.workspace = true
 bls12_381.workspace = true
 # AOT precompile backends.
-# libsecp256k1 (battle-tested, safegcd vartime inversion) for the hot secp256k1 add/double precompiles.
-secp256k1 = "0.30"
 ark-ff = "0.5"
 ark-secp256k1 = "0.5"
 ark-bn254 = "0.5"

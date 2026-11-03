@@ -1,10 +1,11 @@
 //! MLE/WHIR single-node orchestration (KoalaBear).
 //!
 //! In-process pipeline:
-//! - emulation runs `emulate_snapshot_pipeline` with `bench_riscv_ops` opts; it self-initializes
+//! - emulation runs `emulate_snapshot_pipeline` with `bench_riscv_ops` opts, its replay workers on
+//!   the engine [`replay_workers`] resolves at startup (`MLE_REPLAY_WORKERS`); it self-initializes
 //!   the shared snapshot memory-pool/recycler (sized via `MEMORY_POOL_SIZE`) and streams records
-//!   to a preparer thread. (Distinct from the CPU/ALU event-buffer pool this module pre-sizes via
-//!   `MLE_EVENT_POOL_SIZE`.) `PICO_GPU_MEM=5090` selects the precompile-split thresholds;
+//!   to a preparer thread. (Distinct from the bound on records held at once, which this module
+//!   sets from `MLE_HISTORY_SLOTS`.) `PICO_GPU_MEM=5090` selects the precompile-split thresholds;
 //! - a [`GlobalScheduler`] hands chunk indices to a worker pool. Without `--step combine` it runs
 //!   in no-combine mode and completes by count (chunk proofs are terminal); with it, the scheduler
 //!   also runs its aggregation tree — convert proofs are reported into its proof tree, adjacent
@@ -39,13 +40,11 @@ use pico_vm::{
     },
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
-        opts::EmulatorOpts,
+        opts::{EmulatorOpts, ReplayWorkers},
         record::RecordBehavior,
         riscv::{
-            alu_event_pool::size_alu_event_buffer_pool,
-            cpu_event_pool::size_cpu_event_buffer_pool,
-            event_pool::{pooled_event_buffers, HostAllocFlags, Pinning},
             record::EmulationRecord,
+            record_slots::{init_record_slots, record_slots_from_env},
         },
         stdin::EmulatorStdin,
     },
@@ -69,6 +68,7 @@ use watch::SpawnWatched;
 #[cfg(feature = "cuda")]
 use pico_vm::mle::machine::{
     apex::MleApexVerifier,
+    combine::CombineMachine,
     convert::GpuConvertMachine,
     exe::RiscvVmVk,
     vk_map::{pinned_root_from_env, MleVkMap},
@@ -81,8 +81,8 @@ use crate::common::{
     machine_role::{get_worker_label, set_mle_chunk_assignment_defaults},
     mle_scheduler_singleton::{
         get_mle_scheduler, is_mle_secondary, mle_abort_run, mle_acquire_task_unified_async,
-        mle_finalize_emulation, mle_register_chunk, mle_report_chunk_terminal,
-        mle_report_gcs_digest, reset_mle_scheduler, MleAcquireResult,
+        mle_finalize_emulation, mle_register_chunk, mle_register_chunk_with_cost,
+        mle_report_chunk_terminal, mle_report_gcs_digest, reset_mle_scheduler, MleAcquireResult,
     },
 };
 // The combine-preparer feed names the task type; on CPU builds the dispatcher's combine arm is
@@ -284,9 +284,9 @@ fn keeps_initial_gcs_seed() -> bool {
 /// Both machines emulate the whole block — the primary because it registers every chunk with the
 /// scheduler, the secondary because records cannot be shipped — but each proves only its share,
 /// so preparing the other's chunks is work whose only consumer is the eviction that throws it
-/// away. Worse, a prepared chunk pins an event buffer until something drops it, and the other
+/// away. Worse, a prepared chunk holds its record's slot until something drops it, and the other
 /// machine's half is dropped only once that machine proves it and reports back: that is what
-/// coupled emulation to the peer and made a 64-buffer pool stall the emulator.
+/// coupled emulation to the peer and made a bound of 64 records stall the emulator.
 ///
 /// Deliberately routed through the scheduler's own predicate rather than re-deriving the split.
 /// If this said "not mine" about a chunk the scheduler later handed us, `take_prepared_chunk`
@@ -551,6 +551,124 @@ mod recursion_lane_tests {
     }
 }
 
+/// The engine the snapshot pipeline's replay workers run, once per process.
+/// `MLE_REPLAY_WORKERS=aot` replays each chunk on the AOT-compiled guest, `=interpreter` on the
+/// interpreter. Unset or empty, it is `interpreter`: the AOT replay workers measured slower than
+/// the interpreter's on the production launch, so they are opt-in. Either engine writes the same
+/// records through the same history sink into the same history slots; only the replay's speed
+/// differs.
+///
+/// Both binaries call this right after registering the AOT program, so a value the process cannot
+/// honour stops it before any setup: `aot` with no program registered, and any word outside the
+/// two. Neither falls back, since a fallback would run under the name of the arm that was asked
+/// for. The one `bench` line it writes names the arm in a log filtered to that target, and later
+/// blocks of the same process read the same engine back without a second one. What each block's
+/// replay actually ran is the pipeline's own `bench` line at the end of its emulation
+/// (`emulate_snapshot_pipeline_with`): the engine, the chunks and, for AOT workers, the compiled
+/// blocks they entered.
+pub fn replay_workers() -> ReplayWorkers {
+    static RESOLVED: std::sync::OnceLock<ReplayWorkers> = std::sync::OnceLock::new();
+    *RESOLVED.get_or_init(|| {
+        let workers = replay_workers_from(
+            std::env::var("MLE_REPLAY_WORKERS").ok().as_deref(),
+            aot_program_registered(),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        info!(
+            target: "bench",
+            "MLE replay workers: {}",
+            match workers {
+                ReplayWorkers::Aot => "aot",
+                ReplayWorkers::Interpreter => "interpreter",
+            }
+        );
+        workers
+    })
+}
+
+/// Whether this process holds an AOT program for both the snapshot thread and the replay workers;
+/// `pico_aot_runtime::register` installs the two factories together or neither.
+#[cfg(feature = "aot-emulator")]
+fn aot_program_registered() -> bool {
+    pico_vm::emulator::aot::is_aot_factory_registered()
+        && pico_vm::emulator::aot::is_aot_replay_factory_registered()
+}
+
+/// Without `aot-emulator` no AOT program can register.
+#[cfg(not(feature = "aot-emulator"))]
+fn aot_program_registered() -> bool {
+    false
+}
+
+/// Split from the read for the same reason as [`recursion_lane_from`]: the refusals are this
+/// switch's whole interface, and a test that set the variable would race the others in-process.
+fn replay_workers_from(raw: Option<&str>, aot_registered: bool) -> Result<ReplayWorkers, String> {
+    let word = raw.map(|raw| raw.trim().to_ascii_lowercase());
+    match word.as_deref() {
+        None | Some("") | Some("interpreter") => Ok(ReplayWorkers::Interpreter),
+        Some("aot") if aot_registered => Ok(ReplayWorkers::Aot),
+        Some("aot") => Err(
+            "MLE_REPLAY_WORKERS=aot, and this process registered no AOT program: it was built \
+             without aot-emulator, or the registration was refused (logged above); set \
+             MLE_REPLAY_WORKERS=interpreter"
+                .into(),
+        ),
+        Some(_) => Err(format!(
+            "MLE_REPLAY_WORKERS={:?} names no replay engine: expected aot or interpreter",
+            raw.unwrap_or_default()
+        )),
+    }
+}
+
+#[cfg(test)]
+mod replay_workers_tests {
+    use super::replay_workers_from;
+    use pico_vm::emulator::opts::ReplayWorkers;
+
+    #[test]
+    fn unset_and_empty_are_the_interpreter() {
+        for raw in [None, Some(""), Some("  ")] {
+            for registered in [true, false] {
+                assert_eq!(
+                    replay_workers_from(raw, registered),
+                    Ok(ReplayWorkers::Interpreter)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn each_engine_by_name() {
+        for registered in [true, false] {
+            for raw in ["interpreter", " Interpreter "] {
+                assert_eq!(
+                    replay_workers_from(Some(raw), registered),
+                    Ok(ReplayWorkers::Interpreter)
+                );
+            }
+        }
+        for raw in ["aot", " AOT "] {
+            assert_eq!(replay_workers_from(Some(raw), true), Ok(ReplayWorkers::Aot));
+        }
+    }
+
+    #[test]
+    fn aot_without_a_registered_program_refuses() {
+        let err = replay_workers_from(Some("aot"), false).unwrap_err();
+        assert!(err.contains("registered no AOT program"), "{err}");
+    }
+
+    #[test]
+    fn any_other_word_refuses() {
+        for raw in ["bogus", "interp", "1", "0", "true", "on"] {
+            for registered in [true, false] {
+                let err = replay_workers_from(Some(raw), registered).unwrap_err();
+                assert!(err.contains(&format!("{raw:?}")), "{err}");
+            }
+        }
+    }
+}
+
 /// One item of GPU prove work, taken off one queue shared by every card, FIFO, no polling.
 ///
 /// Which thread does the taking is what [`recursion_lane_enabled`] switches: the card's riscv lane
@@ -762,12 +880,77 @@ struct RiscvLane {
     convert_prebuild: Option<Arc<ConvertPrebuild>>,
 }
 
+/// When each prepared chunk was registered with the scheduler, kept only while the prover readings
+/// are switched on, so its pick-up can say how long it waited.
+static READY_AT: std::sync::LazyLock<DashMap<usize, Instant>> =
+    std::sync::LazyLock::new(DashMap::new);
+
+/// Whether the prover readings are switched on; a build without `cuda` has none to take.
+fn readings_on() -> bool {
+    #[cfg(feature = "cuda")]
+    return pico_vm::mle::spans::device::switched_on();
+    #[cfg(not(feature = "cuda"))]
+    false
+}
+
+#[cfg(feature = "cuda")]
+use pico_vm::mle::spans::device::TARGET as READINGS_TARGET;
+#[cfg(not(feature = "cuda"))]
+const READINGS_TARGET: &str = "gpu_tracegen";
+
+/// How many chunks are still on the shared chunk lane as a riscv lane takes one, when the prover
+/// readings are switched on.
+fn lane_depth(items: &crossbeam::channel::Receiver<ProverItem>) -> Option<usize> {
+    readings_on().then(|| items.len())
+}
+
+/// One pick-up from the shared chunk lane: what is still queued on the lane and in the scheduler's
+/// cost-ordered queue, what was taken and its cost key, and how long it waited since registration.
+fn log_pickup(chunk_idx: usize, worker_id: &str, depth: usize, chunk: &PreparedChunk) {
+    let waited_us = READY_AT
+        .remove(&chunk_idx)
+        .map(|(_, t)| t.elapsed().as_micros().to_string());
+    info!(
+        target: READINGS_TARGET,
+        "[queue-pickup] chunk={chunk_idx} pv_chunk={} lane={worker_id} queue.depth={depth} \
+         queue.scheduler_depth={} queue.kind={} cost={} wait_us={}",
+        chunk.record.chunk_index().saturating_sub(1),
+        get_mle_scheduler().queued_chunks(),
+        if chunk.record.is_cpu_chunk {
+            "cpu"
+        } else {
+            "deferred"
+        },
+        chunk.cost,
+        waited_us.as_deref().unwrap_or("unknown"),
+    );
+}
+
+/// The shared chunk lane's capacity: one per card, or `MLE_CHUNK_CHANNEL_CAPACITY` when set. Zero
+/// would make the lane a rendezvous, which the riscv lane's "is a chunk waiting" test cannot see.
+fn chunk_channel_capacity(cards: usize) -> usize {
+    match pico_vm::mle::env_u32("MLE_CHUNK_CHANNEL_CAPACITY") {
+        None => cards,
+        Some(0) => {
+            warn!("MLE_CHUNK_CHANNEL_CAPACITY=0 would make the chunk lane a rendezvous; using {cards}");
+            cards
+        }
+        Some(capacity) => {
+            info!(target: "bench", "[chunk-lane] capacity={capacity} (MLE_CHUNK_CHANNEL_CAPACITY)");
+            capacity as usize
+        }
+    }
+}
+
 impl RiscvLane {
     /// Prove one chunk and hand the proof on. `worker_id` is the calling lane's, so the `[bench]`
     /// lines are keyed on the thread that actually did the work under either shape.
-    fn prove(&self, chunk_idx: usize, worker_id: &str) {
+    fn prove(&self, chunk_idx: usize, worker_id: &str, depth: Option<usize>) {
         let _b = spans::busy(WorkKind::ProveRiscv, Some(chunk_idx as u32));
         let chunk = take_prepared_chunk(&self.store, chunk_idx);
+        if let Some(depth) = depth {
+            log_pickup(chunk_idx, worker_id, depth, &chunk);
+        }
         let t = Instant::now();
         // Unlike the convert arm, this timer CANNOT exclude the debug-only verify: `verify` is a
         // parameter of `prove`, not a separate call, so hoisting it out would mean changing the
@@ -1588,8 +1771,8 @@ pub fn run_step(
 /// twelve of them leave the memory pool with nothing to trim and a 16 GiB allocation on a heavy
 /// block fails outright — block 24600825 aborts every time at 6/12/7 and completes every time at
 /// 1/1/1. The riscv pool comes down with them for a different reason: its lane is unbounded and
-/// `prepare_chunk` takes no device memory, so it never held ctxs, but one preparer already keeps a
-/// single prover lane fed.
+/// `prepare_chunk_shaped` takes no device memory, so it never held ctxs, but one preparer already
+/// keeps a single prover lane fed.
 ///
 /// Do not re-derive these from a measured prepare/prove ratio. That was tried: a four-card A/B put
 /// the ratio-matched sizes 10-19% behind 6/12/7, because the ratio moves with every guest rebuild.
@@ -1603,6 +1786,103 @@ fn preparer_pool(kind: &str, env: &str, multi_card_size: usize, cards: usize) ->
     // which sizes ran cannot be read against another arm's.
     info!("MLE {kind} preparers: {n} ({cards} card(s))");
     n
+}
+
+/// Keygen the root's shape for acceptance as soon as the final combine node's children are known,
+/// under the root's own preparation and GPU prove — **default ON**. `MLE_ROOT_EARLY_KEYGEN=0`
+/// keygens it inside acceptance, after the prove, as before. The keygen's inputs and acceptance's
+/// checks are the same either way; only when the keygen runs moves.
+#[cfg(feature = "cuda")]
+fn root_early_keygen_enabled() -> bool {
+    pico_vm::mle::env_opt_out("MLE_ROOT_EARLY_KEYGEN")
+}
+
+/// The CPU machine root acceptance verifies on, before any shape is registered.
+#[cfg(feature = "cuda")]
+fn acceptance_machine(vm_vk: RiscvVmVk, vk_map: Option<&Arc<MleVkMap>>) -> CombineMachine {
+    let mut machine = CombineMachine::new(
+        pico_vm::mle::recursion_params_with_100_bits_security(),
+        vm_vk,
+        vk_map.is_some(),
+    );
+    if let Some(map) = vk_map {
+        machine.set_vk_map(Arc::clone(map));
+    }
+    machine
+}
+
+/// One block's early root keygen: started by the combine preparer that prepares the final node,
+/// taken by acceptance.
+///
+/// The thread derives the child layouts exactly as `prepare_node` derives the root's (the same
+/// function on the same children, in order), builds the machine acceptance would build, and
+/// registers the shape on it. Acceptance then registers the root's own layouts on that machine as
+/// it always has, which finds the shape instead of keygenning it. A block that never reaches
+/// acceptance drops the handle; the thread finishes its keygen, holds no lock or channel, and its
+/// machine goes with it.
+#[cfg(feature = "cuda")]
+#[derive(Clone)]
+struct EarlyRootKeygen {
+    slot: Arc<std::sync::Mutex<Option<thread::JoinHandle<CombineMachine>>>>,
+    vm_vk: RiscvVmVk,
+    vk_map: Option<Arc<MleVkMap>>,
+}
+
+#[cfg(feature = "cuda")]
+impl EarlyRootKeygen {
+    fn new(vm_vk: RiscvVmVk, vk_map: Option<Arc<MleVkMap>>) -> Self {
+        Self {
+            slot: Arc::new(std::sync::Mutex::new(None)),
+            vm_vk,
+            vk_map,
+        }
+    }
+
+    /// Start the keygen for the final node `[start, end]` with these children, in order.
+    fn start(&self, children: Vec<ProofWithVk>, start: usize, end: usize) {
+        let (vm_vk, vk_map) = (self.vm_vk.clone(), self.vk_map.clone());
+        let handle = thread::Builder::new()
+            .name("mle-root-keygen".into())
+            .spawn(move || {
+                info!("MLE root keygen: start (early, node [{start},{end}])");
+                let t = Instant::now();
+                let layouts: Vec<_> = children
+                    .iter()
+                    .map(|(proof, vk)| {
+                        pico_vm::mle::machine::recursion::extract_recursion_vk_layout(
+                            vk,
+                            Some(proof),
+                        )
+                    })
+                    .collect();
+                let mut machine = acceptance_machine(vm_vk, vk_map.as_ref());
+                machine
+                    .register_shape(&layouts, /* is_complete = */ true)
+                    .unwrap_or_else(|e| panic!("{e}"));
+                info!(
+                    "MLE root keygen: done in {:.3}s (early, node [{start},{end}])",
+                    t.elapsed().as_secs_f64()
+                );
+                machine
+            })
+            .expect("spawn mle-root-keygen");
+        let prev = self
+            .slot
+            .lock()
+            .expect("early root keygen mutex poisoned")
+            .replace(handle);
+        assert!(
+            prev.is_none(),
+            "two final combine nodes were prepared — the tree collapsed twice"
+        );
+    }
+
+    fn take(&self) -> Option<thread::JoinHandle<CombineMachine>> {
+        self.slot
+            .lock()
+            .expect("early root keygen mutex poisoned")
+            .take()
+    }
 }
 
 /// The block-independent half of the pipeline: the compiled program and the per-card machines.
@@ -1782,6 +2062,8 @@ fn run_pipeline(
     let verify = env_flag("MLE_VERIFY");
     // Negative-test hook: tamper one cross-chunk pass-through cell so `Σ gcs != 0`.
     let corrupt_memory = env_flag("CORRUPT_MEMORY");
+    // The binaries resolved and logged it at startup; every block of the process reads it back.
+    let replay = replay_workers();
 
     // Time each setup stage (program load / compile / pools) so per-run variance
     // (disk / page-cache effects) is attributable from the bench log.
@@ -1822,73 +2104,34 @@ fn run_pipeline(
     crate::common::transfer_stats::reset();
     let scheduler: Arc<GlobalScheduler<SchedulerProof>> = get_mle_scheduler();
     scheduler.set_no_combine(!with_combine);
+    // Largest riscv chunk first when chunks queue up, so that the cheap ones are what is left to
+    // even out the cards' ends; `MLE_CHUNK_ORDER=fifo` keeps arrival order instead.
+    scheduler.set_chunk_order_by_cost(!matches!(
+        std::env::var("MLE_CHUNK_ORDER").as_deref(),
+        Ok("fifo")
+    ));
     let store: Arc<DashMap<usize, PreparedChunk>> = Arc::new(DashMap::new());
 
     // Per-chunk prove timing (pure-prove throughput), independent of emulate/transport.
     let prove_nanos = Arc::new(AtomicU64::new(0));
     let prove_count = Arc::new(AtomicUsize::new(0));
 
-    // Event buffer pools must exist before emulation starts. Streaming lowers the requirement
-    // from "≥ total chunk count" (collect-all held every record's pooled buffer at once — a pool
-    // smaller than the chunk count deadlocked) to "≥ in-flight chunks": when emulation runs
-    // ahead of proving, `get_buffer` blocking on an empty pool is natural backpressure, released
-    // as workers finish chunks and drop their records.
-    //
-    // The embedded entry states its size; the CLI reads `MLE_EVENT_POOL_SIZE`. Sized rather than
-    // initialised-if-absent, so pools a host emulation left empty earlier in the process (growable
-    // mode) do not leave this run unbounded; the scope keeps such an emulation out while it runs.
-    let _pooled = pooled_event_buffers();
-    let pool_size = match &cfg.embedded {
-        Some(embedded) => embedded.event_pool_size.get(),
-        None => std::env::var("MLE_EVENT_POOL_SIZE")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(256),
+    // The bound on records held at once must be set before emulation starts. Streaming lowers the
+    // requirement from "≥ total chunk count" (collect-all held every record at once — a bound
+    // below the chunk count deadlocked) to "≥ in-flight chunks": when emulation runs ahead of
+    // proving, a record's slot take waiting on a full bound is natural backpressure, released as
+    // workers finish chunks and drop their records. Each slot is a chunk's pinned history, the
+    // upload's source, so the slots are pinned here, before any timer starts. The embedded entry
+    // states its count (`EmbeddedProgram::event_pool_size`); the CLI reads `MLE_HISTORY_SLOTS`.
+    // An emulation elsewhere in the process that lifts the bound waits for this run, and this run
+    // for it.
+    let _bounded = pico_vm::emulator::riscv::record_slots::bounded_run();
+    let record_slots = match &cfg.embedded {
+        Some(embedded) => embedded.event_pool_size,
+        None => record_slots_from_env().unwrap_or_else(|e| panic!("{e}")),
     };
-    // One buffer holds one chunk's events, so the embedded entry sizes them from the chunk it cuts;
-    // the CLI's chunk and buffers both follow `CHUNK_SIZE`.
-    let buffer_capacity = cfg
-        .embedded
-        .as_ref()
-        .map(|e| e.emulator_opts.chunk_size as usize);
-    let t_pools = Instant::now();
-    // The embedded entry pins on demand, so a small guest pins only the few buffers it uses.
-    let pinning = if cfg.embedded.is_some() {
-        Pinning::OnDemand
-    } else {
-        Pinning::UpFront
-    };
-    size_cpu_event_buffer_pool(pool_size, buffer_capacity, pinning, HostAllocFlags::DEFAULT);
-    size_alu_event_buffer_pool(pool_size, buffer_capacity, pinning, HostAllocFlags::DEFAULT);
-    // MLE_PACKED_EVENTS=1: pinned staging pools for the packed FFI event mirror. The buffers live
-    // only from the preparers packing to that chunk's upload, so a small pool suffices. Its own
-    // `initialized` check, not the alu pool's: nesting it there would silently leave packing off
-    // for a run that found the alu pool already up. GPU build only: the CPU build has no preparer.
-    #[cfg(feature = "cuda")]
-    if pico_vm::instances::preparer::packed_events_enabled()
-        && !pico_vm::instances::preparer::packed_pools_initialized()
-    {
-        // One slot per in-flight chunk, held until the chunk is PROVEN and dropped (the stage
-        // lives inside `PreparedChunk`) — so the bound on live slots is the event pools' own
-        // bound, and the default follows the same `pool_size`: a smaller fixed default silently
-        // reverts the overflow chunks to pageable fat uploads on the prove threads. Slots are
-        // pinned up front, ~1.4 GB each at CHUNK_SIZE=2^23, so the total tracks `pool_size`:
-        // ~88 GiB under `single_node_mle.sh`'s MLE_EVENT_POOL_SIZE=64, but ~358 GiB at this
-        // function's own default of 256. The init log prints the exact total; set
-        // MLE_PACKED_POOL_SIZE on a host that cannot spare it — `two_machine_mle.sh` pins 16.
-        let packed_pool_size = std::env::var("MLE_PACKED_POOL_SIZE")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(pool_size);
-        pico_vm::instances::preparer::init_packed_event_pools(
-            packed_pool_size,
-            HostAllocFlags::DEFAULT,
-        );
-    }
-    info!(
-        "MLE event pools pre-sized to {pool_size} buffers in {:.3}s",
-        t_pools.elapsed().as_secs_f64()
-    );
+    let record_slots = init_record_slots(record_slots.get());
+    info!("MLE records held at once: at most {record_slots}, each in a pinned history slot");
 
     // Keygen (+ eager JIT warmup) on the main thread BEFORE the emulate/preparer/worker threads
     // spawn: `RiscvMachine::new` nvrtc-compiles the JIT kernels here, and that must run while the
@@ -2142,6 +2385,18 @@ fn run_pipeline(
     #[cfg(feature = "cuda")]
     let root_slot: Arc<std::sync::Mutex<Option<RootRecord>>> =
         Arc::new(std::sync::Mutex::new(None));
+    // Per block, like the root slot: a keygen a failed block leaves behind is never handed to the
+    // next one. The secondary never prepares the final node, so it has none to start.
+    #[cfg(feature = "cuda")]
+    let early_root =
+        (with_combine && !is_mle_secondary() && root_early_keygen_enabled()).then(|| {
+            EarlyRootKeygen::new(
+                riscv_vm_vk
+                    .clone()
+                    .expect("combine implies convert, which builds the exe identity"),
+                vk_map.clone(),
+            )
+        });
     // Combine node timing. Kept OUT of `prove_nanos` / `prove_count` on purpose: those two are the
     // riscv chunk figures the `chunks=` / `sum(prove)` bench fields report, and mixing combine into
     // them would break comparability with the riscv/convert baselines.
@@ -2151,12 +2406,13 @@ fn run_pipeline(
     let combine_count = Arc::new(AtomicUsize::new(0));
 
     // --- Emulation via the shared snapshot+sequencer pipeline. ---
-    // Segments through `emulate_snapshot_pipeline` (same emulator + `bench_riscv_ops` opts). The
-    // pipeline self-inits the memory pool + recycler threads; `MEMORY_POOL_SIZE` keeps the pool
-    // larger than the chunk count so the blocking snapshot `recv` never starves. The emulation-only
-    // witness carries no proving keys — MLE proves with its own `RiscvMachine`. `handle_record`
-    // forwards each record to the preparer thread (crossbeam Sender is Send+Sync, which the
-    // pipeline's handler requires); the event precompute in `prepare_chunk` stays off this thread.
+    // Segments through `emulate_snapshot_pipeline` (same emulator + `bench_riscv_ops` opts, the
+    // replay workers on the engine `replay_workers` resolved). The pipeline self-inits the memory
+    // pool + recycler threads; `MEMORY_POOL_SIZE` keeps the pool larger than the chunk count so the
+    // blocking snapshot `recv` never starves. The emulation-only witness carries no proving keys —
+    // MLE proves with its own `RiscvMachine`. `handle_record` forwards each record to the preparer
+    // thread (crossbeam Sender is Send+Sync, which the pipeline's handler requires); the event
+    // precompute in `prepare_chunk_shaped` stays off this thread.
     // `MLE_PREWARM=1`: pay the process's first-touch page-fault cost HERE, before the `e2e=` window
     // opens, instead of inside the first chunk's emulate/prepare where it lands on the pipeline's
     // critical path. The prove lane IS the critical path at that moment but has nothing to work on
@@ -2167,14 +2423,14 @@ fn run_pipeline(
     //
     // Two things get pre-paid: the emulator memory pool's `Lazy` (which would otherwise initialize
     // inside the window), and `MLE_HEAP_PREWARM_GB` GB of heap pages that are touched and then
-    // freed, so the ~30 per-chunk event `Vec`s in `prepare_chunk` — the single biggest contributor,
-    // 201 of the 419 ms — reuse warm pages instead of faulting fresh ones.
+    // freed, so the ~30 per-chunk event `Vec`s in `prepare_chunk_shaped` — the single biggest
+    // contributor, 201 of the 419 ms — reuse warm pages instead of faulting fresh ones.
     //
     // REQUIRES `TCMALLOC_RELEASE_RATE=0` to do most of its work: gperftools tcmalloc hands freed
     // large spans back to the kernel with `MADV_DONTNEED`, which throws the pre-faulted pages away
-    // before `prepare_chunk` ever asks for them. Prewarm alone recovers only ~1/3 of the gap;
-    // `TCMALLOC_RELEASE_RATE=0` alone recovers nothing (nothing has been freed yet on the first
-    // iteration, so there are no pages to retain). `single_node_mle.sh` sets both.
+    // before `prepare_chunk_shaped` ever asks for them. Prewarm alone recovers only ~1/3 of the
+    // gap; `TCMALLOC_RELEASE_RATE=0` alone recovers nothing (nothing has been freed yet on the
+    // first iteration, so there are no pages to retain). `single_node_mle.sh` sets both.
     //
     // Process-level, not per-iteration: `MLE_REPEAT` calls this function N times, and re-growing
     // and re-freeing the arena on every iteration churns exactly the pages the previous iteration
@@ -2240,9 +2496,10 @@ fn run_pipeline(
     let (record_tx, record_rx) = crossbeam::channel::unbounded::<(usize, EmulationRecord)>();
     // Set once the guest's emulation fails in an embedded run: the run drains instead of proving.
     let guest_failed = Arc::new(AtomicBool::new(false));
+    // The embedded entry states its replay engine with its options; the CLI's is `replay`.
     let emulator_opts = embedded
         .map(|e| e.emulator_opts)
-        .unwrap_or_else(EmulatorOpts::bench_riscv_ops);
+        .unwrap_or_else(|| EmulatorOpts::bench_riscv_ops().with_replay_workers(replay));
     let emulation_workers = embedded.map(|e| e.emulation_workers);
     let emulate_handle = {
         let program = program.clone();
@@ -2354,19 +2611,19 @@ fn run_pipeline(
     // one per card either way, and the riscv queue is untouched (see its own note below).
     //
     // Card affinity: a chunk has none. The old rule was `idx % N` fixed at the riscv routing
-    // point, but the riscv preparers are an unrouted pool and `prepare_chunk` allocates no device
-    // memory, so a prepared chunk is host-side and whichever card is free proves it. Convert work
-    // is handed out round-robin as well — its preparer binds the card it is about to send to,
-    // which is all the per-card pk cache requires — as are combine nodes. Every GPU-touching
-    // thread binds its card; the machine layer resolves the device from the thread.
+    // point, but the riscv preparers are an unrouted pool and `prepare_chunk_shaped` allocates no
+    // device memory, so a prepared chunk is host-side and whichever card is free proves it.
+    // Convert work is handed out round-robin as well — its preparer binds the card it is about to
+    // send to, which is all the per-card pk cache requires — as are combine nodes. Every
+    // GPU-touching thread binds its card; the machine layer resolves the device from the thread.
     // Preparer pools: one per kind on a single card, the benchmarked multi-card sizes above that
     // (see `preparer_pool`); the env overrides for A/B work. The pool used to be pinned to
     // 1 because ordering depended on it; it no longer does (see the publish branch below), so the
     // env is honored.
     let riscv_preparer_count = preparer_pool("riscv", "MLE_RISCV_PREPARERS", 6, prover_count);
 
-    // Upstream's upload-ahead preparer barrier is not here: `prepare_chunk` allocates no device
-    // memory, so a prepare cannot contend with a tail's prove.
+    // Upstream's upload-ahead preparer barrier is not here: `prepare_chunk_shaped` allocates no
+    // device memory, so a prepare cannot contend with a tail's prove.
     let preparer_handle = {
         let mut hs = Vec::new();
         for pidx in 0..riscv_preparer_count {
@@ -2387,13 +2644,13 @@ fn run_pipeline(
                             if watch::failed() {
                                 break;
                             }
-                            // A drained run: drop the record, which returns its event buffers.
+                            // A drained run: drop the record, which returns its history slot.
                             if guest_failed.load(Ordering::SeqCst) {
                                 continue;
                             }
-                            // This lane has no `Wait`: `prepare_chunk` takes no gate (`:505-506`
-                            // records that it allocates no device memory) and its downstream is
-                            // unbounded, so it can only ever block for want of input.
+                            // This lane has no `Wait`: `prepare_chunk_shaped` takes no gate
+                            // (`:505-506` records that it allocates no device memory) and its
+                            // downstream is unbounded, so it can only ever block for want of input.
                             let _b = spans::busy(WorkKind::PrepareRiscv, Some(idx as u32));
                             // Not ours to prove: drop the record now, which returns its event
                             // buffer to the pool immediately instead of holding it until the
@@ -2410,6 +2667,7 @@ fn run_pipeline(
                             // event staging copies it (decided from the event counter the
                             // packaging computes anyway); plain packaging otherwise.
                             let chunk = shaper.prepare_chunk_shaped(record);
+                            let cost = chunk.cost;
                             // Stamps need not arrive ascending: the store is a map and
                             // `register_chunk` keeps only a min/max. They must be distinct — an
                             // overwrite drops a chunk while `register_chunk` early-returns on
@@ -2419,7 +2677,10 @@ fn run_pipeline(
                                 displaced.is_none(),
                                 "chunk stamp {idx} arrived twice — the earlier chunk was lost"
                             );
-                            mle_register_chunk(idx);
+                            if readings_on() {
+                                READY_AT.insert(idx, Instant::now());
+                            }
+                            mle_register_chunk_with_cost(idx, cost);
                             n += 1;
                         }
                         (n, t.elapsed())
@@ -2578,6 +2839,7 @@ fn run_pipeline(
             let combine_task_rx = combine_task_rx.clone();
             let combine_ready_txs = combine_ready_txs.clone();
             let combine_card_seq = Arc::clone(&combine_card_seq);
+            let early_root = early_root.clone();
             handles.push(
                 thread::Builder::new()
                     .name(format!("mle-combine-preparer-{p}"))
@@ -2611,6 +2873,9 @@ fn run_pipeline(
                             // to the root but never demote one.
                             let is_final = scheduler
                                 .is_final_combine(task.left.start_chunk, task.right.end_chunk);
+                            if let Some(early) = early_root.as_ref().filter(|_| is_final) {
+                                early.start(children.to_vec(), start, end);
+                            }
                             let prepared = machines[card].prepare_node(&children, is_final);
                             info!(
                                 "[mle-combine-preparer-{p}] node [{start},{end}] prepared \
@@ -2654,8 +2919,8 @@ fn run_pipeline(
     let t_prove = Instant::now();
     // ONE shared lane, drained by whichever card is free, rather than a per-card lane picked by
     // `chunk_idx % cards`. The per-card form assumed a chunk's record was card-resident, but the
-    // riscv preparers are an unrouted pool and `prepare_chunk` allocates no device memory (:708),
-    // so a prepared chunk is host-side and any card can prove it.
+    // riscv preparers are an unrouted pool and `prepare_chunk_shaped` allocates no device memory
+    // (:708), so a prepared chunk is host-side and any card can prove it.
     //
     // Load-bearing under two-machine, and the reason 8+8 was no faster than 8: a machine proves
     // only the chunks it owns, and the static split hands the primary chunks 0-3, 8-11, 16-19...
@@ -2668,7 +2933,8 @@ fn run_pipeline(
     // Capacity is `prover_count`, not 1: enough for every card to have work in hand without a
     // dispatcher round-trip each, and still far from the 106-chunk riscv backlog that capacity
     // was originally holding back so convert work could interleave.
-    let (items_tx, items_rx) = crossbeam::channel::bounded::<ProverItem>(prover_count);
+    let (items_tx, items_rx) =
+        crossbeam::channel::bounded::<ProverItem>(chunk_channel_capacity(prover_count));
     // Closed by the dispatcher when no further chunk can be dispatched, which is long before the
     // run completes. A channel rather than a flag because the riscv lane is parked in a `select!`,
     // and only a channel can wake one.
@@ -2733,12 +2999,12 @@ fn run_pipeline(
                             //
                             // Load-bearing under two-machine, not tidiness. Each machine emulates
                             // the whole block and stores every chunk, but proves only its share,
-                            // and a pooled event buffer is released only when a worker finishes a
-                            // chunk and drops its record. Without this the other machine's half is
-                            // never dropped: the pool drains, `get_buffer` blocks, emulation stalls
-                            // and stops registering, and both sides idle into the scheduler's 300s
+                            // and a record's slot goes back only when a worker finishes its chunk
+                            // and drops the record. Without this the other machine's half is never
+                            // dropped: the slots run out, the take waits, emulation stalls and
+                            // stops registering, and both sides idle into the scheduler's 300s
                             // "system is broken" timeout. reth-239 stalled at 61 of 122 chunks
-                            // against `MLE_EVENT_POOL_SIZE=64`. FRI does the same thing via
+                            // against `MLE_HISTORY_SLOTS=64`. FRI does the same thing via
                             // `record_store::send_proven_chunks` on every acquire.
                             //
                             // A no-op in single-node: this machine already removed each chunk in
@@ -2918,7 +3184,7 @@ fn run_pipeline(
                                     Ok(ProverItem::Riscv { chunk_idx }) => riscv
                                         .as_ref()
                                         .expect("a chunk arrived after the riscv handles went")
-                                        .prove(chunk_idx, &worker_id),
+                                        .prove(chunk_idx, &worker_id, lane_depth(&items)),
                                     Err(_) => {
                                         items_open = false;
                                         items = crossbeam::channel::never();
@@ -3038,7 +3304,7 @@ fn run_pipeline(
                                 Ok(ProverItem::Riscv { chunk_idx }) => riscv
                                     .as_ref()
                                     .expect("riscv work on a lane that does not serve riscv")
-                                    .prove(chunk_idx, &worker_id),
+                                    .prove(chunk_idx, &worker_id, lane_depth(&items)),
                                 Err(_) => {
                                     items_open = false;
                                     items = crossbeam::channel::never();
@@ -3110,7 +3376,7 @@ fn run_pipeline(
 
     // The guest failed: the scheduler is aborted, so every lane drains and exits. Join them all,
     // then drop what the run prepared and the cross-chunk sums it accumulated, so the resident
-    // machines and the event pools serve the next block as if this one never ran.
+    // machines and the history slots serve the next block as if this one never ran.
     if let Some(failure) = guest_failure {
         for h in workers {
             watch::join(h, "worker thread");
@@ -3351,20 +3617,54 @@ fn run_pipeline(
         let combine_total = Duration::from_nanos(combine_nanos.load(Ordering::SeqCst));
 
         let t_verify = Instant::now();
-        let vm_vk = riscv_vm_vk
-            .clone()
-            .expect("combine implies convert, which builds the exe identity");
-        let mut cpu_combine = pico_vm::mle::machine::combine::CombineMachine::new(
-            pico_vm::mle::recursion_params_with_100_bits_security(),
-            vm_vk,
-            vk_map.is_some(),
-        );
-        if let Some(map) = &vk_map {
-            cpu_combine.set_vk_map(Arc::clone(map));
+        let early = early_root.as_ref().and_then(EarlyRootKeygen::take);
+        let keygen_here = early.is_none();
+        let mut cpu_combine = match early {
+            // A keygen that panicked panics here, as it would have inside acceptance.
+            Some(handle) => match handle.join() {
+                Ok(machine) => machine,
+                Err(panic) => std::panic::resume_unwind(panic),
+            },
+            None => acceptance_machine(
+                riscv_vm_vk
+                    .clone()
+                    .expect("combine implies convert, which builds the exe identity"),
+                vk_map.as_ref(),
+            ),
+        };
+        let waited = t_verify.elapsed();
+        if keygen_here {
+            info!("MLE root keygen: start (in acceptance)");
         }
+        let shapes_before = cpu_combine.num_distinct_shapes();
         cpu_combine
             .register_shape(&root.child_layouts, /* is_complete = */ true)
             .unwrap_or_else(|e| panic!("{e}"));
+        if keygen_here {
+            info!(
+                "MLE root keygen: done in {:.3}s (in acceptance)",
+                (t_verify.elapsed() - waited).as_secs_f64()
+            );
+        }
+        // `verify` takes the honest key from any complete shape the machine holds; an early
+        // machine keygen'd from other layouts than the root's would show up here as a second one.
+        assert_eq!(
+            cpu_combine.num_distinct_shapes(),
+            1,
+            "root acceptance's machine holds a shape besides this root's"
+        );
+        let how = match (keygen_here, &early_root) {
+            (false, _) => format!(
+                "keygen'd under the root's prove, {:.3}s waited for it",
+                waited.as_secs_f64()
+            ),
+            (true, None) => "keygen'd here (MLE_ROOT_EARLY_KEYGEN=0)".to_string(),
+            (true, Some(_)) => "keygen'd here: no early keygen was started".to_string(),
+        };
+        info!(
+            "MLE root acceptance: root-shape keygens={} in acceptance | {how}",
+            cpu_combine.num_distinct_shapes() - shapes_before,
+        );
         cpu_combine
             .verify(&root.proof)
             .expect("combine ROOT proof failed host-side acceptance");

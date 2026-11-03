@@ -8,8 +8,9 @@ use crate::{
     emulator::riscv::{
         event_types::RvValue,
         syscalls::{
-            precompiles::{Fp2AddSubEvent, PrecompileEvent},
-            Syscall, SyscallCode, SyscallContext,
+            host::{Precompile, SyscallHost},
+            precompiles::{assert_dword_aligned_precompile, Fp2AddSubEvent, PrecompileEvent},
+            SyscallCode,
         },
     },
 };
@@ -28,19 +29,19 @@ impl<P> Fp2AddSubSyscall<P> {
     }
 }
 
-impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
-    fn emulate(
+impl<P: FpOpField> Precompile for Fp2AddSubSyscall<P> {
+    fn emulate<H: SyscallHost>(
         &self,
-        rt: &mut SyscallContext,
+        rt: &mut H,
         syscall_code: SyscallCode,
         arg1: RvValue,
         arg2: RvValue,
     ) -> Option<RvValue> {
         let x_ptr = arg1;
         let y_ptr = arg2;
-        let clk = rt.clk;
-        SyscallContext::assert_dword_aligned_precompile(x_ptr, "fp2 addsub x_ptr");
-        SyscallContext::assert_dword_aligned_precompile(y_ptr, "fp2 addsub y_ptr");
+        let clk = rt.clk();
+        assert_dword_aligned_precompile(x_ptr, "fp2 addsub x_ptr");
+        assert_dword_aligned_precompile(y_ptr, "fp2 addsub y_ptr");
 
         let num_words = <P as NumWords>::WordsCurvePoint::USIZE;
         // WordsCurvePoint is now the u64 dword count directly.
@@ -48,7 +49,7 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
 
         let x_vals = rt.dword_slice_unsafe(x_ptr, num_memory_words);
         let (y_memory_records, y_vals) = rt.mr_dword_slice(y_ptr, num_memory_words);
-        rt.clk += 1;
+        rt.advance_clk(1);
 
         let x_bytes = x_vals
             .iter()
@@ -115,9 +116,7 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
                     _ => unreachable!(),
                 };
 
-                let syscall_event = rt
-                    .rt
-                    .syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
+                let syscall_event = rt.syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
                 rt.record_mut().add_precompile_event(
                     syscall_code_key,
                     syscall_event,
@@ -132,9 +131,7 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
                     _ => unreachable!(),
                 };
 
-                let syscall_event = rt
-                    .rt
-                    .syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
+                let syscall_event = rt.syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
                 rt.record_mut().add_precompile_event(
                     syscall_code_key,
                     syscall_event,

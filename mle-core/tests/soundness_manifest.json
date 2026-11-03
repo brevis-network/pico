@@ -1,12 +1,12 @@
 {
   "generated_by": "cargo run --release -p pico-vm --example mle_soundness_manifest",
-  "commit": "045fb1fce4e67ede1d617c993ade2a2c1cf75e6e",
+  "commit": "f4a5cd9e6f3881b9b5207658b6e7d673c3d11a04",
   "dirty": false,
   "dirty_paths": [],
   "calculator": "closed-form",
   "program": "perf/bench_data/rv64/fib-elf, n = 10",
   "shipped_whitelist": "vm/src/mle/shape_vk_bins/mle_vk_map_kb.bin",
-  "apex": {"vk_root": [822417522, 744100887, 1298155482, 1623973239, 734555938, 1733333192, 935892639, 781849437], "riscv_vk_pre_hash": [1637860507, 1212602631, 1565435972, 48146571, 1551481270, 147555558, 1005401967, 1195247747]},
+  "apex": {"vk_root": [1824906095, 1504833744, 1546273129, 1731347331, 824402171, 1108620310, 596927438, 916067262], "riscv_vk_pre_hash": [1637860507, 1212602631, 1565435972, 48146571, 1551481270, 147555558, 1005401967, 1195247747]},
   "onchain_test_keys": {"source": "contracts/test/dev/manifest.json", "vk_root": [822417522, 744100887, 1298155482, 1623973239, 734555938, 1733333192, 935892639, 781849437], "circuit_sha256": "056e14a5946054aa1c3e40eb7ab0d2ebb9580dfc80323dcded43bdc48e3d4a7c", "nb_constraints": 7751800, "gnark": "v0.14.0", "note": "test keys from a single-process Groth16 setup (contracts/README.md); a deployment needs a setup ceremony"},
   "not_generated": [{"machine": "embed", "mode": "whitelist", "reason": "the embed key follows the layout of the root proof it wraps, and the whitelist set proves no root; the dev set's embed key has the same params and shape"}],
   "keys": [
@@ -90,7 +90,7 @@
       "mode": "whitelist",
       "role": "ladder row 0 (C0), shape `core:class0`",
       "vk_pre_hash": [628808673, 1781114377, 1715909424, 2095972976, 830050608, 238397067, 1382026853, 1379556777],
-      "merged_preprocessed_commit": [1938808738, 720861825, 2065033509, 911305230, 775386534, 575333335, 211905871, 1582341089],
+      "merged_preprocessed_commit": [572671629, 500904558, 1472308307, 1497775103, 1420931424, 339648672, 1899489592, 1166792809],
       "shape": {"num_airs": 21, "max_constraints_per_air": 148, "max_interactions_per_air": 34, "num_trace_columns": 1277, "log_stacked_height": 21},
       "params": {"l_skip":4,"n_stack":17,"w_stack":2048,"log_blowup":2,"whir":{"k":4,"rounds":[{"num_queries":118},{"num_queries":84},{"num_queries":81}],"mu_pow_bits":13,"query_phase_pow_bits":20,"folding_pow_bits":4,"proximity":"UniqueDecoding"},"logup":{"max_interaction_count":2130706433,"log_max_message_length":7,"pow_bits":18},"max_constraint_degree":4},
       "soundness": {"logup_bits": 102.9658765770136, "gkr_sumcheck_bits": 121.95473874979704, "gkr_batching_bits": 122.95473874979704, "zerocheck_sumcheck_bits": 117.72592005930116, "constraint_batching_bits": 116.47092297253279, "stacked_reduction_bits": 112.63619594009432, "whir_bits": 100.01176429737045, "total_bits": 100.01176429737045},
@@ -100,7 +100,7 @@
     {
       "machine": "convert",
       "mode": "whitelist",
-      "role": "ladder row 1 (C1), shape `core:class24`",
+      "role": "ladder row 1 (C1), shape `core:class25`",
       "vk_pre_hash": [571846443, 2001068309, 1921544338, 2002468798, 1060819745, 567781170, 2081074598, 768406831],
       "merged_preprocessed_commit": [516129513, 1122930871, 861715061, 2044448209, 2034405913, 327088354, 2026787371, 518550815],
       "shape": {"num_airs": 21, "max_constraints_per_air": 148, "max_interactions_per_air": 34, "num_trace_columns": 1277, "log_stacked_height": 21},

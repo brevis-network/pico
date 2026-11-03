@@ -29,31 +29,55 @@ pub struct EmbeddedProgram {
     /// The root the apex accepts; the whitelist must carry it.
     pub trusted_root: [KoalaBear; 8],
     pub emulator_opts: EmulatorOpts,
-    /// Pinned CPU and ALU event buffers, each holding `emulator_opts.chunk_size` events, that
-    /// bound how far emulation runs ahead of proving. They stay allocated for the life of the
-    /// process. See [`DEFAULT_EVENT_POOL_SIZE`] and [`pinned_event_bytes`].
+    /// Records held at once, each in a pinned host history slot of one chunk: they bound how far
+    /// emulation runs ahead of proving. All of them are pinned on the first prove and stay pinned,
+    /// at that count, for the life of the process. See [`default_event_pool_size`] and
+    /// [`pinned_event_bytes`].
     pub event_pool_size: NonZeroUsize,
     /// Interpreters replaying the snapshot thread's snapshots into records. See
     /// [`default_pipeline_workers`](pico_vm::proverchain::riscv::default_pipeline_workers).
     pub emulation_workers: NonZeroUsize,
 }
 
-/// [`EmbeddedProgram::event_pool_size`]'s default. The entry pins buffers on demand, so a small
-/// guest pins only the few it uses; a reth block pins up to all 32. Each in-flight chunk holds one
-/// CPU and two ALU buffers, and the pipeline lets replay run only as far ahead as the pools hold.
-pub const DEFAULT_EVENT_POOL_SIZE: NonZeroUsize = NonZeroUsize::new(32).unwrap();
+/// The most [`default_event_pool_size`] picks; a larger count is the caller's to ask for.
+pub const MAX_DEFAULT_EVENT_POOL_SIZE: NonZeroUsize = NonZeroUsize::new(32).unwrap();
 
-/// The most of the host's memory the event pools may pin; the rest is the emulation's and the
-/// provers' working set. A pool past it is refused up front instead of failing mid-run.
+/// The fewest [`default_event_pool_size`] picks, however small the host.
+pub const MIN_DEFAULT_EVENT_POOL_SIZE: NonZeroUsize = NonZeroUsize::new(4).unwrap();
+
+/// The share of the host's memory [`default_event_pool_size`] lets the slots pin.
+pub const DEFAULT_PINNED_EVENT_FRACTION: f64 = 0.25;
+
+/// The most of the host's memory the slots may pin; the rest is the emulation's and the provers'
+/// working set. A count past it is refused up front instead of failing mid-run.
 pub const MAX_PINNED_EVENT_FRACTION: f64 = 0.5;
 
-/// Host memory the event pools pin: `pool_size` CPU and ALU buffers of `chunk_size` events each.
-pub fn pinned_event_bytes(pool_size: NonZeroUsize, chunk_size: u32) -> u64 {
-    use pico_vm::chips::chips::{alu::event::AluEvent, riscv_cpu::event::CpuEvent};
-    let per_slot = (size_of::<CpuEvent>() + size_of::<AluEvent>()) as u64;
+/// [`EmbeddedProgram::event_pool_size`]'s default: as many slots as fit in
+/// [`DEFAULT_PINNED_EVENT_FRACTION`] of this host's memory, between
+/// [`MIN_DEFAULT_EVENT_POOL_SIZE`] and [`MAX_DEFAULT_EVENT_POOL_SIZE`].
+pub fn default_event_pool_size() -> NonZeroUsize {
+    let slot = pico_vm::emulator::riscv::record_slots::slot_bytes() as f64;
+    let fit = (host_bytes() as f64 * DEFAULT_PINNED_EVENT_FRACTION / slot) as usize;
+    NonZeroUsize::new(fit.clamp(
+        MIN_DEFAULT_EVENT_POOL_SIZE.get(),
+        MAX_DEFAULT_EVENT_POOL_SIZE.get(),
+    ))
+    .expect("the minimum is not 0")
+}
+
+/// Host memory `pool_size` history slots pin.
+pub fn pinned_event_bytes(pool_size: NonZeroUsize) -> u64 {
     (pool_size.get() as u64)
-        .saturating_mul(u64::from(chunk_size))
-        .saturating_mul(per_slot)
+        .saturating_mul(pico_vm::emulator::riscv::record_slots::slot_bytes() as u64)
+}
+
+/// This host's memory, or its container's limit where there is one.
+fn host_bytes() -> u64 {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    sys.cgroup_limits().map_or(sys.total_memory(), |limits| {
+        limits.total_memory.min(sys.total_memory())
+    })
 }
 
 impl fmt::Debug for EmbeddedProgram {
@@ -83,14 +107,16 @@ pub enum EmbedError {
     WhitelistRootMismatch,
     /// An earlier emulation latched another memory tier than the cards need.
     TierLatched(TierAlreadySet),
-    /// The event pools cannot hold one chunk's replay segments, so the run could not finish.
+    /// The history slots cannot hold one chunk's replay segments, so the run could not finish.
     EventPoolTooSmall(String),
-    /// The event pools would pin more of the host's memory than [`MAX_PINNED_EVENT_FRACTION`].
+    /// The history slots would pin more of the host's memory than [`MAX_PINNED_EVENT_FRACTION`].
     EventPoolTooLarge {
         pool_size: usize,
         pinned_bytes: u64,
         host_bytes: u64,
     },
+    /// The history slots could not be pinned, or this process pinned another count already.
+    EventPoolPin(String),
     NoRoot,
     /// The guest's emulation failed, or the emulator panicked (a host-side emulator bug
     /// included). The run was drained, and the process can prove again.
@@ -115,13 +141,14 @@ impl fmt::Display for EmbedError {
             }
             Self::TierLatched(e) => write!(f, "{e}"),
             Self::EventPoolTooSmall(why) => write!(f, "{why}; raise the event pool size"),
+            Self::EventPoolPin(why) => write!(f, "{why}"),
             Self::EventPoolTooLarge {
                 pool_size,
                 pinned_bytes,
                 host_bytes,
             } => write!(
                 f,
-                "an event pool of {pool_size} would pin {:.0} GiB of this host's {:.0} GiB; \
+                "{pool_size} history slots would pin {:.0} GiB of this host's {:.0} GiB; \
                  lower the pool size",
                 *pinned_bytes as f64 / (1u64 << 30) as f64,
                 *host_bytes as f64 / (1u64 << 30) as f64,
@@ -235,6 +262,8 @@ pub fn prove(
     }
     check_pinned_memory(&program)?;
     let gpus = init_memory_tier()?;
+    pico_vm::emulator::riscv::record_slots::try_init_record_slots(program.event_pool_size)
+        .map_err(EmbedError::EventPoolPin)?;
 
     let cfg = MleSingleNodeConfig {
         step: Step::Combine,
@@ -270,27 +299,21 @@ pub fn prove(
     })
 }
 
-/// Refuses event pools too small for one chunk's replay segments, or that would pin more than
+/// Refuses history slots too few for one chunk's replay segments, or that would pin more than
 /// [`MAX_PINNED_EVENT_FRACTION`] of the host: up front, where a refusal poisons nothing.
 #[cfg(feature = "cuda")]
 fn check_pinned_memory(program: &EmbeddedProgram) -> Result<(), EmbedError> {
-    use pico_vm::proverchain::riscv::{chunk_segments, event_pool_refusal};
-    let pool = Some(program.event_pool_size.get());
+    use pico_vm::proverchain::riscv::{chunk_segments, history_slot_refusal};
+    let slots = program.event_pool_size.get();
     let segments = chunk_segments(program.emulator_opts.snapshot_main);
-    if let Some(error) = event_pool_refusal(pool, pool, segments) {
-        return Err(EmbedError::EventPoolTooSmall(error.to_string()));
+    if let Some(why) = history_slot_refusal(Ok(Some(program.event_pool_size)), segments) {
+        return Err(EmbedError::EventPoolTooSmall(why));
     }
-    let mut sys = sysinfo::System::new();
-    sys.refresh_memory();
-    // A container's limit, where there is one, is the host it gets.
-    let host_bytes = sys.cgroup_limits().map_or(sys.total_memory(), |limits| {
-        limits.total_memory.min(sys.total_memory())
-    });
-    let pinned_bytes =
-        pinned_event_bytes(program.event_pool_size, program.emulator_opts.chunk_size);
+    let host_bytes = host_bytes();
+    let pinned_bytes = pinned_event_bytes(program.event_pool_size);
     if pinned_bytes as f64 > host_bytes as f64 * MAX_PINNED_EVENT_FRACTION {
         return Err(EmbedError::EventPoolTooLarge {
-            pool_size: program.event_pool_size.get(),
+            pool_size: slots,
             pinned_bytes,
             host_bytes,
         });

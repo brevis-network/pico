@@ -1,16 +1,14 @@
 use super::{EmulatorMode, UnconstrainedState};
 use crate::{
     chips::chips::{
-        events::{AluEvent, CpuEvent, MemoryAccessPosition, MemoryLocalEvent, MemoryRecord},
+        events::{MemoryAccessPosition, MemoryLocalEvent, MemoryRecord},
         riscv_memory::event::MemoryRecordEnum,
     },
     compiler::riscv::{instruction::Instruction, opcode::Opcode},
     emulator::riscv::{
-        alu_event_pool::AluEventBuffer,
-        cpu_event_pool::CpuEventBuffer,
         emulator::EmulationError,
         event_types::{RvAddr, RvChunk, RvClk, RvValue},
-        record::MemoryAccessRecord,
+        sink::ExecutionSink,
         state::RuntimeRegisterRecord,
         syscalls::SyscallCode,
     },
@@ -23,8 +21,6 @@ use hashbrown::HashMap;
 pub enum RiscvEmulatorMode {
     /// Simple mode for only executing the instructions without trace generation
     Simple,
-    /// Light trace mode for recording without CPU/ALU event generation
-    LightTrace,
     /// Normal trace mode for executing with trace generation
     Trace,
     /// Syscall unconstrained mode
@@ -44,7 +40,7 @@ impl RiscvEmulatorMode {
     /// Identify if the mode should emit records.
     #[inline]
     pub fn is_recording(&self) -> bool {
-        matches!(self, Self::Trace | Self::LightTrace)
+        matches!(self, Self::Trace)
     }
 
     /// Identify if it's the unconstrained mode.
@@ -59,7 +55,6 @@ impl RiscvEmulatorMode {
         if let Self::Unconstrained(state) = self {
             let mode_to_restore = match state.prev_mode {
                 EmulatorMode::Trace => Self::Trace,
-                EmulatorMode::LightTrace => Self::LightTrace,
                 EmulatorMode::Simple => Self::Simple,
             };
 
@@ -89,31 +84,23 @@ impl RiscvEmulatorMode {
         b: RvValue,
         c: RvValue,
         instruction: Instruction,
-        memory_record: MemoryAccessRecord,
         memory_store_value: Option<RvValue>,
-        cpu_events: &mut CpuEventBuffer,
-        memory_read_write_event_indices: &mut Vec<usize>,
+        sink: &mut impl ExecutionSink,
     ) {
         // TODO: Remove Self::Simple
         if matches!(self, Self::Trace | Self::Simple) {
-            let event = CpuEvent::new(
+            sink.end_cycle(
                 chunk,
                 clk,
                 pc,
                 next_pc,
-                instruction,
+                exit_code,
                 a,
                 b,
                 c,
+                instruction,
                 memory_store_value,
-                memory_record,
-                exit_code,
             );
-
-            if instruction.is_memory_instruction() {
-                memory_read_write_event_indices.push(cpu_events.len());
-            }
-            cpu_events.push(event).unwrap();
         }
     }
 
@@ -135,49 +122,13 @@ impl RiscvEmulatorMode {
         c: RvValue,
         opcode: Opcode,
         is_imm: bool,
-        events: &mut Vec<AluEvent>,
+        sink: &mut impl ExecutionSink,
     ) {
         if op_a == 0 {
             return;
         }
         if let Self::Trace = self {
-            let event = AluEvent::new(clk, opcode, a, b, c, is_imm);
-            events.push(event);
-        }
-    }
-
-    /// Emit a ALU event to a pinned memory buffer (for fast H2D transfer).
-    // allow: domain-complex signature; each arg is an independent handle/config
-    #[inline]
-    #[allow(clippy::too_many_arguments)]
-    pub fn emit_alu_pinned(
-        &self,
-        op_a: u8,
-        clk: RvClk,
-        a: RvValue,
-        b: RvValue,
-        c: RvValue,
-        opcode: Opcode,
-        is_imm: bool,
-        events: &mut AluEventBuffer,
-    ) {
-        // Same `x0` rule as `emit_alu` -- the CPU AIR does not dispatch an ALU lookup when the
-        // destination is `x0`, so an event here would leave the ALU chip supplying a row nobody
-        // looks up. This path feeds the GPU prover, which shares that AIR.
-        if op_a == 0 {
-            return;
-        }
-        if let Self::Trace = self {
-            let event = AluEvent {
-                clk,
-                opcode,
-                a,
-                b,
-                c,
-                is_imm,
-                is_cmp: false,
-            };
-            let _ = events.push_alu(event);
+            sink.alu(clk, opcode, a, b, c, is_imm);
         }
     }
 
@@ -191,7 +142,7 @@ impl RiscvEmulatorMode {
         events: &mut HashMap<u64, MemoryLocalEvent>,
     ) {
         // Self::Simple matching only for syscall emulate in simple mode
-        if matches!(self, Self::Trace | Self::LightTrace | Self::Simple) {
+        if matches!(self, Self::Trace | Self::Simple) {
             events
                 .entry(addr)
                 .and_modify(|e| {
@@ -205,31 +156,11 @@ impl RiscvEmulatorMode {
         }
     }
 
-    /// Copy the local memory events.
-    ///
-    /// After exiting unconstrained mode, we need to restore the correct memory events.
-    /// Since the previous mode could be either `Trace` or `Simple`, both cases must be handled here.
-    pub fn copy_local_memory_events(
-        &self,
-        from: &mut HashMap<u64, MemoryLocalEvent>,
-        to: &mut Vec<MemoryLocalEvent>,
-    ) {
-        if matches!(self, Self::Trace | Self::LightTrace | Self::Simple) {
-            // `to` is freshly created here, so reserve the full drained size up front to avoid
-            // repeated grow-and-memmove while pushing (this map can hold hundreds of thousands
-            // of local-memory events at end-of-emulation).
-            to.reserve(from.len());
-            for (_, event) in from.drain() {
-                to.push(event);
-            }
-        }
-    }
-
     /// Init the specified memory access.
     #[inline]
-    pub fn init_memory_access(&self, output: &mut MemoryAccessRecord) {
+    pub fn init_memory_access(&self, sink: &mut impl ExecutionSink) {
         if let Self::Trace = self {
-            *output = MemoryAccessRecord::default();
+            sink.begin_cycle();
         }
     }
 
@@ -239,15 +170,10 @@ impl RiscvEmulatorMode {
         &self,
         position: MemoryAccessPosition,
         input: MemoryRecordEnum,
-        output: &mut MemoryAccessRecord,
+        sink: &mut impl ExecutionSink,
     ) {
         if let Self::Trace = self {
-            match position {
-                MemoryAccessPosition::A => output.a = Some(input),
-                MemoryAccessPosition::B => output.b = Some(input),
-                MemoryAccessPosition::C => output.c = Some(input),
-                MemoryAccessPosition::Memory => output.memory = Some(input),
-            };
+            sink.access(position, input);
         }
     }
 

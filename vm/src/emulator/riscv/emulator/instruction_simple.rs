@@ -1,9 +1,8 @@
-use super::{align_u64, EmulationError, RiscvEmulator};
+use super::{align_u64, AbnormalTermination, EmulationError, RiscvEmulator, TerminationReason};
 use crate::{
     chips::chips::riscv_memory::event::MemoryAccessPosition,
     compiler::riscv::{instruction::Instruction, opcode::Opcode, register::Register},
     emulator::riscv::syscalls::{syscall_context::SyscallContext, SyscallCode},
-    primitives::consts::CHUNK_CLK_START,
 };
 use tracing::debug;
 
@@ -41,15 +40,10 @@ impl RiscvEmulator {
         instruction: &Instruction,
     ) -> Result<(), EmulationError> {
         let mut next_pc = self.state.pc.wrapping_add(4);
-        let exit_code = 0u32;
 
         let rd: Register;
         let (a, b, c): (u64, u64, u64);
         let (addr, memory_read_value): (u64, u64);
-
-        if self.state.clk == u64::from(CHUNK_CLK_START) {
-            self.chunk_start_pc = self.state.pc;
-        }
 
         match instruction.opcode {
             // Arithmetic instructions.
@@ -114,7 +108,7 @@ impl RiscvEmulator {
             Opcode::LH => {
                 (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
                 if addr % 2 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::LH,
                         invalid_memory_addr_u64_simple(addr, "lh"),
                     ));
@@ -127,7 +121,7 @@ impl RiscvEmulator {
             Opcode::LW => {
                 (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
                 if addr % 4 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::LW,
                         invalid_memory_addr_u64_simple(addr, "lw"),
                     ));
@@ -146,7 +140,7 @@ impl RiscvEmulator {
             Opcode::LHU => {
                 (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
                 if addr % 2 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::LHU,
                         invalid_memory_addr_u64_simple(addr, "lhu"),
                     ));
@@ -159,7 +153,7 @@ impl RiscvEmulator {
             Opcode::LWU => {
                 (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
                 if addr % 4 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::LWU,
                         invalid_memory_addr_u64_simple(addr, "lwu"),
                     ));
@@ -171,7 +165,7 @@ impl RiscvEmulator {
             Opcode::LD => {
                 (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
                 if addr % 8 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::LD,
                         invalid_memory_addr_u64_simple(addr, "ld"),
                     ));
@@ -190,7 +184,7 @@ impl RiscvEmulator {
             Opcode::SH => {
                 (a, _, _, addr, memory_read_value) = self.store_rr_simple(instruction);
                 if addr % 2 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::SH,
                         invalid_memory_addr_u64_simple(addr, "sh"),
                     ));
@@ -203,7 +197,7 @@ impl RiscvEmulator {
             Opcode::SW => {
                 (a, _, _, addr, memory_read_value) = self.store_rr_simple(instruction);
                 if addr % 4 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::SW,
                         invalid_memory_addr_u64_simple(addr, "sw"),
                     ));
@@ -220,7 +214,7 @@ impl RiscvEmulator {
                 let store_value = self.rr_simple(rs1, MemoryAccessPosition::A);
                 addr = b.wrapping_add(c);
                 if addr % 8 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::SD,
                         invalid_memory_addr_u64_simple(addr, "sd"),
                     ));
@@ -341,14 +335,9 @@ impl RiscvEmulator {
                         if let Some(error) = precompile_rt.take_error() {
                             return Err(error);
                         }
+                        // A non-zero `HALT` has already failed through `take_error` above: the
+                        // halt syscall reports it as an `AbnormalTermination`.
                         let ret_value = returned.unwrap_or(u64::from(syscall_id));
-
-                        // If the syscall is `HALT` and the exit code is non-zero, return an error.
-                        if syscall == SyscallCode::HALT && precompile_rt.exit_code != 0 {
-                            return Err(EmulationError::HaltWithNonZeroExitCode(
-                                precompile_rt.exit_code,
-                            ));
-                        }
 
                         Ok((
                             precompile_rt.next_pc,
@@ -375,7 +364,10 @@ impl RiscvEmulator {
                 self.state.clk += u64::from(precompile_cycles);
             }
             Opcode::EBREAK => {
-                return Err(EmulationError::Breakpoint());
+                return Err(AbnormalTermination::fault(TerminationReason::Breakpoint {
+                    pc: self.state.pc,
+                })
+                .into());
             }
 
             // Multiply instructions.
@@ -498,12 +490,9 @@ impl RiscvEmulator {
 
             // See https://github.com/riscv-non-isa/riscv-asm-manual/blob/main/src/asm-manual.adoc#instruction-aliases
             Opcode::UNIMP => {
-                return Err(EmulationError::Unimplemented());
+                return Err(EmulationError::illegal_instruction(self.state.pc));
             }
         }
-
-        self.chunk_last_next_pc = next_pc;
-        self.chunk_exit_code = exit_code;
 
         // Update the program counter.
         self.state.pc = next_pc;

@@ -23,10 +23,9 @@ pub struct MemoryChipCols<F> {
 
 pub const NUM_MEMORY_CHIP_VALUE_COLS: usize = size_of::<MemoryChipValueCols<u8>>();
 
-// Pinned on both sides: the CUDA mirror (pico-gpu's `src/tracegen/riscv/memory_read_write.cuh`,
-// and the second hand-written mirror in `src/tracegen/riscv/packed_tracegen.cuh`) asserts the
-// same width, so a field added or removed on one side only fails the build instead of silently
-// shifting every column.
+// Pinned on both sides: the CUDA mirror asserts the same width (pico-gpu's
+// `src/tracegen/riscv/history_cpu_memory_lt.cuh`), so a field added or removed on one side only
+// fails the build instead of silently shifting every column.
 const _: () = assert!(NUM_MEMORY_CHIP_VALUE_COLS == 49);
 
 #[derive(AlignedBorrow, Clone, Copy, Debug, Default)]

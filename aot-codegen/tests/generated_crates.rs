@@ -1,11 +1,13 @@
-//! What `AotCompiler::compile_with` writes for a real guest: its ELF's SHA-256 in the dispatch
-//! crate's `AOT`, and the runtime dependency it was handed in every generated manifest. And that
+//! What `AotCompiler::compile_with` writes for a real guest: its ELF's SHA-256 and the codegen
+//! stamp in the dispatch crate's `AOT`, the runtime dependency it was handed in every generated
+//! manifest, and blocks that read the sink once and hand it to every helper. And that
 //! `generate_crates`, through `compile`, takes that dependency from `PICO_AOT_RUNTIME_SPEC`.
 
 use std::{fs, path::PathBuf, process::Command};
 
-use pico_aot_codegen::{parse_elf, AotCompiler, AotConfig, RuntimeSpec};
+use pico_aot_codegen::{parse_elf, AotCompiler, AotConfig, RuntimeSpec, CODEGEN_STAMP};
 use sha2::{Digest, Sha256};
+use syn::visit::{self, Visit};
 
 fn fib_elf_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../perf/bench_data/rv64/fib-elf")
@@ -24,8 +26,8 @@ fn generate(elf: &[u8], runtime: &RuntimeSpec, name: &str) -> PathBuf {
     out
 }
 
-/// The byte array `pub static AOT` is built from, read back out of the generated source.
-fn exported_digest(lib_rs: &str) -> [u8; 32] {
+/// The call `pub static AOT` is built by, read back out of the generated source.
+fn aot_call(lib_rs: &str) -> syn::ExprCall {
     let file = syn::parse_file(lib_rs).expect("the dispatch crate's source parses");
     let aot = file
         .items
@@ -43,10 +45,26 @@ fn exported_digest(lib_rs: &str) -> [u8; 32] {
     let syn::Expr::Call(call) = &*aot.expr else {
         panic!("`AOT` is not built by a call: {}", quote::quote!(#aot));
     };
+    call.clone()
+}
+
+fn int_literal(expr: &syn::Expr) -> u32 {
+    match expr {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Int(int),
+            ..
+        }) => int.base10_parse().expect("an integer"),
+        other => panic!("not an integer literal: {}", quote::quote!(#other)),
+    }
+}
+
+/// The byte array `pub static AOT` is built from, read back out of the generated source.
+fn exported_digest(lib_rs: &str) -> [u8; 32] {
+    let call = aot_call(lib_rs);
     let Some(syn::Expr::Array(digest)) = call.args.first() else {
         panic!(
             "`AOT`'s first argument is not an array: {}",
-            quote::quote!(#aot)
+            quote::quote!(#call)
         );
     };
     let digest: Vec<u8> = digest
@@ -79,6 +97,90 @@ fn the_dispatch_crate_exports_the_elf_sha256() {
     let lib_rs = fs::read_to_string(out.join("src/lib.rs")).expect("the dispatch crate's lib.rs");
     let expected: [u8; 32] = Sha256::digest(&elf).into();
     assert_eq!(exported_digest(&lib_rs), expected);
+}
+
+#[test]
+fn the_dispatch_crate_exports_the_codegen_stamp() {
+    let out = generate(&fib_elf(), &RuntimeSpec::InTree, "aot-codegen-stamp");
+
+    let lib_rs = fs::read_to_string(out.join("src/lib.rs")).expect("the dispatch crate's lib.rs");
+    let call = aot_call(&lib_rs);
+    let stamp = call.args.iter().nth(1).expect("`AOT`'s second argument");
+    assert_eq!(int_literal(stamp), CODEGEN_STAMP);
+}
+
+/// How one generated block uses the sink: its reads into `emitting`, its helper calls, and every
+/// call that does not take that flag but writes events.
+#[derive(Default)]
+struct SinkUse {
+    reads: usize,
+    helpers: usize,
+    untold: Vec<String>,
+}
+
+impl<'ast> Visit<'ast> for SinkUse {
+    fn visit_local(&mut self, local: &'ast syn::Local) {
+        if matches!(&local.pat, syn::Pat::Ident(pat) if pat.ident == "emitting") {
+            self.reads += 1;
+        }
+        visit::visit_local(self, local);
+    }
+
+    fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+        let name = call.method.to_string();
+        let told = || {
+            call.args
+                .first()
+                .is_some_and(|arg| quote::quote!(#arg).to_string() == "emitting")
+        };
+        if name.ends_with("_no_count") {
+            self.helpers += 1;
+            if !told() {
+                self.untold.push(quote::quote!(#call).to_string());
+            }
+        } else if ["write_reg_no_count", "emit_cpu", "emit_alu"].contains(&name.as_str()) {
+            self.untold.push(quote::quote!(#call).to_string());
+        }
+        visit::visit_expr_method_call(self, call);
+    }
+}
+
+/// Every block reads the sink once, on entry, and hands that flag to every helper
+/// it calls: a call that tested the sink itself would test it again after every emitting call
+/// before it, and the compiler could no longer run the block's plain bodies back to back.
+#[test]
+fn every_block_hands_its_one_read_of_the_sink_to_every_helper() {
+    let out = generate(&fib_elf(), &RuntimeSpec::InTree, "aot-codegen-sink-flag");
+    let (mut blocks, mut helpers) = (0, 0);
+    for chunk in fs::read_dir(out.join("chunks")).expect("the chunks directory") {
+        let path = chunk.expect("a chunk crate").path().join("src/lib.rs");
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+        let file = syn::parse_file(&source).expect("a chunk crate's source parses");
+        for item in &file.items {
+            let syn::Item::Fn(block) = item else {
+                continue;
+            };
+            let name = block.sig.ident.to_string();
+            if !name.starts_with("block_0x") {
+                continue;
+            }
+            let mut uses = SinkUse::default();
+            uses.visit_item_fn(block);
+            assert_eq!(uses.reads, 1, "{name} reads the sink {} times", uses.reads);
+            assert!(
+                uses.untold.is_empty(),
+                "{name} writes events without its flag: {:?}",
+                uses.untold
+            );
+            blocks += 1;
+            helpers += uses.helpers;
+        }
+    }
+    assert!(
+        blocks > 0 && helpers > blocks,
+        "{blocks} blocks, {helpers} helper calls"
+    );
 }
 
 #[test]

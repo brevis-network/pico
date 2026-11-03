@@ -6,6 +6,7 @@ mod commit;
 mod deferred;
 mod halt;
 mod hint;
+pub mod host;
 pub mod precompiles;
 pub mod syscall_context;
 mod unconstrained;

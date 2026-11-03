@@ -1,23 +1,28 @@
 #!/usr/bin/env bash
-# The AOT snapshot thread against the interpreter's, record by record, one guest at a time.
+# The AOT snapshot thread and the AOT replay workers against the interpreter's, record by record,
+# one guest at a time.
 #
-# For each guest: generate its AOT crates into aot-generated/, build the aot-record-parity test
-# against them, and run it (perf/aot/record_parity/src/lib.rs says what it compares). A process
-# holds one AOT program and every generated crate is named pico-aot-dispatch, so each guest gets
-# its own build. The committed aot-generated/ stub is restored on every exit, error paths included;
-# the run refuses to start when aot-generated/ is anything but that stub, rather than overwrite it.
+# First, against the committed stub, the two positive controls: the stub's code under fib's digest
+# on the AOT core's own records, and in the replay workers (perf/aot/record_parity/src/lib.rs,
+# `check_stub_code` and `check_stub_replay`). Then, for each guest: generate its AOT crates into
+# aot-generated/, build the aot-record-parity test against them, and run it (perf/aot/record_parity/
+# src/lib.rs says what it compares). A process holds one AOT program and every generated crate is
+# named pico-aot-dispatch, so each guest gets its own build. The committed aot-generated/ stub is
+# restored on every exit, error paths included; the run refuses to start when aot-generated/ is
+# anything but that stub, rather than overwrite it.
 #
-# Prints the generate time, the generated tree's size and crate count, the build time and EXIT=<n>
-# for each guest, then an overall line. Exits non-zero if any guest failed.
+# Prints each control's EXIT=<n>, then the generate time, the generated tree's size and crate count,
+# the build time and EXIT=<n> for each guest, then an overall line. Exits non-zero if a control or
+# any guest failed.
 
 set -euo pipefail
 
-GUESTS_ALL="fib ed25519 poseidon2 aggregator bls12381-fp"
+GUESTS_ALL="fib ed25519 poseidon2 aggregator bls12381-fp sha2 sha3 tiny-keccak k256 bn254-fp bls12381-ws bn254-ws"
 
 usage() {
   echo "usage: perf/aot/record_parity.sh [-w WORKERS] GUEST... | all" >&2
-  echo "  GUEST    one of: $GUESTS_ALL (the ELF is perf/bench_data/rv64/<GUEST>-elf)" >&2
-  echo "  WORKERS  interpreter workers in the pipeline, both arms; default 4, or the core count if lower" >&2
+  echo "  GUEST    one of: $GUESTS_ALL (the ELF is perf/bench_data/rv64/<GUEST>-elf, but see elf_of)" >&2
+  echo "  WORKERS  replay workers in the pipeline, every arm; default 4, or the core count if lower" >&2
   exit 2
 }
 
@@ -92,8 +97,38 @@ start=$(now)
 (cd "$AOT_DIR" && cargo test --release -p aot-record-parity --test aot_against_interpreter --no-run)
 echo "dependencies built in $(since "$start")s"
 
+echo "==> the stub's code under fib's digest, emitting"
+control=0
+(
+  cd "$AOT_DIR"
+  if [ -n "$workers" ]; then export AOT_PARITY_WORKERS="$workers"; fi
+  cargo test --release -p aot-record-parity --test stub_code_against_interpreter -- --nocapture
+) || control=$?
+control_line="[stub code] EXIT=$control"
+echo "$control_line"
+
+echo "==> the stub's code under fib's digest, in the replay workers"
+workers_control=0
+(
+  cd "$AOT_DIR"
+  if [ -n "$workers" ]; then export AOT_PARITY_WORKERS="$workers"; fi
+  cargo test --release -p aot-record-parity --test stub_workers_against_interpreter -- --nocapture
+) || workers_control=$?
+workers_control_line="[stub workers] EXIT=$workers_control"
+echo "$workers_control_line"
+
+# The two curve guests' ELFs keep the names they were shipped under.
+elf_of() {
+  case "$1" in
+    bls12381-ws) echo "$ROOT/perf/bench_data/rv64/bls12381-elf-ws-add-double-decompress" ;;
+    bn254-ws) echo "$ROOT/perf/bench_data/rv64/bn254-elf-ws-add-double" ;;
+    *) echo "$ROOT/perf/bench_data/rv64/$1-elf" ;;
+  esac
+}
+
 run_guest() {
-  local guest=$1 elf="$ROOT/perf/bench_data/rv64/$1-elf" start code
+  local guest=$1 elf start code
+  elf=$(elf_of "$guest")
 
   echo "==> $guest: generating from $elf"
   start=$(now)
@@ -133,6 +168,9 @@ for guest in $guests; do
   summary="$summary$line"$'\n'
 done
 
+echo "$control_line"
+echo "$workers_control_line"
 printf '%s' "$summary"
-echo "OVERALL: $((total - failed))/$total guest(s) passed, EXIT=$((failed > 0 ? 1 : 0))"
-[ "$failed" -eq 0 ]
+echo "OVERALL: $((total - failed))/$total guest(s) passed, control EXIT=$control, workers control \
+EXIT=$workers_control, EXIT=$((failed > 0 || control != 0 || workers_control != 0 ? 1 : 0))"
+[ "$failed" -eq 0 ] && [ "$control" -eq 0 ] && [ "$workers_control" -eq 0 ]

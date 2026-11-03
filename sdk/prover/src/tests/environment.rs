@@ -42,11 +42,9 @@ fn run_under(opts: EmulatorOpts) -> String {
     shape(run.records.len(), run.chunks, run.reports.len())
 }
 
-/// Two of the three variables `EmulatorOpts::default` reads. The parent first shows that the
-/// variable's value, had it reached the options, would change the run; the child then runs the
-/// prover with the variable set and must match the run without it. The third, `SPLIT_THRESHOLD`,
-/// sets split options the record split on this path does not read, so no value of it changes a run
-/// and a probe of it could not fail.
+/// The two variables `EmulatorOpts::default` reads. The parent first shows that the variable's
+/// value, had it reached the options, would change the run; the child then runs the prover with the
+/// variable set and must match the run without it.
 macro_rules! option_probe {
     ($test:ident, $name:literal, $value:literal, $leak:expr) => {
         #[test]
@@ -292,4 +290,28 @@ fn the_variables_no_longer_read_reach_nothing() {
             "{name} is listed as read too"
         );
     }
+}
+
+/// Every variable the crate documentation names is one the stage ledger's envelope records, so a
+/// run's envelope says how each was set. `MLE_LEDGER` names the ledger's own file.
+#[test]
+fn the_ledger_records_every_documented_variable() {
+    let documented: Vec<&str> = include_str!("../lib.rs")
+        .lines()
+        .filter(|line| line.starts_with("//! | `"))
+        .flat_map(|line| {
+            let names = line.split('|').nth(1).expect("a names column");
+            names.split('`').skip(1).step_by(2)
+        })
+        .filter(|&name| name != "MLE_LEDGER")
+        .collect();
+    assert!(!documented.is_empty(), "no documented variables found");
+    let unrecorded: Vec<&str> = documented
+        .into_iter()
+        .filter(|name| !pico_vm::mle::ledger::KNOBS.contains(name))
+        .collect();
+    assert!(
+        unrecorded.is_empty(),
+        "not in the ledger's KNOBS: {unrecorded:?}"
+    );
 }

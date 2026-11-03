@@ -1,6 +1,16 @@
 use crate::Error;
 use cudart_sys::*;
 use std::ffi::c_void;
+use step_events::StepEvents;
+
+pub mod history_add_sub_divrem;
+pub mod history_bitwise_mul_shift;
+pub mod history_cpu_memory_lt;
+pub mod history_ecall_syscall;
+pub mod history_self_test;
+#[cfg(feature = "history-validate")]
+pub mod history_validate;
+pub mod step_events;
 
 unsafe extern "C" {
     pub fn cuda_byte_generate_preprocessed(
@@ -18,6 +28,7 @@ unsafe extern "C" {
         d_dummy_row: *const c_void,
         d_round_constants: *const c_void,
         stream: cudaStream_t,
+        steps: *mut StepEvents,
     ) -> Error;
 
     pub fn cuda_riscv_program_generate_preprocessed_u64(
@@ -28,17 +39,6 @@ unsafe extern "C" {
         d_trace: *mut c_void,
         num_cols: usize,
         stream: cudaStream_t,
-    ) -> Error;
-
-    pub fn cuda_riscv_program_generate_main_u64(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        pc_base: u64,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        stream: cudaStream_t,
-        num_instrs: usize,
     ) -> Error;
 
     pub fn cuda_weierstrass_add_secp256k1_generate_extra_record_and_main(
@@ -557,128 +557,11 @@ unsafe extern "C" {
         stream: cudaStream_t,
     ) -> Error;
 
-    pub fn cuda_add_generate_extra_record_and_main(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
+    pub fn cuda_extra_record_add_byte_trace_counts(
         d_byte_trace: *mut c_void,
-        stream: cudaStream_t,
-    ) -> Error;
-
-    pub fn cuda_addw_generate_extra_record_and_main(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        d_byte_trace: *mut c_void,
-        stream: cudaStream_t,
-    ) -> Error;
-
-    pub fn cuda_sub_generate_extra_record_and_main(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        d_byte_trace: *mut c_void,
-        stream: cudaStream_t,
-    ) -> Error;
-
-    pub fn cuda_subw_generate_extra_record_and_main(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        d_byte_trace: *mut c_void,
-        stream: cudaStream_t,
-    ) -> Error;
-
-    pub fn cuda_bitwise_generate_extra_record_and_main_u64(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        d_byte_trace: *mut c_void,
-        stream: cudaStream_t,
-    ) -> Error;
-
-    pub fn cuda_divrem_generate_extra_record_and_main(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        stream: cudaStream_t,
-        d_extra_event_indices: *const c_void,
-        d_byte_trace: *mut c_void,
-        d_alu_add_sub_events: *mut c_void,
-        alu_add_sub_events_start_index: usize,
-    ) -> Error;
-
-    pub fn cuda_lt_generate_extra_record_and_main_u64(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        d_byte_trace: *mut c_void,
-        stream: cudaStream_t,
-    ) -> Error;
-
-    pub fn cuda_mul_generate_extra_record_and_main_u64(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        d_byte_trace: *mut c_void,
-        stream: cudaStream_t,
-    ) -> Error;
-
-    pub fn cuda_sll_generate_extra_record_and_main_u64(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        d_byte_trace: *mut c_void,
-        stream: cudaStream_t,
-    ) -> Error;
-
-    pub fn cuda_sr_generate_extra_record_and_main_u64(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        d_byte_trace: *mut c_void,
-        stream: cudaStream_t,
-    ) -> Error;
-
-    pub fn cuda_cpu_generate_extra_record_and_main_u64(
-        num_cols: usize,
-        event_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        stream: cudaStream_t,
-        d_extra_event_indices: *const c_void,
-        d_byte_trace: *mut c_void,
-        d_alu_add_sub_events: *mut c_void,
-        alu_add_sub_events_start_index: usize,
-        d_alu_lt_events: *mut c_void,
-        alu_lt_events_start_index: usize,
-    ) -> Error;
-
-    pub fn cuda_cpu_pad_trace_u64(
-        num_cols: usize,
-        start_row: usize,
-        end_row: usize,
-        d_trace: *mut c_void,
+        d_delta: *const c_void,
+        byte_trace_size: usize,
+        d_overflow: *mut c_void,
         stream: cudaStream_t,
     ) -> Error;
 
@@ -693,6 +576,7 @@ unsafe extern "C" {
         d_poseidon2_events: *mut c_void,
         poseidon2_events_start_index: usize,
         d_round_constants: *const c_void,
+        steps: *mut StepEvents,
     ) -> Error;
 
     pub fn cuda_memory_initialize_finalize_generate_extra_record_and_main_u64(
@@ -719,17 +603,7 @@ unsafe extern "C" {
         d_global_events: *mut c_void,
         global_events_start_index: usize,
         d_byte_trace: *mut c_void,
-    ) -> Error;
-
-    pub fn cuda_memory_read_write_generate_extra_record_and_main_u64(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_event_indices: *const c_void,
-        d_trace: *mut c_void,
-        stream: cudaStream_t,
-        d_byte_trace: *mut c_void,
+        steps: *mut StepEvents,
     ) -> Error;
 
     pub fn cuda_syscall_generate_extra_record_and_main_u64(
@@ -744,16 +618,6 @@ unsafe extern "C" {
         // Matches `enum class SyscallChunkKind : uint8_t` on the device side. Declaring this
         // usize made the two sides disagree on the parameter's width.
         chunk_kind: u8,
-        d_byte_trace: *mut c_void,
-    ) -> Error;
-
-    pub fn cuda_ecall_generate_extra_record_and_main_u64(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        stream: cudaStream_t,
         d_byte_trace: *mut c_void,
     ) -> Error;
 
@@ -911,152 +775,5 @@ unsafe extern "C" {
         d_dummy_row: *const c_void,
         d_byte_trace: *mut c_void,
         stream: cudaStream_t,
-    ) -> Error;
-
-    pub fn cuda_alu_partition_events(
-        all_events: *const c_void,
-        total_count: usize,
-        out_add: *mut c_void,
-        out_sub: *mut c_void,
-        out_addw: *mut c_void,
-        out_subw: *mut c_void,
-        stream: cudaStream_t,
-    ) -> Error;
-
-    // ─── Packed-event (MLE_PACKED_EVENTS=1) entries; format_version must be
-    // PACKED_EVENT_FORMAT_V1 or the CUDA side returns an error (loud unpaired-deploy guard). ───
-
-    pub fn cuda_cpu_generate_extra_record_and_main_u64_packed(
-        num_cols: usize,
-        event_size: usize,
-        d_events: *const c_void,
-        chunk: usize,
-        d_trace: *mut c_void,
-        stream: cudaStream_t,
-        d_extra_event_indices: *const c_void,
-        d_byte_trace: *mut c_void,
-        d_alu_add_sub_events: *mut c_void,
-        alu_add_sub_events_start_index: usize,
-        d_alu_lt_events: *mut c_void,
-        alu_lt_events_start_index: usize,
-        format_version: usize,
-    ) -> Error;
-
-    pub fn cuda_memory_read_write_generate_extra_record_and_main_u64_packed(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_mem_records: *const c_void,
-        chunk: usize,
-        d_event_indices: *const c_void,
-        d_trace: *mut c_void,
-        stream: cudaStream_t,
-        d_byte_trace: *mut c_void,
-        format_version: usize,
-    ) -> Error;
-
-    pub fn cuda_ecall_generate_extra_record_and_main_u64_packed(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        chunk: usize,
-        d_trace: *mut c_void,
-        stream: cudaStream_t,
-        d_byte_trace: *mut c_void,
-        format_version: usize,
-    ) -> Error;
-
-    pub fn cuda_lt_generate_extra_record_and_main_u64_packed(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        d_byte_trace: *mut c_void,
-        stream: cudaStream_t,
-        format_version: usize,
-    ) -> Error;
-
-    pub fn cuda_add_generate_extra_record_and_main_packed(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        d_byte_trace: *mut c_void,
-        stream: cudaStream_t,
-        format_version: usize,
-    ) -> Error;
-
-    pub fn cuda_addw_generate_extra_record_and_main_packed(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        d_byte_trace: *mut c_void,
-        stream: cudaStream_t,
-        format_version: usize,
-    ) -> Error;
-
-    pub fn cuda_sub_generate_extra_record_and_main_packed(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        d_byte_trace: *mut c_void,
-        stream: cudaStream_t,
-        format_version: usize,
-    ) -> Error;
-
-    pub fn cuda_subw_generate_extra_record_and_main_packed(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        d_byte_trace: *mut c_void,
-        stream: cudaStream_t,
-        format_version: usize,
-    ) -> Error;
-
-    pub fn cuda_divrem_generate_extra_record_and_main_packed(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        stream: cudaStream_t,
-        d_extra_event_indices: *const c_void,
-        d_byte_trace: *mut c_void,
-        d_alu_add_sub_events: *mut c_void,
-        alu_add_sub_events_start_index: usize,
-        format_version: usize,
-    ) -> Error;
-
-    pub fn cuda_riscv_program_generate_main_u64_packed(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        pc_base: u64,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        stream: cudaStream_t,
-        num_instrs: usize,
-        format_version: usize,
-    ) -> Error;
-
-    pub fn cuda_alu_partition_events_packed(
-        all_events: *const c_void,
-        total_count: usize,
-        out_add: *mut c_void,
-        out_sub: *mut c_void,
-        out_addw: *mut c_void,
-        out_subw: *mut c_void,
-        stream: cudaStream_t,
-        format_version: usize,
     ) -> Error;
 }

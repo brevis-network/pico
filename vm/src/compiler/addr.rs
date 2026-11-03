@@ -286,6 +286,13 @@ pub const PC_SIZE: usize = 2;
 #[repr(C)]
 pub struct Pc<T>(pub [T; PC_SIZE]);
 
+/// Whether `value` fits a [`Pc`]. `Pc::try_from` and the emulators' end-of-run check share this
+/// bound, so a run that ends without error never hands the CPU trace a pc it cannot hold.
+#[inline(always)]
+pub const fn fits_pc(value: u64) -> bool {
+    value >> 32 == 0
+}
+
 impl<V: Copy> Pc<V> {
     /// Reduces a pc to a single expression: `limb[0] + limb[1] * 2^16`.
     ///
@@ -356,7 +363,7 @@ impl<F: PrimeCharacteristicRing> TryFrom<u64> for Pc<F> {
     type Error = anyhow::Error;
 
     fn try_from(value: u64) -> Result<Self> {
-        if value >> 32 != 0 {
+        if !fits_pc(value) {
             bail!("pc exceeds the 32-bit program counter range: {value:#x}");
         }
         Ok(Pc([

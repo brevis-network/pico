@@ -38,7 +38,7 @@ where
     info!("Creating emulator (at {:?})..", start.elapsed());
     let final_pvs_state = Arc::new(RecordFinalPvsState::default());
     let mut emulator =
-        RiscvEmulator::new_single::<F>(program, final_pvs_state, EmulatorOpts::test_opts(), None);
+        RiscvEmulator::new_single::<F>(program, final_pvs_state, EmulatorOpts::test_opts());
     info!(
         "Running with chunk size: {}, batch size: {}",
         emulator.opts.chunk_size, emulator.opts.chunk_batch_size
@@ -59,7 +59,7 @@ where
             .unwrap();
 
         for (i, record) in enumerate(batch_records.iter()) {
-            if !record.cpu_events.is_empty() {
+            if !record.cpu_steps().is_empty() {
                 execution_record_count += 1;
             }
             record_count += 1;
@@ -78,10 +78,10 @@ where
 
             // For the first chunk, cpu events should not be empty
             if i == 0 {
-                assert!(!record.cpu_events.is_empty());
+                assert!(!record.cpu_steps().is_empty());
                 assert_eq!(record.public_values.start_pc, prev_next_pc);
             }
-            if !record.cpu_events.is_empty() {
+            if !record.cpu_steps().is_empty() {
                 assert_ne!(record.public_values.start_pc, [0u32; 3]);
             } else {
                 assert_eq!(record.public_values.start_pc, record.public_values.next_pc);

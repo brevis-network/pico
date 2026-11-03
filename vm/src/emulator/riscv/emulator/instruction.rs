@@ -1,9 +1,8 @@
-use super::{align_u64, EmulationError, RiscvEmulator};
+use super::{align_u64, AbnormalTermination, EmulationError, RiscvEmulator, TerminationReason};
 use crate::{
     chips::chips::riscv_memory::event::MemoryAccessPosition,
     compiler::riscv::{instruction::Instruction, opcode::Opcode, register::Register},
     emulator::riscv::syscalls::{syscall_context::SyscallContext, SyscallCode},
-    primitives::consts::CHUNK_CLK_START,
 };
 use tracing::debug;
 
@@ -52,11 +51,8 @@ impl RiscvEmulator {
         let mut compat_cpu_event_b_u64: Option<u64> = None;
         let mut compat_cpu_event_c_u64: Option<u64> = None;
 
-        self.mode.init_memory_access(&mut self.memory_accesses);
+        self.mode.init_memory_access(&mut self.sink);
 
-        if self.state.clk == u64::from(CHUNK_CLK_START) {
-            self.chunk_start_pc = self.state.pc;
-        }
         // TODO(rv64im-3r7): remove u64::from ALU payload bridges after canonical ALU operand/result
         // paths are u64 end-to-end (alu_rr/alu result locals no longer u32-compat).
         match instruction.opcode {
@@ -65,7 +61,7 @@ impl RiscvEmulator {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b.wrapping_add(c);
                 self.alu_rw(rd, a);
-                self.mode.emit_alu_pinned(
+                self.mode.emit_alu(
                     instruction.op_a,
                     self.state.clk,
                     a,
@@ -73,14 +69,14 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.add_sub_events,
+                    &mut self.sink,
                 );
             }
             Opcode::SUB => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b.wrapping_sub(c);
                 self.alu_rw(rd, a);
-                self.mode.emit_alu_pinned(
+                self.mode.emit_alu(
                     instruction.op_a,
                     self.state.clk,
                     a,
@@ -88,7 +84,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.add_sub_events,
+                    &mut self.sink,
                 );
             }
             Opcode::XOR => {
@@ -103,7 +99,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.bitwise_events,
+                    &mut self.sink,
                 );
             }
             Opcode::OR => {
@@ -118,7 +114,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.bitwise_events,
+                    &mut self.sink,
                 );
             }
             Opcode::AND => {
@@ -133,7 +129,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.bitwise_events,
+                    &mut self.sink,
                 );
             }
             Opcode::SLL => {
@@ -148,7 +144,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.shift_left_events,
+                    &mut self.sink,
                 );
             }
             Opcode::SRL => {
@@ -163,7 +159,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.shift_right_events,
+                    &mut self.sink,
                 );
             }
             Opcode::SRA => {
@@ -178,14 +174,14 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.shift_right_events,
+                    &mut self.sink,
                 );
             }
             Opcode::SLT => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = if (b as i64) < (c as i64) { 1 } else { 0 };
                 self.alu_rw(rd, a);
-                self.mode.emit_alu_pinned(
+                self.mode.emit_alu(
                     instruction.op_a,
                     self.state.clk,
                     a,
@@ -193,14 +189,14 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.lt_events,
+                    &mut self.sink,
                 );
             }
             Opcode::SLTU => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = if b < c { 1 } else { 0 };
                 self.alu_rw(rd, a);
-                self.mode.emit_alu_pinned(
+                self.mode.emit_alu(
                     instruction.op_a,
                     self.state.clk,
                     a,
@@ -208,7 +204,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.lt_events,
+                    &mut self.sink,
                 );
             }
 
@@ -223,7 +219,7 @@ impl RiscvEmulator {
             Opcode::LH => {
                 (rd, b, c, addr, memory_read_value) = self.load_rr(instruction);
                 if addr % 2 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::LH,
                         invalid_memory_addr_u64(addr, "lh"),
                     ));
@@ -237,7 +233,7 @@ impl RiscvEmulator {
             Opcode::LW => {
                 (rd, b, c, addr, memory_read_value) = self.load_rr(instruction);
                 if addr % 4 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::LW,
                         invalid_memory_addr_u64(addr, "lw"),
                     ));
@@ -258,7 +254,7 @@ impl RiscvEmulator {
             Opcode::LHU => {
                 (rd, b, c, addr, memory_read_value) = self.load_rr(instruction);
                 if addr % 2 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::LHU,
                         invalid_memory_addr_u64(addr, "lhu"),
                     ));
@@ -272,7 +268,7 @@ impl RiscvEmulator {
             Opcode::LWU => {
                 (rd, b, c, addr, memory_read_value) = self.load_rr(instruction);
                 if addr % 4 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::LWU,
                         invalid_memory_addr_u64(addr, "lwu"),
                     ));
@@ -285,7 +281,7 @@ impl RiscvEmulator {
             Opcode::LD => {
                 (rd, b, c, addr, memory_read_value) = self.load_rr(instruction);
                 if addr % 8 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::LD,
                         invalid_memory_addr_u64(addr, "ld"),
                     ));
@@ -312,7 +308,7 @@ impl RiscvEmulator {
                 a = store_value;
                 addr = b.wrapping_add(c);
                 if addr % 8 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::SD,
                         invalid_memory_addr_u64(addr, "sd"),
                     ));
@@ -323,7 +319,7 @@ impl RiscvEmulator {
             Opcode::SH => {
                 (a, b, c, addr, memory_read_value) = self.store_rr(instruction);
                 if addr % 2 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::SH,
                         invalid_memory_addr_u64(addr, "sh"),
                     ));
@@ -337,7 +333,7 @@ impl RiscvEmulator {
             Opcode::SW => {
                 (a, b, c, addr, memory_read_value) = self.store_rr(instruction);
                 if addr % 4 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(
+                    return Err(EmulationError::invalid_memory_access(
                         Opcode::SW,
                         invalid_memory_addr_u64(addr, "sw"),
                     ));
@@ -470,14 +466,9 @@ impl RiscvEmulator {
                         if let Some(error) = precompile_rt.take_error() {
                             return Err(error);
                         }
+                        // A non-zero `HALT` has already failed through `take_error` above: the
+                        // halt syscall reports it as an `AbnormalTermination`.
                         let ret_value = returned.unwrap_or(u64::from(syscall_id));
-
-                        // If the syscall is `HALT` and the exit code is non-zero, return an error.
-                        if syscall == SyscallCode::HALT && precompile_rt.exit_code != 0 {
-                            return Err(EmulationError::HaltWithNonZeroExitCode(
-                                precompile_rt.exit_code,
-                            ));
-                        }
 
                         Ok((
                             precompile_rt.next_pc,
@@ -505,7 +496,10 @@ impl RiscvEmulator {
                 exit_code = returned_exit_code;
             }
             Opcode::EBREAK => {
-                return Err(EmulationError::Breakpoint());
+                return Err(AbnormalTermination::fault(TerminationReason::Breakpoint {
+                    pc: self.state.pc,
+                })
+                .into());
             }
 
             // Multiply instructions.
@@ -521,7 +515,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.mul_events,
+                    &mut self.sink,
                 );
             }
             Opcode::MULH => {
@@ -536,7 +530,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.mul_events,
+                    &mut self.sink,
                 );
             }
             Opcode::MULHU => {
@@ -551,7 +545,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.mul_events,
+                    &mut self.sink,
                 );
             }
             Opcode::MULHSU => {
@@ -566,7 +560,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.mul_events,
+                    &mut self.sink,
                 );
             }
             Opcode::DIV => {
@@ -585,7 +579,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.divrem_events,
+                    &mut self.sink,
                 );
             }
             Opcode::DIVU => {
@@ -600,7 +594,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.divrem_events,
+                    &mut self.sink,
                 );
             }
             Opcode::REM => {
@@ -619,7 +613,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.divrem_events,
+                    &mut self.sink,
                 );
             }
             Opcode::REMU => {
@@ -638,7 +632,7 @@ impl RiscvEmulator {
                     c,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.divrem_events,
+                    &mut self.sink,
                 );
             }
             Opcode::ADDW => {
@@ -652,7 +646,7 @@ impl RiscvEmulator {
                 compat_cpu_event_b_u64 = Some(compat_b_u64);
                 compat_cpu_event_c_u64 = Some(compat_c_u64);
                 self.rw(rd, result);
-                self.mode.emit_alu_pinned(
+                self.mode.emit_alu(
                     instruction.op_a,
                     self.state.clk,
                     result,
@@ -660,7 +654,7 @@ impl RiscvEmulator {
                     compat_c_u64,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.add_sub_events,
+                    &mut self.sink,
                 );
             }
             Opcode::SUBW => {
@@ -674,7 +668,7 @@ impl RiscvEmulator {
                 compat_cpu_event_b_u64 = Some(compat_b_u64);
                 compat_cpu_event_c_u64 = Some(compat_c_u64);
                 self.rw(rd, result);
-                self.mode.emit_alu_pinned(
+                self.mode.emit_alu(
                     instruction.op_a,
                     self.state.clk,
                     result,
@@ -682,7 +676,7 @@ impl RiscvEmulator {
                     compat_c_u64,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.add_sub_events,
+                    &mut self.sink,
                 );
             }
             Opcode::SLLW => {
@@ -704,7 +698,7 @@ impl RiscvEmulator {
                     compat_c_u64,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.shift_left_events,
+                    &mut self.sink,
                 );
             }
             Opcode::SRLW => {
@@ -726,7 +720,7 @@ impl RiscvEmulator {
                     compat_c_u64,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.shift_right_events,
+                    &mut self.sink,
                 );
             }
             Opcode::SRAW => {
@@ -748,7 +742,7 @@ impl RiscvEmulator {
                     compat_c_u64,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.shift_right_events,
+                    &mut self.sink,
                 );
             }
             Opcode::MULW => {
@@ -770,7 +764,7 @@ impl RiscvEmulator {
                     compat_c_u64,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.mul_events,
+                    &mut self.sink,
                 );
             }
             Opcode::DIVW => {
@@ -796,7 +790,7 @@ impl RiscvEmulator {
                     compat_c_u64,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.divrem_events,
+                    &mut self.sink,
                 );
             }
             Opcode::DIVUW => {
@@ -820,7 +814,7 @@ impl RiscvEmulator {
                     compat_c_u64,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.divrem_events,
+                    &mut self.sink,
                 );
             }
             Opcode::REMW => {
@@ -846,7 +840,7 @@ impl RiscvEmulator {
                     compat_c_u64,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.divrem_events,
+                    &mut self.sink,
                 );
             }
             Opcode::REMUW => {
@@ -872,13 +866,13 @@ impl RiscvEmulator {
                     compat_c_u64,
                     instruction.opcode,
                     instruction.imm_c,
-                    &mut self.record.divrem_events,
+                    &mut self.sink,
                 );
             }
 
             // See https://github.com/riscv-non-isa/riscv-asm-manual/blob/main/src/asm-manual.adoc#instruction-aliases
             Opcode::UNIMP => {
-                return Err(EmulationError::Unimplemented());
+                return Err(EmulationError::illegal_instruction(self.state.pc));
             }
         }
 
@@ -897,14 +891,9 @@ impl RiscvEmulator {
             compat_cpu_event_b_u64,
             compat_cpu_event_c_u64,
             *instruction,
-            self.memory_accesses,
             memory_store_value,
-            &mut self.record.cpu_events,
-            &mut self.record.memory_read_write_event_indices,
+            &mut self.sink,
         );
-
-        self.chunk_last_next_pc = next_pc;
-        self.chunk_exit_code = exit_code;
 
         // Update the program counter.
         self.state.pc = next_pc;

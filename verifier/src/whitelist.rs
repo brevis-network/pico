@@ -14,9 +14,9 @@ use crate::{
     Kb, Sc,
 };
 
-/// Fixed Merkle depth: 2^15 = 32,768 whitelist slots. The whitelist holds 15,680 leaves (15,643
+/// Fixed Merkle depth: 2^15 = 32,768 whitelist slots. The whitelist holds 15,683 leaves (15,646
 /// riscv shapes, 36 combine node shapes and the deferred node), so this leaves 109% headroom;
-/// depth 14 would leave 704 free slots (4.3%). A new precompile kind sweeps a few hundred shapes,
+/// depth 14 would leave 701 free slots (4.3%). A new precompile kind sweeps a few hundred shapes,
 /// so a few more kinds would use those up.
 /// The depth is baked into the membership circuit, so changing it changes every combine VK and
 /// the root.

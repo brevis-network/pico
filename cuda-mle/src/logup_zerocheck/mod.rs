@@ -1144,6 +1144,7 @@ impl<'a, FK: FieldKernels, HS: GpuHashScheme<BaseField = FK::Val, ExtField = FK:
         {
             debug!("starting batch constraints for air_idx={air_idx} (trace_idx={trace_idx})");
             let this_pk = &self.pk.per_air[*air_idx];
+            let air_time = crate::air_times::start();
             // Includes both plain AIR constraints and symbolic interactions (1c: tree form
             // is cached in the key — the DAG→tree clone-out used to run per AIR × chunk).
             let air_rules = this_pk.symbolic_constraints();
@@ -1331,6 +1332,9 @@ impl<'a, FK: FieldKernels, HS: GpuHashScheme<BaseField = FK::Val, ExtField = FK:
                 }
             }
 
+            if zc_on_cpu {
+                crate::air_times::note_path("host");
+            }
             let zc_pick = if zc_on_cpu { zc_cpu_poly } else { zc_gpu_poly };
             if let Some(sp_0) = zc_pick {
                 sp_polys_out[2 * present_n + trace_idx] = sp_0;
@@ -1424,6 +1428,7 @@ impl<'a, FK: FieldKernels, HS: GpuHashScheme<BaseField = FK::Val, ExtField = FK:
                     "[stepprof][{}] r0lg_air air={} us={us}", crate::prove_phase(), this_pk.air_name
                 );
             }
+            crate::air_times::stop(air_time, &this_pk.air_name, "round0");
         }
         if r0_prof {
             tracing::info!(
@@ -2264,15 +2269,6 @@ impl<'a, FK: FieldKernels, HS: GpuHashScheme<BaseField = FK::Val, ExtField = FK:
                     && tc.num_y as u64 * mono_n as u64
                         >= rule_n as u64 * DAG_CROSSOVER_EVALS_PER_RULE
             });
-
-        if std::env::var("MLE_LOG_PATH_CHOICE").is_ok() {
-            tracing::warn!(
-                "MLE_PATH round={round}: high_dag={:?} high_mono={:?} low_early={:?}",
-                via_dag.iter().map(|tc| tc.trace_idx).collect::<Vec<_>>(),
-                via_par_y.iter().map(|tc| tc.trace_idx).collect::<Vec<_>>(),
-                small_y.iter().map(|tc| tc.trace_idx).collect::<Vec<_>>(),
-            );
-        }
 
         // High-num_y traces whose monomial count dwarfs their rule count: evaluate the DAG.
         let t_zd = std::time::Instant::now();

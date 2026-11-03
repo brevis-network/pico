@@ -23,9 +23,17 @@
 //! - `usize`: Exact static memory RW event count
 //! - `usize`: Conservative static global lookup base contribution
 //!
-//! Terminal instructions (control flow, syscalls) return `true` and include their own
-//! clock updates. Non-terminal instructions return `false` and batch clock updates
-//! at the superblock level for performance.
+//! Terminal instructions (control flow, syscalls) return `true` and include their own clock
+//! updates. Non-terminal instructions return `false`; their runtime helpers update the clock.
+//!
+//! # Events
+//!
+//! Every instruction but `ECALL` runs through a runtime helper, which writes its events when the
+//! core emits any. A block reads whether it does once, on entry, into `emitting`, and hands that
+//! to every helper: the sink cannot change while a block runs, and one flag tested by every helper
+//! is what lets the compiler run the block's plain bodies back to back, with no test between them.
+//! A jump or a branch leaves only the pc, the clock and the block's exit to the code here.
+//! `ECALL` ends its instruction through the core, which tests the sink itself.
 
 use crate::types::{sign_extend_imm32_to_u64, Instruction, Opcode};
 use proc_macro2::TokenStream;
@@ -42,18 +50,17 @@ use std::collections::HashSet;
 /// # Example
 ///
 /// ```ignore
-/// let translator = InstructionTranslator::new(true);
+/// let translator = InstructionTranslator::new();
 /// let (code, is_terminal, mem_rw_events, global_lookup_base) =
 ///     translator.translate(pc, &instruction, &leaders);
 /// ```
-pub struct InstructionTranslator {
-    allow_direct_jumps: bool,
-}
+#[derive(Default)]
+pub struct InstructionTranslator;
 
 impl InstructionTranslator {
     /// Creates a new instruction translator.
-    pub fn new(allow_direct_jumps: bool) -> Self {
-        Self { allow_direct_jumps }
+    pub fn new() -> Self {
+        Self
     }
 
     /// Translates a RISC-V instruction into Rust code.
@@ -163,10 +170,9 @@ impl InstructionTranslator {
     ) -> (TokenStream, bool, usize, usize) {
         let (rd, imm) = inst.j_type();
         let rd = rd as usize;
-        let next_pc = pc.wrapping_add(4);
         let target = pc.wrapping_add(sign_extend_imm32_to_u64(imm));
 
-        let next_step = if self.allow_direct_jumps && leaders.contains(&target) {
+        let next_step = if leaders.contains(&target) {
             let target_block = format_ident!("block_0x{:08x}", target);
             quote! { crate::NextStep::Direct(#target_block) }
         } else {
@@ -174,8 +180,7 @@ impl InstructionTranslator {
         };
 
         let code = quote! {
-            let return_addr = #next_pc;
-            emu.write_reg_no_count(#rd, return_addr);
+            emu.jal_no_count(emitting, #rd, #pc, u64::from(#imm));
             emu.pc = #target;
             emu.update_insn_clock();
             emu.check_chunk_boundary_fast();
@@ -195,14 +200,9 @@ impl InstructionTranslator {
         let (rd, rs1, imm) = inst.i_type();
         let rd = rd as usize;
         let rs1 = rs1 as usize;
-        let next_pc = pc.wrapping_add(4);
-        let signed_imm = sign_extend_imm32_to_u64(imm);
 
         let code = quote! {
-            let base = emu.read_reg_b_tracked(#rs1);
-            let return_addr = #next_pc;
-            emu.write_reg_no_count(#rd, return_addr);
-            let target = base.wrapping_add(#signed_imm) & !1_u64;
+            let target = emu.jalr_no_count(emitting, #rd, #rs1, #pc, u64::from(#imm));
             emu.pc = target;
             emu.update_insn_clock();
             emu.check_chunk_boundary_fast();
@@ -231,24 +231,25 @@ impl InstructionTranslator {
         let target = pc.wrapping_add(sign_extend_imm32_to_u64(imm));
         let fallthrough = pc.wrapping_add(4);
 
-        let cond = match inst.opcode {
-            Opcode::BEQ => quote! { a == b },
-            Opcode::BNE => quote! { a != b },
-            Opcode::BLT => quote! { (a as i64) < (b as i64) },
-            Opcode::BGE => quote! { (a as i64) >= (b as i64) },
-            Opcode::BLTU => quote! { a < b },
-            Opcode::BGEU => quote! { a >= b },
-            _ => quote! { false },
+        let helper = match inst.opcode {
+            Opcode::BEQ => "beq",
+            Opcode::BNE => "bne",
+            Opcode::BLT => "blt",
+            Opcode::BGE => "bge",
+            Opcode::BLTU => "bltu",
+            Opcode::BGEU => "bgeu",
+            other => unreachable!("{other:?} at PC {pc:#x} is not a branch"),
         };
+        let helper = format_ident!("{}_no_count", helper);
 
-        let target_step = if self.allow_direct_jumps && leaders.contains(&target) {
+        let target_step = if leaders.contains(&target) {
             let name = format_ident!("block_0x{:08x}", target);
             quote! { crate::NextStep::Direct(#name) }
         } else {
             quote! { crate::NextStep::Dynamic(#target) }
         };
 
-        let fallthrough_step = if self.allow_direct_jumps && leaders.contains(&fallthrough) {
+        let fallthrough_step = if leaders.contains(&fallthrough) {
             let name = format_ident!("block_0x{:08x}", fallthrough);
             quote! { crate::NextStep::Direct(#name) }
         } else {
@@ -256,9 +257,8 @@ impl InstructionTranslator {
         };
 
         let code = quote! {
-            let b = emu.read_reg_b_tracked(#rs2);
-            let a = emu.read_reg_a_tracked(#rs1);
-            if #cond {
+            let taken = emu.#helper(emitting, #rs1, #rs2, #pc, u64::from(#imm));
+            if taken {
                 emu.pc = #target;
                 emu.update_insn_clock();
                 emu.check_chunk_boundary_fast();
@@ -284,7 +284,7 @@ impl InstructionTranslator {
     /// ECALL invokes system calls. The generated code delegates to the
     /// emulator's generic syscall system and handles return values, extra
     /// cycles, and potential halts.
-    fn gen_ecall(&self, _pc: u64, _inst: &Instruction) -> (TokenStream, bool, usize, usize) {
+    fn gen_ecall(&self, pc: u64, _inst: &Instruction) -> (TokenStream, bool, usize, usize) {
         let code = quote! {
             // Read the full 32-bit syscall number from t0 (x5)
             // SyscallCode encodes: [ID, Table, Cycles, Unused] in little-endian
@@ -300,6 +300,7 @@ impl InstructionTranslator {
                     // ENTER_UNCONSTRAINED mirrors baseline rw_unconstrained() semantics
                     // and does not increment the chunk-split mem_rw counter.
                     emu.write_reg(5, return_value);
+                    emu.emit_ecall(#pc, new_next_pc, return_value, arg1, arg2);
 
                     // Update PC and clock
                     // Note: new_next_pc is usually pc+4, but some syscalls like
@@ -336,7 +337,7 @@ impl InstructionTranslator {
     /// Generates code for EBREAK (breakpoint) instruction.
     fn gen_ebreak(&self, pc: u64) -> (TokenStream, bool, usize, usize) {
         let code = quote! {
-            Err(format!("Breakpoint at PC {:#x}", #pc))
+            Err(emu.breakpoint(#pc))
         };
         (code, true, 0, 0)
     }
@@ -347,7 +348,7 @@ impl InstructionTranslator {
     fn gen_unimp(&self, pc: u64, _inst: &Instruction) -> (TokenStream, bool, usize, usize) {
         let code = quote! {
             emu.update_insn_clock();
-            Err(format!("Unimplemented instruction (UNIMP) at PC {:#x}", #pc))
+            Err(emu.illegal_instruction(#pc))
         };
         (code, true, 0, 0)
     }
@@ -397,9 +398,7 @@ impl InstructionTranslator {
 
             quote! {
                 #op
-                emu.write_reg_no_count(#rd, a);
-                emu.pc = #next_pc;
-                emu.update_insn_clock();
+                emu.constant_no_count(emitting, #rd, a, #b, #c, #next_pc);
             }
         } else {
             let (rd, rs1, rs2, imm, use_imm) = decode_rr_imm(inst);
@@ -408,11 +407,11 @@ impl InstructionTranslator {
 
             if use_imm {
                 quote! {
-                    emu.#imm_helper_tracked(#rd, #rs1, u64::from(#imm), #next_pc);
+                    emu.#imm_helper_tracked(emitting, #rd, #rs1, u64::from(#imm), #next_pc);
                 }
             } else {
                 quote! {
-                    emu.#reg_helper_tracked(#rd, #rs1, #rs2, #next_pc);
+                    emu.#reg_helper_tracked(emitting, #rd, #rs1, #rs2, #next_pc);
                 }
             }
         }
@@ -434,7 +433,7 @@ impl InstructionTranslator {
         let helper = format_ident!("{}_no_count", helper);
 
         quote! {
-            emu.#helper(#rd, #rs1, #rs2, #next_pc);
+            emu.#helper(emitting, #rd, #rs1, #rs2, #next_pc);
         }
     }
 
@@ -444,6 +443,9 @@ impl InstructionTranslator {
             let rd = inst.op_a as usize;
             let lhs = inst.op_b;
             let rhs = inst.op_c;
+            // The interpreter's event carries the operands as the instruction holds them.
+            let b = sign_extend_imm32_to_u64(lhs);
+            let c = sign_extend_imm32_to_u64(rhs);
             let op = match inst.opcode {
                 Opcode::ADDW => quote! {
                     let value = u64::from((#lhs).wrapping_add(#rhs));
@@ -469,48 +471,27 @@ impl InstructionTranslator {
 
             quote! {
                 #op
-                emu.write_reg_no_count(#rd, result);
-                emu.pc = #next_pc;
-                emu.update_insn_clock();
+                emu.constant_no_count(emitting, #rd, result, #b, #c, #next_pc);
             }
         } else {
             let (rd, rs1, rs2, imm, use_imm) = decode_rr_imm(inst);
             let reg_helper = format_ident!("{}_no_count", reg_helper);
 
             if use_imm {
-                let imm_bits = imm;
-                let op = match inst.opcode {
-                    Opcode::ADDW => quote! {
-                        let value = u64::from((emu.read_reg_b_tracked(#rs1) as u32).wrapping_add(#imm_bits));
-                        let result = AotEmulatorCore::sign_extend_word_result_u64(value);
-                    },
-                    Opcode::SLLW => quote! {
-                        let shamt = AotEmulatorCore::word_shift_amount_u32(u64::from(#imm_bits));
-                        let value = u64::from((emu.read_reg_b_tracked(#rs1) as u32).wrapping_shl(shamt));
-                        let result = AotEmulatorCore::sign_extend_word_result_u64(value);
-                    },
-                    Opcode::SRLW => quote! {
-                        let shamt = AotEmulatorCore::word_shift_amount_u32(u64::from(#imm_bits));
-                        let value = u64::from((emu.read_reg_b_tracked(#rs1) as u32).wrapping_shr(shamt));
-                        let result = AotEmulatorCore::sign_extend_word_result_u64(value);
-                    },
-                    Opcode::SRAW => quote! {
-                        let shamt = AotEmulatorCore::word_shift_amount_u32(u64::from(#imm_bits));
-                        let value = (emu.read_reg_b_tracked(#rs1) as u32 as i32).wrapping_shr(shamt);
-                        let result = AotEmulatorCore::sign_extend_word_result_u64(value as u32 as u64);
-                    },
-                    _ => quote! { unreachable!() },
+                let imm_helper = match inst.opcode {
+                    Opcode::ADDW => "adiw",
+                    Opcode::SLLW => "sliw",
+                    Opcode::SRLW => "sriw",
+                    Opcode::SRAW => "saiw",
+                    other => unreachable!("{other:?} at PC {pc:#x} has no word immediate form"),
                 };
-
+                let imm_helper = format_ident!("{}_no_count", imm_helper);
                 quote! {
-                    #op
-                    emu.write_reg_no_count(#rd, result);
-                    emu.pc = #next_pc;
-                    emu.update_insn_clock();
+                    emu.#imm_helper(emitting, #rd, #rs1, u64::from(#imm), #next_pc);
                 }
             } else {
                 quote! {
-                    emu.#reg_helper(#rd, #rs1, #rs2, #next_pc);
+                    emu.#reg_helper(emitting, #rd, #rs1, #rs2, #next_pc);
                 }
             }
         }
@@ -524,7 +505,7 @@ impl InstructionTranslator {
         let next_pc = pc.wrapping_add(4);
 
         quote! {
-            emu.apc_no_count(#rd, #current_pc, u64::from(#imm), #next_pc);
+            emu.apc_no_count(emitting, #rd, #current_pc, u64::from(#imm), #next_pc);
         }
     }
 
@@ -541,25 +522,25 @@ impl InstructionTranslator {
 
         match inst.opcode {
             Opcode::LB => quote! {
-                emu.lb_no_count(#rd, #rs1, u64::from(#imm), #next_pc);
+                emu.lb_no_count(emitting, #rd, #rs1, u64::from(#imm), #next_pc);
             },
             Opcode::LH => quote! {
-                emu.lh_no_count(#rd, #rs1, u64::from(#imm), #next_pc)?;
+                emu.lh_no_count(emitting, #rd, #rs1, u64::from(#imm), #next_pc)?;
             },
             Opcode::LW => quote! {
-                emu.lw_no_count(#rd, #rs1, u64::from(#imm), #next_pc)?;
+                emu.lw_no_count(emitting, #rd, #rs1, u64::from(#imm), #next_pc)?;
             },
             Opcode::LBU => quote! {
-                emu.lbu_no_count(#rd, #rs1, u64::from(#imm), #next_pc);
+                emu.lbu_no_count(emitting, #rd, #rs1, u64::from(#imm), #next_pc);
             },
             Opcode::LHU => quote! {
-                emu.lhu_no_count(#rd, #rs1, u64::from(#imm), #next_pc)?;
+                emu.lhu_no_count(emitting, #rd, #rs1, u64::from(#imm), #next_pc)?;
             },
             Opcode::LWU => quote! {
-                emu.lwu_no_count(#rd, #rs1, u64::from(#imm), #next_pc)?;
+                emu.lwu_no_count(emitting, #rd, #rs1, u64::from(#imm), #next_pc)?;
             },
             Opcode::LD => quote! {
-                emu.ld_no_count(#rd, #rs1, u64::from(#imm), #next_pc)?;
+                emu.ld_no_count(emitting, #rd, #rs1, u64::from(#imm), #next_pc)?;
             },
             _ => quote! { unreachable!() },
         }
@@ -578,25 +559,19 @@ impl InstructionTranslator {
 
         match inst.opcode {
             Opcode::SB => quote! {
-                emu.sb_no_count(#rs2, #rs1, u64::from(#imm), #next_pc);
+                emu.sb_no_count(emitting, #rs2, #rs1, u64::from(#imm), #next_pc);
             },
             Opcode::SH => quote! {
-                emu.sh_no_count(#rs2, #rs1, u64::from(#imm), #next_pc)?;
+                emu.sh_no_count(emitting, #rs2, #rs1, u64::from(#imm), #next_pc)?;
             },
             Opcode::SW => quote! {
-                emu.sw_no_count(#rs2, #rs1, u64::from(#imm), #next_pc)?;
+                emu.sw_no_count(emitting, #rs2, #rs1, u64::from(#imm), #next_pc)?;
             },
             Opcode::SD => quote! {
-                emu.sd_no_count(#rs2, #rs1, u64::from(#imm), #next_pc)?;
+                emu.sd_no_count(emitting, #rs2, #rs1, u64::from(#imm), #next_pc)?;
             },
             _ => quote! { unreachable!() },
         }
-    }
-}
-
-impl Default for InstructionTranslator {
-    fn default() -> Self {
-        Self::new(true)
     }
 }
 

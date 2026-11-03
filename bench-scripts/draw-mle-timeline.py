@@ -2,7 +2,9 @@
 """Draw the MLE prover's pipeline timeline from a span CSV.
 
 The input is what `MLE_SPANS=<path>` writes (vm/src/mle/spans): one row per interval during which
-one lane was in one state.
+one lane was in one state. Only a build with `pico-vm`'s `stage-ledger` feature writes it
+(`distributed-vm` and `perf/aot/bench` build with it; any other build prints a warning at the
+pipeline's start and writes nothing).
 
     lane,index,state,work,item,start_us,end_us
 
@@ -56,6 +58,7 @@ def is_prove_lane(lane):
 ROLE_ORDER = [
     "snapshot",     # emulate: untraced forward pass (AOT when the factory is registered)
     "emulate",      # emulate: traced replay workers
+    "sequencer",    # emulate: orders the workers' records, splits the deferred pool
     "riscv-prep",
     "conv-prep",
     "comb-prep",
@@ -68,6 +71,7 @@ WORK_COLOR = {
     "snapshot": "#003F5C",
     "emulate": "#2F4B7C",
     "emulate-recover": "#6A7BA2",
+    "sequence": "#A0CBE8",
     "prepare-riscv": "#4C78A8",
     "prepare-convert": "#72B7B2",
     "prepare-combine": "#54A24B",
@@ -94,7 +98,7 @@ CHUNK_ITEM_WORK = {
 }
 # Kinds that never carry an item, so no key space applies.
 ITEMLESS_WORK = {"keygen", "-"}
-BATCH_ITEM_WORK = {"snapshot", "emulate", "emulate-recover"}
+BATCH_ITEM_WORK = {"snapshot", "emulate", "emulate-recover", "sequence"}
 NODE_ITEM_WORK = {"prepare-combine", "prove-combine"}
 
 def _check_key_spaces() -> None:
@@ -726,11 +730,13 @@ def run_checks(spans, stats, log_info, acct, path) -> list[str]:
                 f"`MLE lane: {'/'.join(log_roles)}` line(s)"
             )
     # 4. Busy and non-busy must together fill the lane-seconds the window offers — the unit check for
-    # the sums above, which are per-lane totals and not shares of one window.
+    # the sums above, which are per-lane totals and not shares of one window. A recording with no
+    # prove lane at all (an emulation-only run) has no lane-seconds to fill.
     prove_busy = sum(
         sp["e"] - sp["s"] for sp in spans if is_prove_lane(sp["lane"]) and sp["state"] == "busy"
     )
-    if abs(prove_busy + acct["nonbusy"] - acct["lane_window"]) > max(
+    has_prove = any(is_prove_lane(sp["lane"]) for sp in spans)
+    if has_prove and abs(prove_busy + acct["nonbusy"] - acct["lane_window"]) > max(
         5.0, acct["lane_window"] * 0.005
     ):
         fails.append(
@@ -818,7 +824,7 @@ def self_test(tmp_dir: str) -> int:
             return
         failures.append(f"{name}: accepted a CSV it should have refused ({needle})")
 
-    expect_fail([("sequencer", 0, "busy", "emulate", "", 0, 10)], "unknown-role.csv", "unknown lane role")
+    expect_fail([("no-such-role", 0, "busy", "emulate", "", 0, 10)], "unknown-role.csv", "unknown lane role")
     expect_fail([("prove", 0, "busy", "prove-embed", "", 0, 10)], "unknown-work.csv", "unknown work kind")
     expect_fail([("prove", 0, "sleeping", "prove-riscv", "", 0, 10)], "bad-state.csv", "unknown state")
     expect_fail([("prove", 0, "busy", "prove-riscv", "", 20, 10)], "inverted.csv", "ends before it starts")
@@ -835,6 +841,16 @@ def self_test(tmp_dir: str) -> int:
         failures.append(f"lanes {sorted(set(stats) ^ expected_lanes)} unexpectedly present or absent")
     if ("emulate", 1) not in stats:
         failures.append("the worker that never received a batch produced no lane")
+
+    # An emulation-only recording, with a sequencer and no prove lane, passes the checks.
+    emu_only = write([row for row in SELF_TEST_ROWS if row[0] in ("snapshot", "emulate")]
+                     + [("sequencer", 0, "busy", "sequence", 0, 100, 120)], "emulate-only.spans.csv")
+    emu_spans = load_spans(emu_only)
+    emu_stats = lane_stats(emu_spans)
+    window = max(sp["e"] for sp in emu_spans)
+    if fails := run_checks(emu_spans, emu_stats, None,
+                           window_accounting(emu_spans, emu_stats, window), emu_only):
+        failures.append(f"emulate-only.spans.csv: {fails}")
 
     # The classifier, number by number.
     prove_busy = {

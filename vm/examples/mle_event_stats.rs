@@ -1,6 +1,6 @@
 //! Per-record event census: how many rows each chunk's Add chip and memory chips will get, and
 //! which local-memory entries are fresh. Emulation only (no GPU, no proving), streaming one
-//! record at a time so the pinned event-buffer pool is never exhausted.
+//! record at a time.
 //!
 //! Add rows are what the preparer counts (`precompute_event_size`: the record's ADD ALU events and
 //! the DivRem chip's absolute-value ADD events; a JALR target is proven in the Cpu row and adds
@@ -29,6 +29,7 @@ use pico_vm::{
         riscv::{
             emulator::{RiscvEmulator, MIN_MAIN_MEMORY_ADDR},
             public_values::RecordFinalPvsState,
+            record::AluStream,
         },
     },
     instances::preparer::precompute_event_size,
@@ -52,7 +53,7 @@ fn main() {
         .compile();
     let opts = EmulatorOpts::default();
     let final_pvs_state = Arc::new(RecordFinalPvsState::default());
-    let mut emulator = RiscvEmulator::new_single::<Kb>(program, final_pvs_state, opts, None);
+    let mut emulator = RiscvEmulator::new_single::<Kb>(program, final_pvs_state, opts);
     emulator.write_stdin(&stdin);
 
     println!(
@@ -62,18 +63,14 @@ fn main() {
     loop {
         let report = emulator
             .emulate_batch(&mut |r| {
-                let add_alu = r
-                    .add_sub_events
-                    .as_slice()
-                    .iter()
-                    .filter(|e| matches!(e.opcode, Opcode::ADD))
-                    .count();
-                let jalr = r
-                    .cpu_events
-                    .as_slice()
-                    .iter()
-                    .filter(|e| matches!(e.instruction.opcode, Opcode::JALR))
-                    .count();
+                let add_alu = r.alu_ops(AluStream::Add).count(Opcode::ADD);
+                let jalr = r.history.as_ref().map_or(0, |history| {
+                    history
+                        .steps
+                        .iter()
+                        .filter(|step| r.program.fetch(u64::from(step.pc)).opcode == Opcode::JALR)
+                        .count()
+                });
                 let add_rows = precompute_event_size::<Kb>(&r).num_add_events;
                 let image = &r.program.memory_image;
                 let is_fresh = |e: &pico_vm::chips::chips::events::MemoryLocalEvent| {
@@ -120,7 +117,7 @@ fn main() {
                     .count();
                 println!(
                     "{i},{},{add_alu},{jalr},{add_rows},{},{n_entries},{},{fresh_zero},{fresh_low},{n_init},{init_nonzero},{n_final},{final_untouched},{final_image}",
-                    r.cpu_events.len(),
+                    r.cpu_steps().len(),
                     pow2(add_rows),
                     fresh.len()
                 );

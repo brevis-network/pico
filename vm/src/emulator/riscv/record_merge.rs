@@ -3,29 +3,25 @@
 //! Splitting a chunk's replay across threads only pays if the chunk still proves once, so the
 //! segments' records have to become the record the unsplit replay would have produced.
 //!
-//! One field makes that more than a concatenation, and it is silent when wrong:
-//! `memory_read_write_event_indices` index into `cpu_events`, so they move with it.
-//! [`RecordBehavior::append`] concatenates them as they are — correct for its own caller
-//! (precompile-only records, whose `cpu_events` is empty) and wrong here.
+//! `cpu_local_memory_access` is concatenated, not re-aggregated by address: an unsplit chunk
+//! already carries several windows per address, so folding them by address destroys ones it
+//! keeps and the memory bus goes unbalanced. A split only adds the one window that spans the
+//! cut, and the two chain, so the global cumulative sum still closes.
 //!
-//! `cpu_local_memory_access` looked like it needed re-aggregating by address, since an entry
-//! holds an address's first and last access. Measuring says no: an unsplit chunk already carries
-//! well over one entry per address, so folding by address destroys windows the unsplit replay
-//! keeps — which it did, and the proof failed on an unbalanced memory bus. What a split does
-//! change is that an address live across a cut gets two chained windows where the unsplit replay
-//! had one; the address set is identical either way, and the global cumulative sum still closes.
+//! An execution history holds indices into its own tables, so `append` folds it whatever the
+//! caller, moving each later segment's past the steps and accesses before them
+//! ([`super::history::ExecutionHistory::append`]). Segments either all carry a history or none
+//! does: a fold of both kinds would hand on a history of only some of the chunk, so it is refused.
 //!
-//! The equivalence gate in [`super::record_digest`] is what says the fold is right; run it
-//! before trusting a measurement.
+//! The equivalence gate in [`super::record_digest`] is what says the fold is right.
 
+use super::record::EmulationRecord;
 use crate::emulator::record::RecordBehavior;
 
 /// `MLE_SPLIT_CHECK=1` logs what each fold saw. Read once: a value that changed mid-run would
 /// make the numbers it prints incomparable.
 static SPLIT_CHECK: std::sync::LazyLock<bool> =
     std::sync::LazyLock::new(|| std::env::var("MLE_SPLIT_CHECK").is_ok_and(|value| value == "1"));
-
-use super::record::EmulationRecord;
 
 /// Fold `segments` — a chunk's replay segments, in clock order — into a single record.
 ///
@@ -41,7 +37,20 @@ pub fn merge_segments(mut segments: Vec<EmulationRecord>) -> EmulationRecord {
     // The chunk's public values straddle the segments: where it started comes from the first,
     // where it ended from the last. `append` does not carry them at all.
     let last = segments.last().expect("checked non-empty");
-    let tail_public_values = last.public_values;
+    let mut tail_public_values = last.public_values;
+    // A digest word lands in the record of the segment whose COMMIT wrote it, and each segment's
+    // record starts with none, so the chunk's words are all the segments' together.
+    for segment in &segments {
+        let written = &segment.public_values;
+        keep_written(
+            &mut tail_public_values.committed_value_digest,
+            &written.committed_value_digest,
+        );
+        keep_written(
+            &mut tail_public_values.deferred_proofs_digest,
+            &written.deferred_proofs_digest,
+        );
+    }
     let tail_is_last = last.is_last;
     let tail_shape = last.shape.clone();
 
@@ -50,45 +59,43 @@ pub fn merge_segments(mut segments: Vec<EmulationRecord>) -> EmulationRecord {
         .iter()
         .map(|segment| segment.cpu_local_memory_access.len())
         .collect();
-    let cpu_lens: Vec<usize> = segments
+    let step_lens: Vec<usize> = segments
         .iter()
-        .map(|segment| segment.cpu_events.len())
+        .filter_map(|segment| Some(segment.history.as_ref()?.steps.len()))
         .collect();
+    assert!(
+        step_lens.is_empty() || step_lens.len() == segment_count,
+        "{} of a chunk's {segment_count} replay segments carry an execution history, which \
+         folded would cover only theirs",
+        step_lens.len()
+    );
 
     let mut merged = segments.remove(0);
     let head_start_pc = merged.public_values.start_pc;
 
     for mut segment in segments {
-        let cpu_base = merged.cpu_events.len();
-        merged.memory_read_write_event_indices.extend(
-            segment
-                .memory_read_write_event_indices
-                .iter()
-                .map(|index| index + cpu_base),
-        );
-        // Taken out of the segment so `append` cannot concatenate them behind our back.
-        segment.memory_read_write_event_indices.clear();
-
         merged.append(&mut segment);
     }
 
-    // `append` funnels the CPU events through `add_cpu_events`, which returns how many it took
-    // and drops the rest when the pinned buffer is full — and its caller ignores that. A chunk's
-    // events fit the buffer by construction, but only just (measured: 692 spare on a full one),
-    // so say so loudly rather than prove a chunk short.
+    // The fold owes the caller every event it was handed; losing one proves the chunk short,
+    // which is silent. Cheap to state, so state it.
+    let merged_steps = merged
+        .history
+        .as_ref()
+        .map_or(0, |history| history.steps.len());
     assert_eq!(
-        merged.cpu_events.len(),
-        cpu_lens.iter().sum::<usize>(),
-        "the fold dropped CPU events: the pinned buffer was too small for the merged chunk"
+        merged_steps,
+        step_lens.iter().sum::<usize>(),
+        "the fold dropped history steps"
     );
 
     if *SPLIT_CHECK {
         tracing::info!(
             target: "bench",
             "[mergeprobe] segments={segment_count} local_lens={local_lens:?} \
-             merged_local={} cpu_lens={cpu_lens:?} merged_cpu={}",
+             merged_local={} step_lens={step_lens:?} \
+             merged_steps={merged_steps}",
             merged.cpu_local_memory_access.len(),
-            merged.cpu_events.len(),
         );
     }
 
@@ -99,6 +106,17 @@ pub fn merge_segments(mut segments: Vec<EmulationRecord>) -> EmulationRecord {
     merged
 }
 
+/// Overwrites each word of `words` with `later`'s where `later`'s is nonzero: a record leaves a
+/// word no COMMIT wrote at zero. A chunk committing two different values to one word fails the
+/// ECALL constraints, so reading zero as unwritten loses nothing a provable chunk writes.
+fn keep_written(words: &mut [u32], later: &[u32]) {
+    for (word, &later) in words.iter_mut().zip(later) {
+        if later != 0 {
+            *word = later;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,17 +124,14 @@ mod tests {
         chips::chips::{
             alu::event::AluEvent,
             byte::event::ByteLookupEvent,
-            riscv_cpu::event::CpuEvent,
             riscv_memory::event::{MemoryLocalEvent, MemoryRecord},
         },
         compiler::riscv::opcode::ByteOpcode,
         emulator::riscv::{
-            cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
-            event_pool::HostAllocFlags,
+            history::{Access, ChipSteps, ExecutionHistory, ReadAccess, Step},
             record_digest::first_difference,
         },
     };
-    use std::sync::{Mutex, MutexGuard, PoisonError};
 
     /// One window over `addr`: entered from the chunk's entry record, closed at `timestamp`. An
     /// entry that opens and closes on the same access is not a state the AIR admits, so no
@@ -133,33 +148,75 @@ mod tests {
         }
     }
 
-    /// CPU events live in a pinned pool buffer, and with no pool `add_cpu_events` silently adds
-    /// nothing (it returns `Ok(0)`) — so a test that needs real ones has to bring the pool up.
-    /// The pool blocks when empty, so the tests holding buffers take turns behind the guard.
-    fn ensure_cpu_event_pool() -> MutexGuard<'static, ()> {
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        static TURN: Mutex<()> = Mutex::new(());
-        ONCE.call_once(|| {
-            if !is_pool_initialized() {
-                // The size every other test site passes: the pool is process-wide.
-                init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
-            }
-        });
-        TURN.lock().unwrap_or_else(PoisonError::into_inner)
+    /// A segment's history of `steps` steps of chunk 5, a read, a write and a memory-list entry
+    /// each, indexed from its own first step.
+    fn with_history(steps: u32) -> EmulationRecord {
+        let history = ExecutionHistory {
+            chunk: 5,
+            steps: (0..steps)
+                .map(|index| Step {
+                    first_read: index,
+                    first_write: index,
+                    ..Step::default()
+                })
+                .collect(),
+            reads: vec![ReadAccess::default(); steps as usize].into(),
+            writes: vec![Access::default(); steps as usize].into(),
+            chip_steps: ChipSteps {
+                memory: (0..steps).collect(),
+                ..ChipSteps::default()
+            },
+            ..ExecutionHistory::default()
+        };
+        EmulationRecord {
+            history: Some(history),
+            ..Default::default()
+        }
     }
 
-    fn with_cpu_events(count: usize) -> EmulationRecord {
-        let mut record = EmulationRecord::default();
-        let events = vec![CpuEvent::default(); count];
-        let added = record.add_cpu_events(&events).expect("add cpu events");
-        assert_eq!(added, count, "the pool did not hand out a buffer");
-        record
+    /// Each later segment moves past everything folded before it.
+    #[test]
+    fn histories_fold_with_their_indices_moved_past_everything_before_them() {
+        let merged = merge_segments(vec![with_history(2), with_history(3), with_history(1)]);
+        let history = merged.history.expect("the folded history");
+        let first_rows: Vec<(u32, u32)> = history
+            .steps
+            .iter()
+            .map(|step| (step.first_read, step.first_write))
+            .collect();
+        assert_eq!(
+            first_rows,
+            (0..6).map(|index| (index, index)).collect::<Vec<_>>()
+        );
+        assert_eq!(history.chip_steps.memory, (0..6).collect::<Vec<u32>>());
+        assert_eq!((history.reads.len(), history.writes.len()), (6, 6));
+        assert_eq!(history.chunk, 5);
+    }
+
+    /// A fold of segments some of which wrote a history would hand on a history of only part of
+    /// the chunk, whichever segment lacks one.
+    #[test]
+    fn segments_with_and_without_a_history_are_refused() {
+        for order in [[true, false], [false, true]] {
+            let segments: Vec<EmulationRecord> = order
+                .into_iter()
+                .map(|carries| {
+                    if carries {
+                        with_history(1)
+                    } else {
+                        EmulationRecord::default()
+                    }
+                })
+                .collect();
+            let refused = std::panic::catch_unwind(|| merge_segments(segments));
+            assert!(refused.is_err(), "history in the segments {order:?}");
+        }
     }
 
     #[test]
     fn one_segment_folds_to_itself() {
         let mut only = EmulationRecord::default();
-        only.mul_events.push(AluEvent::default());
+        only.add_events.push(AluEvent::default());
         only.cpu_local_memory_access.push(local_event(0x100, 7, 3));
         let expected = only.clone();
         assert_eq!(
@@ -168,31 +225,32 @@ mod tests {
         );
     }
 
-    /// The hazard: the indices point into `cpu_events`, so the second segment's have to shift by
-    /// the first segment's event count. `append` alone leaves them pointing at the wrong events.
     #[test]
-    fn indices_are_rebased_onto_the_merged_cpu_events() {
-        let _turn = ensure_cpu_event_pool();
-        let mut head = with_cpu_events(4);
-        head.memory_read_write_event_indices = vec![1, 3];
-        let mut tail = with_cpu_events(3);
-        tail.memory_read_write_event_indices = vec![0, 2];
+    fn memory_indices_are_rebased_onto_the_merged_history() {
+        let mut head = with_history(4);
+        head.history.as_mut().unwrap().chip_steps.memory = vec![1, 3].into();
+        let mut tail = with_history(3);
+        tail.history.as_mut().unwrap().chip_steps.memory = vec![0, 2].into();
 
-        let merged = merge_segments(vec![head, tail]);
+        let history = merge_segments(vec![head, tail]).history.unwrap();
 
-        assert_eq!(merged.cpu_events.len(), 7);
-        assert_eq!(merged.memory_read_write_event_indices, vec![1, 3, 4, 6]);
+        assert_eq!(history.steps.len(), 7);
+        assert_eq!(history.chip_steps.memory, vec![1, 3, 4, 6]);
     }
 
     /// Both segments' windows survive: an unsplit chunk already carries more than one window
-    /// per address, so folding them by address would destroy information (measured: 1.6 entries
-    /// per address). A split only adds the one window that spans the cut.
+    /// per address, so folding them by address would destroy information. A split only adds the
+    /// one window that spans the cut.
     #[test]
     fn both_segments_windows_survive() {
-        let mut head = EmulationRecord::default();
-        head.cpu_local_memory_access = vec![local_event(0x100, 1, 10), local_event(0x200, 2, 11)];
-        let mut tail = EmulationRecord::default();
-        tail.cpu_local_memory_access = vec![local_event(0x100, 9, 42), local_event(0x300, 3, 43)];
+        let head = EmulationRecord {
+            cpu_local_memory_access: vec![local_event(0x100, 1, 10), local_event(0x200, 2, 11)],
+            ..Default::default()
+        };
+        let tail = EmulationRecord {
+            cpu_local_memory_access: vec![local_event(0x100, 9, 42), local_event(0x300, 3, 43)],
+            ..Default::default()
+        };
 
         let merged = merge_segments(vec![head, tail]);
 
@@ -238,23 +296,43 @@ mod tests {
         assert_eq!(merged.public_values.exit_code, 7);
     }
 
+    /// Each segment's record holds only the digest words its own COMMITs wrote, so taking the
+    /// last segment's values would lose the words an earlier one committed.
+    #[test]
+    fn digest_words_committed_in_any_segment_survive_the_fold() {
+        let mut head = EmulationRecord::default();
+        head.public_values.committed_value_digest[..4].copy_from_slice(&[1, 2, 3, 4]);
+        head.public_values.deferred_proofs_digest[0] = 9;
+        let mut middle = EmulationRecord::default();
+        middle.public_values.committed_value_digest[3] = 40;
+        let mut tail = EmulationRecord::default();
+        tail.public_values.committed_value_digest[4..].copy_from_slice(&[5, 6, 7, 8]);
+
+        let merged = merge_segments(vec![head, middle, tail]);
+
+        assert_eq!(
+            merged.public_values.committed_value_digest,
+            [1, 2, 3, 40, 5, 6, 7, 8]
+        );
+        assert_eq!(merged.public_values.deferred_proofs_digest[0], 9);
+    }
+
     /// Three segments, because the rebase carries a running offset: with two, an implementation
     /// that shifted by the first segment's length instead of by everything merged so far would
     /// still pass.
     #[test]
     fn indices_are_rebased_against_everything_merged_so_far() {
-        let _turn = ensure_cpu_event_pool();
-        let mut first = with_cpu_events(2);
-        first.memory_read_write_event_indices = vec![0];
-        let mut second = with_cpu_events(3);
-        second.memory_read_write_event_indices = vec![1];
-        let mut third = with_cpu_events(4);
-        third.memory_read_write_event_indices = vec![0, 3];
+        let mut first = with_history(2);
+        first.history.as_mut().unwrap().chip_steps.memory = vec![0].into();
+        let mut second = with_history(3);
+        second.history.as_mut().unwrap().chip_steps.memory = vec![1].into();
+        let mut third = with_history(4);
+        third.history.as_mut().unwrap().chip_steps.memory = vec![0, 3].into();
 
-        let merged = merge_segments(vec![first, second, third]);
+        let history = merge_segments(vec![first, second, third]).history.unwrap();
 
-        assert_eq!(merged.cpu_events.len(), 9);
-        assert_eq!(merged.memory_read_write_event_indices, vec![0, 3, 5, 8]);
+        assert_eq!(history.steps.len(), 9);
+        assert_eq!(history.chip_steps.memory, vec![0, 3, 5, 8]);
     }
 
     /// `is_last` and `shape` describe where the chunk ends, so they come from the last segment —
@@ -262,10 +340,14 @@ mod tests {
     /// at the first cut.
     #[test]
     fn the_tail_decides_where_the_chunk_ends() {
-        let mut head = EmulationRecord::default();
-        head.is_last = false;
-        let mut tail = EmulationRecord::default();
-        tail.is_last = true;
+        let head = EmulationRecord {
+            is_last: false,
+            ..Default::default()
+        };
+        let tail = EmulationRecord {
+            is_last: true,
+            ..Default::default()
+        };
 
         assert!(merge_segments(vec![head, tail]).is_last);
     }

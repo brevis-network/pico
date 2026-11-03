@@ -7,6 +7,9 @@ use pico_vm::{
 use std::fs;
 use tracing::info;
 
+#[path = "../../tests/common/chip_coverage.rs"]
+mod chip_coverage;
+
 fn load_elf(name: &str) -> &'static [u8] {
     let elf_file = format!("./perf/bench_data/rv64/{name}-elf");
     let bytes = std::fs::read(elf_file).expect("failed to read elf");
@@ -123,6 +126,11 @@ pub fn parse_args<SC: StarkGenericConfig>() -> (&'static [u8], EmulatorStdin<Pro
         // nothing, so `--n` does not apply.
         elf = load_elf("coprocessor");
         info!("Test coprocessor (trading volume over 64 receipts)");
+    } else if args.elf == "chip-coverage" {
+        // Every chip family and its edge rows (`vm/examples/patch-testing/guests/chip-coverage`);
+        // it reads nothing.
+        elf = chip_coverage::elf();
+        info!("Test chip coverage");
     } else if args.elf == "fibonacci-sha" {
         elf = load_elf("fibonacci-sha");
         stdin.write(&args.n);

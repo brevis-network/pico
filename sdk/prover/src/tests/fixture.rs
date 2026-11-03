@@ -12,7 +12,7 @@ use pico_vm::{
 };
 
 pub(super) use super::scratch::scratch_dir;
-use crate::{prover::ProverBuilder, Stdin};
+use crate::{prover::ProverBuilder, Execution, Stdin};
 
 /// The prebuilt RV64 fibonacci guest, the same fixture `vm/src/mle/machine/riscv.rs` proves
 /// against. It commits `(n, F(n), F(n+1))` as three 32-byte big-endian words via `commit_bytes`.
@@ -25,6 +25,13 @@ pub(super) const FIB_ELF: &[u8] = include_bytes!(concat!(
 pub(super) const OTHER_ELF: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../vm/src/compiler/test_elf/riscv64im-pico-fibnacci-elf"
+));
+
+/// The emulation-abort guest (`vm/examples/patch-testing/guests/commit-out-of-range`): it reads an
+/// optional word, and issues `COMMIT` for that digest word when one is given.
+pub(super) const COMMIT_OUT_OF_RANGE_ELF: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../perf/bench_data/rv64/commit-out-of-range-elf"
 ));
 
 /// The poseidon2 guest (`vm/examples/patch-testing/patches/poseidon2`); it reads its round count.
@@ -54,6 +61,12 @@ pub(super) const SMALL_LOG_STACKED_HEIGHT: usize = 20;
 /// [`builder`] at [`SMALL_LOG_STACKED_HEIGHT`].
 pub(super) fn small_builder() -> ProverBuilder {
     crate::Prover::builder(FIB_ELF).log_stacked_height(SMALL_LOG_STACKED_HEIGHT)
+}
+
+/// The replay workers a build runs when told no count: one per core, up to the builder's cap.
+pub(super) fn default_emulation_workers() -> usize {
+    pico_vm::proverchain::riscv::max_pipeline_workers()
+        .min(crate::prover::DEFAULT_MAX_EMULATION_WORKERS)
 }
 
 /// The whitelist the repo ships, and the root published beside it in `mle_vk_root.txt`.
@@ -104,6 +117,15 @@ pub(super) fn emulate_fib(opts: EmulatorOpts) -> EmulationOutput {
 pub(super) fn emulate_fib_on(program: Arc<Program>, opts: EmulatorOpts) -> EmulationOutput {
     riscv::emulate_with_opts(program, &Stdin::from(&N).into_emulator_stdin(), opts)
         .expect("emulation")
+}
+
+/// Two `execute`s ran the same run: the same output, cycles, chunks, reports and precompile calls.
+pub(super) fn assert_same_run(a: &Execution, b: &Execution) {
+    assert_eq!(a.committed_bytes, b.committed_bytes);
+    assert_eq!(a.cycles, b.cycles);
+    assert_eq!(a.chunks, b.chunks);
+    assert_eq!(a.reports, b.reports);
+    assert_eq!(a.precompile_calls, b.precompile_calls);
 }
 
 /// `(F(n), F(n+1))` in wrapping `u32`, recomputed here so an assertion compares against a derived
@@ -161,7 +183,6 @@ pub(super) fn run_child(test_name: &str, marker: &str, envs: &[(&str, String)]) 
 
 /// [`run_child`], with the child killed and the test failed if it has not exited within `timeout`,
 /// so a hang is reported as one rather than stalling the run.
-#[cfg(feature = "aot")]
 pub(super) fn run_child_within(
     test_name: &str,
     marker: &str,

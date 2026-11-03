@@ -1,17 +1,123 @@
 use crate::compiler::riscv::opcode::Opcode;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use thiserror::Error;
+
+/// A run that ended abnormally: why, and the exit code the host reports for it. Guest halts with
+/// a non-zero code and the faults the emulator detects both end here. No proof of such a run
+/// verifies (Pico is Type 1 under the zkevm-standards termination semantics); see
+/// `docs/guest-runtime.md` for the codes.
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[error("{reason} (exit code {exit_code})")]
+pub struct AbnormalTermination {
+    pub reason: TerminationReason,
+    pub exit_code: u32,
+}
+
+impl AbnormalTermination {
+    /// A guest halt with a non-zero `exit_code`, and the reason tag it passed in `a1`.
+    pub fn halt(exit_code: u32, reason_tag: u64) -> Self {
+        Self {
+            reason: TerminationReason::from_halt_tag(reason_tag),
+            exit_code,
+        }
+    }
+
+    /// A fault the emulator detected, with the exit code a native process gets for it.
+    pub fn fault(reason: TerminationReason) -> Self {
+        Self {
+            exit_code: reason.fault_exit_code(),
+            reason,
+        }
+    }
+}
+
+/// The reason tags a guest passes in `a1` to `HALT`. Only read when the exit code is non-zero.
+/// Anything else in `a1` reads as [`TerminationReason::Exit`]; the tags carry a prefix so that a
+/// value an older runtime left there is not taken for one.
+pub mod halt_reason {
+    const PREFIX: u64 = 0x7069_636f << 32; // "pico"
+    pub const EXIT: u64 = 0;
+    pub const PANIC: u64 = PREFIX | 1;
+    pub const ABORT: u64 = PREFIX | 2;
+    pub const OUT_OF_MEMORY: u64 = PREFIX | 3;
+}
+
+/// The exit codes the guest runtime halts with for its own failures: what a native process
+/// reports for the same failure.
+pub mod exit_code {
+    /// A Rust panic, as a panicking Rust process exits.
+    pub const PANIC: u32 = 101;
+    /// `abort()` and an exhausted heap: 128 + SIGABRT.
+    pub const ABORT: u32 = 134;
+}
+
+/// Why a run ended abnormally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TerminationReason {
+    /// The guest halted with a non-zero code of its own: `main`'s return value, or a direct
+    /// `syscall_halt`.
+    Exit,
+    /// A Rust panic.
+    Panic,
+    /// `abort()`, or a failed C `assert()`.
+    Abort,
+    /// The heap is exhausted.
+    OutOfMemory,
+    /// An access the emulator does not allow.
+    InvalidMemoryAccess { opcode: Opcode, addr: u64 },
+    /// `unimp` at `pc`, which is also what `core::intrinsics::abort` and `std::process::abort`
+    /// emit.
+    IllegalInstruction { pc: u64 },
+    /// `ebreak` at `pc`.
+    Breakpoint { pc: u64 },
+}
+
+impl TerminationReason {
+    fn from_halt_tag(tag: u64) -> Self {
+        match tag {
+            halt_reason::PANIC => Self::Panic,
+            halt_reason::ABORT => Self::Abort,
+            halt_reason::OUT_OF_MEMORY => Self::OutOfMemory,
+            _ => Self::Exit,
+        }
+    }
+
+    /// The exit code for a fault the emulator detects: 128 + the signal a native process gets.
+    fn fault_exit_code(&self) -> u32 {
+        match self {
+            Self::Exit => 1,
+            Self::Panic => exit_code::PANIC,
+            Self::Abort | Self::OutOfMemory => exit_code::ABORT,
+            Self::InvalidMemoryAccess { .. } => 128 + 11, // SIGSEGV
+            Self::IllegalInstruction { .. } => 128 + 4,   // SIGILL
+            Self::Breakpoint { .. } => 128 + 5,           // SIGTRAP
+        }
+    }
+}
+
+impl fmt::Display for TerminationReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Exit => f.write_str("the guest exited with a non-zero code"),
+            Self::Panic => f.write_str("the guest panicked"),
+            Self::Abort => f.write_str("the guest aborted"),
+            Self::OutOfMemory => f.write_str("the guest ran out of heap"),
+            Self::InvalidMemoryAccess { opcode, addr } => {
+                write!(f, "invalid memory access: {opcode} at {addr:#x}")
+            }
+            Self::IllegalInstruction { pc } => write!(f, "illegal instruction at {pc:#x}"),
+            Self::Breakpoint { pc } => write!(f, "breakpoint at {pc:#x}"),
+        }
+    }
+}
 
 /// Errors that the [``Emulator``] can throw.
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum EmulationError {
-    /// The emulation failed with a non-zero exit code.
-    #[error("emulation failed with exit code {0}")]
-    HaltWithNonZeroExitCode(u32),
-
-    /// The emulation failed with an invalid memory access.
-    #[error("invalid memory access for opcode {0} and address {1}")]
-    InvalidMemoryAccess(Opcode, u64),
+    /// The guest halted with a non-zero exit code, or the emulator found a fault in it.
+    #[error("abnormal termination: {0}")]
+    AbnormalTermination(AbnormalTermination),
 
     /// The emulation failed with an unimplemented syscall.
     #[error("unimplemented syscall {0}")]
@@ -35,10 +141,6 @@ pub enum EmulationError {
     #[error("invalid hint read: {0}")]
     InvalidHintRead(String),
 
-    /// The emulation failed with a breakpoint.
-    #[error("breakpoint encountered")]
-    Breakpoint(),
-
     /// The emulation failed with an exceeded cycle limit.
     #[error("exceeded cycle limit of {0}")]
     ExceededCycleLimit(u64),
@@ -46,10 +148,6 @@ pub enum EmulationError {
     /// The emulation failed because the syscall was called in unconstrained mode.
     #[error("syscall called in unconstrained mode")]
     InvalidSyscallUsage(u64),
-
-    /// The emulation failed with an unimplemented feature.
-    #[error("got unimplemented as opcode")]
-    Unimplemented(),
 
     /// The AOT batch runner failed before producing a snapshot.
     #[error("aot snapshot execution failed: {0}")]
@@ -85,16 +183,98 @@ pub enum EmulationError {
     #[error("the snapshot pipeline would wait on its memory pool forever: {0}")]
     PipelineMemoryPool(String),
 
-    /// The pooled event buffers cannot hold one chunk's replay segments, which take a CPU buffer
-    /// and two ALU buffers each until the chunk is folded.
-    #[error(
-        "the snapshot pipeline needs {segments} pooled CPU and {} ALU event buffers to replay a \
-         chunk in {segments} segment(s), got {cpu} and {alu}",
-        2 * segments
-    )]
-    EventPoolTooSmall {
-        cpu: usize,
-        alu: usize,
-        segments: usize,
-    },
+    /// The process holds fewer records at once than the snapshot pipeline's chunks have segments,
+    /// each of which holds a history slot until the chunk is whole: a chunk would wait for a slot
+    /// forever. Refused before any thread starts, for the same reason.
+    #[error("the snapshot pipeline would wait for a history slot forever: {0}")]
+    PipelineHistorySlots(String),
+
+    /// The snapshot pipeline was asked for AOT replay workers it cannot run as asked. Refused
+    /// before any thread starts, rather than run on interpreters under an AOT label.
+    #[error("the snapshot pipeline cannot run AOT replay workers: {0}")]
+    UnsupportedReplayWorkers(String),
+
+    /// The program ended on a jump to a pc the CPU trace's two-limb pc cannot hold. The last
+    /// chunk's `next_pc` is that pc, so no proof can state where the run ended. Raised where the
+    /// run ends, so every mode and every thread fails the same way.
+    #[error("ended at pc 0x{0:016x}, beyond the 32-bit proof pc range")]
+    EndPcBeyondProofAddress(u64),
+}
+
+// By hand rather than `#[from]`, which would also make the termination the error's source and
+// print its reason a second time in every error chain.
+impl From<AbnormalTermination> for EmulationError {
+    fn from(termination: AbnormalTermination) -> Self {
+        Self::AbnormalTermination(termination)
+    }
+}
+
+impl EmulationError {
+    /// A load or store the emulator does not allow.
+    pub fn invalid_memory_access(opcode: Opcode, addr: u64) -> Self {
+        AbnormalTermination::fault(TerminationReason::InvalidMemoryAccess { opcode, addr }).into()
+    }
+
+    /// An `unimp` at `pc`.
+    pub fn illegal_instruction(pc: u64) -> Self {
+        AbnormalTermination::fault(TerminationReason::IllegalInstruction { pc }).into()
+    }
+
+    /// Why the run ended and its exit code, for a run that ended abnormally.
+    pub fn abnormal_termination(&self) -> Option<&AbnormalTermination> {
+        match self {
+            Self::AbnormalTermination(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// The exit code the host reports, for a run that ended abnormally.
+    pub fn exit_code(&self) -> Option<u32> {
+        self.abnormal_termination().map(|t| t.exit_code)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_halt_reads_its_reason_from_the_tag() {
+        for (tag, reason) in [
+            (halt_reason::EXIT, TerminationReason::Exit),
+            (halt_reason::PANIC, TerminationReason::Panic),
+            (halt_reason::ABORT, TerminationReason::Abort),
+            (halt_reason::OUT_OF_MEMORY, TerminationReason::OutOfMemory),
+        ] {
+            assert_eq!(AbnormalTermination::halt(7, tag).reason, reason);
+        }
+    }
+
+    /// What an older runtime leaves in `a1` (the old `sys_panic` left the message length there)
+    /// must not read as a runtime failure.
+    #[test]
+    fn an_untagged_halt_is_a_plain_exit() {
+        for stray in [1, 2, 3, 42, u64::MAX] {
+            let t = AbnormalTermination::halt(1, stray);
+            assert_eq!(t.reason, TerminationReason::Exit);
+            assert_eq!(t.exit_code, 1, "the guest's code is kept as given");
+        }
+    }
+
+    #[test]
+    fn a_fault_takes_the_code_a_native_process_gets() {
+        let code = |reason| AbnormalTermination::fault(reason).exit_code;
+        assert_eq!(code(TerminationReason::IllegalInstruction { pc: 0 }), 132);
+        assert_eq!(code(TerminationReason::Breakpoint { pc: 0 }), 133);
+        assert_eq!(code(TerminationReason::OutOfMemory), 134);
+        let access = TerminationReason::InvalidMemoryAccess {
+            opcode: Opcode::LW,
+            addr: 0x10,
+        };
+        assert_eq!(code(access), 139);
+        assert_eq!(
+            EmulationError::from(AbnormalTermination::fault(access)).exit_code(),
+            Some(139)
+        );
+    }
 }

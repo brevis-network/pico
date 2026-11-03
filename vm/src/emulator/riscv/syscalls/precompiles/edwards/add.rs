@@ -8,19 +8,20 @@ use crate::{
     emulator::riscv::{
         event_types::RvValue,
         syscalls::{
+            host::{Precompile, SyscallHost},
             precompiles::{edwards::event::create_ec_add_event, PrecompileEvent},
-            syscall_context::SyscallContext,
-            Syscall, SyscallCode,
+            SyscallCode,
         },
     },
 };
 
-pub(crate) struct EdwardsAddAssignSyscall<E: EllipticCurve + EdwardsParameters> {
+pub struct EdwardsAddAssignSyscall<E: EllipticCurve + EdwardsParameters> {
     _phantom: PhantomData<E>,
 }
 
 impl<E: EllipticCurve + EdwardsParameters> EdwardsAddAssignSyscall<E> {
     /// Create a new instance of the [`EdwardsAddAssignSyscall`].
+    #[allow(clippy::new_without_default)]
     pub const fn new() -> Self {
         Self {
             _phantom: PhantomData,
@@ -28,24 +29,22 @@ impl<E: EllipticCurve + EdwardsParameters> EdwardsAddAssignSyscall<E> {
     }
 }
 
-impl<E: EllipticCurve + EdwardsParameters> Syscall for EdwardsAddAssignSyscall<E> {
+impl<E: EllipticCurve + EdwardsParameters> Precompile for EdwardsAddAssignSyscall<E> {
     fn num_extra_cycles(&self) -> u32 {
         1
     }
 
-    fn emulate(
+    fn emulate<H: SyscallHost>(
         &self,
-        ctx: &mut SyscallContext,
+        ctx: &mut H,
         syscall_code: SyscallCode,
         arg1: RvValue,
         arg2: RvValue,
     ) -> Option<RvValue> {
-        let event = create_ec_add_event::<E>(ctx, arg1, arg2);
+        let event = create_ec_add_event::<E, _>(ctx, arg1, arg2);
         assert_canonical::<E>(&event.p, "p");
         assert_canonical::<E>(&event.q, "q");
-        let syscall_event = ctx
-            .rt
-            .syscall_event(event.clk, syscall_code.syscall_id(), arg1, arg2);
+        let syscall_event = ctx.syscall_event(event.clk, syscall_code.syscall_id(), arg1, arg2);
         ctx.record_mut().add_precompile_event(
             syscall_code,
             syscall_event,

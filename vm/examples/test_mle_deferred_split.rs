@@ -86,8 +86,8 @@ fn syscall(e: &CpuEvent) -> Option<u32> {
 fn deferred_commits(record: &EmulationRecord) -> usize {
     let id = SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id();
     record
-        .cpu_events
-        .as_slice()
+        .cpu_steps()
+        .ecalls()
         .iter()
         .filter(|e| syscall(e) == Some(id))
         .count()
@@ -96,10 +96,10 @@ fn deferred_commits(record: &EmulationRecord) -> usize {
 fn halts(record: &EmulationRecord) -> bool {
     let id = SyscallCode::HALT.syscall_id();
     record
-        .cpu_events
-        .as_slice()
+        .cpu_steps()
+        .ecalls()
         .iter()
-        .any(|e| syscall(e) == Some(id))
+        .any(|e| syscall(&e) == Some(id))
 }
 
 fn emulate(program: &Arc<Program>, n: u32, chunk_size: u32) -> Vec<EmulationRecord> {
@@ -299,7 +299,7 @@ fn main() {
     // ── halt-only ────────────────────────────────────────────────────────────────────────────
     let halt_only = |rs: &[EmulationRecord]| {
         rs.iter()
-            .any(|r| halts(r) && deferred_commits(r) == 0 && !r.cpu_events.is_empty())
+            .any(|r| halts(r) && deferred_commits(r) == 0 && !r.cpu_steps().is_empty())
     };
     let cs = search(&program, n, (256..GUARDED_CHUNK_SIZE).rev(), halt_only)
         .expect("no chunk size puts HALT in a chunk of its own");
