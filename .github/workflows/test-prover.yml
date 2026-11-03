@@ -50,13 +50,13 @@ jobs:
         run: |
           # The `chunks` tests prove across chunk boundaries at the chain's operating point and would
           # keep this job running well past the wrap proof. A plain run includes them. `chain` runs
-          # in the `prover-chain` job, the precompile guests in `prover-precompiles`, and the wrap
-          # test in the `wrap` job.
+          # in the `prover-chain` job, the precompile guests in `prover-precompiles`, the ACT4 tests
+          # in `act4`, and the wrap test in the `wrap` job.
           # One test at a time: each proof already uses every core, and several peak at 6-8 GB, so
           # side by side they can exceed the runner's memory. `free` records what it has.
           nproc && free -g
           cargo test --release -p pico-prover -- --test-threads=1 --skip tests::chunks:: \
-            --skip tests::chain:: --skip tests::precompiles:: \
+            --skip tests::chain:: --skip tests::precompiles:: --skip tests::act4:: \
             --skip tests::evm::a_wrap_proof_gives_the_program_id_and_the_bundle_the_circuits_public_inputs
       - name: The commit tail stays in one chunk
         run: |
@@ -97,6 +97,26 @@ jobs:
           set -o pipefail
           cargo test --release -p pico-prover -- --test-threads=1 tests::precompiles:: | tee precompiles-test.log
           grep -qE "test result: ok\. [1-9][0-9]* passed" precompiles-test.log
+
+  # The RISC-V architectural tests (ACT4) of Pico's RV64IM_Zicclsm target, 72 in all (act4/README.md).
+  # Each checks its own results and commits `PASS` or `FAIL`. The 64 of the I and M suites must
+  # execute, prove and verify, committing `PASS`; the 8 Misalign tests must still fail until
+  # misaligned access is supported, and the first that passes fails the job. Its own job: 64 keygens
+  # and proofs, beside the other proving lanes.
+  act4:
+    name: CPU · ACT4 RV64IM_Zicclsm (64 pass, 8 known failures)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: Execute, prove and verify each test
+        run: |
+          # `--nocapture` prints a line per test with its time. The count: a renamed module would
+          # otherwise run nothing and pass.
+          set -o pipefail
+          cargo test --release -p pico-prover -- --test-threads=1 --nocapture tests::act4:: | tee act4-test.log
+          grep -q "test result: ok. 3 passed" act4-test.log
 
   cli:
     name: CPU · CLI prove and verify

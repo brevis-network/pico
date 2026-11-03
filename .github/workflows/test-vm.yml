@@ -86,6 +86,40 @@ jobs:
           # The syscall map and the MLE air table each refuse nothing today; these pin both, so a
           # precompile losing support is a reviewed edit rather than a patch case turning red.
           cargo test --release -p pico-vm --test precompile_support
+      - name: Interpreter record pins
+        run: |
+          # The parity suites compare two emulators with each other; this is the only check on
+          # what the interpreter itself emits. A change to an event, a chunk cut or the deferred
+          # split moves a pinned digest, and a guest reaching a new syscall moves the coverage list.
+          cargo test --release -p pico-vm --test record_digest_golden
+      - name: Execution sink pins
+        run: |
+          # The unconstrained rollback, the boundary a cut writes and the guards on swapping a
+          # sink: none of the record filters below reaches `emulator::riscv::sink`.
+          cargo test --release -p pico-vm --lib -- emulator::riscv::sink with_sink
+      - name: Execution history pins
+        run: |
+          # The tables the history sink writes and the readers that build each step's CPU event and
+          # ALU operations from them. Each count fails a filter a rename left matching nothing.
+          set -o pipefail
+          cargo test --release -p pico-vm --lib -- emulator::riscv::history::tests:: | tee history-tests.log
+          grep -qE "test result: ok\. [1-9][0-9]* passed" history-tests.log
+          cargo test --release -p pico-vm --lib -- emulator::riscv::history_view::tests:: | tee history-view-tests.log
+          grep -qE "test result: ok\. [1-9][0-9]* passed" history-view-tests.log
+      - name: Chunk boundary stamps
+        run: |
+          # A chunk's start and next pc are the ones its cut stamped: around an unconstrained block,
+          # in a replay resumed or split mid-chunk, and through the record readers.
+          set -o pipefail
+          cargo test --release -p pico-vm --lib -- emulator::riscv::emulator::tests:: | tee emulator-tests.log
+          grep -qE "test result: ok\. [1-9][0-9]* passed" emulator-tests.log
+      - name: Trace generation reaches every CPU chunk
+        run: |
+          # Every CPU chunk of a split run reaches trace generation, across more records than one
+          # batch of prove slots holds, and the report counts none traced without the CPU chip.
+          set -o pipefail
+          cargo test --release -p pico-vm --lib -- mle::machine::riscv::tests::trace_records | tee trace-records.log
+          grep -qE "test result: ok\. [1-9][0-9]* passed" trace-records.log
       - name: Poseidon2 known answers
         run: |
           # The riscv stage's Poseidon2 constants sit in its constraint DAG, so a change to them
@@ -114,6 +148,98 @@ jobs:
           # here, not at a prover's first lookup; an AIR change is caught by the constraint
           # parity step above.
           cargo test --release -p pico-vm --lib mle::machine::vk_map::tests::the_shipped_artifact_matches_this_binary
+      - name: Stage ledger, span recorder and golden heights
+        run: |
+          # The recording code is behind `stage-ledger`, which no other step turns on, so its tests
+          # (overlapping windows, nested prove time, span nesting, the prove slot each record runs
+          # in, the golden height file's keys) run only here.
+          cargo test --release -p pico-vm --features stage-ledger --lib -- \
+            mle::ledger mle::spans mle::heights mle::machine::riscv::tests::par_in_prove_slots
+
+  # History, trace and record parity on the record-parity guests. They take minutes of emulation
+  # between them, enough to push `vm-pins` past the wrap job, so they run beside it on the same
+  # `cpu-vm-release` cache. Split by guest: sha2's run is most of the byte-trace and pipeline time,
+  # so it has a job to itself; the other part skips only sha2, so a guest added later runs there.
+  vm-parity:
+    name: CPU · Pipeline, byte trace and sink parity (${{ matrix.part }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: sha2
+            only: sha2
+          - part: other guests
+            skip: sha2
+            sink: true
+    env:
+      ONLY: ${{ matrix.only }}
+      SKIP: ${{ matrix.skip }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-vm-release
+          cache-save: "false"
+      - name: Snapshot pipeline records against the interpreter
+        run: |
+          # The default emulation, the snapshot pipeline, against the one-interpreter path record by
+          # record, and the runs the pipeline refuses. One exact test per guest, so the part selects
+          # its guests by name; the count fails a filter a rename left matching fewer tests.
+          set -o pipefail
+          read -ra only <<<"$ONLY"
+          read -ra skip <<<"$SKIP"
+          args=(--exact)
+          for guest in "${only[@]}"; do args+=("${guest//-/_}"); done
+          for guest in "${skip[@]}"; do args+=(--skip "${guest//-/_}"); done
+          cargo test --release -p pico-vm --test pipeline_record_parity -- "${args[@]}" | tee pipeline-parity.log
+          if [ "${#only[@]}" -gt 0 ]; then
+            grep -qE "test result: ok\. ${#only[@]} passed" pipeline-parity.log
+          else
+            grep -qE "test result: ok\. [1-9][0-9]* passed" pipeline-parity.log
+          fi
+      - name: Byte trace written by lookup against the row scan
+        run: |
+          # The byte chip's trace, written lookup by lookup, against the per-row scan it replaced.
+          # `PARITY_GUESTS` / `PARITY_SKIP_GUESTS` fail on an unknown guest or an empty selection.
+          PARITY_GUESTS="${ONLY// /,}" PARITY_SKIP_GUESTS="${SKIP// /,}" \
+            cargo test --release -p pico-vm --test byte_trace_scatter
+      - name: Execution history sinks on the serial and replay paths
+        run: |
+          # History output held to the program it ran, and replay workers against the interpreter.
+          # One exact test per guest; the count detects stale test names.
+          set -o pipefail
+          read -ra only <<<"$ONLY"
+          read -ra skip <<<"$SKIP"
+          args=(--exact)
+          for guest in "${only[@]}"; do args+=("${guest//-/_}"); done
+          for guest in "${skip[@]}"; do args+=(--skip "${guest//-/_}"); done
+          for suite in history_sink replay_sink_history; do
+            cargo test --release -p pico-vm --test "$suite" -- "${args[@]}" | tee "$suite.log"
+            if [ "${#only[@]}" -gt 0 ]; then
+              grep -qE "test result: ok\. ${#only[@]} passed" "$suite.log"
+            else
+              grep -qE "test result: ok\. [1-9][0-9]* passed" "$suite.log"
+            fi
+          done
+      - name: Segmented replay preserves execution history and traces
+        if: matrix.sink
+        run: |
+          set -o pipefail
+          cargo test --release -p pico-vm --test history_fold | tee history-fold.log
+          grep -qE 'test result: ok\. 7 passed' history-fold.log
+      - name: Per-chip traces against pinned digests
+        if: matrix.sink
+        run: |
+          set -o pipefail
+          cargo test --release -p pico-vm --test trace_digest_golden | tee trace-digest.log
+          grep -qE 'test result: ok\. 1 passed' trace-digest.log
+      - name: Counting sink against execution history
+        if: matrix.sink
+        run: |
+          # The target needs `test-utils` (`required-features`), so a plain `cargo test` skips it.
+          # In one part only: it fails unless every count is taken on some guest, so it runs them all.
+          cargo test --release -p pico-vm --features test-utils --test counting_sink
 
   compile-ffi:
     name: CPU · Compile, AOT and FFI
@@ -212,8 +338,8 @@ jobs:
           # Doctors every riscv public-value copy but Ecall's; the recursion tree must reject it.
           RUST_LOG=info cargo run --release -p pico-vm --example test_carrier_tie
 
-  # The only job that runs AOT code generated from an ELF, and the only one that builds the
-  # prover's `aot` feature; `AOT harnesses compile` builds `perf/aot` against the committed stub.
+  # Runs AOT code generated from ELFs (as does `aot-workers-parity`), and is the only job that
+  # builds the prover's `aot` feature; `AOT harnesses compile` builds `perf/aot` against the committed stub.
   # The generated crates compile in `perf/aot`'s own target, which is why it runs as its own job
   # beside the VM lanes, on its own cache key.
   aot-parity:
@@ -227,12 +353,20 @@ jobs:
           workspaces: |
             . -> target
             perf/aot -> target
-      - name: Generate fib's AOT crates and compare its records with the interpreter's
+      - name: AOT code generator
         run: |
-          # Every record the pipeline emits with the AOT snapshot thread against the interpreter's,
-          # at three chunk sizes, the commit tail across a boundary among them; the test also fails
-          # if the AOT thread entered no compiled block.
-          bash perf/aot/record_parity.sh fib
+          # The stamp the dispatch crate exports against the one the runtime accepts, the runtime
+          # dependency in every generated manifest, and the decode and forced-split regressions. No
+          # other job runs them; first, so a generator fault shows before the comparisons below.
+          cargo test --release -p pico-aot-codegen
+      - name: Generate each guest's AOT crates and compare its records with the interpreter's
+        run: |
+          # First the committed stub's code against the interpreter's records. Then, per guest, every
+          # record the pipeline emits with the AOT snapshot thread against the interpreter's, and
+          # again with the AOT core writing the records itself; each pass fails if compiled code ran
+          # nothing. fib puts its commit tail across a chunk boundary, and poseidon2 is the cheapest
+          # guest whose precompile events the AOT core writes.
+          bash perf/aot/record_parity.sh fib poseidon2
       - name: The committed stub is back
         run: |
           set -eux
@@ -246,6 +380,50 @@ jobs:
           # peaks near 8 GB.
           cargo test --release -p pico-prover --features aot -- --test-threads=1 tests::aot::
           cargo test --release -p pico-cli --features aot --lib --test aot
+          # The pipeline's refusal tests have an AOT snapshot thread arm that only this build
+          # compiles. The count fails a filter a rename left matching nothing.
+          set -o pipefail
+          cargo test --release -p pico-prover --features aot -- --test-threads=1 tests::pipeline:: | tee pipeline-aot-test.log
+          grep -qE "test result: ok\. [1-9][0-9]* passed" pipeline-aot-test.log
+
+  # The pipeline's replay workers run as the AOT core, on guests generated from their ELFs, and their
+  # records are compared with the interpreter workers'. Records cannot show which engine replayed a
+  # chunk, so each chunk's own account is read as well. Its own job because `aot-parity` is already
+  # the longest here; bls12381-fp's run is by far the longest and peaks near 8.5 GB, so it has a leg
+  # to itself. Each leg runs both stub controls, one fib run each.
+  aot-workers-parity:
+    name: CPU · AOT workers against interpreter workers (${{ matrix.part }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: bls12381-fp
+            guests: bls12381-fp
+          - part: other guests
+            guests: fib ed25519 poseidon2 aggregator
+    env:
+      GUESTS: ${{ matrix.guests }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          # The root target holds the code generator, `perf/aot`'s the test built on its output.
+          workspaces: |
+            . -> target
+            perf/aot -> target
+      - name: Generate each guest's AOT crates and compare its replay workers with the interpreter's
+        run: |
+          # The committed stub first, then per guest the pipeline's records with AOT replay workers
+          # against interpreter workers. Compiled execution is required across the run; a count the
+          # worker did not report fails it.
+          # shellcheck disable=SC2086
+          bash perf/aot/record_parity.sh $GUESTS
+      - name: The committed stub is back
+        run: |
+          set -eux
+          git status --porcelain --ignored -- aot-generated
+          test -z "$(git status --porcelain --ignored -- aot-generated)"
 
   # The patch harness imports pico-vm and pico-prover internals, and no other job compiles it. It
   # has its own workspace and so its own target, which is why it runs beside the VM lanes. The
