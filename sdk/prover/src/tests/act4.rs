@@ -35,10 +35,10 @@ const ARCHIVE: &str = concat!(
 const ARCHIVE_SHA256: &str = "abf1aae4f2fa9cac8c68ffbdb2f26a420991291af8c81f1220c574b2ade862bd";
 
 /// The suites every test of which must pass, and how many tests each holds.
-const MUST_PASS: [(&str, usize); 2] = [("I", 51), ("M", 13)];
+pub(super) const MUST_PASS: [(&str, usize); 2] = [("I", 51), ("M", 13)];
 
 /// Known failures until Pico supports misaligned loads and stores.
-const KNOWN_FAILURES: (&str, usize) = ("Misalign", 8);
+pub(super) const KNOWN_FAILURES: (&str, usize) = ("Misalign", 8);
 
 /// What a test writes to the public values when every result matched the reference model's.
 const PASS: &[u8] = b"PASS";
@@ -109,7 +109,7 @@ fn unpack() -> PathBuf {
 }
 
 /// One suite's tests, by name, in name order.
-fn suite(name: &str) -> Vec<(String, PathBuf)> {
+pub(super) fn suite(name: &str) -> Vec<(String, PathBuf)> {
     let dir = elf_dir().join(name);
     let mut tests: Vec<_> = fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))

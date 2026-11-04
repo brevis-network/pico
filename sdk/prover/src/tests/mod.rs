@@ -27,6 +27,7 @@ mod pipeline;
 mod poseidon2;
 mod precompiles;
 mod program_id;
+mod pure;
 mod scratch;
 mod standard_io;
 mod whitelist;
