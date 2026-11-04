@@ -665,7 +665,7 @@ fn a_split_wider_than_the_history_slots_is_refused() {
 }
 
 /// Armed by a test: the first replay to start inside the first chunk past its first instruction,
-/// a later segment of it, fails before its first write once four other replays have started.
+/// a later segment of it, fails before its first write once three other replays have started.
 static FAIL_A_SEGMENT: AtomicBool = AtomicBool::new(false);
 
 /// Replays of [`SEGMENT_FAILING_CODE`] started and not failed.
@@ -684,7 +684,7 @@ fn fail_a_segment(emu: &mut AotEmulatorCore) -> Result<(), String> {
     let later_segment_of_first_chunk = emu.current_chunk == 1 && emu.insn_count > 0;
     if later_segment_of_first_chunk && FAIL_A_SEGMENT.swap(false, Ordering::Relaxed) {
         let deadline = Instant::now() + Duration::from_secs(30);
-        while STARTED.load(Ordering::Relaxed) < 4 && Instant::now() < deadline {
+        while STARTED.load(Ordering::Relaxed) < 3 && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(1));
         }
         IN_FLIGHT_AT_FAILURE.store(STARTED.load(Ordering::Relaxed), Ordering::Relaxed);
@@ -694,10 +694,10 @@ fn fail_a_segment(emu: &mut AotEmulatorCore) -> Result<(), String> {
     emu.run_blocks(|_| None)
 }
 
-/// Three history slots, every chunk cut into three segments, five AOT workers, and a segment of the
-/// first chunk failing before its first write while the first five segments are in flight. The
-/// first chunk then never completes, and its other two segments keep their slots in the fold that
-/// waits for it; the second chunk's first segment takes the last slot, and its second finds none,
+/// Two history slots, every chunk cut into two segments, four AOT workers (a CI runner's cores), and
+/// the first chunk's second segment failing before its first write while the first four segments
+/// are in flight. The first chunk then never completes, and its first segment keeps its slot in the
+/// fold that waits for it; the second chunk's first segment takes the last slot, and its second finds none,
 /// with nothing left to free one. The failure is the run's result all the same, and the run after
 /// it finishes.
 #[test]
@@ -706,14 +706,14 @@ fn a_segment_failing_before_its_first_write_ends_a_bounded_split_run() {
     if std::env::var_os(CHILD).is_none() {
         in_child(
             "a_segment_failing_before_its_first_write_ends_a_bounded_split_run",
-            &[("MLE_SPLIT_REPLAY", "3")],
+            &[("MLE_SPLIT_REPLAY", "2")],
             Duration::from_secs(120),
             MARKER,
         );
         return;
     }
-    assert!(max_pipeline_workers() >= 5, "five workers need five cores");
-    bounded(3, &SEGMENT_FAILING_CODE);
+    assert!(max_pipeline_workers() >= 4, "four workers need four cores");
+    bounded(2, &SEGMENT_FAILING_CODE);
     let mut witness = witness(FIB_ELF, 10, 2048);
     witness.opts = witness
         .opts
@@ -721,7 +721,7 @@ fn a_segment_failing_before_its_first_write_ends_a_bounded_split_run() {
     let run = || {
         emulate_snapshot_pipeline_with(
             &witness,
-            NonZeroUsize::new(5).expect("five workers"),
+            NonZeroUsize::new(4).expect("four workers"),
             DeferredSplit::AfterEveryChunk,
             |_, _| {},
         )
@@ -740,7 +740,7 @@ fn a_segment_failing_before_its_first_write_ends_a_bounded_split_run() {
         "no segment of the first chunk failed"
     );
     assert!(
-        IN_FLIGHT_AT_FAILURE.load(Ordering::Relaxed) >= 4,
+        IN_FLIGHT_AT_FAILURE.load(Ordering::Relaxed) >= 3,
         "{} other replays in flight at the failure",
         IN_FLIGHT_AT_FAILURE.load(Ordering::Relaxed)
     );
