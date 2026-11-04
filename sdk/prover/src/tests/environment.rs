@@ -136,7 +136,7 @@ fn event_limit_probe(test_name: &str, name: &str, value: &str, refused: bool) {
                 .expect_err("build must refuse a loosened event limit");
             assert!(is_named(&err), "build: got {err}");
             let err = small_builder()
-                .execute(Stdin::from(&N))
+                .execute_chunked(Stdin::from(&N))
                 .expect_err("execute must refuse a loosened event limit");
             assert!(is_named(&err), "execute: got {err}");
         } else {

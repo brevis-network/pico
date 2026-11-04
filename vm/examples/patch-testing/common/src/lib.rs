@@ -117,7 +117,7 @@ fn check(
 
     // Keygen-free, so a case that fails here pays no keygen.
     let execution = Prover::builder(&elf)
-        .execute(input.stdin())
+        .execute_chunked(input.stdin())
         .map_err(|e| format!("emulation: {e}"))?;
     let counts = describe_counts(&execution, syscalls);
     if let Some(silent) = syscalls

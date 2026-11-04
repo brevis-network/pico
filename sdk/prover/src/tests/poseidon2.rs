@@ -26,7 +26,7 @@ const LOOP_ROUNDS: u32 = 1;
 fn the_guest_hash_is_the_machines_poseidon2_hash_iter() {
     let execution = Prover::builder(POSEIDON2_ELF)
         .log_stacked_height(SMALL_LOG_STACKED_HEIGHT)
-        .execute(Stdin::from(&LOOP_ROUNDS))
+        .execute_chunked(Stdin::from(&LOOP_ROUNDS))
         .expect("the poseidon2 guest emulates");
 
     // `commit(&out)` first, one `u32`; then one `[u32; DIGEST_SIZE]` per length, bincode's fixed

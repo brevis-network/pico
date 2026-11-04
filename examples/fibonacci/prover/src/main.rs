@@ -61,7 +61,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         ["execute", n @ ..] => {
             // Emulation only, without keygen: seconds, and nothing is proved.
             let n = parse_n(n)?;
-            let execution = Prover::builder(&elf).execute(Stdin::from(&n))?;
+            let execution = Prover::builder(&elf).execute_chunked(Stdin::from(&n))?;
             let values = check(&execution.committed_bytes, Some(n))?;
             println!(
                 "executed {} cycle(s) in {} chunk(s); the guest committed F({}) = ({}, {}), not proved",

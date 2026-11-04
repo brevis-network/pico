@@ -196,7 +196,7 @@ fn run(elf: &[u8]) -> Result<(), String> {
         .build()
         .map_err(|e| format!("cannot build the prover: {e}"))?;
     let execution = prover
-        .execute(Stdin::new())
+        .execute_chunked(Stdin::new())
         .map_err(|e| format!("execute: {e}"))?;
     committed_pass("execute", &execution.committed_bytes)?;
     let proof = prover
@@ -208,7 +208,7 @@ fn run(elf: &[u8]) -> Result<(), String> {
 /// Execute only, without a prover's keys.
 fn execute(elf: &[u8]) -> Result<(), String> {
     let execution = Prover::builder(elf)
-        .execute(Stdin::new())
+        .execute_chunked(Stdin::new())
         .map_err(|e| format!("execute: {e}"))?;
     committed_pass("execute", &execution.committed_bytes)
 }

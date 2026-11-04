@@ -50,7 +50,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let expected = expected_commits(&trusted, &untrusted)?;
     let stdin = guest_input(&trusted, &untrusted)?;
 
-    let execution = Prover::builder(&elf).execute(stdin.clone())?;
+    let execution = Prover::builder(&elf).execute_chunked(stdin.clone())?;
     check(&execution.committed_bytes, &expected, "the emulation")?;
     println!(
         "executed {} cycle(s) in {} chunk(s); the emulated commits match the host",

@@ -659,7 +659,7 @@ fn execute_prints_the_precompile_calls_the_prover_counts() {
 
     let calls = Prover::builder(&std::fs::read(BN254_FP_ELF).expect("bn254-fp elf"))
         .log_stacked_height(SMALL_LOG_STACKED_HEIGHT.parse().unwrap())
-        .execute(Stdin::new())
+        .execute_chunked(Stdin::new())
         .expect("execute")
         .precompile_calls;
     assert!(calls.len() > 1, "one precompile orders nothing: {calls:?}");

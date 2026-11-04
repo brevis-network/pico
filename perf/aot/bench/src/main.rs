@@ -993,7 +993,7 @@ fn through_prover(args: &Args, elf: &[u8]) -> Result<Measured, String> {
     };
     let Some(phase) = phase else {
         let start = Instant::now();
-        let execution = prover.execute(stdin);
+        let execution = prover.execute_chunked(stdin);
         measured.wall = start.elapsed();
         let execution = execution.map_err(|e| format!("{}: {e}", args.arm.name()))?;
         measured.timed = "execute:emulate+drop-records";
