@@ -1,4 +1,4 @@
-use crate::emulator::AotEmulatorCore;
+use super::PrecompileMemory;
 
 pub const SHA_COMPRESS_K: [u32; 64] = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -14,12 +14,12 @@ pub const SHA_COMPRESS_K: [u32; 64] = [
 /// SHA256 compress syscall implementation.
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::many_single_char_names)]
-pub fn sha256_compress(core: &mut AotEmulatorCore, w_ptr: u64, h_ptr: u64) {
+pub fn sha256_compress(core: &mut impl PrecompileMemory, w_ptr: u64, h_ptr: u64) {
     assert_ne!(w_ptr, h_ptr);
     assert!(w_ptr.is_multiple_of(8), "w_ptr is unaligned");
     assert!(h_ptr.is_multiple_of(8), "h_ptr is unaligned");
 
-    let clk = core.clk;
+    let clk = core.clk();
 
     // Execute the "initialize" phase where we read in the h values.
     let mut hx = [0u32; 8];
@@ -75,9 +75,9 @@ pub fn sha256_compress(core: &mut AotEmulatorCore, w_ptr: u64, h_ptr: u64) {
 }
 
 /// SHA256 extend syscall implementation.
-pub fn sha256_extend(core: &mut AotEmulatorCore, w_ptr: u64) {
+pub fn sha256_extend(core: &mut impl PrecompileMemory, w_ptr: u64) {
     assert!(w_ptr.is_multiple_of(8), "w_ptr is unaligned");
-    for (clk, i) in (core.clk..).zip(16u64..64) {
+    for (clk, i) in (core.clk()..).zip(16u64..64) {
         // Read w[i-15].
         let w_i_minus_15 = core.read_mem_low32_slot_at_clk(w_ptr + (i - 15) * 8, clk);
 

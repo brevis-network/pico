@@ -1,18 +1,16 @@
-use crate::{
-    emulator::AotEmulatorCore,
-    precompiles::limb_math::{uint256_mod_mul, Limbs8},
-};
+use super::PrecompileMemory;
+use crate::precompiles::limb_math::{uint256_mod_mul, Limbs8};
 use pico_vm::chips::{
     gadgets::utils::conversions::bytes_to_words_le, precompiles::uint256::UINT256_NUM_WORDS,
 };
 
 /// UINT256 multiply syscall implementation.
 #[inline(always)]
-pub fn uint256_mul(core: &mut AotEmulatorCore, x_ptr: u64, y_ptr: u64) {
+pub fn uint256_mul(core: &mut impl PrecompileMemory, x_ptr: u64, y_ptr: u64) {
     assert!(x_ptr.is_multiple_of(8), "x_ptr is unaligned");
     assert!(y_ptr.is_multiple_of(8), "y_ptr is unaligned");
 
-    let clk = core.clk;
+    let clk = core.clk();
     let num_dwords = UINT256_NUM_WORDS;
 
     // Stack-allocated packed-dword buffers (4 dwords each = 32 bytes).

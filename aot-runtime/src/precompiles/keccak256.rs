@@ -1,11 +1,11 @@
-use crate::emulator::AotEmulatorCore;
+use super::PrecompileMemory;
 use tiny_keccak::keccakf;
 
 pub(crate) const STATE_SIZE: usize = 25;
 
 /// Keccak256 permute syscall implementation with span operations.
-pub fn keccak_permute(core: &mut AotEmulatorCore, state_ptr: u64) {
-    let clk = core.clk;
+pub fn keccak_permute(core: &mut impl PrecompileMemory, state_ptr: u64) {
+    let clk = core.clk();
 
     // Match the interpreter's dword-granular keccak syscall accounting.
     let mut state = [0u64; STATE_SIZE];

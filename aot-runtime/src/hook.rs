@@ -1,4 +1,3 @@
-use crate::emulator::AotEmulatorCore;
 use hashbrown::HashMap;
 use k256::{elliptic_curve::ff::PrimeField, FieldBytes, FieldElement, Scalar as K256Scalar};
 use num_bigint::BigUint;
@@ -10,7 +9,9 @@ use pico_vm::{
     emulator::riscv::hook::ed_decompress::hint_ed_decompress,
 };
 
-pub type Hook = fn(&AotEmulatorCore, &[u8]) -> Vec<Vec<u8>>;
+/// A host call a guest makes by writing to its file descriptor; returns the input elements it
+/// answers with. Hooks read only the buffer, so the AOT core and pure execution share them.
+pub type Hook = fn(&[u8]) -> Vec<Vec<u8>>;
 
 const SECP256K1_ECRECOVER: u32 = 5;
 pub const FD_EDDECOMPRESS: u32 = 8;
@@ -50,7 +51,7 @@ fn pad_to_be(val: &BigUint, len: usize) -> Vec<u8> {
     bytes
 }
 
-pub fn ecrecover(_: &AotEmulatorCore, buf: &[u8]) -> Vec<Vec<u8>> {
+pub fn ecrecover(buf: &[u8]) -> Vec<Vec<u8>> {
     if buf.len() != 65 {
         return vec![vec![0]];
     }
@@ -99,11 +100,11 @@ pub fn ecrecover(_: &AotEmulatorCore, buf: &[u8]) -> Vec<Vec<u8>> {
 /// failed to parse and came back "not decompressable" without the two witnesses the guest reads
 /// next, so an ed25519 guest that ran under the interpreter stopped on missing input under AOT.
 #[must_use]
-pub fn ed_decompress(_: &AotEmulatorCore, buf: &[u8]) -> Vec<Vec<u8>> {
+pub fn ed_decompress(buf: &[u8]) -> Vec<Vec<u8>> {
     hint_ed_decompress(buf)
 }
 
-pub fn hook_fp_inverse(_: &AotEmulatorCore, buf: &[u8]) -> Vec<Vec<u8>> {
+pub fn hook_fp_inverse(buf: &[u8]) -> Vec<Vec<u8>> {
     let len: usize = u32::from_be_bytes(buf[0..4].try_into().unwrap()) as usize;
 
     assert!(buf.len() == 4 + 2 * len, "FpOp Hook: Invalid buffer length");
@@ -119,7 +120,7 @@ pub fn hook_fp_inverse(_: &AotEmulatorCore, buf: &[u8]) -> Vec<Vec<u8>> {
     vec![pad_to_be(&inverse, len)]
 }
 
-pub fn hook_fp_sqrt(_: &AotEmulatorCore, buf: &[u8]) -> Vec<Vec<u8>> {
+pub fn hook_fp_sqrt(buf: &[u8]) -> Vec<Vec<u8>> {
     let len: usize = u32::from_be_bytes(buf[0..4].try_into().unwrap()) as usize;
 
     assert!(buf.len() == 4 + 3 * len, "FpOp Hook: Invalid buffer length");
@@ -214,7 +215,7 @@ fn legendre_symbol(element: &BigUint, modulus: &BigUint) -> BigUint {
     element.modpow(&((modulus - BigUint::one()) / BigUint::from(2u64)), modulus)
 }
 
-pub fn hook_bls12_381_sqrt(_: &AotEmulatorCore, buf: &[u8]) -> Vec<Vec<u8>> {
+pub fn hook_bls12_381_sqrt(buf: &[u8]) -> Vec<Vec<u8>> {
     assert!(buf.len() == 48, "BLS12-381 sqrt input must be 48 bytes");
 
     let field_element = BigUint::from_bytes_be(buf);
@@ -241,7 +242,7 @@ pub fn hook_bls12_381_sqrt(_: &AotEmulatorCore, buf: &[u8]) -> Vec<Vec<u8>> {
     vec![vec![1], pad_to_be(&sqrt, 48)]
 }
 
-pub fn hook_bls12_381_inverse(_: &AotEmulatorCore, buf: &[u8]) -> Vec<Vec<u8>> {
+pub fn hook_bls12_381_inverse(buf: &[u8]) -> Vec<Vec<u8>> {
     assert!(buf.len() == 48, "BLS12-381 inverse input must be 48 bytes");
 
     let field_element = BigUint::from_bytes_be(buf);
@@ -289,7 +290,6 @@ mod tests {
         default_hook_map, pad_to_be, FD_BLS12_381_INVERSE, FD_BLS12_381_SQRT, FD_EDDECOMPRESS,
         FD_FP_INV, FD_FP_SQRT, SECP256K1_ECRECOVER,
     };
-    use crate::emulator::AotEmulatorCore;
 
     #[test]
     fn phase5_default_hook_map_matches_baseline_fd_surface() {
@@ -316,7 +316,6 @@ mod tests {
     #[test]
     fn every_hook_answers_what_the_interpreter_hook_does() {
         let program = test_program();
-        let aot = AotEmulatorCore::new(program.clone(), Vec::new());
         let interpreter = RiscvEmulator::new_single::<KoalaBear>(
             program,
             Arc::new(RecordFinalPvsState::default()),
@@ -341,7 +340,7 @@ mod tests {
 
         for (fd, requests) in &requests {
             for (i, buf) in requests.iter().enumerate() {
-                let from_aot = catch_unwind(AssertUnwindSafe(|| aot_hooks[fd](&aot, buf)));
+                let from_aot = catch_unwind(AssertUnwindSafe(|| aot_hooks[fd](buf)));
                 let from_interpreter = catch_unwind(AssertUnwindSafe(|| {
                     interpreter_hooks[fd](&interpreter, buf)
                 }));
@@ -362,8 +361,7 @@ mod tests {
     /// What the hook the AOT runtime serves on `FD_EDDECOMPRESS` answers, as a guest's write to
     /// that fd would ask it.
     fn ask(buf: &[u8]) -> Vec<Vec<u8>> {
-        let emu = AotEmulatorCore::new(test_program(), Vec::new());
-        default_hook_map()[&FD_EDDECOMPRESS](&emu, buf)
+        default_hook_map()[&FD_EDDECOMPRESS](buf)
     }
 
     fn unhex(s: &str) -> Vec<u8> {

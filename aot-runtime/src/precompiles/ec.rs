@@ -1,4 +1,4 @@
-use crate::emulator::AotEmulatorCore;
+use super::PrecompileMemory;
 use pico_vm::chips::gadgets::{
     curves::{
         curve25519_dalek::CompressedEdwardsY,
@@ -47,21 +47,21 @@ use halo2curves::{
 // bls12_381 imports for optimized BLS12-381 operations
 use bls12_381::{G1Affine as Bls12381G1Affine, G1Projective as Bls12381G1Projective};
 
-fn read_packed_words_snapshot(core: &mut AotEmulatorCore, ptr: u64, out: &mut [u32]) {
+fn read_packed_words_snapshot(core: &mut impl PrecompileMemory, ptr: u64, out: &mut [u32]) {
     let mut dwords = [0u64; 16];
     let num_dwords = out.len() / 2;
     core.read_mem_dword_span_snapshot(ptr, &mut dwords[..num_dwords]);
     unpack_packed_dwords_into_words(&dwords[..num_dwords], out);
 }
 
-fn read_packed_words_at_clk(core: &mut AotEmulatorCore, ptr: u64, out: &mut [u32], clk: u32) {
+fn read_packed_words_at_clk(core: &mut impl PrecompileMemory, ptr: u64, out: &mut [u32], clk: u32) {
     let mut dwords = [0u64; 16];
     let num_dwords = out.len() / 2;
     core.read_mem_dword_span_at_clk(ptr, &mut dwords[..num_dwords], clk);
     unpack_packed_dwords_into_words(&dwords[..num_dwords], out);
 }
 
-fn write_packed_words_at_clk(core: &mut AotEmulatorCore, ptr: u64, values: &[u32], clk: u32) {
+fn write_packed_words_at_clk(core: &mut impl PrecompileMemory, ptr: u64, values: &[u32], clk: u32) {
     let dwords = pack_words_to_packed_dwords(values);
     core.write_mem_dword_span_at_clk(ptr, &dwords, clk);
 }
@@ -84,14 +84,14 @@ fn pack_words_to_packed_dwords(words: &[u32]) -> Vec<u64> {
 
 /// Edwards curve add syscall implementation.
 pub fn edwards_add<E: EllipticCurve + EdwardsParameters>(
-    core: &mut AotEmulatorCore,
+    core: &mut impl PrecompileMemory,
     p_ptr: u64,
     q_ptr: u64,
 ) {
     assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
     assert!(q_ptr.is_multiple_of(8), "q_ptr is unaligned");
 
-    let clk = core.clk;
+    let clk = core.clk();
     let num_words = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
     let num_u32_words = num_words * 2;
 
@@ -125,7 +125,7 @@ pub fn edwards_add<E: EllipticCurve + EdwardsParameters>(
 
 /// Edwards curve decompress syscall implementation.
 pub fn edwards_decompress<E: EdwardsParameters>(
-    core: &mut AotEmulatorCore,
+    core: &mut impl PrecompileMemory,
     slice_ptr: u64,
     sign: u32,
 ) {
@@ -135,7 +135,7 @@ pub fn edwards_decompress<E: EdwardsParameters>(
     );
     assert!(sign <= 1, "Sign bit must be 0 or 1.");
 
-    let clk = core.clk;
+    let clk = core.clk();
     let num_dwords = WORDS_FIELD_ELEMENT;
     let y_ptr = slice_ptr + (num_dwords as u64) * 8;
 
@@ -172,11 +172,11 @@ pub fn edwards_decompress<E: EdwardsParameters>(
 }
 
 /// Weierstrass curve add syscall implementation.
-pub fn weierstrass_add<E: EllipticCurve>(core: &mut AotEmulatorCore, p_ptr: u64, q_ptr: u64) {
+pub fn weierstrass_add<E: EllipticCurve>(core: &mut impl PrecompileMemory, p_ptr: u64, q_ptr: u64) {
     assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
     assert!(q_ptr.is_multiple_of(8), "q_ptr is unaligned");
 
-    let clk = core.clk;
+    let clk = core.clk();
     let num_words = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
     let num_u32_words = num_words * 2;
 
@@ -196,10 +196,10 @@ pub fn weierstrass_add<E: EllipticCurve>(core: &mut AotEmulatorCore, p_ptr: u64,
 }
 
 /// Weierstrass curve double syscall implementation.
-pub fn weierstrass_double<E: EllipticCurve>(core: &mut AotEmulatorCore, p_ptr: u64) {
+pub fn weierstrass_double<E: EllipticCurve>(core: &mut impl PrecompileMemory, p_ptr: u64) {
     assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
 
-    let clk = core.clk;
+    let clk = core.clk();
     let num_words = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
     let num_u32_words = num_words * 2;
 
@@ -217,7 +217,7 @@ pub fn weierstrass_double<E: EllipticCurve>(core: &mut AotEmulatorCore, p_ptr: u
 
 /// Weierstrass curve decompress syscall implementation.
 pub fn weierstrass_decompress<E: EllipticCurve>(
-    core: &mut AotEmulatorCore,
+    core: &mut impl PrecompileMemory,
     slice_ptr: u64,
     sign_bit: u32,
 ) {
@@ -227,7 +227,7 @@ pub fn weierstrass_decompress<E: EllipticCurve>(
     );
     assert!(sign_bit <= 1, "is_odd must be 0 or 1");
 
-    let clk = core.clk;
+    let clk = core.clk();
     let num_limbs = <E::BaseField as NumLimbs>::Limbs::USIZE;
     let num_words_field_element = num_limbs / 4;
     let num_memory_words_field_element = num_words_field_element / 2;
@@ -283,11 +283,11 @@ pub fn weierstrass_decompress<E: EllipticCurve>(
 
 /// secp256k1 point addition through [`secp256k1_add_words`], libsecp256k1 where it agrees with
 /// the generic formula.
-pub fn secp256k1_add_optimized(core: &mut AotEmulatorCore, p_ptr: u64, q_ptr: u64) {
+pub fn secp256k1_add_optimized(core: &mut impl PrecompileMemory, p_ptr: u64, q_ptr: u64) {
     assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
     assert!(q_ptr.is_multiple_of(8), "q_ptr is unaligned");
 
-    let clk = core.clk;
+    let clk = core.clk();
     const NUM_WORDS: usize = 16; // 2 coordinates * 8 words per coordinate
 
     // Read points from memory using span operations (stack-allocated arrays)
@@ -305,10 +305,10 @@ pub fn secp256k1_add_optimized(core: &mut AotEmulatorCore, p_ptr: u64, q_ptr: u6
 }
 
 /// secp256k1 point doubling through [`secp256k1_double_words`], with span memory.
-pub fn secp256k1_double_optimized(core: &mut AotEmulatorCore, p_ptr: u64) {
+pub fn secp256k1_double_optimized(core: &mut impl PrecompileMemory, p_ptr: u64) {
     assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
 
-    let clk = core.clk;
+    let clk = core.clk();
     const NUM_WORDS: usize = 16;
 
     // Read point from memory using span operation
@@ -326,11 +326,11 @@ pub fn secp256k1_double_optimized(core: &mut AotEmulatorCore, p_ptr: u64) {
 // ============================================================================
 
 /// Optimized secp256r1 point addition using p256 native operations.
-pub fn secp256r1_add_optimized(core: &mut AotEmulatorCore, p_ptr: u64, q_ptr: u64) {
+pub fn secp256r1_add_optimized(core: &mut impl PrecompileMemory, p_ptr: u64, q_ptr: u64) {
     assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
     assert!(q_ptr.is_multiple_of(8), "q_ptr is unaligned");
 
-    let clk = core.clk;
+    let clk = core.clk();
     const NUM_WORDS: usize = 16; // 2 coordinates * 8 words per coordinate
 
     let mut p_words = [0u32; NUM_WORDS];
@@ -350,10 +350,10 @@ pub fn secp256r1_add_optimized(core: &mut AotEmulatorCore, p_ptr: u64, q_ptr: u6
 }
 
 /// Optimized secp256r1 point doubling using p256 native operations.
-pub fn secp256r1_double_optimized(core: &mut AotEmulatorCore, p_ptr: u64) {
+pub fn secp256r1_double_optimized(core: &mut impl PrecompileMemory, p_ptr: u64) {
     assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
 
-    let clk = core.clk;
+    let clk = core.clk();
     const NUM_WORDS: usize = 16;
 
     let mut p_words = [0u32; NUM_WORDS];
@@ -440,11 +440,11 @@ fn p256_affine_to_words(point: &P256AffinePoint) -> [u32; 16] {
 /// - Optimized field towers
 /// - Assembly-optimized operations
 /// - Page-aware span memory operations
-pub fn bn254_add_optimized(core: &mut AotEmulatorCore, p_ptr: u64, q_ptr: u64) {
+pub fn bn254_add_optimized(core: &mut impl PrecompileMemory, p_ptr: u64, q_ptr: u64) {
     assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
     assert!(q_ptr.is_multiple_of(8), "q_ptr is unaligned");
 
-    let clk = core.clk;
+    let clk = core.clk();
     const NUM_WORDS: usize = 16; // 2 coordinates * 8 words per coordinate (256-bit each)
 
     // Read points from memory using span operations (stack-allocated arrays)
@@ -470,10 +470,10 @@ pub fn bn254_add_optimized(core: &mut AotEmulatorCore, p_ptr: u64, q_ptr: u64) {
 }
 
 /// Optimized BN254 point doubling using halo2curves native operations with span memory.
-pub fn bn254_double_optimized(core: &mut AotEmulatorCore, p_ptr: u64) {
+pub fn bn254_double_optimized(core: &mut impl PrecompileMemory, p_ptr: u64) {
     assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
 
-    let clk = core.clk;
+    let clk = core.clk();
     const NUM_WORDS: usize = 16;
 
     // Read point from memory using snapshot-only span operation
@@ -560,11 +560,11 @@ fn bn254_affine_to_words(point: &Bn256G1Affine) -> [u32; 16] {
 /// - Optimized field towers (Fp, Fp2, Fp12)
 /// - Assembly-optimized operations
 /// - Page-aware span memory operations
-pub fn bls12381_add_optimized(core: &mut AotEmulatorCore, p_ptr: u64, q_ptr: u64) {
+pub fn bls12381_add_optimized(core: &mut impl PrecompileMemory, p_ptr: u64, q_ptr: u64) {
     assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
     assert!(q_ptr.is_multiple_of(8), "q_ptr is unaligned");
 
-    let clk = core.clk;
+    let clk = core.clk();
     const NUM_WORDS: usize = 24; // 2 coordinates * 12 words per coordinate (384-bit each)
 
     // Read points from memory using span operations (stack-allocated arrays)
@@ -592,10 +592,10 @@ pub fn bls12381_add_optimized(core: &mut AotEmulatorCore, p_ptr: u64, q_ptr: u64
 }
 
 /// Optimized BLS12-381 point doubling using bls12_381 native operations with span memory.
-pub fn bls12381_double_optimized(core: &mut AotEmulatorCore, p_ptr: u64) {
+pub fn bls12381_double_optimized(core: &mut impl PrecompileMemory, p_ptr: u64) {
     assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
 
-    let clk = core.clk;
+    let clk = core.clk();
     const NUM_WORDS: usize = 24;
 
     // Read point from memory using snapshot-only span operation
