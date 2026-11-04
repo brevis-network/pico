@@ -3837,6 +3837,7 @@ dependencies = [
  "p3-field",
  "p3-koala-bear",
  "p3-symmetric",
+ "pico-aot-pure",
  "pico-vm",
  "tiny-keccak",
  "typenum",

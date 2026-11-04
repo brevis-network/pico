@@ -53,6 +53,7 @@ mod hook;
 pub mod interpreter;
 pub mod precompiles;
 mod program;
+pub mod pure;
 mod snapshot_runtime;
 pub mod syscall;
 mod syscall_context;

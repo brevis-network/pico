@@ -114,72 +114,8 @@ impl Drop for SyscallGuard {
 // execution only. If needed for future trace/proof features, it can be added.
 
 impl AotEmulatorCore {
-    #[inline(always)]
-    fn syscall_leaf_u32(value: u64, context: &str) -> Result<u32, String> {
-        u32::try_from(value).map_err(|_| format!("{context} overflow: {value}"))
-    }
-
-    #[inline(always)]
-    fn decode_syscall_id_u32(value: u64) -> Result<u32, String> {
-        let low_byte = value as u8;
-        let sign_ext_byte = (low_byte as i8 as i64) as u64;
-        if value == sign_ext_byte {
-            return Ok(u32::from(low_byte));
-        }
-
-        let low = value as u32;
-        let zero_ext = u64::from(low);
-        let sign_ext = (low as i32 as i64) as u64;
-
-        if value == zero_ext || value == sign_ext {
-            return Ok(low);
-        }
-
-        Err(format!(
-            "invalid rv64 syscall number encoding: 0x{value:016x}"
-        ))
-    }
-
-    #[inline(always)]
-    fn decode_u32_abi_word(value: u64, context: &str) -> Result<u32, String> {
-        let low = value as u32;
-        let zero_ext = u64::from(low);
-        let sign_ext = (low as i32 as i64) as u64;
-
-        if value == zero_ext || value == sign_ext {
-            Ok(low)
-        } else {
-            Err(format!(
-                "{context} invalid 32-bit ABI encoding: 0x{value:016x}"
-            ))
-        }
-    }
-
-    #[inline(always)]
-    fn decode_u32_abi_index(value: u64, bound: usize, context: &str) -> Result<usize, String> {
-        let low = value as u32;
-        let zero_ext = u64::from(low);
-        if value != zero_ext {
-            return Err(format!(
-                "{context} invalid unsigned index encoding: 0x{value:016x}"
-            ));
-        }
-
-        let index =
-            usize::try_from(low).map_err(|_| format!("{context} index overflow: {value}"))?;
-        if index >= bound {
-            return Err(format!("{context} index out of range: {index} >= {bound}"));
-        }
-        Ok(index)
-    }
-
-    #[inline(always)]
-    fn digest_leaf_word_u32(value: u64, context: &str) -> Result<u32, String> {
-        Self::decode_u32_abi_word(value, context)
-    }
-
     fn handle_write(&mut self, fd: u64, write_buf: u64) -> Result<(), String> {
-        let fd = Self::syscall_leaf_u32(fd, "write fd")?;
+        let fd = syscall_leaf_u32(fd, "write fd")?;
         let nbytes = usize::try_from(self.read_reg_snapshot(Register::X12 as usize))
             .map_err(|_| "write syscall byte count does not fit usize".to_string())?;
 
@@ -326,12 +262,12 @@ impl AotEmulatorCore {
 
     #[inline(always)]
     fn handle_commit(&mut self, word_idx: u64, word: u64) -> Result<(), String> {
-        let idx = Self::decode_u32_abi_index(
+        let idx = decode_u32_abi_index(
             word_idx,
             self.committed_value_digest.len(),
             "commit word_idx",
         )?;
-        let word = Self::digest_leaf_word_u32(word, "commit digest word")?;
+        let word = digest_leaf_word_u32(word, "commit digest word")?;
         self.committed_value_digest[idx] = word;
         if let Some(record) = self.emitting_record_mut() {
             record.public_values.committed_value_digest[idx] = word;
@@ -342,12 +278,12 @@ impl AotEmulatorCore {
 
     #[inline(always)]
     fn handle_commit_deferred(&mut self, word_idx: u64, word: u64) -> Result<(), String> {
-        let idx = Self::decode_u32_abi_index(
+        let idx = decode_u32_abi_index(
             word_idx,
             self.deferred_proofs_digest.len(),
             "deferred word_idx",
         )?;
-        let word = Self::digest_leaf_word_u32(word, "deferred digest word")?;
+        let word = digest_leaf_word_u32(word, "deferred digest word")?;
         self.deferred_proofs_digest[idx] = word;
         // Into the record too, as the interpreter's COMMIT_DEFERRED_PROOFS writes it: the pipeline
         // takes a chunk's deferred digest from its record.
@@ -377,7 +313,7 @@ impl AotEmulatorCore {
         arg1: u64,
         arg2: u64,
     ) -> Result<(u64, u64, u32, bool), String> {
-        let syscall_id_u32 = Self::decode_syscall_id_u32(syscall_id)?;
+        let syscall_id_u32 = decode_syscall_id_u32(syscall_id)?;
         let Some(syscall_code) = SyscallCode::try_from_u32(syscall_id_u32) else {
             return Err(self.fail(EmulationError::UnsupportedSyscall(syscall_id_u32)));
         };
@@ -464,7 +400,7 @@ impl AotEmulatorCore {
                     Ok((0, next_pc, extra_cycles, false))
                 }
                 id if id == SyscallCode::HALT as u32 => {
-                    let exit_code = Self::decode_u32_abi_word(arg1, "halt exit_code")?;
+                    let exit_code = decode_u32_abi_word(arg1, "halt exit_code")?;
                     if exit_code != 0 {
                         // `arg2` is the reason tag the runtime passes in `a1`, as for the interpreter.
                         return Err(self.fail(AbnormalTermination::halt(exit_code, arg2).into()));
@@ -501,6 +437,76 @@ fn process_output(fd: u32, rt: &mut AotEmulatorCore, s: &str) {
     };
 }
 
+// The 32-bit ABI words syscalls take, decoded as the interpreter decodes them; free functions,
+// so the AOT core and pure execution share them.
+
+#[inline(always)]
+pub(crate) fn syscall_leaf_u32(value: u64, context: &str) -> Result<u32, String> {
+    u32::try_from(value).map_err(|_| format!("{context} overflow: {value}"))
+}
+
+#[inline(always)]
+pub(crate) fn decode_syscall_id_u32(value: u64) -> Result<u32, String> {
+    let low_byte = value as u8;
+    let sign_ext_byte = (low_byte as i8 as i64) as u64;
+    if value == sign_ext_byte {
+        return Ok(u32::from(low_byte));
+    }
+
+    let low = value as u32;
+    let zero_ext = u64::from(low);
+    let sign_ext = (low as i32 as i64) as u64;
+
+    if value == zero_ext || value == sign_ext {
+        return Ok(low);
+    }
+
+    Err(format!(
+        "invalid rv64 syscall number encoding: 0x{value:016x}"
+    ))
+}
+
+#[inline(always)]
+pub(crate) fn decode_u32_abi_word(value: u64, context: &str) -> Result<u32, String> {
+    let low = value as u32;
+    let zero_ext = u64::from(low);
+    let sign_ext = (low as i32 as i64) as u64;
+
+    if value == zero_ext || value == sign_ext {
+        Ok(low)
+    } else {
+        Err(format!(
+            "{context} invalid 32-bit ABI encoding: 0x{value:016x}"
+        ))
+    }
+}
+
+#[inline(always)]
+pub(crate) fn decode_u32_abi_index(
+    value: u64,
+    bound: usize,
+    context: &str,
+) -> Result<usize, String> {
+    let low = value as u32;
+    let zero_ext = u64::from(low);
+    if value != zero_ext {
+        return Err(format!(
+            "{context} invalid unsigned index encoding: 0x{value:016x}"
+        ));
+    }
+
+    let index = usize::try_from(low).map_err(|_| format!("{context} index overflow: {value}"))?;
+    if index >= bound {
+        return Err(format!("{context} index out of range: {index} >= {bound}"));
+    }
+    Ok(index)
+}
+
+#[inline(always)]
+pub(crate) fn digest_leaf_word_u32(value: u64, context: &str) -> Result<u32, String> {
+    decode_u32_abi_word(value, context)
+}
+
 /// Runs the precompile `syscall_id_u32` names on `mem`; `Ok(false)` if it names no precompile.
 ///
 /// The compute-only implementations, shared by the AOT core (for a core that writes no events) and
@@ -525,16 +531,12 @@ pub(crate) fn dispatch_precompile(
             Ok(true)
         }
         id if id == SyscallCode::POSEIDON2_PERMUTE as u32 => {
-            // KoalaBear is not a default here, it is the only choice: the MLE backend that
-            // consumes these events is KoalaBear-only (`mle::machine::riscv::Kb`), so there
-            // is no other field whose permutation could be proved. If a second field ever
-            // ships, this is the site that has to thread it -- `AotEmulatorCore` carries no
-            // field parameter, which is why the concrete type appears here rather than in
-            // `poseidon2_permute`'s signature.
+            // KoalaBear only: the MLE backend these events feed is KoalaBear-only
+            // (`mle::machine::riscv::Kb`). A second field would be threaded from here.
             precompiles::poseidon2::poseidon2_permute::<KoalaBear>(
                 mem,
-                AotEmulatorCore::syscall_leaf_u32(arg1, "poseidon2 input_ptr")?,
-                AotEmulatorCore::syscall_leaf_u32(arg2, "poseidon2 output_ptr")?,
+                syscall_leaf_u32(arg1, "poseidon2 input_ptr")?,
+                syscall_leaf_u32(arg2, "poseidon2 output_ptr")?,
             );
             Ok(true)
         }
@@ -546,7 +548,7 @@ pub(crate) fn dispatch_precompile(
             precompiles::ec::edwards_decompress::<Ed25519Parameters>(
                 mem,
                 arg1,
-                AotEmulatorCore::syscall_leaf_u32(arg2, "edwards decompress sign")?,
+                syscall_leaf_u32(arg2, "edwards decompress sign")?,
             );
             Ok(true)
         }
@@ -566,7 +568,7 @@ pub(crate) fn dispatch_precompile(
             precompiles::ec::weierstrass_decompress::<Secp256k1>(
                 mem,
                 arg1,
-                AotEmulatorCore::syscall_leaf_u32(arg2, "secp256k1 decompress sign")?,
+                syscall_leaf_u32(arg2, "secp256k1 decompress sign")?,
             );
             Ok(true)
         }
@@ -582,7 +584,7 @@ pub(crate) fn dispatch_precompile(
             precompiles::ec::weierstrass_decompress::<Secp256r1>(
                 mem,
                 arg1,
-                AotEmulatorCore::syscall_leaf_u32(arg2, "secp256r1 decompress sign")?,
+                syscall_leaf_u32(arg2, "secp256r1 decompress sign")?,
             );
             Ok(true)
         }
@@ -606,7 +608,7 @@ pub(crate) fn dispatch_precompile(
             precompiles::ec::weierstrass_decompress::<Bls12381>(
                 mem,
                 arg1,
-                AotEmulatorCore::syscall_leaf_u32(arg2, "bls12381 decompress sign")?,
+                syscall_leaf_u32(arg2, "bls12381 decompress sign")?,
             );
             Ok(true)
         }
@@ -1002,11 +1004,11 @@ mod tests {
     #[test]
     fn phase5_commit_digest_word_accepts_sign_extended_payload() {
         assert_eq!(
-            AotEmulatorCore::digest_leaf_word_u32(0xffff_ffff_ffff_ffff, "digest").unwrap(),
+            super::digest_leaf_word_u32(0xffff_ffff_ffff_ffff, "digest").unwrap(),
             u32::MAX
         );
         assert_eq!(
-            AotEmulatorCore::digest_leaf_word_u32(0x0000_0000_8000_0001, "digest").unwrap(),
+            super::digest_leaf_word_u32(0x0000_0000_8000_0001, "digest").unwrap(),
             0x8000_0001
         );
     }
