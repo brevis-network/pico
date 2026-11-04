@@ -69,7 +69,7 @@ pico-prover = { git = "https://github.com/brevis-network/pico", tag = "v3.0.0" }
 | `prove_combine(stdin)` | `prove(stdin)`, or `prove_to(stdin, Phase::Combine)` |
 | `prove_fast(stdin)` | `prove_to(stdin, Phase::Riscv)`. The RISC-V phase is full-security; there is no "fast" mode |
 | `verify(&proof)` | no separate call: every returned `Proof` is already verified. To verify in another process: `Proof::write(path)`, then `ProofArtifact::read(path)` and `Prover::verify_artifact(artifact)` |
-| `emulate(stdin) -> (reports, public values)` | `execute(stdin) -> Execution` on `Prover`, or on `ProverBuilder` to skip keygen. Its `committed_bytes` are not proved |
+| `emulate(stdin) -> (reports, public values)` | `execute(stdin) -> Execution` on `Prover`, or on `ProverBuilder` to skip keygen. Its `committed_bytes` are not proved. After 3.1 this is `execute_chunked`, and `execute` runs the guest without chunking: see the support matrix |
 | `proof.pv_stream` | `proof.committed()`: `as_bytes()` for the raw bytes, `read::<T>()` per committed value |
 | `prove_evm(stdin, need_setup, output, field)`, which ran Groth16 in Docker | `prove_evm(stdin) -> EvmBundle`, in whitelist mode only (`verify_keys(true)`); `EvmBundle::write_to(dir)` writes the gnark inputs. The library runs no Groth16: use `cargo pico prove --evm` or the `pico-gnark` CLI |
 | `write_onchain_data(dir, ...)` | `EvmBundle::write_to(dir)`, or `Proof::write_wrap_artifacts(constraints, witness)` on a WRAP proof |

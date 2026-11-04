@@ -31,10 +31,12 @@
 //!
 //! [`Prover::prove_to`] stops at any [`Phase`]. `Prover::prove_evm` proves to [`Phase::Wrap`] in
 //! whitelist mode only, and returns an `EvmBundle`: the gnark inputs and the wrap circuit's two
-//! public inputs. [`Prover::execute_chunked`] emulates without proving, and returns an [`Execution`] whose
-//! bytes are explicitly *not* authenticated. [`ProverBuilder::execute_chunked`] does the same without
-//! keygen. [`ProverBuilder::estimate_cost`] emulates and reports the trace rows proving would fill,
-//! per RISC-V AIR.
+//! public inputs. [`Prover::execute`] runs the guest without proving, on its pure-mode AOT code
+//! when it has some, and returns a [`PureExecution`]: the committed bytes, explicitly *not*
+//! authenticated, and the cycle count. [`Prover::execute_chunked`] emulates as proving does, chunk
+//! by chunk, and returns an [`Execution`] that also counts chunks and precompile calls. Both are on
+//! [`ProverBuilder`] too, without keygen. [`ProverBuilder::estimate_cost`] emulates and reports the
+//! trace rows proving would fill, per RISC-V AIR.
 //!
 //! # Verifying outside this crate
 //!
