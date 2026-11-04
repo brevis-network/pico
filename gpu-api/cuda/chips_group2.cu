@@ -50,8 +50,8 @@
 #include "tracegen/precompiles/sha256_operations.cuh"
 #include "tracegen/riscv/syscall.cuh"
 #include "tracegen/riscv/ecall.cuh"
-// Packed-event (MLE_PACKED_EVENTS=1) ecall kernel
-#include "tracegen/riscv/packed_ecall.cuh"
+// Trace builders that read the execution history
+#include "history/ecall_syscall.cuh"
 
 namespace pico_gpu {
   namespace warmup {
@@ -417,6 +417,17 @@ namespace pico_gpu {
     {
       return finalize_byte_trace(d_byte_trace, byte_trace_size, stream);
     }
+
+    PICO_FFI
+    RustError::by_value cuda_extra_record_add_byte_trace_counts(
+      field_t* d_byte_trace,
+      const uint32_t* d_delta,
+      size_t byte_trace_size,
+      uint32_t* d_overflow,
+      cudaStream_t stream)
+    {
+      return add_raw_counts(d_byte_trace, d_delta, byte_trace_size, d_overflow, stream);
+    }
   } // namespace byte
 
   namespace memory_initialize_finalize_u64 {
@@ -451,10 +462,12 @@ namespace pico_gpu {
       cudaStream_t stream,
       GlobalInteractionEvent* global_events,
       size_t global_events_start_index,
-      field_t* byte_trace)
+      field_t* byte_trace,
+      StepEvents* steps)
     {
       return generate_extra_record_and_main(
-        num_cols, event_size, trace_size, events, trace, stream, global_events, global_events_start_index, byte_trace);
+        num_cols, event_size, trace_size, events, trace, stream, global_events, global_events_start_index, byte_trace,
+        steps);
     }
   } // namespace riscv_memory_local_u64
 
@@ -477,41 +490,6 @@ namespace pico_gpu {
         byte_trace);
     }
   } // namespace syscall_u64
-
-  namespace ecall_u64 {
-    PICO_FFI
-    RustError::by_value cuda_ecall_generate_extra_record_and_main_u64(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const FfiCpuEventU64* events,
-      field_t* trace,
-      cudaStream_t stream,
-      field_t* byte_trace)
-    {
-      return pico_gpu::ecall_u64::generate_extra_record_and_main(
-        num_cols, event_size, trace_size, events, trace, stream, byte_trace);
-    }
-  } // namespace ecall_u64
-
-  namespace ecall_u64_packed {
-    PICO_FFI
-    RustError::by_value cuda_ecall_generate_extra_record_and_main_u64_packed(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const FfiCpuEventPacked* events,
-      size_t chunk,
-      field_t* trace,
-      cudaStream_t stream,
-      field_t* byte_trace,
-      size_t format_version)
-    {
-      if (format_version != PICO_PACKED_EVENT_FORMAT_V1) return RustError{cudaErrorInvalidValue};
-      return generate_extra_record_and_main_packed(
-        num_cols, event_size, trace_size, events, (uint32_t)chunk, trace, stream, byte_trace);
-    }
-  } // namespace ecall_u64_packed
 
   namespace precompile_poseidon2 {
     PICO_FFI

@@ -12,9 +12,10 @@ use pico_vm::{
 };
 
 use super::fixture::{
-    small_builder, whitelist_builder, FIB_ELF, N, SMALL_CHUNK as CHUNK, SMALL_LOG_STACKED_HEIGHT,
+    assert_same_run, small_builder, whitelist_builder, FIB_ELF, N, SMALL_CHUNK as CHUNK,
+    SMALL_LOG_STACKED_HEIGHT,
 };
-use crate::{prover::emulator_opts, Execution, ProveError, Prover, Stdin};
+use crate::{prover::emulator_opts, ProveError, Prover, Stdin};
 
 /// Calls the BN254 base-field precompiles.
 const BN254_FP_ELF: &[u8] = include_bytes!(concat!(
@@ -27,14 +28,6 @@ const BLS12381_FP_ELF: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../perf/bench_data/rv64/bls12381-fp-elf"
 ));
-
-fn assert_same_run(from_builder: &Execution, from_prover: &Execution) {
-    assert_eq!(from_builder.committed_bytes, from_prover.committed_bytes);
-    assert_eq!(from_builder.cycles, from_prover.cycles);
-    assert_eq!(from_builder.chunks, from_prover.chunks);
-    assert_eq!(from_builder.reports.len(), from_prover.reports.len());
-    assert_eq!(from_builder.precompile_calls, from_prover.precompile_calls);
-}
 
 #[test]
 fn the_builder_executes_the_run_the_built_prover_executes() {
@@ -54,7 +47,7 @@ fn the_builder_executes_the_run_the_built_prover_executes() {
     assert_same_run(&from_builder, &from_prover);
 }
 
-/// `execute` runs the light-trace pipeline; proving emulates the records in full. The two must
+/// `execute` streams the run and drops each record; proving keeps them to prove. The two must
 /// report one run: same bytes, cycles, chunks, reports and precompile calls.
 #[test]
 fn execute_reports_the_run_proving_emulates() {
@@ -123,6 +116,12 @@ fn the_builder_refuses_the_chunk_sizes_build_refuses() {
     }
 }
 
+/// The chunk the precompile guests run at: the widest `SMALL_LOG_STACKED_HEIGHT` admits. They run
+/// tens of millions of cycles, and the snapshot pipeline gives every chunk a pool memory it resets
+/// afterwards, so at `CHUNK` they would pay for thousands of those; the counts do not depend on
+/// where chunks cut.
+const PRECOMPILE_CHUNK: u32 = 1 << SMALL_LOG_STACKED_HEIGHT;
+
 /// The emulator's own counts for one run of every code that has its own table, keyed through
 /// `SyscallCode::count_map` as the emulator keys them.
 fn emulator_precompile_counts(elf: &[u8], chunk: u32) -> BTreeMap<SyscallCode, u64> {
@@ -133,7 +132,6 @@ fn emulator_precompile_counts(elf: &[u8], chunk: u32) -> BTreeMap<SyscallCode, u
         program,
         Arc::new(RecordFinalPvsState::default()),
         emulator_opts(chunk),
-        None,
     );
     emulator.write_stdin(&Stdin::new().into_emulator_stdin());
     while !emulator
@@ -157,12 +155,12 @@ fn assert_counts_match_the_emulator(guest: &str, elf: &[u8]) {
     let started = std::time::Instant::now();
     let calls = Prover::builder(elf)
         .log_stacked_height(SMALL_LOG_STACKED_HEIGHT)
-        .chunk_size(CHUNK)
+        .chunk_size(PRECOMPILE_CHUNK)
         .execute(Stdin::new())
         .expect("execute")
         .precompile_calls;
 
-    let expected = emulator_precompile_counts(elf, CHUNK);
+    let expected = emulator_precompile_counts(elf, PRECOMPILE_CHUNK);
     assert!(!expected.is_empty(), "{guest}: calls no precompile");
     let mut coalesced = BTreeMap::new();
     for (code, n) in &calls {

@@ -78,10 +78,6 @@ pub const DEFAULT_MEDIUM_BLOCK_THRESHOLD: u32 = 24;
 // Block Splitting Constants
 // =============================================================================
 
-/// Default maximum instructions per superblock before forced split.
-/// Larger values improve locality but increase compile time and code size.
-pub const DEFAULT_MAX_SUPERBLOCK_INSNS: u32 = 256;
-
 /// Default maximum instructions per block before forced split.
 /// Smaller values reduce interpreter fallback near chunk boundaries.
 pub const DEFAULT_MAX_BLOCK_INSTRUCTIONS: u32 = 4096;

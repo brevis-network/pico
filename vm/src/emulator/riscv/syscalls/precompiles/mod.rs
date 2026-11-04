@@ -9,7 +9,10 @@ pub mod weierstrass;
 
 use crate::{
     chips::chips::riscv_memory::event::MemoryLocalEvent,
-    emulator::riscv::syscalls::{SyscallCode, SyscallEvent},
+    emulator::riscv::{
+        event_types::RvAddr,
+        syscalls::{SyscallCode, SyscallEvent},
+    },
 };
 use hashbrown::{hash_map::IterMut, HashMap};
 use serde::{Deserialize, Serialize};
@@ -23,6 +26,14 @@ pub use keccak256::event::KeccakPermuteEvent;
 pub use poseidon2::event::Poseidon2PermuteEvent;
 pub use sha256::event::{ShaCompressEvent, ShaExtendEvent};
 pub use uint256::event::Uint256MulEvent;
+
+#[inline(always)]
+pub fn assert_dword_aligned_precompile(addr: RvAddr, context: &str) {
+    assert!(
+        addr.is_multiple_of(8),
+        "{context} must be 8-byte aligned, got 0x{addr:08x}"
+    );
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, EnumIter)]
 /// Precompile event.  There should be one variant for every precompile syscall.

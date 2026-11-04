@@ -3,8 +3,8 @@ use crate::{
     emulator::{
         opts::EmulatorOpts,
         riscv::{
-            public_values::RecordFinalPvsState, riscv_emulator::EmulationError,
-            state::RiscvEmulationState,
+            memory::ContiguousRiscvMemory, public_values::RecordFinalPvsState,
+            record::EmulationRecord, riscv_emulator::EmulationError, state::RiscvEmulationState,
         },
     },
     machine::report::EmulationReport,
@@ -50,7 +50,8 @@ pub fn split_segments() -> u32 {
         let segments = chosen_segments(requested_segments(), threads, prover_count());
         // Splitting without knowing the card count cuts the first chunk alone, which moves the
         // stall rather than removing it. Only an explicit request gets here, so say so and go on.
-        if segments > 1 && prover_count().is_none() {
+        // MLE_SPLIT_FROM_CHUNK names the cut chunks, so a missing card count cannot shrink them.
+        if segments > 1 && prover_count().is_none() && split_from_chunk().is_none() {
             tracing::warn!(
                 "split replay is on but PROVER_COUNT is unset, so only the first chunk is cut; \
                  set PROVER_COUNT, or MLE_SPLIT_CHUNKS, to cut one per card"
@@ -74,12 +75,38 @@ pub fn split_chunks() -> u32 {
     })
 }
 
+/// `MLE_SPLIT_FROM_CHUNK=K` cuts the chunks with index `K` and above instead of the leading ones, so
+/// the tail's replay can be split alone. Unset, [`split_chunks`] decides.
+pub fn split_from_chunk() -> Option<u32> {
+    static FROM: OnceLock<Option<u32>> = OnceLock::new();
+    *FROM.get_or_init(|| env_u32("MLE_SPLIT_FROM_CHUNK"))
+}
+
+/// Whether snapshot batch `batch`, which is also its chunk, has its replay cut into
+/// [`split_segments`] segments.
+pub fn splits_batch(batch: u32) -> bool {
+    match split_from_chunk() {
+        Some(from) => batch >= from,
+        None => batch < split_chunks(),
+    }
+}
+
+/// Whether any batch's replay is cut, which sizes the snapshot memory pool.
+pub fn splits_any_batch() -> bool {
+    split_from_chunk().is_some() || split_chunks() > 0
+}
+
 pub trait AotSnapshotEmulator: Send {
     fn next_state_batch(
         &mut self,
     ) -> Result<(RiscvEmulationState, EmulationReport), EmulationError>;
     fn cycles(&self) -> u64;
     fn get_pv_stream(&mut self) -> Vec<u8>;
+
+    /// See [`crate::emulator::snapshot::SnapshotEmulator::counters`].
+    fn counters(&self) -> crate::emulator::snapshot::SnapshotCounters {
+        crate::emulator::snapshot::SnapshotCounters::default()
+    }
 
     /// The batch's replay segments, in clock order, as `(start state, target global clock)`.
     ///
@@ -123,6 +150,73 @@ pub fn create_aot_emulator(
     AOT_FACTORY
         .get()
         .map(|factory| factory(program, input_stream, opts, final_pvs_state))
+}
+
+/// The AOT core as a replay worker: it starts from a snapshot and runs to the snapshot's target
+/// global clock, exactly, writing the interpreter's records.
+///
+/// Where a chunk ends was decided by the snapshot thread, so a replay makes no cut of its own: the
+/// one record it cuts is the segment's, at the target. Only a final segment rolls the chunk over,
+/// as the interpreter's worker does.
+pub trait AotReplayEmulator: Send {
+    /// Starts over from `state`, to replay up to `target_global_clk`, keeping this worker's
+    /// allocations. Returns the memory the previous replay ran on, which only the caller knows
+    /// whether to give back to the pool.
+    fn recover_in_place(
+        &mut self,
+        state: RiscvEmulationState,
+        target_global_clk: u64,
+        final_segment: bool,
+    ) -> ContiguousRiscvMemory;
+
+    /// Runs to the target and cuts the segment's record. Stopping anywhere else is an error.
+    fn replay(&mut self) -> Result<(EmulationRecord, EmulationReport), EmulationError>;
+
+    /// The run's memory initialize and finalize events into `record`, from the state a replay
+    /// that ended the run left.
+    fn postprocess(&self, record: &mut EmulationRecord);
+
+    /// Compiled blocks entered, over every replay this worker ran.
+    fn compiled_block_dispatches(&self) -> u64;
+
+    /// Instructions the fallback interpreter ran, over every replay this worker ran.
+    fn fallback_insns(&self) -> u64;
+
+    /// Puts `memory` in place of the one the core runs on and returns that one: how a worker
+    /// that keeps its core gives a replay's memory back.
+    fn replace_memory(&mut self, memory: ContiguousRiscvMemory) -> ContiguousRiscvMemory;
+
+    /// The memory the last replay ran on, for the caller to give back.
+    fn into_memory(self: Box<Self>) -> ContiguousRiscvMemory;
+}
+
+type AotReplayFactory =
+    fn(Arc<Program>, RiscvEmulationState, u64, bool) -> Box<dyn AotReplayEmulator>;
+
+static AOT_REPLAY_FACTORY: OnceLock<AotReplayFactory> = OnceLock::new();
+
+/// [`register_aot_factory`] for the replay workers.
+pub fn register_aot_replay_factory(factory: AotReplayFactory) -> bool {
+    AOT_REPLAY_FACTORY.set(factory).is_ok()
+}
+
+pub fn is_aot_replay_factory_registered() -> bool {
+    AOT_REPLAY_FACTORY.get().is_some()
+}
+
+/// A replay worker recovered from `state`; see [`AotReplayEmulator::recover_in_place`].
+///
+/// `None` when no factory is registered, and `state` is dropped with whatever pool memory it
+/// holds: check [`is_aot_replay_factory_registered`] before a snapshot is handed out.
+pub fn create_aot_replay_emulator(
+    program: Arc<Program>,
+    state: RiscvEmulationState,
+    target_global_clk: u64,
+    final_segment: bool,
+) -> Option<Box<dyn AotReplayEmulator>> {
+    AOT_REPLAY_FACTORY
+        .get()
+        .map(|factory| factory(program, state, target_global_clk, final_segment))
 }
 
 #[cfg(test)]
@@ -178,5 +272,69 @@ mod tests {
             Arc::new(RecordFinalPvsState::default()),
         );
         assert!(boxed.is_some());
+    }
+
+    struct DummyReplay(ContiguousRiscvMemory);
+    impl AotReplayEmulator for DummyReplay {
+        fn recover_in_place(
+            &mut self,
+            state: RiscvEmulationState,
+            _target_global_clk: u64,
+            _final_segment: bool,
+        ) -> ContiguousRiscvMemory {
+            core::mem::replace(&mut self.0, state.memory)
+        }
+        fn replay(&mut self) -> Result<(EmulationRecord, EmulationReport), EmulationError> {
+            unreachable!("dummy AOT replay never invoked in tests")
+        }
+        fn postprocess(&self, _record: &mut EmulationRecord) {}
+        fn compiled_block_dispatches(&self) -> u64 {
+            0
+        }
+        fn fallback_insns(&self) -> u64 {
+            0
+        }
+        fn replace_memory(&mut self, memory: ContiguousRiscvMemory) -> ContiguousRiscvMemory {
+            core::mem::replace(&mut self.0, memory)
+        }
+        fn into_memory(self: Box<Self>) -> ContiguousRiscvMemory {
+            self.0
+        }
+    }
+
+    fn dummy_replay_factory(
+        _p: Arc<Program>,
+        state: RiscvEmulationState,
+        _target_global_clk: u64,
+        _final_segment: bool,
+    ) -> Box<dyn AotReplayEmulator> {
+        Box::new(DummyReplay(state.memory))
+    }
+
+    #[test]
+    fn replay_factory_registration_and_creation() {
+        let create = || {
+            create_aot_replay_emulator(
+                Arc::new(Program::default()),
+                RiscvEmulationState::default(),
+                1,
+                true,
+            )
+        };
+        assert!(!is_aot_replay_factory_registered());
+        assert!(create().is_none());
+
+        assert!(register_aot_replay_factory(dummy_replay_factory));
+        assert!(
+            !register_aot_replay_factory(dummy_replay_factory),
+            "the first install holds the slot"
+        );
+        assert!(is_aot_replay_factory_registered());
+        // Registering does not select the AOT workers.
+        assert_eq!(
+            EmulatorOpts::default().replay_workers,
+            crate::emulator::opts::ReplayWorkers::Interpreter
+        );
+        assert!(create().is_some());
     }
 }

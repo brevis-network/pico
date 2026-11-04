@@ -56,7 +56,7 @@
 //! # What the options decide, and what they do not
 //!
 //! Every [`ProverBuilder`] setter outranks the environment: the emulator options are constructed
-//! field by field rather than from `EmulatorOpts::default`, which reads three variables, and the
+//! field by field rather than from `EmulatorOpts::default`, which reads two variables, and the
 //! proving concurrency is passed as an argument rather than left to `PROVE_CONCURRENCY`.
 //!
 //! What remains environment-controlled is stated here rather than implied, variable by variable:
@@ -65,7 +65,6 @@
 //! |---|---|---|
 //! | `CHUNK_SIZE` | `EmulatorOpts::default` | **no** — superseded by [`ProverBuilder::chunk_size`] |
 //! | `CHUNK_BATCH_SIZE` | `EmulatorOpts::default` | **no** — stated as 1, the VM's own pin |
-//! | `SPLIT_THRESHOLD` | `EmulatorOpts::default` | **no** — derived from the chunk size, and the record split on this path reads none of the split options |
 //! | `PROVE_CONCURRENCY` | `RiscvMachine::prove` | **no** — superseded by [`ProverBuilder::concurrency`] |
 //! | `MLE_VK_ROOT` | `MleVkMap::try_load` | **no** — the whitelist is loaded without it, and [`ProverBuilder::trusted_vk_root`] pins the root |
 //! | `CHUNK_EVENT_LIMITS_OFF`, `CHUNK_EVENT_LIMIT_SCALE` | chunk splitting | **yes, and refused by [`ProverBuilder::build`]**: switched off, or scaled above 1, the event limits let a chunk's memory events outgrow `2^log_stacked_height`, which depends on the guest's data and so cannot be checked before proving. [`ProverBuilder::execute`] refuses them too, so it chunks as a built prover would. A scale the VM does not parse, or outside 1 to 16, it reads as 1, and so does the check |
@@ -75,10 +74,11 @@
 //! | `RECURSION_EARLY_EXIT_TS` | recursion emulation | **yes, and it breaks proving**: it truncates the recursion run, and a value that does not parse aborts |
 //! | `MLE_WITNESS_HASH`, `MLE_TRANSCRIPT_PROF`, `MLE_WALKER_XCHECK` | recursion witness generation | **yes**, and deliberately |
 //! | `MLE_REC_PARALLEL_CHILDREN` | recursion node interpretation | **yes**, and deliberately |
-//! | `MEMORY_POOL_SIZE` | the snapshot pipeline's memory pool | **yes**: the pool holds this many emulator memories, one per batch the snapshot thread cuts until a recycler returns it. With the `aot` or `cuda` feature a replay worker keeps one between its batches, so the run needs one per worker plus one per segment of the batch being cut: unset, it is raised to that, and a smaller value is refused by `build` and `execute`. `0` is always refused |
-//! | `MEMORY_POOL_EAGER`, `MEMORY_POOL_LOW_WATER`, `MEMORY_RECYCLER_THREADS` | the snapshot pipeline's memory pool | **yes**: how the pool is filled and recycled. A setting that leaves the pool empty, or `MEMORY_RECYCLER_THREADS=0`, which never returns a memory to it, is refused by `build` and `execute` |
-//! | `MLE_SPLIT_REPLAY`, `MLE_SPLIT_CHUNKS`, `NUM_THREADS`, `PROVER_COUNT` | the AOT snapshot thread | **yes, with the `aot` or `cuda` feature**: whether the replay of the leading chunks is cut into segments, which the workers fold back into one record per chunk. `NUM_THREADS` and `PROVER_COUNT` cut only together, and neither sets the worker count. A cut into more segments than the memory pool holds is refused by `build` and `execute`, and one into more than the GPU prove's event pool holds by the prove, up front |
-//! | `MLE_RECORD_DIGEST` | the snapshot pipeline's workers | as a diagnostic only: `1` logs a digest of every record |
+//! | `MEMORY_POOL_SIZE` | the snapshot pipeline's memory pool | **yes**: the pool holds this many emulator memories. With `ProverBuilder::aot`, or the `cuda` feature's interpreted AOT runtime, a replay worker holds one while it replays: unset, the pool is 16, raised where that is fewer to one per worker plus one per segment of the batch being cut, so every worker replays at once, and a smaller value caps the replay workers running at once. `0`, or fewer than the segments of one batch, is refused by `build` and `execute`, unless they emulate with `ProverBuilder::serial_emulation` |
+//! | `MEMORY_POOL_EAGER`, `MEMORY_POOL_LOW_WATER`, `MEMORY_RECYCLER_THREADS` | the snapshot pipeline's memory pool | **yes**: how the pool is filled and recycled. A setting that leaves the pool empty, or `MEMORY_RECYCLER_THREADS=0`, which never returns a memory to it, is refused by `build` and `execute`, unless they emulate with `ProverBuilder::serial_emulation` |
+//! | `MLE_SPLIT_REPLAY`, `MLE_SPLIT_CHUNKS`, `NUM_THREADS`, `PROVER_COUNT` | the AOT snapshot thread | **yes, with the `aot` or `cuda` feature**: whether the replay of the leading chunks is cut into segments, which the workers fold back into one record per chunk. `NUM_THREADS` and `PROVER_COUNT` cut only together, and neither sets the worker count. A cut into more segments than the pool holds is refused by `build` and `execute`, and one into more than the GPU prove's history slots hold by the prove, up front |
+//! | `MLE_RECORD_DIGEST` | the snapshot pipeline's workers and sequencer | as a diagnostic only: `1` logs a digest of every record the pipeline hands on, its public values as stamped |
+//! | `MLE_LEDGER`, `MLE_LEDGER_DIGESTS`, `MLE_SPANS` | the snapshot pipeline and the RISC-V prover | with the `stage-ledger` feature, as instruments only: a JSON line per stage of every chunk, the per-chip trace digests in it, and a CSV of what each pipeline thread was doing when; a process records one run at a time, and none changes a record or a proof |
 //! | `MLE_SHAPE_MARGIN`, `CHUNK_SPLIT_DEBUG`, `DEBUG_MEMORY_EVENTS`, `DEBUG_LOCAL_MEMORY` | logging | yes, as diagnostics only |
 //!
 //! The six proof-changing variables are experiment or test knobs; leave them unset. A caller that
@@ -86,8 +86,7 @@
 //! produce.
 //! `CHUNK_EVENT_LIMITS_OFF`, `CHUNK_EVENT_LIMIT_SCALE` and `DEFERRED_TAIL_MERGE` are read once per
 //! process, the other three on every use. The snapshot pipeline's variables take effect once per
-//! process, on its first run: [`ProverBuilder::execute`] runs it in every build, and proving does
-//! with the `aot` feature or on the GPU.
+//! process, on its first run.
 //!
 //! The witness and interpretation rows are four process-global diagnostics and controls, each
 //! resolved once per process on first use — the VM lists them as one table, `witness_flags`. Three
@@ -100,12 +99,24 @@
 //! recursion witness always takes the transcript-only derive, one child after another.
 //! [`ENV_NO_LONGER_READ`] lists them, so a caller can warn that setting one does nothing.
 //!
+//! # Emulation
+//!
+//! A [`Prover`] makes its records with the snapshot pipeline: one snapshot thread runs the guest
+//! ahead, and replay workers turn its snapshots into the records. The workers default to one per
+//! core, at most 16, and [`ProverBuilder::emulation_workers`] sets the count.
+//! [`ProverBuilder::serial_emulation`] emulates on one interpreter instead, and makes the same
+//! records.
+//!
+//! The pipeline's memory pool belongs to the process, not to a prover: provers emulating at once
+//! share its `MEMORY_POOL_SIZE` memories and wait on one another for them, and with `MLE_LEDGER` or
+//! `MLE_SPANS` set, a run that overlaps another stops both instruments for the rest of the process.
+//!
 //! # AOT emulation
 //!
 //! With the `aot` feature, `ProverBuilder::aot` emulates with the guest's AOT-compiled code, which
-//! `cargo pico aot` generates: the AOT code runs ahead in the snapshot pipeline, and interpreters
-//! replay its snapshots into the records. It changes how the records are made, not what is
-//! proved.
+//! `cargo pico aot` generates: the AOT code takes the snapshot thread's place in that pipeline, and
+//! interpreters still replay its snapshots into the records. It changes how the records are made,
+//! not what is proved.
 //!
 //! A `cuda` build runs the AOT runtime without compiled code by default: its snapshot thread
 //! interprets every block with the runtime's own interpreter and precompile backends, for any ELF.
@@ -188,7 +199,8 @@ pub const ENV_READ_BY_PROVER: &[(&str, &str)] = &[
     ),
     (
         "MEMORY_POOL_SIZE",
-        "sizes the snapshot pipeline's memory pool; 0 is refused",
+        "sizes the snapshot pipeline's memory pool, which caps the AOT replay workers running at \
+         once; the pipeline refuses 0",
     ),
     (
         "MEMORY_POOL_EAGER",
@@ -200,7 +212,7 @@ pub const ENV_READ_BY_PROVER: &[(&str, &str)] = &[
     ),
     (
         "MEMORY_RECYCLER_THREADS",
-        "sizes how the snapshot pipeline's memory pool is recycled; 0 is refused",
+        "sizes how the snapshot pipeline's memory pool is recycled; the pipeline refuses 0",
     ),
     #[cfg(any(feature = "aot", feature = "cuda"))]
     (

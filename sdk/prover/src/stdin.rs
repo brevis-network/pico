@@ -12,6 +12,7 @@ use serde::Serialize;
 /// |---|---|
 /// | [`Stdin::write`] | `pico_sdk::io::read_as::<T>()` |
 /// | [`Stdin::write_bytes`] | `pico_sdk::io::read_vec()` |
+/// | [`Stdin::from_input`] | `read_input` (zkevm-standards C ABI), `pico_sdk::io::input()` |
 ///
 /// ```
 /// # use pico_prover::Stdin;
@@ -54,6 +55,21 @@ impl Stdin {
     pub fn write_bytes(&mut self, bytes: &[u8]) -> &mut Self {
         self.elements.push(bytes.to_vec());
         self
+    }
+
+    /// The input of a guest on the zkevm-standards IO interface: one block, which the guest reads
+    /// whole and unchanged with `read_input` (`pico_sdk::io::input()` in Rust), with no length
+    /// prefix and no encoding. The run's output is every byte the guest passed to `write_output`,
+    /// in order: [`crate::Execution::committed_bytes`], and [`crate::Proof::committed`] once
+    /// proved.
+    ///
+    /// One element holding `block`, as one [`Stdin::write_bytes`] on an empty `Stdin`. An empty
+    /// block is still an element, which `read_input` returns with size 0: with no element at all,
+    /// the guest's `read_input` would end the run with `InsufficientInput`.
+    pub fn from_input(block: &[u8]) -> Self {
+        let mut stdin = Self::new();
+        stdin.write_bytes(block);
+        stdin
     }
 
     /// How many elements the guest can read.
@@ -134,6 +150,17 @@ mod tests {
         let (index, message) = stdin.failure().expect("the failure is held for the prover");
         assert_eq!(index, 1);
         assert!(message.contains("cannot be encoded"), "{message}");
+    }
+
+    /// The block reaches the guest as it is: one element, no framing, and an empty block is an
+    /// element too.
+    #[test]
+    fn from_input_is_one_element_holding_the_block_unchanged() {
+        for block in [&[][..], &[0x2a][..], &[0, 1, 2, 0xff, 0][..]] {
+            let stdin = Stdin::from_input(block);
+            assert_eq!(stdin.len(), 1, "block of {} byte(s)", block.len());
+            assert_eq!(stdin.elements[0], block);
+        }
     }
 
     #[test]

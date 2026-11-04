@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use lazy_static::lazy_static;
 use rand::{rngs::StdRng, RngExt, SeedableRng};
 
-use crate::riscv_ecalls::{syscall_halt, syscall_write};
+use crate::riscv_ecalls::{exit_code, halt_reason, halt_with_reason, syscall_write};
 
 /// The random number generator seed for the zkVM.
 ///
@@ -39,7 +39,7 @@ pub unsafe extern "C" fn sys_rand(recv_buf: *mut u8, words: usize) {
 #[no_mangle]
 pub unsafe extern "C" fn sys_panic(msg_ptr: *const u8, len: usize) -> ! {
     sys_write(2, msg_ptr, len);
-    syscall_halt(1);
+    halt_with_reason(exit_code::PANIC, halt_reason::PANIC);
 }
 
 #[allow(unused_variables)]

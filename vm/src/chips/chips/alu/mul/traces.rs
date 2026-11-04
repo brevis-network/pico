@@ -5,8 +5,10 @@ use crate::{
     cuda_adaptor::resource_pool::{
         mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
     },
-    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    emulator::riscv::{history::ExecutionHistory, history_fill::HISTORY_LAYOUT},
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents, Readiness},
     machine::chip::GpuChipBehavior,
+    mle::{machine::trace_oracle::history_launch, spans::device},
 };
 use crate::{
     chips::{
@@ -17,7 +19,10 @@ use crate::{
         riscv::{opcode::Opcode, program::Program},
         word::Word,
     },
-    emulator::{record::RecordBehavior, riscv::record::EmulationRecord},
+    emulator::{
+        record::RecordBehavior,
+        riscv::record::{AluStream, EmulationRecord},
+    },
     machine::chip::ChipBehavior,
     primitives::consts::MUL_DATAPAR,
 };
@@ -27,14 +32,13 @@ use cudart::{
     slice::CudaSliceMut,
     stream::{CudaStream, CudaStreamCreateFlags},
 };
-use itertools::Itertools;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 #[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 #[cfg(feature = "cuda")]
-use pico_gpu_api::cuda_mul_generate_extra_record_and_main_u64;
+use pico_gpu_api::history_bitwise_mul_shift::cuda_mul_generate_extra_record_and_main_history;
 use std::borrow::BorrowMut;
 #[cfg(feature = "cuda")]
 use tracing::info;
@@ -58,8 +62,8 @@ impl<F: PrimeField32> ChipBehavior<F> for MulChip<F> {
         input: &EmulationRecord,
         output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
-        let events = input.mul_events.iter().collect::<Vec<_>>();
-        let nrows = events.len().div_ceil(MUL_DATAPAR);
+        let ops = input.alu_ops(AluStream::Mul);
+        let nrows = ops.len().div_ceil(MUL_DATAPAR);
         let log2_nrows = input.shape_chip_size(&self.name());
         let padded_nrows = match log2_nrows {
             Some(log2_nrows) => 1 << log2_nrows,
@@ -68,13 +72,14 @@ impl<F: PrimeField32> ChipBehavior<F> for MulChip<F> {
 
         let mut values = vec![F::ZERO; padded_nrows * NUM_MUL_COLS];
 
-        let populate_len = events.len() * NUM_MUL_VALUE_COLS;
+        let populate_len = ops.len() * NUM_MUL_VALUE_COLS;
         let mut record = EmulationRecord::default();
 
         values[..populate_len]
             .chunks_mut(NUM_MUL_VALUE_COLS)
-            .zip_eq(events)
-            .for_each(|(row, event)| {
+            .enumerate()
+            .for_each(|(index, row)| {
+                let event = ops.get(index);
                 let cols: &mut MulValueCols<_> = row.borrow_mut();
                 // Ensure that the opcode is MUL, MULHU, MULH, MULHSU, or MULW.
                 assert!(
@@ -128,7 +133,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MulChip<F> {
         if let Some(shape) = record.shape.as_ref() {
             return shape.included::<F, _>(self);
         }
-        !record.mul_events.is_empty()
+        !record.alu_ops(AluStream::Mul).is_empty()
     }
 
     fn local_only(&self) -> bool {
@@ -138,10 +143,6 @@ impl<F: PrimeField32> ChipBehavior<F> for MulChip<F> {
 
 #[cfg(feature = "cuda")]
 impl<F: PrimeField32> GpuChipBehavior<F> for MulChip<F> {
-    fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
-        counter.num_mul_events += record.mul_events.len();
-    }
-
     fn gpu_generate_extra_record_and_main(
         &self,
         device_id: usize,
@@ -149,11 +150,41 @@ impl<F: PrimeField32> GpuChipBehavior<F> for MulChip<F> {
         prepared_gpu_events: &PreparedGpuEvents,
         preallocated_gpu_memory: &mut PreallocatedGpuMemory,
     ) -> TraceData<'_, F> {
-        // The orchestrator already allocated `d_mul_events` and uploaded `input.mul_events` into it
-        // (before the DivRem chip ran); `num_mul_events == input.mul_events.len()`, since no kernel
-        // appends mul extras. This chip used to ignore that pre-transfer and re-upload the events from
-        // a fresh pageable Vec every chunk; use the resident buffer instead.
-        let event_size = prepared_gpu_events.event_counter.num_mul_events;
+        let view = input
+            .history_view()
+            .expect("a CPU chunk's record carries its execution history");
+        self.gpu_generate_from_history(
+            device_id,
+            input,
+            view.history,
+            prepared_gpu_events,
+            preallocated_gpu_memory,
+        )
+    }
+
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        record.event_counter.num_mul_events > 0
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> MulChip<F> {
+    /// The trace from the chunk's history on the device: the kernel reads the mul list there, so no
+    /// event is uploaded, and the list's length sizes the trace. The counter the activity check
+    /// read must have counted the same list.
+    fn gpu_generate_from_history(
+        &self,
+        device_id: usize,
+        input: &EmulationRecord,
+        history: &ExecutionHistory,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let event_size = history.chip_steps.alu(AluStream::Mul).len();
+        assert_eq!(
+            prepared_gpu_events.event_counter.num_mul_events, event_size,
+            "the counter's mul height is not the history's mul list"
+        );
 
         let nrows = event_size.div_ceil(MUL_DATAPAR);
         let log2_nrows = input.shape_chip_size(&self.name());
@@ -167,45 +198,54 @@ impl<F: PrimeField32> GpuChipBehavior<F> for MulChip<F> {
         let sync_mem_pool = get_global_mem_pool(device_id);
         let mem_pool = &sync_mem_pool.0;
 
-        // The orchestrator uploads `input.mul_events` before the DivRem chip; the buffer is
-        // absent on zero events (a whitelist shape can still list this chip), and the launcher
-        // then zero-fills the trace and reads no event, so a null pointer is fine.
-        let d_events_ptr: *const std::ffi::c_void = preallocated_gpu_memory
-            .d_mul_events
-            .as_ref()
-            .map_or(std::ptr::null(), |b| b.as_ptr() as *const _);
-
-        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+        let d_byte_trace = preallocated_gpu_memory
+            .d_byte_trace
+            .as_mut()
+            .unwrap()
+            .as_mut_ptr();
 
         let trace_size = padded_nrows * NUM_MUL_COLS;
         let mut d_trace =
             DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
                 .unwrap();
 
-        unsafe {
-            cuda_mul_generate_extra_record_and_main_u64(
+        // Waits on `stream` for the whole fill; dropped after the launch, its end-of-reads mark is
+        // what the fill's error-word read-back and free follow.
+        let reader = preallocated_gpu_memory
+            .d_history
+            .as_ref()
+            .expect("a chunk whose chips read its history has its fill on the device")
+            .reader(stream, Readiness::Complete)
+            .unwrap_or_else(|e| panic!("reading the chunk's device history: {e}"));
+        let args = reader.args();
+        let kernels = device::start(stream);
+        let err = unsafe {
+            cuda_mul_generate_extra_record_and_main_history(
+                std::ptr::from_ref(&args).cast(),
+                HISTORY_LAYOUT,
                 NUM_MUL_VALUE_COLS,
-                event_size,
                 trace_size,
-                d_events_ptr,
                 d_trace.as_mut_ptr() as *mut _,
-                d_byte_trace.as_mut_ptr() as *mut _,
+                d_byte_trace as *mut _,
                 stream.into(),
-            );
-        }
+            )
+        };
+        assert_eq!(
+            err.code, 0,
+            "cuda_mul_generate_extra_record_and_main_history failed: {err}"
+        );
+        history_launch::note(&self.name());
+        drop(reader);
 
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
+        device::launched(kernels, stream);
+        device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
+        device::wait(main_stream).unwrap();
 
-        info!("[mul-chip] generate_extra_record_and_main on GPU");
+        info!("[mul-chip] generate_extra_record_and_main from the history on GPU");
         TraceData::Gpu(NUM_MUL_COLS, d_trace)
-    }
-
-    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
-        record.event_counter.num_mul_events > 0
     }
 }

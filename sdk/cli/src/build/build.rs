@@ -12,7 +12,7 @@ use std::{
     process::Command,
 };
 
-const TARGET_TRIPLE: &str = "riscv64im-pico-zkvm-elf";
+pub(crate) const TARGET_TRIPLE: &str = "riscv64im-pico-zkvm-elf";
 /// The copied ELF's name when neither `--elf-name` nor `--bin` gives one.
 const TARGET_ELF: &str = TARGET_TRIPLE;
 
@@ -44,7 +44,10 @@ pub fn build_program(args: &BuildArgs, program_dir: Option<PathBuf>) -> Result<P
     // dependency outside the workspace still moves the ELF: cargo hashes its absolute path into
     // `-C metadata`, which reaches symbol hashes and type ids, and no rustc flag undoes that.
     let target_remap = format!("--remap-path-prefix={}=/pico/target", target_dir.display());
-    let rust_flags: Vec<&str> = std::iter::once(target_remap.as_str())
+    let linker_script = write_linker_script(&target_dir)?;
+    let link_with_script = format!("link-arg=-T{}", linker_script.display());
+    let rust_flags: Vec<&str> = [target_remap.as_str(), "-C", link_with_script.as_str()]
+        .into_iter()
         .chain(
             args.rustflags
                 .iter()
@@ -134,13 +137,6 @@ pub(crate) fn encode_rust_flags(rustc_flags: &[&str]) -> String {
             // Replace atomic ops with nonatomic versions since the guest is single threaded.
             "-C",
             "passes=lower-atomic",
-            // Specify where to start loading the program in
-            // memory.  The clang linker understands the same
-            // command line arguments as the GNU linker does; see
-            // https://ftp.gnu.org/old-gnu/Manuals/ld-2.9.1/html_mono/ld.html#SEC3
-            // for details.
-            "-C",
-            &format!("link-arg=-Ttext=0x{:08X}", 0x0020_0800),
             // Apparently not having an entry point is only a linker warning(!), so
             // error out in this case.
             "-C",
@@ -155,6 +151,17 @@ pub(crate) fn encode_rust_flags(rustc_flags: &[&str]) -> String {
     ]
     .concat()
     .join("\x1f")
+}
+
+/// The guest linker script, `sdk/sdk/pico.ld`: the memory layout, the segments and the symbols
+/// the runtime reads (`_stack_top`, `_heap_start`, `_heap_end`, the constructor tables).
+pub(crate) const LINKER_SCRIPT: &str = include_str!("../../../sdk/pico.ld");
+
+/// Writes [`LINKER_SCRIPT`] into the target dir, where the guest link reads it.
+fn write_linker_script(target_dir: &Path) -> Result<PathBuf> {
+    let path = target_dir.join("pico.ld");
+    fs::write(&path, LINKER_SCRIPT).with_context(|| format!("writing {}", path.display()))?;
+    Ok(path)
 }
 
 /// Returns the given cargo Package from the metadata in the Cargo.toml manifest

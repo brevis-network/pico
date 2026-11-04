@@ -7,7 +7,8 @@ use crate::{
         chips::riscv_memory::event::{MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord},
         gadgets::{
             curves::{
-                edwards::WORDS_FIELD_ELEMENT, AffinePoint, EllipticCurve, COMPRESSED_POINT_BYTES,
+                edwards::WORDS_FIELD_ELEMENT, weierstrass::secp256k1::secp256k1_add_words,
+                AffinePoint, CurveType, EllipticCurve, COMPRESSED_POINT_BYTES,
                 NUM_BYTES_FIELD_ELEMENT,
             },
             utils::field_params::{FieldParameters, NumWords},
@@ -15,7 +16,7 @@ use crate::{
     },
     emulator::riscv::{
         event_types::{RvAddr, RvChunk, RvClk, RvValue},
-        syscalls::syscall_context::SyscallContext,
+        syscalls::{host::SyscallHost, precompiles::assert_dword_aligned_precompile},
     },
 };
 
@@ -218,16 +219,16 @@ impl From<&EdDecompressEvent> for EdDecompressEventFFI {
 /// The generic parameter `N` is the number of u32 words in the point representation. For example,
 /// for the secp256k1 curve, `N` would be 16 (64 bytes) because the x and y coordinates are 32 bytes
 /// each.
-pub fn create_ec_add_event<E: EllipticCurve>(
-    ctx: &mut SyscallContext,
+pub fn create_ec_add_event<E: EllipticCurve, H: SyscallHost>(
+    ctx: &mut H,
     arg1: RvAddr,
     arg2: RvAddr,
 ) -> EllipticCurveAddEvent {
-    let start_clk = ctx.clk;
+    let start_clk = ctx.clk();
     let p_ptr = arg1;
-    SyscallContext::assert_dword_aligned_precompile(p_ptr, "edwards add p_ptr");
+    assert_dword_aligned_precompile(p_ptr, "edwards add p_ptr");
     let q_ptr = arg2;
-    SyscallContext::assert_dword_aligned_precompile(q_ptr, "edwards add q_ptr");
+    assert_dword_aligned_precompile(q_ptr, "edwards add q_ptr");
 
     let num_words = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
     // WordsCurvePoint is now the u64 dword count directly.
@@ -237,7 +238,7 @@ pub fn create_ec_add_event<E: EllipticCurve>(
     let (q_memory_records, q) = ctx.mr_dword_slice(q_ptr, num_memory_words);
 
     // When we write to p, we want the clk to be incremented because p and q could be the same.
-    ctx.clk += 1;
+    ctx.advance_clk(1);
 
     let p_words = p
         .iter()
@@ -247,11 +248,24 @@ pub fn create_ec_add_event<E: EllipticCurve>(
         .iter()
         .flat_map(|&word| [word as u32, (word >> 32) as u32])
         .collect::<Vec<u32>>();
-    let p_affine = AffinePoint::<E>::from_words_le(&p_words);
-    let q_affine = AffinePoint::<E>::from_words_le(&q_words);
-    let result_affine = p_affine + q_affine;
-
-    let result_words = result_affine.to_words_le();
+    let result_words = match E::CURVE_TYPE {
+        // As the AOT emulator computes it; see `secp256k1_add_words`. The generic add refuses
+        // equal points, so this does too.
+        CurveType::Secp256k1 => {
+            assert!(
+                p_words != q_words,
+                "Error: Points are the same. Use sw_double instead."
+            );
+            secp256k1_add_words(
+                p_words.as_slice().try_into().unwrap(),
+                q_words.as_slice().try_into().unwrap(),
+            )
+            .to_vec()
+        }
+        _ => (AffinePoint::<E>::from_words_le(&p_words)
+            + AffinePoint::<E>::from_words_le(&q_words))
+        .to_words_le(),
+    };
     let result_dwords = result_words
         .as_chunks::<2>()
         .0

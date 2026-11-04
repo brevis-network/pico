@@ -31,10 +31,6 @@ fn main() {
         .ok()
         .and_then(|v| v.parse::<u32>().ok());
 
-    let max_superblock_instructions = env::var("PICO_AOT_MAX_SUPERBLOCK_INSNS")
-        .ok()
-        .and_then(|v| v.parse::<u32>().ok());
-
     let save_metrics = env::var("PICO_AOT_SAVE_METRICS")
         .map(|v| v == "1" || v.to_lowercase() == "true")
         .unwrap_or(false);
@@ -63,9 +59,6 @@ fn main() {
     }
     if let Some(max_block_instructions) = max_block_instructions {
         config = config.with_max_block_instructions(max_block_instructions);
-    }
-    if let Some(max_superblock_instructions) = max_superblock_instructions {
-        config = config.with_max_superblock_instructions(max_superblock_instructions);
     }
 
     pico_aot_codegen::AotCompiler::new(program_info, config)

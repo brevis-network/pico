@@ -81,7 +81,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPos
     ChipBehavior<F> for RecursionChipType<F>
 {
     type Record = RecursionRecord<F>;
-    // NOTE: unnecessary to support additional gpu record in recursion for now
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {

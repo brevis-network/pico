@@ -1,3 +1,5 @@
+#[cfg(feature = "cuda")]
+use crate::mle::spans::device;
 use crate::{
     chips::{
         chips::{
@@ -521,6 +523,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> GpuChipBehavior<
 
         // Generate trace
         let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+        let kernels = device::start(stream);
         unsafe {
             match E::CURVE_TYPE {
                 CurveType::Bls12381 => {
@@ -569,10 +572,11 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> GpuChipBehavior<
         // 6. Switch to main stream and return result
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
+        device::launched(kernels, stream);
+        device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
+        device::wait(main_stream).unwrap();
 
         info!("[weierstrass-decompress-chip] generate_main on GPU");
 

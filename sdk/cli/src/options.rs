@@ -39,6 +39,13 @@ pub struct ProverArgs {
     /// at $PICO_SOURCE
     #[clap(long)]
     pub aot: bool,
+
+    /// Emulate on one interpreter, on the calling thread, instead of through the snapshot
+    /// pipeline, which is the default. For a machine the pipeline's replay workers do not fit; the
+    /// records are the same. Cannot be combined with `--aot`, which runs on the pipeline's
+    /// snapshot thread
+    #[clap(long, conflicts_with = "aot")]
+    pub serial_emulation: bool,
 }
 
 impl ProverArgs {
@@ -63,6 +70,7 @@ impl ProverArgs {
                 "trusted_vk_root",
                 parse_root,
             )?,
+            serial_emulation: self.echo_serial_emulation(),
             #[cfg(feature = "aot")]
             aot: self.aot_program()?,
         };
@@ -70,7 +78,8 @@ impl ProverArgs {
         Ok(options)
     }
 
-    /// For emulation, which reads the chunk size and the stacked height and no other option.
+    /// For emulation, which reads the chunk size, the stacked height and the emulation path, and no
+    /// other option.
     pub fn resolve_for_execute(&self) -> Result<ProverOptions> {
         #[cfg(not(feature = "aot"))]
         self.refuse_aot()?;
@@ -81,11 +90,20 @@ impl ProverArgs {
             verify_keys: None,
             vk_map: None,
             trusted_vk_root: None,
+            serial_emulation: self.echo_serial_emulation(),
             #[cfg(feature = "aot")]
             aot: self.aot_program()?,
         };
         warn_prover_reads();
         Ok(options)
+    }
+
+    /// `--serial-emulation`, echoed as the setter it becomes when given.
+    fn echo_serial_emulation(&self) -> bool {
+        if self.serial_emulation {
+            eprintln!("emulation: --serial-emulation -> serial_emulation()");
+        }
+        self.serial_emulation
     }
 
     /// The program `--aot` names, which only a helper holds: outside one, [`run`](crate::run)
@@ -147,6 +165,7 @@ pub struct ProverOptions {
     verify_keys: Option<bool>,
     vk_map: Option<PathBuf>,
     trusted_vk_root: Option<[u32; 8]>,
+    serial_emulation: bool,
     #[cfg(feature = "aot")]
     aot: Option<&'static AotProgram>,
 }
@@ -174,6 +193,9 @@ impl ProverOptions {
         if let Some(root) = self.trusted_vk_root {
             builder = builder.trusted_vk_root(root);
         }
+        if self.serial_emulation {
+            builder = builder.serial_emulation();
+        }
         #[cfg(feature = "aot")]
         if let Some(program) = self.aot {
             builder = builder.aot(program);
@@ -192,7 +214,17 @@ pub fn build(builder: ProverBuilder) -> Result<Prover> {
         prover.concurrency(),
         prover.verify_keys()
     );
-    eprintln!("prover: {} emulation worker(s)", prover.emulation_workers());
+    match prover.emulation_workers() {
+        Some(workers) => eprintln!(
+            "prover: emulation snapshot pipeline, {} snapshot thread, {workers} replay worker(s)",
+            if prover.emulates_with_aot() {
+                "aot"
+            } else {
+                "interpreter"
+            }
+        ),
+        None => eprintln!("prover: emulation serial interpreter"),
+    }
     Ok(prover)
 }
 

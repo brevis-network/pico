@@ -7,29 +7,29 @@ use crate::{
     emulator::riscv::{
         event_types::RvValue,
         syscalls::{
-            precompiles::{PrecompileEvent, Uint256MulEvent},
-            syscall_context::SyscallContext,
-            Syscall, SyscallCode,
+            host::{Precompile, SyscallHost},
+            precompiles::{assert_dword_aligned_precompile, PrecompileEvent, Uint256MulEvent},
+            SyscallCode,
         },
     },
 };
 
-pub(crate) struct Uint256MulSyscall;
+pub struct Uint256MulSyscall;
 
-impl Syscall for Uint256MulSyscall {
-    fn emulate(
+impl Precompile for Uint256MulSyscall {
+    fn emulate<H: SyscallHost>(
         &self,
-        ctx: &mut SyscallContext,
+        ctx: &mut H,
         syscall_code: SyscallCode,
         arg1: RvValue,
         arg2: RvValue,
     ) -> Option<RvValue> {
-        let clk = ctx.clk;
+        let clk = ctx.clk();
 
         let x_ptr = arg1;
-        SyscallContext::assert_dword_aligned_precompile(x_ptr, "uint256 x_ptr");
+        assert_dword_aligned_precompile(x_ptr, "uint256 x_ptr");
         let y_ptr = arg2;
-        SyscallContext::assert_dword_aligned_precompile(y_ptr, "uint256 y_ptr");
+        assert_dword_aligned_precompile(y_ptr, "uint256 y_ptr");
 
         // First read the words for the x value. We can read a slice_unsafe here because we write
         // the computed result to x later.
@@ -88,7 +88,7 @@ impl Syscall for Uint256MulSyscall {
             .collect();
 
         // Increment clk so that the write is not at the same cycle as the read.
-        ctx.clk += 1;
+        ctx.advance_clk(1);
         // Write the result to x and keep track of the memory records.
         let x_memory_records = ctx.mw_dword_slice(x_ptr, &result_u64);
 
@@ -108,9 +108,7 @@ impl Syscall for Uint256MulSyscall {
             local_mem_access: ctx.postprocess(),
         });
 
-        let syscall_event = ctx
-            .rt
-            .syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
+        let syscall_event = ctx.syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
         ctx.record_mut()
             .add_precompile_event(syscall_code, syscall_event, event);
 

@@ -11,23 +11,27 @@
 //! reach, a deferred block out before the last chunk where the run pins none or the reverse, or
 //! final digests that do not show what the guest commits and defers.
 //!
-//! Each arm's output is reduced to those digests before the other runs: the BLS12-381 field guest
-//! emits gigabytes of events, and two of its outputs at once are more than a laptop has.
+//! Each arm hands its records over one at a time, and each is reduced to those digests as it comes
+//! and dropped: a whole run of the sha2 or BLS12-381 field guest's records is gigabytes, more than
+//! a CI runner has.
 
 use std::{num::NonZeroUsize, sync::Arc};
 
 use pico_vm::{
     compiler::riscv::{
         compiler::{Compiler, SourceType},
+        opcode::Opcode,
         program::Program,
     },
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
-        opts::{EmulatorOpts, SnapshotMainMode, SplitOpts},
+        opts::{EmulatorOpts, ReplayWorkers, SnapshotMainMode},
         record::RecordBehavior,
         riscv::{
             public_values::PublicValues,
+            record::EmulationRecord,
             record_digest::{field_digests, is_compared},
+            syscalls::SyscallCode,
         },
         stdin::EmulatorStdin,
     },
@@ -49,8 +53,23 @@ const POSEIDON2_ELF: &[u8] = include_bytes!("../../../perf/bench_data/rv64/posei
 pub const BLS12381_FP_ELF: &[u8] = include_bytes!("../../../perf/bench_data/rv64/bls12381-fp-elf");
 /// Claims one deferred proof per `(program id, output)` pair it reads, then commits both lists.
 const AGGREGATOR_ELF: &[u8] = include_bytes!("../../../perf/bench_data/rv64/aggregator-elf");
+/// Chains SHA-256 66 000 times from the bytes it reads.
+const SHA2_ELF: &[u8] = include_bytes!("../../../perf/bench_data/rv64/sha2-elf");
+/// SHA3-256 of the bytes it reads.
+const SHA3_ELF: &[u8] = include_bytes!("../../../perf/bench_data/rv64/sha3-elf");
+/// Keccak-256 of the bytes it reads.
+const TINY_KECCAK_ELF: &[u8] = include_bytes!("../../../perf/bench_data/rv64/tiny-keccak-elf");
+/// secp256k1 point adds and doubles, and one Keccak; reads nothing.
+const K256_ELF: &[u8] = include_bytes!("../../../perf/bench_data/rv64/k256-elf");
+/// BN254 base and quadratic field arithmetic; reads nothing.
+const BN254_FP_ELF: &[u8] = include_bytes!("../../../perf/bench_data/rv64/bn254-fp-elf");
+/// A BLS12-381 point decompress, add and doubles; reads nothing.
+const BLS12381_WS_ELF: &[u8] =
+    include_bytes!("../../../perf/bench_data/rv64/bls12381-elf-ws-add-double-decompress");
+/// A BN254 point add and doubles; reads nothing.
+const BN254_WS_ELF: &[u8] = include_bytes!("../../../perf/bench_data/rv64/bn254-elf-ws-add-double");
 
-/// One chunk holds every run below but the BLS12-381 field guest's.
+/// One chunk holds every run below but the BLS12-381 field, BN254 field and SHA-256 guests'.
 pub const WHOLE: u32 = 1 << 22;
 /// A size at which fib(10)'s eight COMMIT ecalls would straddle a chunk boundary if a chunk could
 /// be cut while a commit is in flight.
@@ -58,9 +77,16 @@ const COMMIT_SPLITTING_CHUNK: u32 = 9500;
 /// Many more chunks than workers, so the workers finish out of order and their reports have to
 /// be put back in order.
 const MANY_CHUNKS: u32 = 17;
+/// A size at which the event limit closes six of the Poseidon2 guest's chunks right after a
+/// `POSEIDON2_PERMUTE`, each only because the permute topped the chunk's split budget up by the
+/// words it reads and writes beyond the dwords covering them (`add_syscall_memory_events`, 8 + 8):
+/// without the top-up those cuts land later. Two of them, late in the run, leave the global-lookup
+/// count exactly at its threshold, so a top-up short by one event moves them.
+const POSEIDON2_BUDGET_CHUNK: u32 = 952;
 
 /// A guest both suites compare on. `name` is `perf/aot/record_parity.sh`'s argument, and the ELF
-/// is `perf/bench_data/rv64/<name>-elf`.
+/// is `perf/bench_data/rv64/<name>-elf` but for the two `-ws` guests, whose constants name theirs
+/// (and `record_parity.sh`'s `elf_of`).
 pub struct Guest {
     pub name: &'static str,
     pub elf: &'static [u8],
@@ -70,15 +96,25 @@ pub struct Guest {
 }
 
 /// One comparison: an input, and a chunk size small enough to reach `at_least_chunks` chunks.
-struct Run {
-    stdin: Vec<Vec<u8>>,
-    chunk_size: u32,
+pub struct Run {
+    pub stdin: Vec<Vec<u8>>,
+    pub chunk_size: u32,
     at_least_chunks: u32,
     /// A full deferred block comes out between two CPU chunks, not only after the last.
     early_block: bool,
+    /// The run is there to put a `POSEIDON2_PERMUTE` at a cut, and fails unless some CPU chunk
+    /// ends on one.
+    permute_at_cut: bool,
 }
 
-pub const GUESTS: [Guest; 5] = [
+impl Guest {
+    /// Every run both suites compare this guest on, in order.
+    pub fn runs(&self) -> Vec<Run> {
+        (self.runs)()
+    }
+}
+
+pub const GUESTS: [Guest; 12] = [
     Guest {
         name: "fib",
         elf: FIB_ELF,
@@ -109,7 +145,87 @@ pub const GUESTS: [Guest; 5] = [
         defers: false,
         runs: bls12381_fp_runs,
     },
+    Guest {
+        name: "sha2",
+        elf: SHA2_ELF,
+        defers: false,
+        runs: sha2_runs,
+    },
+    Guest {
+        name: "sha3",
+        elf: SHA3_ELF,
+        defers: false,
+        runs: sha3_runs,
+    },
+    Guest {
+        name: "tiny-keccak",
+        elf: TINY_KECCAK_ELF,
+        defers: false,
+        runs: tiny_keccak_runs,
+    },
+    Guest {
+        name: "k256",
+        elf: K256_ELF,
+        defers: false,
+        runs: k256_runs,
+    },
+    Guest {
+        name: "bn254-fp",
+        elf: BN254_FP_ELF,
+        defers: false,
+        runs: bn254_fp_runs,
+    },
+    Guest {
+        name: "bls12381-ws",
+        elf: BLS12381_WS_ELF,
+        defers: false,
+        runs: bls12381_ws_runs,
+    },
+    Guest {
+        name: "bn254-ws",
+        elf: BN254_WS_ELF,
+        defers: false,
+        runs: bn254_ws_runs,
+    },
 ];
+
+/// The guests a suite whose one test walks every guest runs: all of [`GUESTS`], narrowed to the
+/// comma-separated names `PARITY_GUESTS` lists and stripped of those `PARITY_SKIP_GUESTS` lists,
+/// either unset or empty meaning no narrowing. CI splits such a suite across jobs by guest. A name
+/// that is no guest panics, and so does a selection left empty: neither may pass as a run that
+/// compared nothing.
+// The suites with a test per guest select by test name and never call it.
+#[allow(dead_code)]
+pub fn selected_guests() -> Vec<&'static Guest> {
+    let listed = |var: &str| -> Vec<String> {
+        let value = std::env::var(var).unwrap_or_default();
+        let names: Vec<String> = value
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect();
+        for name in &names {
+            assert!(
+                GUESTS.iter().any(|guest| guest.name == name),
+                "{var} names {name}, which is none of {:?}",
+                GUESTS.map(|guest| guest.name)
+            );
+        }
+        names
+    };
+    let (only, skip) = (listed("PARITY_GUESTS"), listed("PARITY_SKIP_GUESTS"));
+    let selected: Vec<&Guest> = GUESTS
+        .iter()
+        .filter(|guest| only.is_empty() || only.iter().any(|name| name == guest.name))
+        .filter(|guest| !skip.iter().any(|name| name == guest.name))
+        .collect();
+    assert!(
+        !selected.is_empty(),
+        "PARITY_GUESTS and PARITY_SKIP_GUESTS leave no guest to run"
+    );
+    selected
+}
 
 fn run(stdin: Vec<Vec<u8>>, chunk_size: u32, at_least_chunks: u32) -> Run {
     Run {
@@ -117,6 +233,7 @@ fn run(stdin: Vec<Vec<u8>>, chunk_size: u32, at_least_chunks: u32) -> Run {
         chunk_size,
         at_least_chunks,
         early_block: false,
+        permute_at_cut: false,
     }
 }
 
@@ -140,6 +257,10 @@ fn poseidon2_runs() -> Vec<Run> {
     vec![
         run(vec![element(&1u32)], WHOLE, 1),
         run(vec![element(&1u32)], 1 << 10, MANY_CHUNKS),
+        Run {
+            permute_at_cut: true,
+            ..run(vec![element(&1u32)], POSEIDON2_BUDGET_CHUNK, MANY_CHUNKS)
+        },
     ]
 }
 
@@ -157,6 +278,55 @@ fn bls12381_fp_runs() -> Vec<Run> {
         early_block: true,
         ..run(Vec::new(), WHOLE, 2)
     }]
+}
+
+/// One run: at `WHOLE` its 66 000 rounds already cut into many more chunks than workers, with
+/// full deferred blocks out mid-run, and a second, smaller size would emulate all of them again
+/// for no shape this one lacks.
+fn sha2_runs() -> Vec<Run> {
+    vec![Run {
+        early_block: true,
+        ..run(sha_input(), WHOLE, MANY_CHUNKS)
+    }]
+}
+
+fn sha3_runs() -> Vec<Run> {
+    vec![
+        run(sha_input(), WHOLE, 1),
+        run(sha_input(), 512, MANY_CHUNKS),
+    ]
+}
+
+fn tiny_keccak_runs() -> Vec<Run> {
+    vec![
+        run(keccak_input(), WHOLE, 1),
+        run(keccak_input(), 512, MANY_CHUNKS),
+    ]
+}
+
+fn k256_runs() -> Vec<Run> {
+    vec![
+        run(Vec::new(), WHOLE, 1),
+        run(Vec::new(), 1 << 10, MANY_CHUNKS),
+    ]
+}
+
+fn bn254_fp_runs() -> Vec<Run> {
+    vec![
+        run(Vec::new(), WHOLE, 1),
+        run(Vec::new(), 1 << 17, MANY_CHUNKS),
+    ]
+}
+
+fn bls12381_ws_runs() -> Vec<Run> {
+    vec![
+        run(Vec::new(), WHOLE, 1),
+        run(Vec::new(), 1 << 10, MANY_CHUNKS),
+    ]
+}
+
+fn bn254_ws_runs() -> Vec<Run> {
+    vec![run(Vec::new(), WHOLE, 1), run(Vec::new(), 512, MANY_CHUNKS)]
 }
 
 pub fn program(elf: &[u8]) -> Arc<Program> {
@@ -177,17 +347,16 @@ fn element<T: Serialize>(value: &T) -> Vec<u8> {
     bincode::serialize(value).expect("serialize a stdin element")
 }
 
-/// Every field stated: `EmulatorOpts::default` reads `CHUNK_SIZE`, `CHUNK_BATCH_SIZE` and
-/// `SPLIT_THRESHOLD`.
+/// Every field stated: `EmulatorOpts::default` reads `CHUNK_SIZE` and `CHUNK_BATCH_SIZE`.
 pub fn opts(chunk_size: u32) -> EmulatorOpts {
     EmulatorOpts {
         chunk_size,
         chunk_batch_size: 1,
-        split_opts: SplitOpts::new(chunk_size as usize >> 2),
         max_cycles: Some(1 << 32),
         cycle_tracker: false,
         cost_estimator: false,
         snapshot_main: SnapshotMainMode::Interpreter,
+        replay_workers: ReplayWorkers::Interpreter,
     }
 }
 
@@ -216,6 +385,16 @@ fn ed25519_input() -> Vec<Vec<u8>> {
         element(&scalar),
         element(&second),
     ]
+}
+
+/// 32 bytes of 3, as `vm/examples/patch-testing/patches/{sha2,sha3}` feed their guests.
+fn sha_input() -> Vec<Vec<u8>> {
+    vec![element(&[3u8; 32])]
+}
+
+/// The string `vm/examples/common/parse_args.rs` writes for `--elf keccak` at its default `--n`.
+fn keccak_input() -> Vec<Vec<u8>> {
+    vec![element(&"x".repeat(10))]
 }
 
 /// Two claims over fib's real outputs. The program ids are made up: the ones
@@ -282,6 +461,7 @@ fn public_value_fields(pv: &PublicValues<u32, u32>) -> Vec<(&'static str, String
 /// `field_digests`.
 struct RecordDigest {
     is_cpu_chunk: bool,
+    ends_on_permute: bool,
     chunk_index: usize,
     public_values: PublicValues<u32, u32>,
     rows: Vec<(&'static str, usize, u64)>,
@@ -296,23 +476,47 @@ struct OutputDigest {
     reports: Vec<EmulationReport>,
 }
 
-fn reduce(output: EmulationOutput) -> OutputDigest {
+impl RecordDigest {
+    fn of(record: &EmulationRecord) -> Self {
+        Self {
+            is_cpu_chunk: record.is_cpu_chunk,
+            ends_on_permute: ends_on_permute(record),
+            chunk_index: record.chunk_index(),
+            public_values: record.public_values,
+            rows: field_digests(record),
+        }
+    }
+}
+
+/// `output` with `records`, the digests of the records its arm handed over, or of the records it
+/// returned when it handed none over.
+fn reduce(output: EmulationOutput, mut records: Vec<RecordDigest>) -> OutputDigest {
+    assert!(
+        records.is_empty() || output.records.is_empty(),
+        "an arm both handed records over and returned some"
+    );
+    records.extend(output.records.iter().map(RecordDigest::of));
     OutputDigest {
-        records: output
-            .records
-            .iter()
-            .map(|record| RecordDigest {
-                is_cpu_chunk: record.is_cpu_chunk,
-                chunk_index: record.chunk_index(),
-                public_values: record.public_values,
-                rows: field_digests(record),
-            })
-            .collect(),
+        records,
         chunks: output.chunks,
         committed_bytes: output.committed_bytes,
         cycles: output.cycles,
         reports: output.reports,
     }
+}
+
+/// Whether the record's last CPU step is a `POSEIDON2_PERMUTE` ecall: the syscall that ecall sent
+/// is the record's last, at the same clk.
+fn ends_on_permute(record: &EmulationRecord) -> bool {
+    let steps = record.cpu_steps();
+    steps.len().checked_sub(1).is_some_and(|index| {
+        let last = steps.get(index);
+        last.instruction.opcode == Opcode::ECALL
+            && record.syscalls().last().is_some_and(|event| {
+                event.clk == last.clk
+                    && event.syscall_id == SyscallCode::POSEIDON2_PERMUTE.syscall_id()
+            })
+    })
 }
 
 /// Whether a full deferred block comes out before the last CPU chunk's record.
@@ -471,11 +675,15 @@ fn compare(guest: &Guest, reference: &OutputDigest, candidate: &OutputDigest) ->
 /// One side of a comparison: the name messages give it, and how it emulates a run.
 pub struct Arm<'a> {
     pub name: &'static str,
+    /// Emulates a run, handing each record to the callback in emission order and returning an
+    /// output with none, or, for an arm that has to hold the run whole anyway, returning them all
+    /// and calling the callback never.
     #[allow(clippy::type_complexity)]
     pub emulate: &'a dyn Fn(
         Arc<Program>,
         &EmulatorStdin<Program, Vec<u8>>,
         EmulatorOpts,
+        &mut (dyn FnMut(EmulationRecord) + Send),
     ) -> Result<EmulationOutput, EmulateError>,
 }
 
@@ -492,16 +700,20 @@ pub fn check_guest(
 ) {
     let mut failures = Vec::new();
     let mut records_compared = 0;
-    let runs = (guest.runs)();
+    let runs = guest.runs();
     let run_count = runs.len();
     for run in runs {
         let label = format!("{} @ chunk {}", guest.name, run.chunk_size);
         let program = program(guest.elf);
         let stdin = stdin(&run.stdin);
         let opts = opts(run.chunk_size);
-        let outputs = arms
-            .each_ref()
-            .map(|arm| (arm.emulate)(program.clone(), &stdin, opts).map(reduce));
+        let outputs = arms.each_ref().map(|arm| {
+            let mut records = Vec::new();
+            let output = (arm.emulate)(program.clone(), &stdin, opts, &mut |record| {
+                records.push(RecordDigest::of(&record))
+            });
+            output.map(|output| reduce(output, records))
+        });
         let (reference, candidate) = match outputs {
             [Ok(reference), Ok(candidate)] => (reference, candidate),
             outputs => {
@@ -533,6 +745,18 @@ pub fn check_guest(
                 "a deferred block comes out before the last chunk: {early}, where this run pins {}",
                 run.early_block
             ));
+        }
+        if run.permute_at_cut
+            && !reference
+                .records
+                .iter()
+                .any(|r| r.is_cpu_chunk && r.ends_on_permute)
+        {
+            problems.push(
+                "no CPU chunk ends on a POSEIDON2_PERMUTE ecall, which this run is there to put at \
+                 a cut: the guest or the split thresholds moved it, so pick its chunk size again"
+                    .to_string(),
+            );
         }
         let suffix = audit(&mut problems);
         println!(

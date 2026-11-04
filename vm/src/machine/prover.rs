@@ -4,25 +4,18 @@
 //! code that used to surround it was removed with the FRI proving path (tag `legacy-fri-last`).
 
 use crate::{
-    chips::{
-        chips::{byte::columns::NUM_BYTE_MULT_COLS, events::AluEvent},
-        trace::TraceData,
-    },
+    chips::{chips::byte::columns::NUM_BYTE_MULT_COLS, trace::TraceData},
     configs::config::StarkGenericConfig,
-    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    cuda_adaptor::get_global_stream_pool,
     emulator::{record::RecordBehavior, riscv::record::EmulationRecord},
     instances::preparer::{
-        gpu_allocate_and_copy_add_sub_events, gpu_allocate_and_copy_global_events,
-        gpu_allocate_and_copy_lt_events, gpu_allocate_and_copy_mul_events,
-        gpu_allocate_and_copy_poseidon2_events, gpu_allocate_byte_trace, gpu_allocate_cpu_events,
-        gpu_finalize_byte_trace, PreallocatedGpuMemory, PreparedGpuEvents,
+        gpu_allocate_and_copy_global_events, gpu_allocate_and_copy_poseidon2_events,
+        gpu_allocate_byte_trace, gpu_finalize_byte_trace, PreallocatedGpuMemory, PreparedGpuEvents,
     },
     machine::chip::{ChipBehavior, GpuChipBehavior, MetaChip},
+    mle::spans::device,
 };
-use cudart::{
-    memory_pools::DevicePoolAllocation,
-    stream::{CudaStream, CudaStreamCreateFlags},
-};
+use cudart::stream::{CudaStream, CudaStreamCreateFlags};
 use dashmap::DashMap;
 use std::{cmp::Reverse, ops::RangeInclusive, time::Instant};
 use tracing::debug;
@@ -68,27 +61,24 @@ where
         prepared_gpu_events: &PreparedGpuEvents,
     ) -> Vec<(String, TraceData<'a, SC::Val>)> {
         // Processing order: Batch 1, Divrem, Add, Sub, Addw, Subw, Lt, Mul, Batch 2, Global, Poseidon2, Batch 3, Precompiles, Ecall, Host-tracegen precompiles, Byte.
+        // The RISC-V chips read the chunk's execution history, whose upload is enqueued before
+        // Batch 1 and not waited for: each chip that reads it makes its own streams wait on the
+        // copies it reads (`HistoryReader`), so the CPU chip's slice kernels start as their slices
+        // land, and every other reader once the whole fill has.
         // Batch 1: CPU, Program, and MemoryReadWrite chips.
-        // Byte trace, AddSub event, Lt Event memories are allocated and copied before running Batch 1.
-        // CPU event is allocated before running Batch 1, and is transferred to device at the same time as the CPU chip is run.
         const BATCH_1_CHIP_INDICES: RangeInclusive<usize> = 0..=2;
-        // CPU event memory is released after Batch 1.
 
-        // Mul event memory is allocated and copied before running Divrem chip.
+        // Divrem writes the ADD rows it derives, which the Add chip reads after its own.
         const DIVREM_CHIP_INDEX: usize = 3;
 
-        // Add and Sub share d_add_sub_events; Addw and Subw also use d_add_sub_events.
         const ADD_CHIP_INDEX: usize = 4;
         const SUB_CHIP_INDEX: usize = 5;
         const ADDW_CHIP_INDEX: usize = 6;
         const SUBW_CHIP_INDEX: usize = 7;
-        // AddSub event memory is released after running all Add/Sub/Addw/Subw chips.
 
         const LT_CHIP_INDEX: usize = 8;
-        // Lt event memory is released after running Lt chip.
 
         const MUL_CHIP_INDEX: usize = 9;
-        // Mul event memory is released after running Mul chip.
 
         // Batch 2: MemoryInitialize, MemoryFinalize, MemoryLocal, SyscallRiscv, and SyscallPrecompile chips.
         // Global event memory is allocated before running Batch 2.
@@ -123,29 +113,33 @@ where
         let durations = DashMap::new();
         let mut chip_names_traces = Vec::new();
         let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+        device::orchestrator_stream(stream);
 
-        // Allocate byte trace, CPU event, AddSub event, and Lt event memories.
-        let d_cpu_events = gpu_allocate_cpu_events(stream, device_id, prepared_gpu_events).unwrap();
-
-        let d_add_sub_events =
-            gpu_allocate_and_copy_add_sub_events(stream, device_id, record, prepared_gpu_events)
-                .unwrap();
-
-        let d_lt_events =
-            gpu_allocate_and_copy_lt_events(stream, device_id, record, prepared_gpu_events)
-                .unwrap();
-
+        device::set_chip(|| chips[BYTE_CHIP_INDEX].name());
+        let kernels = device::start(stream);
         let d_byte_trace = gpu_allocate_byte_trace(stream, device_id).unwrap();
+        device::launched_step(kernels, stream, "init");
+        device::clear_chip();
+        // The byte table's allocation and zeroing land before any chip writes it: the writers are
+        // the chips' kernels, on streams of their wrappers' own that wait on no event of this
+        // stream. Waited for before the history's upload is enqueued, so it holds none of its
+        // copies.
+        device::wait(stream).unwrap();
+
+        let d_history = record
+            .gpu_upload_history(stream, device_id, prepared_gpu_events)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "chunk {}: uploading the execution history: {e}",
+                    prepared_gpu_events.chunk_index
+                )
+            });
 
         let mut preallocated_gpu_memory = PreallocatedGpuMemory {
-            d_cpu_events,
-            d_add_sub_events,
-            d_lt_events,
             d_byte_trace,
+            d_history,
             ..Default::default()
         };
-
-        stream.synchronize().unwrap();
 
         // Per-chip byte_trace diagnostic (gated by BYTE_TRACE_DEBUG=1)
         use cudart::slice::CudaSlice;
@@ -207,6 +201,7 @@ where
                 return;
             }
             let begin = Instant::now();
+            device::set_chip(|| chip.name());
             // A listed chip with no events takes the kernel like any other: the launchers pad
             // a zero-event trace on the device (DivRem / ShiftLeft / ShiftRight write their
             // non-zero padding row, the rest are zero-filled) and the wrappers tolerate an
@@ -217,6 +212,7 @@ where
                 prepared_gpu_events,
                 mem,
             );
+            device::clear_chip();
             durations.insert(chip.name(), begin.elapsed());
             chip_names_traces.push((chip.name(), trace));
         };
@@ -226,134 +222,10 @@ where
             run_chip(chip_index, &mut preallocated_gpu_memory);
             snap_after!(chip_index);
         }
-        preallocated_gpu_memory.d_cpu_events = None;
-
-        // Allocate Mul event memories.
-        preallocated_gpu_memory.d_mul_events =
-            gpu_allocate_and_copy_mul_events(stream, device_id, record, prepared_gpu_events)
-                .unwrap();
-        stream.synchronize().unwrap();
-
         // Divrem chip
         run_chip(DIVREM_CHIP_INDEX, &mut preallocated_gpu_memory);
 
-        // 4-way GPU partition of d_add_sub_events into per-opcode buffers.
-        // At this point Batch 1 + DivRem have finished writing extra events,
-        // so d_add_sub_events is finalized.
-        {
-            let ec = &prepared_gpu_events.event_counter;
-            let sync_mem_pool = get_global_mem_pool(device_id);
-            let mem_pool = &sync_mem_pool.0;
-
-            let mut d_add = if ec.num_add_events > 0 {
-                Some(
-                    DevicePoolAllocation::<AluEvent>::alloc_from_pool_async(
-                        ec.num_add_events,
-                        mem_pool,
-                        stream,
-                    )
-                    .unwrap(),
-                )
-            } else {
-                None
-            };
-            let mut d_sub = if ec.num_sub_events > 0 {
-                Some(
-                    DevicePoolAllocation::<AluEvent>::alloc_from_pool_async(
-                        ec.num_sub_events,
-                        mem_pool,
-                        stream,
-                    )
-                    .unwrap(),
-                )
-            } else {
-                None
-            };
-            let mut d_addw = if ec.num_addw_events > 0 {
-                Some(
-                    DevicePoolAllocation::<AluEvent>::alloc_from_pool_async(
-                        ec.num_addw_events,
-                        mem_pool,
-                        stream,
-                    )
-                    .unwrap(),
-                )
-            } else {
-                None
-            };
-            let mut d_subw = if ec.num_subw_events > 0 {
-                Some(
-                    DevicePoolAllocation::<AluEvent>::alloc_from_pool_async(
-                        ec.num_subw_events,
-                        mem_pool,
-                        stream,
-                    )
-                    .unwrap(),
-                )
-            } else {
-                None
-            };
-
-            if ec.num_add_sub_events > 0 {
-                let d_all = preallocated_gpu_memory.d_add_sub_events.as_ref().unwrap();
-                if prepared_gpu_events.packed.is_some() {
-                    // MLE_PACKED_EVENTS: the buffer holds AddSubEventPacked entries.
-                    unsafe {
-                        let err = pico_gpu_api::cuda_alu_partition_events_packed(
-                            d_all.as_ptr() as *const _,
-                            ec.num_add_sub_events,
-                            d_add
-                                .as_mut()
-                                .map_or(std::ptr::null_mut(), |b| b.as_mut_ptr() as *mut _),
-                            d_sub
-                                .as_mut()
-                                .map_or(std::ptr::null_mut(), |b| b.as_mut_ptr() as *mut _),
-                            d_addw
-                                .as_mut()
-                                .map_or(std::ptr::null_mut(), |b| b.as_mut_ptr() as *mut _),
-                            d_subw
-                                .as_mut()
-                                .map_or(std::ptr::null_mut(), |b| b.as_mut_ptr() as *mut _),
-                            stream.into(),
-                            crate::instances::preparer::PACKED_EVENT_FORMAT_V1,
-                        );
-                        assert_eq!(
-                            err.code, 0,
-                            "cuda_alu_partition_events_packed failed (packed format mismatch?)"
-                        );
-                    }
-                } else {
-                    unsafe {
-                        pico_gpu_api::cuda_alu_partition_events(
-                            d_all.as_ptr() as *const _,
-                            ec.num_add_sub_events,
-                            d_add
-                                .as_mut()
-                                .map_or(std::ptr::null_mut(), |b| b.as_mut_ptr() as *mut _),
-                            d_sub
-                                .as_mut()
-                                .map_or(std::ptr::null_mut(), |b| b.as_mut_ptr() as *mut _),
-                            d_addw
-                                .as_mut()
-                                .map_or(std::ptr::null_mut(), |b| b.as_mut_ptr() as *mut _),
-                            d_subw
-                                .as_mut()
-                                .map_or(std::ptr::null_mut(), |b| b.as_mut_ptr() as *mut _),
-                            stream.into(),
-                        );
-                    }
-                }
-            }
-            stream.synchronize().unwrap();
-
-            preallocated_gpu_memory.d_partitioned_add_events = d_add;
-            preallocated_gpu_memory.d_partitioned_sub_events = d_sub;
-            preallocated_gpu_memory.d_partitioned_addw_events = d_addw;
-            preallocated_gpu_memory.d_partitioned_subw_events = d_subw;
-        }
-        preallocated_gpu_memory.d_add_sub_events = None;
-
-        // Add, Sub, Addw, Subw chips (each uses its pre-partitioned buffer)
+        // Add, Sub, Addw, Subw chips
         run_chip(ADD_CHIP_INDEX, &mut preallocated_gpu_memory);
         snap_after!(ADD_CHIP_INDEX);
         run_chip(SUB_CHIP_INDEX, &mut preallocated_gpu_memory);
@@ -361,25 +233,19 @@ where
         run_chip(ADDW_CHIP_INDEX, &mut preallocated_gpu_memory);
         snap_after!(ADDW_CHIP_INDEX);
         run_chip(SUBW_CHIP_INDEX, &mut preallocated_gpu_memory);
-        preallocated_gpu_memory.d_partitioned_add_events = None;
-        preallocated_gpu_memory.d_partitioned_sub_events = None;
-        preallocated_gpu_memory.d_partitioned_addw_events = None;
-        preallocated_gpu_memory.d_partitioned_subw_events = None;
 
         // Lt chip
         run_chip(LT_CHIP_INDEX, &mut preallocated_gpu_memory);
         snap_after!(LT_CHIP_INDEX);
-        preallocated_gpu_memory.d_lt_events = None;
 
         // Mul chip
         run_chip(MUL_CHIP_INDEX, &mut preallocated_gpu_memory);
         snap_after!(MUL_CHIP_INDEX);
-        preallocated_gpu_memory.d_mul_events = None;
 
         preallocated_gpu_memory.d_global_events =
             gpu_allocate_and_copy_global_events(stream, device_id, record, prepared_gpu_events)
                 .unwrap();
-        stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
 
         // Batch 2
         for chip_index in BATCH_2_CHIP_INDICES {
@@ -394,7 +260,7 @@ where
             prepared_gpu_events,
         )
         .unwrap();
-        stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
 
         // Global chip
         run_chip(GLOBAL_CHIP_INDEX, &mut preallocated_gpu_memory);
@@ -432,10 +298,14 @@ where
 
         // Byte chip
         let byte_timer = Instant::now();
+        device::set_chip(|| chips[BYTE_CHIP_INDEX].name());
+        let kernels = device::start(stream);
         gpu_finalize_byte_trace(stream, &mut preallocated_gpu_memory).unwrap();
+        device::launched_step(kernels, stream, "finalize");
+        device::clear_chip();
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
 
         // === BYTE_TRACE_DEBUG: compare GPU vs CPU byte_trace per-opcode multiplicities ===
         // Enable with: BYTE_TRACE_DEBUG=1
@@ -695,7 +565,17 @@ where
             .take()
             .unwrap()
             .swap_stream(main_stream);
-        stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
+        // Read once every reader's kernels have run: a set bit means some kernel read rows that
+        // are not this chunk's history, and its trace cannot be trusted.
+        if let Some(history) = preallocated_gpu_memory.d_history.take() {
+            history.finish().unwrap_or_else(|e| {
+                panic!(
+                    "chunk {}: the execution history's readers: {e}",
+                    prepared_gpu_events.chunk_index
+                )
+            });
+        }
         chip_names_traces.push((
             chips[BYTE_CHIP_INDEX].name(),
             TraceData::<SC::Val>::Gpu(NUM_BYTE_MULT_COLS, d_byte_trace),

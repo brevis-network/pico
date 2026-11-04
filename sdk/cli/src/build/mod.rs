@@ -9,6 +9,7 @@ use std::{
 
 #[allow(clippy::module_inception)]
 pub mod build;
+pub mod lib;
 
 /// Runs `command` to completion with each line of its output shown as it comes, prefixed.
 pub(crate) fn execute_command(mut command: Command) -> anyhow::Result<()> {

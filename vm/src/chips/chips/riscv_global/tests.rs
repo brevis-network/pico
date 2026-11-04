@@ -64,9 +64,10 @@ fn generate_gpu_test_record(event_count: usize) -> EmulationRecord {
         })
         .collect();
 
-    let mut record = EmulationRecord::default();
-    record.global_lookup_events = events;
-    record
+    EmulationRecord {
+        global_lookup_events: events,
+        ..Default::default()
+    }
 }
 
 #[cfg(feature = "cuda")]
@@ -299,6 +300,7 @@ fn bench_riscv_global_cpu_vs_gpu() {
                         .start_indices
                         .global_extra_poseidon2_start_index,
                     d_round_constants.as_ptr() as *const _,
+                    std::ptr::null_mut(),
                 );
             }
         }

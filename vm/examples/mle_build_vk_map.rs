@@ -414,8 +414,7 @@ fn main() {
         let mut passed = 0usize;
         for block in &blocks {
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                // One record at a time: a reth block's records do not all fit the GPU prover's
-                // pinned event pools at once.
+                // One record at a time: a reth block's records are never all held at once.
                 let mut i = 0usize;
                 riscv::emulate_each(
                     reth_program.clone(),

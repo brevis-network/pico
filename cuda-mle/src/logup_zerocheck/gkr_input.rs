@@ -143,6 +143,7 @@ pub fn log_gkr_input_evals<
     for meta in trace_interactions.iter().flatten() {
         let air_ctx = &ctx.per_trace[meta.trace_idx].1;
         let pk_air = &pk.per_air[meta.air_idx];
+        let air_time = crate::air_times::start();
 
         let preprocessed_matrix = pk_air
             .preprocessed_data
@@ -332,6 +333,7 @@ pub fn log_gkr_input_evals<
 
         if FK::use_cpu_gkr_input_eval() {
             // CPU fallback path: compute on CPU and upload to trace_output.
+            crate::air_times::note_path("host");
             let cpu_fracs = compute_cpu_fracs()?;
             let mut trace_output_buf = unsafe {
                 DevBuf::<Frac<FK::ValExt>>::from_raw_parts(
@@ -434,6 +436,13 @@ pub fn log_gkr_input_evals<
                 let grid = (height as u32).div_ceil(256);
                 unsafe { kernel.launch(grid, 256, 0, &mut params) }
             };
+            // The proof takes the interpreter's output under `G1_JIT_VERIFY` and after a failed
+            // launch, so those note it.
+            crate::air_times::note_path(if jit.is_some() {
+                "compiled"
+            } else {
+                "interpreter"
+            });
             match jit {
                 // Off unless explicitly on — it allocates a device-side reference buffer per
                 // launch; see the `Z1_JIT_VERIFY` note in `round0.rs`.
@@ -443,6 +452,7 @@ pub fn log_gkr_input_evals<
                     let scratch =
                         DevBuf::<Frac<FK::ValExt>>::with_capacity(height * num_interactions);
                     let jit_ok = launch_jit(scratch.as_mut_ptr(), kernel);
+                    crate::air_times::note_path("interpreter");
                     run_gpu(trace_output)?;
                     match jit_ok {
                         Ok(()) => {
@@ -494,6 +504,7 @@ pub fn log_gkr_input_evals<
                             meta.air_idx,
                             crate::runtime::context::get_device()
                         );
+                        crate::air_times::note_path("interpreter");
                         run_gpu(trace_output)?;
                     }
                 }
@@ -522,6 +533,7 @@ pub fn log_gkr_input_evals<
                 )?;
             }
         }
+        crate::air_times::stop(air_time, &pk_air.air_name, "gkr_input");
     }
 
     // alpha is deliberately left out of the leaves: `fractional_sumcheck_gpu` adds it while

@@ -242,6 +242,7 @@ fn prove_help_lists_only_what_can_run() {
         "--elf",
         "--input",
         "--log-stacked-height",
+        "--serial-emulation",
         "--phase",
         "--output",
         "--evm",
@@ -534,6 +535,102 @@ fn execute_is_not_stopped_by_an_option_only_proving_checks() {
     );
 }
 
+/// `--serial-emulation` runs the one-interpreter path and says so, and `execute` commits what the
+/// default path commits.
+#[test]
+fn execute_emulates_serially_on_request() {
+    let args = ["execute", "--elf", FIB_ELF, "--input", "u32:10"];
+    let (out, default_out, default_err) = run(&mut cargo_pico(&args));
+    assert!(out.status.success(), "{default_out}\n{default_err}");
+    let (out, serial_out, serial_err) = run(cargo_pico(&args).arg("--serial-emulation"));
+    assert!(out.status.success(), "{serial_out}\n{serial_err}");
+
+    assert!(
+        serial_err.contains("emulation: --serial-emulation -> serial_emulation()"),
+        "{serial_err}"
+    );
+    assert!(
+        !default_err.contains("emulation: --serial-emulation"),
+        "{default_err}"
+    );
+    assert_eq!(
+        serial_out, default_out,
+        "the two paths executed different runs"
+    );
+    assert!(
+        serial_out
+            .lines()
+            .any(|line| line.starts_with("committed (") && line.ends_with(&hex(&fib_commit(10)))),
+        "{serial_out}"
+    );
+}
+
+/// The serial path proves too, and the prover line names it. The file it wrote verifies here.
+#[test]
+fn a_serial_emulation_proof_verifies_and_the_prover_line_says_so() {
+    let dir = scratch_dir("prove_serial");
+    let output = dir.to_str().expect("utf-8 path");
+    let (out, stdout, stderr) = run(&mut cargo_pico(&[
+        "prove",
+        "--elf",
+        FIB_ELF,
+        "--input",
+        "u32:10",
+        "--phase",
+        "riscv",
+        "--log-stacked-height",
+        LOG_STACKED_HEIGHT,
+        "--serial-emulation",
+        "--output",
+        output,
+    ]));
+    assert!(out.status.success(), "{stdout}\n{stderr}");
+    assert!(
+        stderr.contains("prover: emulation serial interpreter"),
+        "the prover line does not name the serial path:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("snapshot pipeline"),
+        "the serial run started the pipeline:\n{stderr}"
+    );
+    let verifier = Prover::builder(&std::fs::read(FIB_ELF).expect("fib elf"))
+        .log_stacked_height(LOG_STACKED_HEIGHT.parse().unwrap())
+        .build()
+        .expect("verifier");
+    let artifact = ProofArtifact::read(dir.join("proof-riscv.pico")).expect("read the proof file");
+    let proof = verifier
+        .verify_artifact(artifact)
+        .expect("the proof verifies");
+    assert_eq!(proof.committed().as_bytes(), fib_commit(10));
+}
+
+/// `--aot` runs on the pipeline's snapshot thread, so the parser refuses the pair before a helper
+/// is built for it.
+#[test]
+fn serial_emulation_is_refused_beside_aot_before_anything_runs() {
+    for command in ["prove", "execute"] {
+        let (out, stdout, stderr) = run(&mut cargo_pico(&[
+            command,
+            "--elf",
+            FIB_ELF,
+            "--input",
+            "u32:10",
+            "--aot",
+            "--serial-emulation",
+        ]));
+        assert!(!out.status.success(), "{command} accepted the pair");
+        assert!(
+            stderr.contains("--serial-emulation") && stderr.contains("cannot be used with"),
+            "{command}:\n{stderr}"
+        );
+        assert!(stdout.is_empty(), "{command} printed a result:\n{stdout}");
+        assert!(
+            !stderr.contains("aot:") && !stderr.contains("helper"),
+            "{command} went on to build or run an AOT helper:\n{stderr}"
+        );
+    }
+}
+
 /// One `NAME=n` per precompile the run called, by name, and the counts are the prover's own.
 #[test]
 fn execute_prints_the_precompile_calls_the_prover_counts() {
@@ -606,6 +703,10 @@ fn what_prove_writes_is_answered_for_in_a_fresh_process() {
         .env("RUST_LOG", "info"));
         assert!(out.status.success(), "{phase}:\n{stdout}\n{stderr}");
         assert_logs_leave_stdout_to(PROVE_RESULTS, &stdout, &stderr);
+        assert!(
+            stderr.contains("prover: emulation snapshot pipeline, interpreter snapshot thread, "),
+            "{phase}: the prover line does not name the default emulation path:\n{stderr}"
+        );
         // Known from the options alone, so said before keygen: the `prover:` line follows keygen.
         let note = stderr.find("note: no other process can verify a combine proof");
         if phase == Phase::Combine {

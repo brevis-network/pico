@@ -95,12 +95,8 @@ fn main() {
     // emulator once the block needs more chunks than the pool has buffers. Blocks 239/240/246 do.
     // Measuring inside the callback drops each record immediately and returns its buffers.
     let final_pvs_state = Arc::new(RecordFinalPvsState::default());
-    let mut emulator = RiscvEmulator::new_single::<riscv::Kb>(
-        program,
-        final_pvs_state,
-        EmulatorOpts::default(),
-        None,
-    );
+    let mut emulator =
+        RiscvEmulator::new_single::<riscv::Kb>(program, final_pvs_state, EmulatorOpts::default());
     emulator.write_stdin(&stdin);
     loop {
         let report = emulator

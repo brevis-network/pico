@@ -1,3 +1,5 @@
+#[cfg(feature = "cuda")]
+use crate::mle::spans::device;
 use crate::{
     chips::{
         chips::{
@@ -486,6 +488,7 @@ impl<F: PrimeField32, E: EllipticCurve> GpuChipBehavior<F> for WeierstrassAddAss
 
         // Generate trace
         let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+        let kernels = device::start(stream);
         unsafe {
             match E::CURVE_TYPE {
                 CurveType::Secp256k1 => {
@@ -539,10 +542,11 @@ impl<F: PrimeField32, E: EllipticCurve> GpuChipBehavior<F> for WeierstrassAddAss
         // 6. Switch to main stream and return result
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
+        device::launched(kernels, stream);
+        device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
+        device::wait(main_stream).unwrap();
 
         info!(
             "[weierstrass-add-assign-chip] generate_main on GPU, curve={:?}",
@@ -995,10 +999,10 @@ mod tests {
         let mut precompile_events = PrecompileEvents::default();
         precompile_events.insert(syscode, events);
 
-        let mut record = EmulationRecord::default();
-        record.precompile_events = precompile_events.clone();
-
-        record
+        EmulationRecord {
+            precompile_events: precompile_events.clone(),
+            ..Default::default()
+        }
     }
 
     #[cfg(feature = "cuda")]

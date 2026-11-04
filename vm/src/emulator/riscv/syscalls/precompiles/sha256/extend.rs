@@ -3,31 +3,31 @@ use crate::{
     emulator::riscv::{
         event_types::RvValue,
         syscalls::{
-            precompiles::{PrecompileEvent, ShaExtendEvent},
-            syscall_context::SyscallContext,
-            Syscall, SyscallCode,
+            host::{Precompile, SyscallHost},
+            precompiles::{assert_dword_aligned_precompile, PrecompileEvent, ShaExtendEvent},
+            SyscallCode,
         },
     },
 };
 
-pub(crate) struct Sha256ExtendSyscall;
+pub struct Sha256ExtendSyscall;
 
-impl Syscall for Sha256ExtendSyscall {
+impl Precompile for Sha256ExtendSyscall {
     fn num_extra_cycles(&self) -> u32 {
         48
     }
 
-    fn emulate(
+    fn emulate<H: SyscallHost>(
         &self,
-        ctx: &mut SyscallContext,
+        ctx: &mut H,
         syscall_code: SyscallCode,
         arg1: RvValue,
         arg2: RvValue,
     ) -> Option<RvValue> {
-        let clk_init = ctx.clk;
+        let clk_init = ctx.clk();
         let w_ptr = arg1;
         assert!(arg2 == 0, "arg2 must be 0");
-        SyscallContext::assert_dword_aligned_precompile(w_ptr, "sha extend w_ptr");
+        assert_dword_aligned_precompile(w_ptr, "sha extend w_ptr");
 
         let w_ptr_init = w_ptr;
         let mut w_i_minus_15_reads = Vec::new();
@@ -75,7 +75,7 @@ impl Syscall for Sha256ExtendSyscall {
 
             // Write w[i].
             w_i_writes.push(ctx.mw_dword(w_ptr + i * 8, u64::from(w_i)));
-            ctx.clk += 1;
+            ctx.advance_clk(1);
         }
 
         // Push the SHA extend event.
@@ -93,9 +93,7 @@ impl Syscall for Sha256ExtendSyscall {
             local_mem_access: ctx.postprocess(),
         });
 
-        let syscall_event = ctx
-            .rt
-            .syscall_event(clk_init, syscall_code.syscall_id(), arg1, arg2);
+        let syscall_event = ctx.syscall_event(clk_init, syscall_code.syscall_id(), arg1, arg2);
         ctx.record_mut()
             .add_precompile_event(syscall_code, syscall_event, event);
 

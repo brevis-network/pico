@@ -1,7 +1,7 @@
 //! Main AOT Compiler
 //!
 //! This module provides the main AOT compilation pipeline that coordinates
-//! block analysis, code generation, and post-processing.
+//! block analysis and code generation.
 //!
 //! ## Chunk Crates + Dispatch Crate
 //!
@@ -15,15 +15,16 @@ use crate::{
     constants,
     instruction_translator::InstructionTranslator,
     metrics::{AotMetrics, ChunkMetrics, LookupStrategy, ProgramMetrics},
-    post_processor::AotPostProcessor,
-    types::{sign_extend_imm32_to_u64, Opcode, ProgramInfo},
+    types::{Opcode, ProgramInfo},
 };
 use quote::{format_ident, quote};
-use std::{
-    collections::{HashMap, HashSet},
-    fs,
-};
+use std::{collections::HashSet, fs};
 use syn::visit_mut::VisitMut;
+
+/// The runtime contract the generated code is written against, exported in the dispatch crate's
+/// `AOT` for `pico_aot_runtime::register` to check: [`pico_vm::AOT_CODEGEN_STAMP`], which the
+/// runtime accepts as `AotProgram::CODEGEN_STAMP`.
+pub const CODEGEN_STAMP: u32 = pico_vm::AOT_CODEGEN_STAMP;
 
 /// Information about a compiled basic block
 struct BlockInfo {
@@ -99,17 +100,6 @@ fn runtime_dep_line(runtime: &RuntimeSpec, in_tree_path: &str) -> String {
             format!("pico-aot-runtime = {{ {} }}\n", trimmed)
         }
     }
-}
-
-struct SuperblockInfo {
-    entry_pc: u64,
-    entry_name: proc_macro2::Ident,
-    block_pcs: Vec<u64>,
-    block_codes: Vec<proc_macro2::TokenStream>,
-    total_insn_count: u32,
-    total_mem_rw_events: usize,
-    total_non_register_global_lookup_base_max: usize,
-    total_reg_write_mask: u32,
 }
 
 struct LookupEntry {
@@ -222,14 +212,8 @@ impl AotCompiler {
             return Err("No blocks generated".to_string());
         }
 
-        let (pred_counts, succ_map) = self.analyze_block_cfg(&blocks);
-
         // Phase 3: Partition blocks into chunks
-        let chunks = if self.config.enable_cfg_aware_chunking {
-            self.partition_into_chunks_cfg_aware(blocks, &leaders)?
-        } else {
-            self.partition_into_chunks(blocks)
-        };
+        let chunks = self.partition_into_chunks(blocks, &leaders)?;
 
         // Phase 4: Clean and create output directories
         let output_dir = &self.config.output_path;
@@ -258,7 +242,7 @@ impl AotCompiler {
             } else {
                 None
             };
-            self.write_chunk_crate(chunk, &chunks_dir, &pred_counts, &succ_map, runtime)?;
+            self.write_chunk_crate(chunk, &chunks_dir, runtime)?;
             if let Some(metric) = chunk_metric {
                 chunk_metrics_vec.push(metric);
             }
@@ -316,7 +300,7 @@ impl AotCompiler {
 
     /// Generate all basic blocks from the program
     fn generate_blocks(&self, leaders: &HashSet<u64>) -> Result<Vec<BlockInfo>, String> {
-        let translator = InstructionTranslator::new(true);
+        let translator = InstructionTranslator::new();
         let mut blocks = Vec::new();
 
         let mut current_block_name = format_ident!("block_0x{:08x}", self.program.pc_start);
@@ -492,54 +476,8 @@ impl AotCompiler {
         Ok(blocks)
     }
 
-    /// Partition blocks into chunks for parallel compilation (simple sequential)
-    fn partition_into_chunks(&self, blocks: Vec<BlockInfo>) -> Vec<ChunkInfo> {
-        let blocks_per_chunk = self.compute_blocks_per_chunk(blocks.len());
-        let max_gap = self.config.max_chunk_pc_gap;
-        let mut chunks = Vec::new();
-        let mut current_blocks: Vec<BlockInfo> = Vec::new();
-        let mut prev_pc: Option<u64> = None;
-        let mut chunk_idx = 0usize;
-
-        for block in blocks.into_iter() {
-            let should_split_for_gap = prev_pc
-                .map(|pc| block.pc > pc && block.pc - pc > u64::from(max_gap))
-                .unwrap_or(false);
-            let should_split_for_size = current_blocks.len() >= blocks_per_chunk;
-
-            if should_split_for_gap || should_split_for_size {
-                let pc_min = current_blocks.iter().map(|b| b.pc).min().unwrap();
-                let pc_max = current_blocks.iter().map(|b| b.pc).max().unwrap();
-                chunks.push(ChunkInfo {
-                    chunk_idx,
-                    blocks: current_blocks,
-                    pc_min,
-                    pc_max,
-                });
-                chunk_idx += 1;
-                current_blocks = Vec::new();
-            }
-
-            prev_pc = Some(block.pc);
-            current_blocks.push(block);
-        }
-
-        if !current_blocks.is_empty() {
-            let pc_min = current_blocks.iter().map(|b| b.pc).min().unwrap();
-            let pc_max = current_blocks.iter().map(|b| b.pc).max().unwrap();
-            chunks.push(ChunkInfo {
-                chunk_idx,
-                blocks: current_blocks,
-                pc_min,
-                pc_max,
-            });
-        }
-
-        chunks
-    }
-
     /// Partition blocks into chunks using CFG-aware segmentation
-    fn partition_into_chunks_cfg_aware(
+    fn partition_into_chunks(
         &self,
         blocks: Vec<BlockInfo>,
         leaders: &HashSet<u64>,
@@ -549,7 +487,6 @@ impl AotCompiler {
         }
 
         let blocks_per_chunk = self.compute_blocks_per_chunk(blocks.len());
-        let max_gap = self.config.max_chunk_pc_gap;
         let max_chunks = self.config.max_chunk_count.max(1);
 
         // Extract block PCs for CFG analysis
@@ -558,76 +495,17 @@ impl AotCompiler {
         // Perform CFG analysis
         let cfg = CfgAnalysis::analyze(&self.program, &block_pcs, leaders);
 
-        // Find forced splits from PC gaps
-        let forced_splits = self.find_forced_splits(&blocks, max_gap);
-
-        // Segment between forced splits using greedy algorithm
-        let mut chunks = Vec::new();
-        let mut start = 0;
-        let mut chunk_idx = 0usize;
-
-        for &split_end in &forced_splits {
-            if start > split_end {
-                continue;
-            }
-
-            let segment_blocks = &blocks[start..=split_end];
-            let segment_chunks = self.greedy_segment(
-                segment_blocks,
-                &cfg,
-                start,
-                blocks_per_chunk,
-                max_chunks.saturating_sub(chunks.len()).max(1),
-                &mut chunk_idx,
-            )?;
-            chunks.extend(segment_chunks);
-            start = split_end + 1;
-        }
-
-        // Handle remaining blocks after last forced split
-        if start < blocks.len() {
-            let segment_blocks = &blocks[start..];
-            let segment_chunks = self.greedy_segment(
-                segment_blocks,
-                &cfg,
-                start,
-                blocks_per_chunk,
-                max_chunks.saturating_sub(chunks.len()).max(1),
-                &mut chunk_idx,
-            )?;
-            chunks.extend(segment_chunks);
-        }
-
-        Ok(chunks)
+        self.greedy_segment(&blocks, &cfg, blocks_per_chunk, max_chunks)
     }
 
-    /// Find forced split points based on PC gaps
-    fn find_forced_splits(&self, blocks: &[BlockInfo], max_gap: u32) -> Vec<usize> {
-        let mut splits = Vec::new();
-        let mut prev_pc: Option<u64> = None;
-
-        for (idx, block) in blocks.iter().enumerate() {
-            if let Some(pc) = prev_pc {
-                if block.pc > pc && block.pc - pc > u64::from(max_gap) {
-                    // Split before this block (boundary is after previous block)
-                    splits.push(idx.saturating_sub(1));
-                }
-            }
-            prev_pc = Some(block.pc);
-        }
-
-        splits
-    }
-
-    /// Greedy segmentation within a segment (between forced splits)
+    /// Greedy segmentation: each chunk ends at the boundary in its size window with the lowest
+    /// CFG cut penalty
     fn greedy_segment(
         &self,
         segment_blocks: &[BlockInfo],
         cfg: &CfgAnalysis,
-        segment_start_idx: usize,
         desired_blocks_per_chunk: usize,
         max_chunks_for_segment: usize,
-        chunk_idx: &mut usize,
     ) -> Result<Vec<ChunkInfo>, String> {
         if segment_blocks.is_empty() {
             return Ok(Vec::new());
@@ -663,29 +541,25 @@ impl AotCompiler {
                 let pc_min = chunk_blocks.iter().map(|b| b.pc).min().unwrap();
                 let pc_max = chunk_blocks.iter().map(|b| b.pc).max().unwrap();
                 chunks.push(ChunkInfo {
-                    chunk_idx: *chunk_idx,
+                    chunk_idx: chunks.len(),
                     blocks: chunk_blocks,
                     pc_min,
                     pc_max,
                 });
-                *chunk_idx += 1;
                 break;
             }
 
             // Find boundary with minimum cut penalty in window.
-            // NOTE: `boundary` is an absolute index into `segment_blocks`, so the global boundary
-            // index is `segment_start_idx + boundary`.
             let mut best_boundary = window_start;
-            let mut best_penalty = if segment_start_idx + window_start < cfg.num_boundaries() {
-                cfg.cut_penalty(segment_start_idx + window_start)
+            let mut best_penalty = if window_start < cfg.num_boundaries() {
+                cfg.cut_penalty(window_start)
             } else {
                 u32::MAX
             };
 
             for boundary in window_start..window_end {
-                let boundary_idx = segment_start_idx + boundary;
-                if boundary_idx < cfg.num_boundaries() {
-                    let penalty = cfg.cut_penalty(boundary_idx);
+                if boundary < cfg.num_boundaries() {
+                    let penalty = cfg.cut_penalty(boundary);
                     if penalty < best_penalty {
                         best_penalty = penalty;
                         best_boundary = boundary;
@@ -699,225 +573,15 @@ impl AotCompiler {
             let pc_min = chunk_blocks.iter().map(|b| b.pc).min().unwrap();
             let pc_max = chunk_blocks.iter().map(|b| b.pc).max().unwrap();
             chunks.push(ChunkInfo {
-                chunk_idx: *chunk_idx,
+                chunk_idx: chunks.len(),
                 blocks: chunk_blocks,
                 pc_min,
                 pc_max,
             });
-            *chunk_idx += 1;
             start = end;
         }
 
         Ok(chunks)
-    }
-
-    fn analyze_block_cfg(
-        &self,
-        blocks: &[BlockInfo],
-    ) -> (HashMap<u64, usize>, HashMap<u64, Vec<u64>>) {
-        let mut pred_counts: HashMap<u64, usize> = HashMap::new();
-        let mut succ_map: HashMap<u64, Vec<u64>> = HashMap::new();
-
-        let pc_to_idx: HashMap<u64, usize> = blocks
-            .iter()
-            .enumerate()
-            .map(|(idx, block)| (block.pc, idx))
-            .collect();
-
-        for block in blocks {
-            if block.insn_count == 0 {
-                succ_map.insert(block.pc, Vec::new());
-                continue;
-            }
-
-            let last_pc = block.pc.wrapping_add(u64::from(
-                block.insn_count.saturating_sub(1).saturating_mul(4),
-            ));
-            let inst_idx =
-                usize::try_from(last_pc.saturating_sub(self.program.pc_base) >> 2).unwrap();
-            if inst_idx >= self.program.instructions.len() {
-                succ_map.insert(block.pc, Vec::new());
-                continue;
-            }
-
-            let inst = &self.program.instructions[inst_idx];
-            let mut succs = Vec::new();
-            match inst.opcode {
-                Opcode::JAL => {
-                    let (_, imm) = inst.j_type();
-                    let target = last_pc.wrapping_add(sign_extend_imm32_to_u64(imm));
-                    if pc_to_idx.contains_key(&target) {
-                        succs.push(target);
-                    }
-                }
-                Opcode::BEQ
-                | Opcode::BNE
-                | Opcode::BLT
-                | Opcode::BGE
-                | Opcode::BLTU
-                | Opcode::BGEU => {
-                    let (_, _, imm) = inst.b_type();
-                    let target = last_pc.wrapping_add(sign_extend_imm32_to_u64(imm));
-                    let fallthrough = last_pc.wrapping_add(4);
-                    if pc_to_idx.contains_key(&target) {
-                        succs.push(target);
-                    }
-                    if pc_to_idx.contains_key(&fallthrough) {
-                        succs.push(fallthrough);
-                    }
-                }
-                Opcode::JALR | Opcode::ECALL | Opcode::EBREAK | Opcode::UNIMP => {}
-                _ => {
-                    let next_pc = last_pc.wrapping_add(4);
-                    if pc_to_idx.contains_key(&next_pc) {
-                        succs.push(next_pc);
-                    }
-                }
-            }
-
-            for succ in &succs {
-                *pred_counts.entry(*succ).or_default() += 1;
-            }
-            succ_map.insert(block.pc, succs);
-        }
-
-        (pred_counts, succ_map)
-    }
-
-    fn build_chunk_superblocks(
-        &self,
-        chunk: &ChunkInfo,
-        pred_counts: &HashMap<u64, usize>,
-        succ_map: &HashMap<u64, Vec<u64>>,
-    ) -> Vec<SuperblockInfo> {
-        let mut superblocks = Vec::new();
-        let mut visited = HashSet::new();
-        let mut block_lookup = HashMap::new();
-        let chunk_pc_set: HashSet<u64> = chunk.blocks.iter().map(|b| b.pc).collect();
-
-        for block in &chunk.blocks {
-            block_lookup.insert(block.pc, block);
-        }
-
-        for block in &chunk.blocks {
-            let pc = block.pc;
-            if visited.contains(&pc) {
-                continue;
-            }
-
-            // Don't use is_terminal flag - it's too conservative (marks all branches as terminal)
-            // Instead, check if block has exactly one successor in the CFG
-            let succs = succ_map.get(&pc);
-            let succ_count = succs.map(|s| s.len()).unwrap_or(0);
-
-            if succ_count == 0 {
-                continue;
-            }
-
-            if succ_count != 1 {
-                continue;
-            }
-
-            let pred_count = *pred_counts.get(&pc).unwrap_or(&0);
-            if pred_count > 1 {
-                continue;
-            }
-
-            let next_pc = succs.and_then(|s| s.first()).copied().unwrap_or(0);
-            if !chunk_pc_set.contains(&next_pc) {
-                continue;
-            }
-
-            let mut pcs = vec![pc];
-            let mut codes = vec![block.code.clone()];
-            let mut total_insns = block.insn_count;
-            let mut total_mem_rw_events = block.mem_rw_events;
-            let mut total_non_register_global_lookup_base_max =
-                block.non_register_global_lookup_base_max;
-            let mut total_reg_write_mask = block.reg_write_mask;
-            visited.insert(pc);
-
-            let mut current_pc = pc;
-            let max_superblock_insns = self.config.max_superblock_instructions.max(1);
-            loop {
-                // Check if current block has exactly one successor
-                let succs = succ_map.get(&current_pc);
-                let succ_count = succs.map(|s| s.len()).unwrap_or(0);
-                if succ_count != 1 {
-                    break;
-                }
-
-                let next_pc = succs.and_then(|s| s.first()).copied().unwrap_or(0);
-                if !chunk_pc_set.contains(&next_pc) {
-                    break;
-                }
-
-                // CRITICAL: Only merge fallthrough blocks (sequential addresses)
-                // Don't merge jump targets (JAL, etc.) even if they have 1 successor
-                let current_block = match block_lookup.get(&current_pc) {
-                    Some(b) => *b,
-                    None => break,
-                };
-                let expected_fallthrough =
-                    current_pc.wrapping_add(u64::from(current_block.insn_count * 4));
-                if next_pc != expected_fallthrough {
-                    // Next block is a jump target, not a fallthrough - stop merging
-                    break;
-                }
-
-                let next_pred_count = *pred_counts.get(&next_pc).unwrap_or(&0);
-                if next_pred_count != 1 {
-                    break;
-                }
-
-                let next_block = match block_lookup.get(&next_pc) {
-                    Some(b) => *b,
-                    None => break,
-                };
-
-                pcs.push(next_pc);
-                codes.push(next_block.code.clone());
-                total_insns += next_block.insn_count;
-                total_mem_rw_events += next_block.mem_rw_events;
-                total_non_register_global_lookup_base_max +=
-                    next_block.non_register_global_lookup_base_max;
-                total_reg_write_mask |= next_block.reg_write_mask;
-                visited.insert(next_pc);
-                current_pc = next_pc;
-
-                // Stop if superblock gets too large (for compilation time)
-                if total_insns >= max_superblock_insns {
-                    break;
-                }
-            }
-
-            if pcs.len() > 1 {
-                let entry_name = format_ident!("superblock_0x{:08x}", pc);
-                superblocks.push(SuperblockInfo {
-                    entry_pc: pc,
-                    entry_name,
-                    block_pcs: pcs,
-                    block_codes: codes,
-                    total_insn_count: total_insns,
-                    total_mem_rw_events,
-                    total_non_register_global_lookup_base_max,
-                    total_reg_write_mask,
-                });
-            }
-        }
-
-        if !superblocks.is_empty() {
-            eprintln!(
-                "Chunk {}: Created {} superblocks (merged {} blocks)",
-                chunk.chunk_idx,
-                superblocks.len(),
-                superblocks
-                    .iter()
-                    .map(|sb| sb.block_pcs.len())
-                    .sum::<usize>()
-            );
-        }
-        superblocks
     }
 
     /// Write a chunk crate with block functions and per-chunk lookup
@@ -925,8 +589,6 @@ impl AotCompiler {
         &self,
         chunk: &ChunkInfo,
         chunks_dir: &std::path::Path,
-        pred_counts: &HashMap<u64, usize>,
-        succ_map: &HashMap<u64, Vec<u64>>,
         runtime: &RuntimeSpec,
     ) -> Result<(), String> {
         let crate_dir = chunks_dir.join(format!("chunk_{:03}", chunk.chunk_idx));
@@ -951,25 +613,12 @@ impl AotCompiler {
 
         let pc_min = chunk.pc_min;
         let pc_max = chunk.pc_max;
-        let superblocks = self.build_chunk_superblocks(chunk, pred_counts, succ_map);
-
-        let mut pc_to_export: HashMap<u64, proc_macro2::Ident> = HashMap::new();
-        for block in &chunk.blocks {
-            pc_to_export.insert(block.pc, block.name.clone());
-        }
-        for sb in &superblocks {
-            pc_to_export.insert(sb.entry_pc, sb.entry_name.clone());
-        }
-
         let lookup_entries: Vec<LookupEntry> = chunk
             .blocks
             .iter()
             .map(|block| LookupEntry {
                 pc: block.pc,
-                name: pc_to_export
-                    .get(&block.pc)
-                    .cloned()
-                    .unwrap_or_else(|| block.name.clone()),
+                name: block.name.clone(),
             })
             .collect();
 
@@ -1008,20 +657,19 @@ impl AotCompiler {
                         ) {
                             return emu.interpret_from_current_pc();
                         }
-                        // Fast path: unconstrained mode is rare, fall back to interpreter
-                        // This allows using _constrained variants in generated code
+                        // The `_no_count` helpers assume constrained mode; unconstrained mode is
+                        // rare, so it runs in the interpreter.
                         if emu.is_unconstrained_mode() {
                             return emu.interpret_from_current_pc();
                         }
+                        // Read once for the block and handed to every helper: see the
+                        // instruction translator's `# Events`.
+                        #[allow(unused_variables)]
+                        let emitting = emu.is_emitting();
                         #code
                     }
                 }
             })
-            .collect();
-
-        let superblock_functions: Vec<_> = superblocks
-            .iter()
-            .map(|sb| self.generate_superblock(sb))
             .collect();
 
         let chunk_code = quote! {
@@ -1038,43 +686,15 @@ impl AotCompiler {
             }
 
             #(#block_functions)*
-            #(#superblock_functions)*
         };
 
-        // Parse and optionally post-process
+        // Parse, then turn a direct jump to a block of another chunk into a dynamic one.
         let mut syntax_tree = syn::parse2(chunk_code)
             .map_err(|e| format!("Parse error in chunk {}: {}", chunk.chunk_idx, e))?;
 
-        let mut allowed_blocks: HashSet<String> =
-            chunk.blocks.iter().map(|b| b.name.to_string()).collect();
-        for sb in &superblocks {
-            allowed_blocks.insert(sb.entry_name.to_string());
-        }
-
-        let mut superblock_map = HashMap::new();
-        let block_pc_to_name: HashMap<u64, String> = chunk
-            .blocks
-            .iter()
-            .map(|b| (b.pc, b.name.to_string()))
-            .collect();
-        for sb in &superblocks {
-            if let Some(first_pc) = sb.block_pcs.first() {
-                if let Some(block_name) = block_pc_to_name.get(first_pc) {
-                    superblock_map.insert(block_name.clone(), sb.entry_name.clone());
-                }
-            }
-        }
-
-        let mut rewriter = CrossChunkDirectRewriter {
-            allowed_blocks,
-            superblock_map,
-        };
+        let allowed_blocks = chunk.blocks.iter().map(|b| b.name.to_string()).collect();
+        let mut rewriter = CrossChunkDirectRewriter { allowed_blocks };
         rewriter.visit_file_mut(&mut syntax_tree);
-
-        if self.config.enable_optimizations {
-            let mut processor = AotPostProcessor::new();
-            processor.process(&mut syntax_tree);
-        }
 
         let formatted = prettyplease::unparse(&syntax_tree);
         fs::write(&chunk_file, &formatted)
@@ -1253,6 +873,7 @@ impl AotCompiler {
             " This crate's program: the code generated from the ELF with SHA-256 `{elf_sha256_hex}`."
         );
         let elf_sha256 = elf_sha256.iter();
+        let codegen_stamp = CODEGEN_STAMP;
 
         let dispatch_code = quote! {
             // AUTO-GENERATED by AOT compiler - Dispatch crate
@@ -1262,7 +883,8 @@ impl AotCompiler {
             use pico_aot_runtime::{set_lookup_block_fn, AotProgram, BlockFn};
 
             #[doc = #aot_doc]
-            pub static AOT: AotProgram = AotProgram::new([#(#elf_sha256),*], run_aot);
+            pub static AOT: AotProgram =
+                AotProgram::stamped([#(#elf_sha256),*], #codegen_stamp, run_aot);
 
             pub fn run_aot(emu: &mut AotEmulatorCore) -> Result<(), String> {
                 set_lookup_block_fn(lookup_block);
@@ -1482,105 +1104,11 @@ impl AotCompiler {
         Ok((lookup_body, inline_attr, LookupStrategy::RunTable))
     }
 
-    fn generate_superblock(&self, sb: &SuperblockInfo) -> proc_macro2::TokenStream {
-        if sb.block_codes.len() < 2 {
-            return quote! {};
-        }
-
-        let name = &sb.entry_name;
-        let total_insn_count = sb.total_insn_count;
-        let total_mem_rw_events = sb.total_mem_rw_events;
-        let total_non_register_global_lookup_base_max =
-            sb.total_non_register_global_lookup_base_max;
-        let total_reg_write_mask = sb.total_reg_write_mask;
-        let inline_attr = self.get_inline_attr(total_insn_count);
-
-        // Merge block codes: strip returns from intermediate blocks, keep last block's return
-        let mut merged_code = quote! {};
-        for (idx, code) in sb.block_codes.iter().enumerate() {
-            let is_last = idx == sb.block_codes.len() - 1;
-            if is_last {
-                // Last block: keep everything including return
-                merged_code.extend(quote! {
-                    #code
-                });
-            } else {
-                // Intermediate blocks: strip all terminal code (pc/clock/boundary/yield/return)
-                if let Ok(block_code) = syn::parse2::<syn::Block>(quote! { { #code } }) {
-                    // Find where terminal code starts (first pc assignment)
-                    let mut terminal_start = None;
-                    for (i, stmt) in block_code.stmts.iter().enumerate() {
-                        if Self::is_pc_assignment(stmt) {
-                            terminal_start = Some(i);
-                            break;
-                        }
-                    }
-
-                    // Include only non-terminal statements
-                    if let Some(terminal_idx) = terminal_start {
-                        for stmt in &block_code.stmts[..terminal_idx] {
-                            merged_code.extend(quote! { #stmt });
-                        }
-                    } else {
-                        // No terminal code found, include everything (shouldn't happen)
-                        for stmt in &block_code.stmts {
-                            merged_code.extend(quote! { #stmt });
-                        }
-                    }
-                } else {
-                    // Fallback: just include the code (shouldn't happen)
-                    merged_code.extend(quote! { #code });
-                }
-            }
-        }
-
-        quote! {
-            #inline_attr
-            pub fn #name(emu: &mut AotEmulatorCore) -> Result<crate::NextStep, String> {
-                const BLOCK_INSNS: u32 = #total_insn_count;
-                const BLOCK_MEM_RW_EVENTS: usize = #total_mem_rw_events;
-                const BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX: usize =
-                    #total_non_register_global_lookup_base_max;
-                const BLOCK_REG_WRITE_MASK: u32 = #total_reg_write_mask;
-                if !emu.can_fit_block(
-                    BLOCK_INSNS,
-                    BLOCK_MEM_RW_EVENTS,
-                    BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX,
-                    BLOCK_REG_WRITE_MASK,
-                ) {
-                    return emu.interpret_from_current_pc();
-                }
-                // Fast path: unconstrained mode is rare, fall back to interpreter
-                // This allows using _constrained variants in generated code
-                if emu.is_unconstrained_mode() {
-                    return emu.interpret_from_current_pc();
-                }
-                #merged_code
-            }
-        }
-    }
-
-    /// Check if a statement is a PC assignment (marks start of terminal code)
-    fn is_pc_assignment(stmt: &syn::Stmt) -> bool {
-        match stmt {
-            syn::Stmt::Expr(syn::Expr::Assign(assign), _) => {
-                // Check if left side is emu.pc
-                if let syn::Expr::Field(field) = &*assign.left {
-                    if let syn::Member::Named(ident) = &field.member {
-                        return ident == "pc";
-                    }
-                }
-                false
-            }
-            _ => false,
-        }
-    }
-
     /// Get inline attribute based on block instruction count
     fn get_inline_attr(&self, insn_count: u32) -> proc_macro2::TokenStream {
-        if insn_count <= self.config.small_block_threshold {
+        if insn_count <= constants::DEFAULT_SMALL_BLOCK_THRESHOLD {
             quote! { #[inline(always)] }
-        } else if insn_count <= self.config.medium_block_threshold {
+        } else if insn_count <= constants::DEFAULT_MEDIUM_BLOCK_THRESHOLD {
             quote! { #[inline] }
         } else {
             quote! { #[inline(never)] }
@@ -1800,26 +1328,19 @@ impl Clone for BlockInfo {
 
 struct CrossChunkDirectRewriter {
     allowed_blocks: HashSet<String>,
-    superblock_map: HashMap<String, proc_macro2::Ident>,
 }
 
 impl VisitMut for CrossChunkDirectRewriter {
     fn visit_expr_mut(&mut self, node: &mut syn::Expr) {
         if let syn::Expr::Call(call) = node {
             if is_nextstep_direct(&call.func) && call.args.len() == 1 {
-                if let Some(first_arg) = call.args.first_mut() {
-                    if let syn::Expr::Path(arg_path) = first_arg {
-                        if let Some(ident) = arg_path.path.get_ident() {
-                            let name = ident.to_string();
-                            if let Some(replacement) = self.superblock_map.get(&name) {
-                                *first_arg = syn::parse_quote! { #replacement };
+                if let Some(syn::Expr::Path(arg_path)) = call.args.first() {
+                    if let Some(ident) = arg_path.path.get_ident() {
+                        let name = ident.to_string();
+                        if !self.allowed_blocks.contains(&name) {
+                            if let Some(pc) = block_name_to_pc(&name) {
+                                *node = syn::parse_quote! { crate::NextStep::Dynamic(#pc) };
                                 return;
-                            }
-                            if !self.allowed_blocks.contains(&name) {
-                                if let Some(pc) = block_name_to_pc(&name) {
-                                    *node = syn::parse_quote! { crate::NextStep::Dynamic(#pc) };
-                                    return;
-                                }
                             }
                         }
                     }
@@ -1855,11 +1376,12 @@ fn block_name_to_pc(name: &str) -> Option<u64> {
 mod tests {
     use super::*;
     use crate::{
-        block_analysis::BlockAnalyzer, elf_parser::parse_elf,
-        instruction_translator::InstructionTranslator, types::Instruction,
+        block_analysis::BlockAnalyzer,
+        elf_parser::parse_elf,
+        instruction_translator::InstructionTranslator,
+        types::{sign_extend_imm32_to_u64, Instruction},
     };
     use std::{
-        collections::HashMap,
         fs,
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
@@ -1893,7 +1415,7 @@ mod tests {
         let inst = &program.instructions[idx];
 
         let leaders = BlockAnalyzer::new(&program).analyze();
-        let (translated, _, _, _) = InstructionTranslator::new(true).translate(pc, inst, &leaders);
+        let (translated, _, _, _) = InstructionTranslator::new().translate(pc, inst, &leaders);
         let translated = translated.to_string();
         assert!(
             translated.contains("emu"),
@@ -1902,7 +1424,7 @@ mod tests {
         match inst.opcode {
             Opcode::ADD if inst.imm_b && inst.imm_c => {
                 assert!(
-                    translated.contains("write_reg_no_count"),
+                    translated.contains("constant_no_count"),
                     "translator emitted unexpected ADD-immediate code: {translated}"
                 );
                 assert!(
@@ -1952,7 +1474,7 @@ mod tests {
     fn block_translate_reports_global_lookup_base_by_opcode_shape() {
         let leaders = HashSet::new();
 
-        let (_, _, mem_rw_events, global_lookup_base) = InstructionTranslator::new(true).translate(
+        let (_, _, mem_rw_events, global_lookup_base) = InstructionTranslator::new().translate(
             0x1000,
             &Instruction::new(Opcode::LD, 1, 2, 8, false, true),
             &leaders,
@@ -1960,7 +1482,7 @@ mod tests {
         assert_eq!(mem_rw_events, 1);
         assert_eq!(global_lookup_base, 2);
 
-        let (_, _, mem_rw_events, global_lookup_base) = InstructionTranslator::new(true).translate(
+        let (_, _, mem_rw_events, global_lookup_base) = InstructionTranslator::new().translate(
             0x1004,
             &Instruction::new(Opcode::SD, 1, 2, 8, false, true),
             &leaders,
@@ -1968,7 +1490,7 @@ mod tests {
         assert_eq!(mem_rw_events, 1);
         assert_eq!(global_lookup_base, 1);
 
-        let (_, _, mem_rw_events, global_lookup_base) = InstructionTranslator::new(true).translate(
+        let (_, _, mem_rw_events, global_lookup_base) = InstructionTranslator::new().translate(
             0x1008,
             &Instruction::new(Opcode::BEQ, 1, 2, 4, false, true),
             &leaders,
@@ -2004,13 +1526,7 @@ mod tests {
         fs::create_dir_all(&chunks_dir).expect("create temp chunk root");
 
         compiler
-            .write_chunk_crate(
-                &chunk,
-                &chunks_dir,
-                &HashMap::new(),
-                &HashMap::new(),
-                &RuntimeSpec::InTree,
-            )
+            .write_chunk_crate(&chunk, &chunks_dir, &RuntimeSpec::InTree)
             .expect("write_chunk_crate should succeed");
 
         let lib_rs = fs::read_to_string(chunks_dir.join("chunk_000/src/lib.rs"))
@@ -2021,5 +1537,63 @@ mod tests {
         assert!(lib_rs.contains("can_fit_block"));
 
         let _ = fs::remove_dir_all(out_dir);
+    }
+
+    #[test]
+    fn forced_splits_preserve_instructions_and_block_exits() {
+        let program = ProgramInfo::new(
+            vec![
+                Instruction::new(Opcode::ADD, 1, 5, 7, true, true),
+                Instruction::new(Opcode::ADD, 2, 1, 1, false, true),
+                Instruction::new(Opcode::ADD, 3, 2, 1, false, true),
+                Instruction::new(Opcode::JALR, 0, 1, 0, false, true),
+            ],
+            0x1000,
+            0x1000,
+        );
+        let leaders = BlockAnalyzer::new(&program).analyze();
+        for cap in [0, 2] {
+            let compiler = AotCompiler::new(
+                program.clone(),
+                AotConfig::new(PathBuf::from("/tmp/aot-test")).with_max_block_instructions(cap),
+            );
+            let blocks = compiler
+                .generate_blocks(&leaders)
+                .expect("block generation should succeed");
+            let expected = if cap == 0 {
+                vec![(0x1000, 4)]
+            } else {
+                vec![(0x1000, 2), (0x1008, 2)]
+            };
+            assert_eq!(
+                blocks
+                    .iter()
+                    .map(|b| (b.pc, b.insn_count))
+                    .collect::<Vec<_>>(),
+                expected,
+            );
+            let translator = InstructionTranslator::new();
+            for block in &blocks {
+                let code = block.code.to_string();
+                let start = ((block.pc - program.pc_base) / 4) as usize;
+                for index in start..start + block.insn_count as usize {
+                    let pc = program.pc_base + 4 * index as u64;
+                    let (translated, ..) =
+                        translator.translate(pc, &program.instructions[index], &leaders);
+                    assert!(
+                        code.contains(&translated.to_string()),
+                        "missing {pc:#x}: {code}"
+                    );
+                }
+            }
+            if cap > 0 {
+                let exit = blocks[0].code.to_string();
+                assert!(exit.contains("emu . pc = 4104u64"));
+                assert!(exit.contains("check_chunk_boundary_fast"));
+                assert!(exit.contains("should_yield"));
+                assert!(exit.contains("NextStep :: Dynamic (emu . pc)"));
+                assert!(exit.contains("NextStep :: Direct (block_0x00001008)"));
+            }
+        }
     }
 }

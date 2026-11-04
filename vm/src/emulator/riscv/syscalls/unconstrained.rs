@@ -4,6 +4,7 @@ use super::{Syscall, SyscallCode, SyscallContext};
 use crate::emulator::riscv::{
     emulator::{RiscvEmulatorMode, UnconstrainedState},
     event_types::RvValue,
+    sink::ExecutionSink,
     state::RuntimeRegisterRecord,
 };
 
@@ -23,6 +24,7 @@ impl Syscall for EnterUnconstrainedSyscall {
             "[Unconstrained] Entering at PC={} clk={} global_clk={}",
             ctx.rt.state.pc, ctx.rt.state.clk, ctx.rt.state.global_clk
         );
+        ctx.rt.sink.enter_unconstrained();
         ctx.rt.mode = RiscvEmulatorMode::Unconstrained(state);
         ctx.rt.update_mode_deps();
 
@@ -46,6 +48,7 @@ impl Syscall for ExitUnconstrainedSyscall {
 
         // Reset the state of the emulator.
         if let Some(mut state) = state {
+            ctx.rt.sink.exit_unconstrained();
             ctx.rt.state.global_clk = state.global_clk;
             ctx.rt.state.clk = state.clk;
             ctx.rt.state.pc = state.pc;
@@ -63,11 +66,9 @@ impl Syscall for ExitUnconstrainedSyscall {
                 let record = value.unwrap_or_default();
                 ctx.rt.state.memory.insert_u64(addr, record);
             }
-            ctx.rt.record = core::mem::take(&mut state.record);
             // The record's digest rolls back, so the flag its COMMITs raised rolls back with it.
             ctx.rt.chunk_split_state.commit_in_flight = state.commit_in_flight;
             ctx.rt.chunk_split_state.deferred_commits = state.deferred_commits;
-            ctx.rt.memory_accesses = core::mem::take(&mut state.op_record);
         }
         Some(0)
     }

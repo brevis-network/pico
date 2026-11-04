@@ -335,14 +335,16 @@ mod tests {
             types::{Address, AssertZeroExtInstr},
         },
         emulator::recursion::public_values::RecursionPublicValues,
-        mle::machine::riscv::{init_mle_gpu_pool, MLE_GPU_DEVICE},
+        mle::machine::riscv::{share_mle_gpu_pool, MLE_GPU_DEVICE},
     };
     use p3_field::PrimeCharacteristicRing;
     use pico_mle_core::config::recursion_params_with_100_bits_security;
 
+    /// The pool alone: these tests replay no RISC-V program, and bounding the records held at once
+    /// would bound the emulator tests sharing the binary.
     fn ensure_gpu_pools() {
         if !cuda_mle::runtime::memory_manager::external_pool_is_set(MLE_GPU_DEVICE) {
-            init_mle_gpu_pool(MLE_GPU_DEVICE);
+            share_mle_gpu_pool(MLE_GPU_DEVICE);
         }
     }
 

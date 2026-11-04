@@ -5,13 +5,8 @@
 //! word 8 when its input asks it to. The public values hold eight words, and the emulator panics on
 //! the index rather than returning an error.
 
-use super::fixture::SMALL_LOG_STACKED_HEIGHT;
+use super::fixture::{COMMIT_OUT_OF_RANGE_ELF, SMALL_LOG_STACKED_HEIGHT};
 use crate::{Phase, ProveError, Prover, Stdin};
-
-const COMMIT_OUT_OF_RANGE_ELF: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../perf/bench_data/rv64/commit-out-of-range-elf"
-));
 
 fn assert_aborted<T>(result: Result<T, ProveError>, call: &str) {
     match result {

@@ -44,12 +44,12 @@ fn the_gpu_root_verifies_and_binds_the_output() {
     assert_is_fib_output(proof.committed().as_bytes(), N);
 }
 
-/// Full `2^23`-instruction chunks, twice the pinned event buffers' environment default, prove: the
-/// GPU prove sizes its buffers from the chunks it cuts. `CHUNK_SIZE` is unset, as a library caller
-/// has it. A reth block, because fib's chunks outgrow the whitelist's `Add` shapes long before that.
+/// Full `2^23`-instruction chunks, the size a history slot is laid out for, prove with `CHUNK_SIZE`
+/// unset, as a library caller has it. A reth block, because fib's chunks outgrow the whitelist's
+/// `Add` shapes long before that.
 #[test]
 #[ignore = "needs a GPU"]
-fn chunks_past_the_default_event_buffers_prove() {
+fn full_chunks_prove_with_chunk_size_unset() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../perf/bench_data/rv64");
     let elf = std::fs::read(format!("{dir}/reth-elf")).expect("reth ELF");
     let input = std::fs::read(format!("{dir}/reth-18884864.bin")).expect("reth block");
@@ -57,7 +57,7 @@ fn chunks_past_the_default_event_buffers_prove() {
     stdin.write_bytes(&input);
     assert!(
         std::env::var_os("CHUNK_SIZE").is_none(),
-        "CHUNK_SIZE would size the buffers"
+        "CHUNK_SIZE would set the chunk size"
     );
     let mut prover = whitelist_prover(&elf);
     assert!(prover.chunk_size() > 1 << 22);
@@ -146,8 +146,8 @@ fn the_interpreted_aot_runtime_matches_the_interpreter() {
     }
 }
 
-/// An event pool that would pin more than half the host, or that cannot hold one record, is
-/// refused before anything runs, so it leaves the process able to prove. Named to sort after the
+/// History slots that would pin more than half the host, or a count other than the one this
+/// process pinned, are refused before anything runs, so the process can still prove. Named to sort after the
 /// child-process tests: its prover keeps card memory in this process.
 #[test]
 #[ignore = "needs a GPU"]
@@ -173,23 +173,45 @@ fn pinning_past_half_the_host_is_refused_up_front() {
         );
     }
 
-    // A pool that cannot hold one record is refused the same way.
-    let (map, root) = shipped_whitelist();
-    let mut prover = Prover::builder(FIB_ELF)
-        .log_stacked_height(WHITELIST_LOG_STACKED_HEIGHT)
-        .verify_keys(true)
-        .vk_map(map)
-        .trusted_vk_root(root)
-        .gpu_event_pool_size(NonZeroUsize::MIN)
+    // Once a prove has pinned the slots, a prover asking for another count is refused the same
+    // way, and the process can still prove at the pinned count.
+    let build = |slots: Option<NonZeroUsize>| {
+        let (map, root) = shipped_whitelist();
+        let builder = Prover::builder(FIB_ELF)
+            .log_stacked_height(WHITELIST_LOG_STACKED_HEIGHT)
+            .verify_keys(true)
+            .vk_map(map)
+            .trusted_vk_root(root);
+        match slots {
+            Some(n) => builder.gpu_event_pool_size(n),
+            None => builder,
+        }
         .build()
-        .expect("whitelist prover");
+        .expect("whitelist prover")
+    };
+    let pinned = match pico_vm::emulator::riscv::record_slots::bound_in_force() {
+        Ok(Some(pinned)) => pinned,
+        _ => {
+            let n = distributed_vm::mle::embed::default_event_pool_size();
+            build(Some(n))
+                .prove(Stdin::from(&N))
+                .expect("a prove at the default count");
+            n
+        }
+    };
+    let other = pinned.checked_add(1).unwrap();
     for _ in 0..2 {
-        let err = prover.prove(Stdin::from(&N)).expect_err("a pool of one");
+        let err = build(Some(other))
+            .prove(Stdin::from(&N))
+            .expect_err("another count than the pinned one");
         assert!(
-            matches!(&err, ProveError::Gpu(m) if m.contains("event buffers")),
+            matches!(&err, ProveError::Gpu(m) if m.contains("already pinned")),
             "got {err}"
         );
     }
+    build(Some(pinned))
+        .prove(Stdin::from(&N))
+        .expect("a prove at the pinned count");
 }
 
 /// A whitelist prover latches its cards' memory tier at build, so an execute before its first
@@ -250,7 +272,7 @@ fn an_estimate_before_build_latches_the_cards_tier() {
 }
 
 const EXECUTE_FIRST_VAR: &str = "PICO_PROVER_GPU_EXECUTE_FIRST_CHILD";
-const EXECUTE_FIRST_MARKER: &str = "[gpu] an execute before a GPU prove left its pools bounded";
+const EXECUTE_FIRST_MARKER: &str = "[gpu] an execute before a GPU prove left its slots bounded";
 
 /// Peak resident memory of this process, from `/proc/self/status`.
 fn peak_rss_gib() -> f64 {
@@ -263,28 +285,27 @@ fn peak_rss_gib() -> f64 {
     kib / (1u64 << 20) as f64
 }
 
-/// An `execute`, whose emulation holds its records in growable buffers, does not leave a later GPU
-/// prove in the same process unbounded: the prove sizes the event pools to its option, and an
-/// execute after it still runs. In a child process, so no earlier prove has sized the pools.
+/// An `execute`, whose emulation lifts the bound on records held only while it runs, does not
+/// leave a later GPU prove in the same process unbounded: the prove pins its option's history
+/// slots, and an execute after it leaves them bounding the next prove. In a child process, so no
+/// earlier prove has pinned the slots.
 #[test]
 #[ignore = "needs a GPU"]
-fn an_execute_before_a_gpu_prove_leaves_its_pools_bounded() {
+fn an_execute_before_a_gpu_prove_leaves_its_slots_bounded() {
     use std::num::NonZeroUsize;
 
-    use pico_vm::emulator::riscv::{
-        alu_event_pool::alu_event_buffer_pool_size, cpu_event_pool::cpu_event_buffer_pool_size,
-    };
+    use pico_vm::emulator::riscv::record_slots::{bound_in_force, slots_outstanding};
 
     if std::env::var(EXECUTE_FIRST_VAR).is_err() {
         run_child(
-            "tests::gpu::an_execute_before_a_gpu_prove_leaves_its_pools_bounded",
+            "tests::gpu::an_execute_before_a_gpu_prove_leaves_its_slots_bounded",
             EXECUTE_FIRST_MARKER,
             &[(EXECUTE_FIRST_VAR, "1".to_string())],
         );
         return;
     }
 
-    const POOL: usize = 40;
+    const POOL: usize = 8;
     let (map, root) = shipped_whitelist();
     let builder = Prover::builder(FIB_ELF)
         .log_stacked_height(WHITELIST_LOG_STACKED_HEIGHT)
@@ -293,26 +314,25 @@ fn an_execute_before_a_gpu_prove_leaves_its_pools_bounded() {
         .trusted_vk_root(root)
         .gpu_event_pool_size(NonZeroUsize::new(POOL).unwrap());
     builder.execute(Stdin::from(&N)).expect("execute");
-    // The emulation claimed the pools empty rather than pinning full-size buffers.
-    assert_eq!(cpu_event_buffer_pool_size(), Some(0));
-    assert_eq!(alu_event_buffer_pool_size(), Some(0));
+    // The emulation pinned nothing.
+    assert_eq!(slots_outstanding(), None);
 
     let mut prover = builder.build().expect("whitelist prover");
     let proof = prover.prove(Stdin::from(&N)).expect("GPU combine");
     assert_is_fib_output(proof.committed().as_bytes(), N);
-    assert_eq!(cpu_event_buffer_pool_size(), Some(POOL));
-    assert_eq!(alu_event_buffer_pool_size(), Some(POOL));
+    assert_eq!(bound_in_force(), Ok(NonZeroUsize::new(POOL)));
 
-    // Growable again for an emulation after the prove, and bounded again for the next prove.
+    // The execute after the prove lifts the bound only while it runs.
     prover
         .execute(Stdin::from(&N))
         .expect("execute after the prove");
+    assert_eq!(bound_in_force(), Ok(NonZeroUsize::new(POOL)));
     let again = prover.prove(Stdin::from(&N)).expect("second GPU combine");
     assert_is_fib_output(again.committed().as_bytes(), N);
-    assert_eq!(cpu_event_buffer_pool_size(), Some(POOL));
+    assert_eq!(slots_outstanding(), Some(0));
 
     let rss = peak_rss_gib();
-    println!("[gpu] peak RSS {rss:.1} GiB with {POOL} event buffers per pool");
+    println!("[gpu] peak RSS {rss:.1} GiB with {POOL} history slots");
     assert!(rss < 64.0, "peak RSS {rss:.1} GiB");
     println!("{EXECUTE_FIRST_MARKER}");
 }
@@ -384,18 +404,16 @@ const GUEST_CHILD_VAR: &str = "PICO_PROVER_GPU_GUEST_FAILURE_CHILD";
 const GUEST_MARKER: &str = "[gpu] a failing guest left the process able to prove";
 
 /// A guest whose emulation fails is an ordinary error on the GPU path too: the run drains, every
-/// pooled event buffer and emulator memory comes back, and the next prove in the process works.
+/// history slot and pooled emulator memory comes back, and the next prove in the process works.
 /// The same program on bad input, as a caller retrying with fixed input would see it, so the
 /// resident machines and their per-run state carry over; then another program's failure. In a
-/// child process, so no earlier test's pools or poisoning are in the way.
+/// child process, so no earlier test's slots or poisoning are in the way.
 #[test]
 #[ignore = "needs a GPU"]
 fn a_failing_guest_leaves_the_process_able_to_prove() {
     use pico_vm::{
         emulator::riscv::{
-            alu_event_pool::alu_event_buffers_outstanding,
-            cpu_event_pool::cpu_event_buffers_outstanding, emulator::EmulationError,
-            memory::memory_pool_free,
+            emulator::EmulationError, memory::memory_pool_free, record_slots::slots_outstanding,
         },
         mle::machine::riscv::EmulateError,
     };
@@ -424,8 +442,11 @@ fn a_failing_guest_leaves_the_process_able_to_prove() {
         }
     };
     let assert_drained = |baseline: usize| {
-        assert_eq!(cpu_event_buffers_outstanding(), Some(0));
-        assert_eq!(alu_event_buffers_outstanding(), Some(0));
+        assert!(
+            matches!(slots_outstanding(), None | Some(0)),
+            "{:?} history slots still held",
+            slots_outstanding()
+        );
         let free = settled_memory_pool(baseline);
         assert!(free >= baseline, "{free} memories free, {baseline} before");
     };
@@ -453,7 +474,7 @@ fn a_failing_guest_leaves_the_process_able_to_prove() {
         matches!(
             err,
             ProveError::Emulate(EmulateError::Emulation(
-                EmulationError::HaltWithNonZeroExitCode(_)
+                EmulationError::AbnormalTermination(_)
             ))
         ),
         "got {err}"

@@ -23,10 +23,12 @@ impl AotEmulatorCore {
             panic!("Nested ENTER_UNCONSTRAINED is not supported in AOT emulation");
         }
 
+        self.sink_enter_unconstrained();
         self.unconstrained_state = Some(UnconstrainedState {
             pc: self.pc,
             clk: self.clk,
             insn_count: self.insn_count,
+            fallback_insns: self.fallback_insns,
             current_chunk: self.current_chunk,
             batch_chunks_emulated: self.batch_chunks_emulated,
             batch_stop: self.batch_stop,
@@ -49,11 +51,13 @@ impl AotEmulatorCore {
     /// Returns the next PC to execute after unconstrained mode, or None if not in unconstrained mode.
     pub(crate) fn exit_unconstrained_mode(&mut self) -> Option<u64> {
         let mut state = self.unconstrained_state.take()?;
+        self.sink_exit_unconstrained();
 
         // Restore timing/chunk state (matches baseline behavior)
         self.pc = state.pc;
         self.clk = state.clk;
         self.insn_count = state.insn_count;
+        self.fallback_insns = state.fallback_insns;
         self.current_chunk = state.current_chunk;
         self.batch_chunks_emulated = state.batch_chunks_emulated;
         self.batch_stop = state.batch_stop;

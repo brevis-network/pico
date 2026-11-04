@@ -10,11 +10,7 @@ use super::{
 use crate::{
     chips::{chips::riscv_poseidon2::Poseidon2Event, tests::init_test_stream, trace::TraceData},
     cuda_adaptor::resource_pool::mem_pool::get_global_mem_pool,
-    emulator::riscv::{
-        cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
-        event_pool::HostAllocFlags,
-        record::EmulationRecord,
-    },
+    emulator::riscv::record::EmulationRecord,
     machine::{
         chip::{ChipBehavior, GpuChipBehavior},
         field::FieldSpecificPoseidon2Config,
@@ -75,10 +71,6 @@ fn gpu_generate_main(
 
 #[cfg(feature = "cuda")]
 fn make_shard(num_iters: usize) -> EmulationRecord {
-    if !is_pool_initialized() {
-        init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
-    }
-
     let mut rec = EmulationRecord::default();
     let perm = KoalaBear::permutation();
     let mut rng = rng();
@@ -136,10 +128,6 @@ fn test_riscv_poseidon2_gpu_generate_main() {
 #[cfg(feature = "cuda")]
 #[test]
 fn bench_riscv_poseidon2_cpu_vs_gpu() {
-    if !is_pool_initialized() {
-        init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
-    }
-
     let warmup_sizes: Vec<usize> = vec![1 << 14];
     let bench_sizes: Vec<usize> = vec![1 << 14, 1 << 16, 1 << 18, 1 << 20];
 
@@ -247,6 +235,7 @@ fn bench_riscv_poseidon2_cpu_vs_gpu() {
                 d_dummy_row.as_ptr() as *const _,
                 d_round_constants.as_ptr() as *const _,
                 stream.into(),
+                std::ptr::null_mut(),
             );
         }
         stream.synchronize().unwrap();

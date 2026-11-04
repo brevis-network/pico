@@ -14,8 +14,7 @@ anyhow.workspace = true
 p3-challenger.workspace = true
 p3-field.workspace = true
 p3-koala-bear.workspace = true
-# TODO(onchain): back to `pico-vm.workspace = true` once `multi-field-transcript` is unconditional.
-pico-vm = { path = "../../vm", default-features = false, features = ["rayon", "strict"] }
+p3-symmetric.workspace = true
 pico-patch-libs.workspace = true
 cfg-if.workspace = true
 rand.workspace = true
@@ -38,6 +37,11 @@ serde_json.workspace = true
 tracing.workspace = true
 tracing-forest.workspace = true
 tracing-subscriber.workspace = true
+
+# The prover is host-side: a guest compiles none of it, nor the host-only crates it depends on.
+[target.'cfg(not(target_os = "zkvm"))'.dependencies]
+# TODO(onchain): back to `pico-vm.workspace = true` once `multi-field-transcript` is unconditional.
+pico-vm = { path = "../../vm", default-features = false, features = ["rayon", "strict"] }
 
 [features]
 prover = ["pico-vm/jemalloc"]

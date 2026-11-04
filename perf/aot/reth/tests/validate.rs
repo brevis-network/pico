@@ -7,12 +7,7 @@ use pico_vm::{
     configs::stark_config::KoalaBearPoseidon2 as RiscvKBSC,
     emulator::{
         opts::EmulatorOpts,
-        riscv::{
-            cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
-            emulator::RiscvEmulator,
-            event_pool::HostAllocFlags,
-            public_values::RecordFinalPvsState,
-        },
+        riscv::{emulator::RiscvEmulator, public_values::RecordFinalPvsState},
     },
     primitives::consts::{DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
 };
@@ -149,10 +144,6 @@ fn run_and_compare_chunks(
 ) -> ([u32; PV_DIGEST_NUM_WORDS], [u32; DIGEST_SIZE]) {
     use p3_koala_bear::KoalaBear;
 
-    if !is_pool_initialized() {
-        init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
-    }
-
     let opts = EmulatorOpts::test_opts();
 
     let program = Compiler::new(SourceType::RISCV, elf_bytes)
@@ -165,7 +156,6 @@ fn run_and_compare_chunks(
         program.clone(),
         Arc::new(RecordFinalPvsState::default()),
         opts,
-        None,
     );
     baseline_emu.write_stdin(&stdin);
 
@@ -241,8 +231,16 @@ fn run_and_compare_chunks(
         chunk_idx += 1;
     }
 
-    let committed_digest = baseline_emu.record.public_values.committed_value_digest;
-    let deferred_digest = baseline_emu.record.public_values.deferred_proofs_digest;
+    let committed_digest = baseline_emu
+        .sink
+        .record()
+        .public_values
+        .committed_value_digest;
+    let deferred_digest = baseline_emu
+        .sink
+        .record()
+        .public_values
+        .deferred_proofs_digest;
 
     assert_eq!(
         committed_digest, aot_emu.committed_value_digest,

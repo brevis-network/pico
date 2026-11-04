@@ -15,6 +15,7 @@ use crate::{
     },
     instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::chip::GpuChipBehavior,
+    mle::spans::device,
 };
 use crate::{
     chips::{
@@ -46,7 +47,7 @@ use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
 #[cfg(feature = "cuda")]
-use pico_gpu_api::cuda_riscv_poseidon2_generate_main;
+use pico_gpu_api::{cuda_riscv_poseidon2_generate_main, step_events::RISCV_POSEIDON2_STEPS};
 use std::borrow::BorrowMut;
 #[cfg(feature = "cuda")]
 use tracing::info;
@@ -321,6 +322,7 @@ impl<
                 d_dummy_row.as_ptr() as *const _,
                 d_round_constants.as_ptr() as *const _,
                 stream.into(),
+                std::ptr::null_mut(),
             );
         }
 
@@ -394,6 +396,8 @@ impl<
             DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
                 .unwrap();
         let d_poseidon2_events = preallocated_gpu_memory.d_poseidon2_events.as_mut();
+        let kernels = device::start(stream);
+        let mut steps = device::steps(&kernels, &RISCV_POSEIDON2_STEPS);
         if let (true, Some(d_poseidon2_events)) = (event_size > 0, d_poseidon2_events) {
             unsafe {
                 cuda_riscv_poseidon2_generate_main(
@@ -405,16 +409,19 @@ impl<
                     d_dummy_row.as_ptr() as *const _,
                     d_round_constants.as_ptr() as *const _,
                     stream.into(),
+                    steps.ffi(),
                 );
             }
         }
 
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
+        device::launched(kernels, stream);
+        device::stepped(steps, stream);
+        device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
+        device::wait(main_stream).unwrap();
 
         info!("[riscv-poseidon2-chip] generate_extra_record_and_main on GPU");
 

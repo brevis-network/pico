@@ -53,3 +53,6 @@ cuda = [
     "pico-vm/aot-emulator",
     "dep:pico-aot-runtime",
 ]
+# Forwards to `pico-vm`'s: the stage ledger and span recorder that `MLE_LEDGER` and `MLE_SPANS`
+# write. Without it both compile to nothing.
+stage-ledger = ["pico-vm/stage-ledger"]

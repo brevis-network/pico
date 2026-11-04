@@ -8,8 +8,9 @@
 //! `generate_main` over the lookups the chip's `extra_record` raises.
 
 use super::{
-    add_byte_lookups_to_raw_table, gpu_add_host_byte_lookups, gpu_allocate_byte_trace,
-    gpu_finalize_byte_trace, precompute_event_size, PreallocatedGpuMemory, PreparedGpuEvents,
+    add_byte_lookups_to_raw_table, gpu_add_host_byte_lookups, gpu_add_host_byte_lookups_additive,
+    gpu_add_host_byte_lookups_through_host, gpu_allocate_byte_trace, gpu_finalize_byte_trace,
+    precompute_event_size, GpuMemoryError, PreallocatedGpuMemory, PreparedGpuEvents,
 };
 #[cfg(feature = "cuda")]
 use crate::machine::chip::GpuChipBehavior;
@@ -70,8 +71,10 @@ fn finalized(stream: &CudaStream, mut memory: PreallocatedGpuMemory<'_>) -> RowM
 
 /// The byte chip's trace over `lookups`: what the device table has to equal once finalized.
 fn reference_table(lookups: &HashMap<ByteLookupEvent, usize>) -> RowMajorMatrix<F> {
-    let mut record = EmulationRecord::default();
-    record.byte_lookups = lookups.clone();
+    let record = EmulationRecord {
+        byte_lookups: lookups.clone(),
+        ..Default::default()
+    };
     ByteChip::<F>::default().generate_main(&record, &mut EmulationRecord::default())
 }
 
@@ -151,6 +154,59 @@ fn host_lookups_added_to_the_device_table_match_the_byte_chip() {
         finalized(stream, memory),
         reference_table(&merged(&first, &second))
     );
+}
+
+/// The additive path leaves the device table where the read-modify-write leaves it: on counts
+/// already in the table, over two batches, the second one lookup at a time.
+#[test]
+fn the_additive_byte_table_update_equals_the_read_modify_write() {
+    let stream = init_test_stream();
+    let mut rng = StdRng::seed_from_u64(0xadd);
+    let resident = random_lookups(&mut rng, 3000);
+    let first = random_lookups(&mut rng, 3000);
+    let second = random_lookups(&mut rng, 1000);
+    let one_by_one = |lookups: &HashMap<ByteLookupEvent, usize>| {
+        lookups
+            .iter()
+            .flat_map(|(&lookup, &mult)| std::iter::repeat_n((lookup, 1), mult))
+            .collect::<Vec<_>>()
+    };
+
+    let mut through_host = device_byte_table(stream);
+    let mut additive = device_byte_table(stream);
+    for memory in [&mut through_host, &mut additive] {
+        gpu_add_host_byte_lookups_through_host(resident.clone(), memory).unwrap();
+    }
+    gpu_add_host_byte_lookups_through_host(first.clone(), &mut through_host).unwrap();
+    gpu_add_host_byte_lookups_through_host(one_by_one(&second), &mut through_host).unwrap();
+    gpu_add_host_byte_lookups_additive(first.clone(), &mut additive).unwrap();
+    gpu_add_host_byte_lookups_additive(one_by_one(&second), &mut additive).unwrap();
+    gpu_add_host_byte_lookups_additive(std::iter::empty(), &mut additive).unwrap();
+
+    let through_host = finalized(stream, through_host);
+    assert_eq!(finalized(stream, additive), through_host);
+    assert_eq!(
+        through_host,
+        reference_table(&merged(&merged(&resident, &first), &second))
+    );
+}
+
+/// A count the additive path would take to the field order is refused, not wrapped into another
+/// element.
+#[test]
+fn the_additive_byte_table_update_refuses_a_count_at_the_field_order() {
+    use p3_field::PrimeField32;
+
+    let stream = init_test_stream();
+    let lookup = ByteLookupEvent::new(ByteOpcode::U8Range, 0, 0, 7, 9);
+    let mut memory = device_byte_table(stream);
+    let near = F::ORDER_U32 as usize - 3;
+    gpu_add_host_byte_lookups_through_host([(lookup, near)], &mut memory).unwrap();
+    gpu_add_host_byte_lookups_additive([(lookup, 2)], &mut memory).unwrap();
+    assert!(matches!(
+        gpu_add_host_byte_lookups_additive([(lookup, 1)], &mut memory),
+        Err(GpuMemoryError::ByteTraceOverflow(_))
+    ));
 }
 
 fn bench_elf(name: &str) -> Arc<Program> {

@@ -1,3 +1,4 @@
+use super::{host::SyscallHost, SyscallEvent};
 use crate::{
     chips::chips::riscv_memory::event::{
         MemoryLocalEvent, MemoryReadRecord, MemoryRecord, MemoryWriteRecord,
@@ -83,7 +84,7 @@ impl<'a> SyscallContext<'a> {
 
     /// Get a mutable reference to the emulation record.
     pub fn record_mut(&mut self) -> &mut EmulationRecord {
-        &mut self.rt.record
+        self.rt.sink.record_mut()
     }
 
     /// Get the current chunk.
@@ -97,14 +98,6 @@ impl<'a> SyscallContext<'a> {
         assert!(
             addr >= MIN_MAIN_MEMORY_ADDR,
             "syscall memory access below floor 0x{MIN_MAIN_MEMORY_ADDR:08x}: 0x{addr:08x}"
-        );
-    }
-
-    #[inline(always)]
-    pub fn assert_dword_aligned_precompile(addr: RvAddr, context: &str) {
-        assert!(
-            addr.is_multiple_of(8),
-            "{context} must be 8-byte aligned, got 0x{addr:08x}"
         );
     }
 
@@ -309,23 +302,6 @@ impl<'a> SyscallContext<'a> {
         (record, record.value)
     }
 
-    /// Read N consecutive 8-byte dwords.
-    pub fn mr_dword_slice(
-        &mut self,
-        addr: RvAddr,
-        len: usize,
-    ) -> (Vec<MemoryReadRecord>, Vec<RvValue>) {
-        let mut records = Vec::with_capacity(len);
-        let mut values = Vec::with_capacity(len);
-        for i in 0..len {
-            let dword_addr = addr.wrapping_add((i as u64) * 8);
-            let (record, value) = self.mr_dword(dword_addr);
-            records.push(record);
-            values.push(value);
-        }
-        (records, values)
-    }
-
     /// Write an 8-byte dword to memory.
     pub fn mw_dword(&mut self, addr: RvAddr, value: RvValue) -> MemoryWriteRecord {
         self.validate_main_memory_addr(addr);
@@ -337,16 +313,6 @@ impl<'a> SyscallContext<'a> {
             self.timestamp(),
             Some(&mut self.local_memory_access),
         )
-    }
-
-    /// Write N consecutive 8-byte dwords.
-    pub fn mw_dword_slice(&mut self, addr: RvAddr, values: &[RvValue]) -> Vec<MemoryWriteRecord> {
-        let mut records = Vec::with_capacity(values.len());
-        for (i, &value) in values.iter().enumerate() {
-            let dword_addr = addr.wrapping_add((i as u64) * 8);
-            records.push(self.mw_dword(dword_addr, value));
-        }
-        records
     }
 
     /// Read N consecutive dwords (unconstrained).
@@ -375,13 +341,14 @@ impl<'a> SyscallContext<'a> {
         if !self.rt.is_unconstrained() {
             // Will need to transfer the existing memory local events in the emulator to it's record,
             // and return all the syscall memory local events.  This is similar to what
-            // `bump_record` does.
+            // `ExecutionSink::cut_chunk` does.
             for (addr, event) in self.local_memory_access.drain() {
-                let local_mem_access = self.rt.local_memory_access.remove(&addr);
+                let local_mem_access = self.rt.sink.local_memory_access_mut().remove(&addr);
 
                 if let Some(local_mem_access) = local_mem_access {
                     self.rt
-                        .record
+                        .sink
+                        .record_mut()
                         .cpu_local_memory_access
                         .push(local_mem_access);
                 }
@@ -401,6 +368,56 @@ impl<'a> SyscallContext<'a> {
     /// Set the exit code.
     pub fn set_exit_code(&mut self, exit_code: u32) {
         self.exit_code = exit_code;
+    }
+}
+
+// Forwards to the inherent methods, which resolve first and which the ECALL dispatcher and the
+// host-side syscalls call directly; the slices are the trait's own.
+impl SyscallHost for SyscallContext<'_> {
+    fn current_chunk(&self) -> RvChunk {
+        Self::current_chunk(self)
+    }
+
+    fn clk(&self) -> RvClk {
+        self.clk
+    }
+
+    fn advance_clk(&mut self, cycles: RvClk) {
+        self.clk += cycles;
+    }
+
+    fn mr_dword(&mut self, addr: RvAddr) -> (MemoryReadRecord, RvValue) {
+        Self::mr_dword(self, addr)
+    }
+
+    fn mw_dword(&mut self, addr: RvAddr, value: RvValue) -> MemoryWriteRecord {
+        Self::mw_dword(self, addr, value)
+    }
+
+    fn dword_slice_unsafe(&mut self, addr: RvAddr, len: usize) -> Vec<RvValue> {
+        Self::dword_slice_unsafe(self, addr, len)
+    }
+
+    fn add_syscall_memory_events(&mut self, count: usize) {
+        self.rt.chunk_split_state.add_syscall_memory_events(count);
+    }
+
+    fn record_mut(&mut self) -> &mut EmulationRecord {
+        Self::record_mut(self)
+    }
+
+    fn postprocess(&mut self) -> Vec<MemoryLocalEvent> {
+        Self::postprocess(self)
+    }
+
+    fn syscall_event(
+        &self,
+        clk: RvClk,
+        syscall_id: u32,
+        arg1: RvValue,
+        arg2: RvValue,
+    ) -> SyscallEvent {
+        self.rt.syscall_event(clk, syscall_id, arg1, arg2)
     }
 }
 

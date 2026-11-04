@@ -68,7 +68,9 @@ verifier contracts in [`contracts/`](../contracts).
 ## Memory
 
 Proving memory depends on the program. The only figures in this repository are measurements of
-the examples with the 3.0 CPU prover, not guarantees:
+the examples with the 3.0 CPU prover, not guarantees. The emulation in them is serial
+(`ProverBuilder::serial_emulation`, `--serial-emulation`); the default snapshot pipeline, which
+emulates with up to 16 replay workers, has not been measured on them:
 
 | what | machine | peak memory | wall clock |
 |---|---|---|---|

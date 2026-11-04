@@ -17,6 +17,7 @@ use crate::{
     },
     instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
     machine::chip::GpuChipBehavior,
+    mle::spans::device,
 };
 use crate::{
     chips::{
@@ -50,7 +51,9 @@ use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 #[cfg(feature = "cuda")]
-use pico_gpu_api::cuda_memory_local_generate_extra_record_and_main_u64;
+use pico_gpu_api::{
+    cuda_memory_local_generate_extra_record_and_main_u64, step_events::MEMORY_LOCAL_STEPS,
+};
 #[cfg(feature = "cuda")]
 use tracing::info;
 
@@ -336,6 +339,10 @@ impl<F: PrimeField32> GpuChipBehavior<F> for MemoryLocalChip<F> {
         let mut d_trace =
             DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
                 .unwrap();
+        let fill = device::start(stream);
+        // The event copy below is timed only when this fill is, so its bracket looks up nothing
+        // while the readings are off.
+        let timed = fill.times();
         unsafe {
             let _ = cudaMemsetAsync(
                 d_trace.as_mut_ptr() as *mut _,
@@ -344,6 +351,7 @@ impl<F: PrimeField32> GpuChipBehavior<F> for MemoryLocalChip<F> {
                 stream.into(),
             );
         }
+        device::filled(fill, stream);
 
         let event_size = events.len();
         if event_size > 0 {
@@ -351,6 +359,7 @@ impl<F: PrimeField32> GpuChipBehavior<F> for MemoryLocalChip<F> {
                 event_size, mem_pool, stream,
             )
             .unwrap();
+            let copy = device::start_if(timed, stream);
             unsafe {
                 let _ = cudaMemcpyAsync(
                     d_events.as_mut_c_void_ptr(),
@@ -360,10 +369,13 @@ impl<F: PrimeField32> GpuChipBehavior<F> for MemoryLocalChip<F> {
                     stream.into(),
                 );
             }
+            device::copied(copy, stream, "memory_local_events", None);
             let d_global_events = preallocated_gpu_memory.d_global_events.as_mut().unwrap();
             let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
 
             unsafe {
+                let kernels = device::start(stream);
+                let mut steps = device::steps(&kernels, &MEMORY_LOCAL_STEPS);
                 let err = cuda_memory_local_generate_extra_record_and_main_u64(
                     NUM_SINGLE_MEMORY_LOCAL_COLS,
                     event_size,
@@ -377,7 +389,10 @@ impl<F: PrimeField32> GpuChipBehavior<F> for MemoryLocalChip<F> {
                         .start_indices
                         .memory_local_extra_global_start_index,
                     d_byte_trace.as_mut_ptr() as *mut _,
+                    steps.ffi(),
                 );
+                device::launched(kernels, stream);
+                device::stepped(steps, stream);
                 assert_eq!(
                     err.code, 0,
                     "cuda_memory_local_generate_extra_record_and_main_u64 failed \
@@ -388,10 +403,10 @@ impl<F: PrimeField32> GpuChipBehavior<F> for MemoryLocalChip<F> {
 
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
+        device::wait(main_stream).unwrap();
 
         info!("[memory-local-chip] generate_extra_record_and_main on GPU");
         TraceData::Gpu(NUM_MEMORY_LOCAL_INIT_COLS, d_trace)

@@ -7,7 +7,7 @@ compile_error!(
 
 use reth_aot::{
     aot_snapshot_opts, build_witness, load_block_input, load_reth_elf, parse_block_arg,
-    register_snapshot_aot_factory, run_aot_only_benchmark, run_pipeline_benchmark, validate_block,
+    register_aot, run_aot_only_benchmark, run_pipeline_benchmark, validate_block,
     AotOnlyBenchSummary, PipelineBenchSummary,
 };
 
@@ -151,10 +151,9 @@ fn main() {
     let block_input = load_block_input(block_number).expect("Failed to load block input");
     let opts = aot_snapshot_opts();
     println!(
-        "Opts: chunk_size={}, chunk_batch_size={}, split_threshold={}, num_threads={}",
+        "Opts: chunk_size={}, chunk_batch_size={}, num_threads={}",
         opts.chunk_size,
         opts.chunk_batch_size,
-        opts.split_opts.deferred,
         std::env::var("NUM_THREADS").unwrap_or_else(|_| "1".to_string()),
     );
     println!("Block input size: {} bytes", block_input.len());
@@ -171,7 +170,9 @@ fn main() {
         .expect("witness.stdin not set")
         .inputs
         .to_vec();
-    register_snapshot_aot_factory();
+    if let Err(err) = register_aot() {
+        panic!("register the generated AOT program: {err}");
+    }
 
     println!("\nAOT-only timed runs:");
     let aot_only_results = run_aot_only_benchmark(

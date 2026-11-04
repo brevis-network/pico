@@ -1,4 +1,4 @@
-use super::{EmulationError, RiscvEmulator, RiscvEmulatorMode};
+use super::{EmulationError, RiscvEmulator};
 use crate::{
     chips::chips::riscv_memory::event::MemoryAccessPosition,
     compiler::riscv::program::Program,
@@ -6,6 +6,7 @@ use crate::{
         riscv::{
             event_types::{RvAddr, RvChunk, RvClk, RvTimestamp, RvValue},
             record::EmulationRecord,
+            sink::ExecutionSink,
             syscalls::{Syscall, SyscallCode, SyscallEvent},
         },
         stdin::EmulatorStdin,
@@ -20,27 +21,6 @@ impl RiscvEmulator {
     pub fn write_stdin(&mut self, stdin: &Stdin) {
         for input in &*stdin.inputs {
             self.state.input_stream.push(input.clone());
-        }
-    }
-
-    /// Run without tracing
-    pub fn run_fast(
-        &mut self,
-        stdin: Option<Stdin>,
-    ) -> Result<(Vec<EmulationRecord>, Vec<EmulationReport>), EmulationError> {
-        if let Some(stdin) = stdin {
-            self.write_stdin(&stdin);
-        }
-        self.mode = RiscvEmulatorMode::Simple;
-        let mut all_records = vec![];
-        let mut all_reports = vec![];
-        loop {
-            let report = self.emulate_batch(&mut |record| all_records.push(record))?;
-            let done = report.done;
-            all_reports.push(report);
-            if done {
-                return Ok((all_records, all_reports));
-            }
         }
     }
 
@@ -131,7 +111,8 @@ impl RiscvEmulator {
 
         let syscall_event = self.syscall_event(clk, syscall_id, arg1, arg2);
 
-        self.record.syscall_events.push(syscall_event);
+        // Ungated: an unconstrained block's syscall events go with the record it discards.
+        self.sink.syscall(syscall_event);
     }
 }
 

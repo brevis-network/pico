@@ -88,9 +88,13 @@ rayon-scan = { workspace = true, optional = true }
 rrs-lib.workspace = true
 rug = { workspace = true, optional = true }
 rustc-hash.workspace = true
+# libsecp256k1 (safegcd inversion) for the secp256k1 add/double precompiles, in both
+# emulators: `weierstrass::secp256k1::{secp256k1_add_words, secp256k1_double_words}`.
+secp256k1 = "0.31"
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
+sha2 = { workspace = true, optional = true }
 static_assertions.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
@@ -111,6 +115,7 @@ parking_lot = "0.12"
 # sudo apt-get install google-perftools
 # sudo ln -s /usr/lib/x86_64-linux-gnu/libtcmalloc.so.4 /usr/lib/x86_64-linux-gnu/libtcmalloc.so
 tcmalloc = { workspace = true, optional = true }
+
 # Set JEMALLOC_SYS_WITH_MALLOC_CONF="retain:true,background_thread:true,metadata_thp:always,dirty_decay_ms:-1,muzzy_decay_ms:-1,abort_conf:true"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { workspace = true, optional = true }
@@ -143,6 +148,16 @@ single-threaded = []
 rayon = ["dep:rayon", "dep:rayon-scan", "p3-maybe-rayon/parallel", "parallel"]
 strict = []
 aot-emulator = []
+# The stage ledger and the span recorder (`MLE_LEDGER`, `MLE_SPANS`). Without it their hooks compile
+# to no-ops, so a production build carries none of the recording code; the bench under
+# `perf/aot/` turns it on by default, and `distributed-vm` reads what the recorder leaves behind,
+# so it turns it on too.
+stage-ledger = []
+# The golden height file's witness (`mle::heights`): each record the GPU preparer packages has its
+# event counter's natural heights checked against its event streams' and written to `MLE_HEIGHTS`.
+# A correctness build, not a timing one.
+height-witness = ["cuda", "dep:sha2"]
+drop-ordering-edge = ["cuda"] # tests only: delay an ordering edge's producer, drop the edge
 # Use memory-mapped storage for ContiguousRiscvMemory (Unix only)
 # Enables fast reset via madvise(MADV_DONTNEED)
 mmap-memory = ["dep:memmap2", "dep:libc"]
@@ -164,6 +179,11 @@ multi-field-transcript = ["pico-mle-core/multi-field-transcript"]
 soundness-bchks25-optimized = ["pico-mle-core/soundness-bchks25-optimized"]
 test-utils = ["pico-mle-core/test-utils"]
 
+# `Sink::Counting` exists only with the feature.
+[[test]]
+name = "counting_sink"
+required-features = ["test-utils"]
+
 # Examples that drive the outer (BN254) transcript/config only exist with the feature.
 [[example]]
 name = "test_outer_twins"
@@ -177,4 +197,14 @@ required-features = ["multi-field-transcript"]
 # Counts events the way the GPU preparer does.
 [[example]]
 name = "mle_event_stats"
+required-features = ["cuda"]
+
+# Generates device traces, so it exists only with the GPU backend.
+[[example]]
+name = "mle_trace_oracle"
+required-features = ["cuda"]
+
+# Runs the history loaders on a card.
+[[example]]
+name = "history_self_test"
 required-features = ["cuda"]

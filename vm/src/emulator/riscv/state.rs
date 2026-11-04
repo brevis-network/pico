@@ -100,9 +100,18 @@ impl RiscvEmulationState {
         // back-pressure the pipeline has — the record channel is unbounded — so this keeps
         // waiting however long it takes, and only says so once the wait stops looking normal.
         let mut reported = false;
+        let t_wait = std::time::Instant::now();
+        let waiting = crate::mle::spans::wait(
+            crate::mle::spans::WorkKind::Snapshot,
+            crate::mle::ledger::context_batch(),
+        );
         let memory = loop {
             match GLOBAL_MEMORY_POOL.1.recv_timeout(POOL_WAIT) {
-                Ok(memory) => break memory,
+                Ok(memory) => {
+                    drop(waiting);
+                    crate::mle::ledger::pool_wait(t_wait, std::time::Instant::now(), reported);
+                    break memory;
+                }
                 Err(RecvTimeoutError::Disconnected) => {
                     panic!("Global memory pool channel closed")
                 }

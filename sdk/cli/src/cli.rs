@@ -6,8 +6,8 @@ use std::{ffi::OsString, path::Path};
 use crate::{
     aot_helper,
     subcommand::{
-        aot::AotCmd, build::BuildCmd, execute::ExecuteCmd, install::InstallCmd, new::NewCmd,
-        prove::ProveCmd,
+        aot::AotCmd, build::BuildCmd, execute::ExecuteCmd, install::InstallCmd, lib::LibCmd,
+        new::NewCmd, prove::ProveCmd,
     },
 };
 
@@ -38,6 +38,7 @@ pub enum SubCommands {
     Prove(ProveCmd),
     Execute(ExecuteCmd),
     Aot(AotCmd),
+    Lib(LibCmd),
     New(NewCmd),
 }
 
@@ -80,6 +81,7 @@ where
         SubCommands::Prove(cmd) => cmd.run(),
         SubCommands::Execute(cmd) => cmd.run(),
         SubCommands::Aot(cmd) => cmd.run(),
+        SubCommands::Lib(cmd) => cmd.run(),
         SubCommands::New(cmd) => cmd.run(),
     }
 }

@@ -62,21 +62,15 @@ export MLE_LOG_STACKED_HEIGHT="${MLE_LOG_STACKED_HEIGHT:-23}"
 # codeword_height x width buffer. Required at CHUNK_SIZE=2^23 (see above); N=8 keeps each block
 # ~2GiB. Set RS_STREAM_BLOCKS= (empty) to force the monolithic path (only fits at <=2^22).
 export RS_STREAM_BLOCKS="${RS_STREAM_BLOCKS:-8}"
-# Precompile-split threshold; sets how many tail chunks the precompile remainders split into.
-export SPLIT_THRESHOLD="${SPLIT_THRESHOLD:-32768}"
 export CHUNK_BATCH_SIZE="${CHUNK_BATCH_SIZE:-1}"
 
-# Event buffer pools (cpu + alu): pinned host memory pre-allocated before keygen. Streaming only
-# needs >= in-flight chunks (backpressure), so a modest pool keeps setup cheap.
-export MLE_EVENT_POOL_SIZE="${MLE_EVENT_POOL_SIZE:-64}"
-
-# Pack the RISC-V events for the H2D upload (CpuEvent 304B -> 80B + a 24B side stream). Flat on wall
-# clock with one card, where those copies already hid behind the prove kernels, so this is for hosts
-# where several provers share a bus. A chunk whose events break a packing invariant silently uses
-# the unpacked path instead, which costs the saving for that whole chunk — reth-171 packs all 16 of
-# its chunks, and the `fell back to fat path` lines name the cause if a workload stops doing so. The
-# packed kernels live in pico-gpu.
-export MLE_PACKED_EVENTS="${MLE_PACKED_EVENTS:-1}"
+# Records held at once: a chunk's record holds a slot from its first step until a worker proves it
+# and drops it, and emulation waits for a slot when every one is held. Streaming only needs
+# >= in-flight chunks (backpressure), so a modest bound keeps the held histories small. Each slot
+# is the chunk's history in pinned memory, about 0.7 GB, pinned at startup: 64 pin about 45 GB.
+# MLE_EVENT_POOL_SIZE, the variable's former name, still sets the count; the default here must not
+# shadow it, as the two set to different counts refuse to start.
+export MLE_HISTORY_SLOTS="${MLE_HISTORY_SLOTS:-${MLE_EVENT_POOL_SIZE:-64}}"
 
 # Snapshot-pipeline memory pool: a CAP, not a count. The
 # pool seeds MEMORY_POOL_EAGER entries and tops up in the background while below
@@ -103,6 +97,11 @@ export TCMALLOC_RELEASE_RATE="${TCMALLOC_RELEASE_RATE:-0}"
 # with the record's own index, not its arrival order). 8 is where emulate saturates — 1/2/8/12 all
 # verified through combine, with e2e flat across them, since emulate runs behind prove.
 export NUM_THREADS="${NUM_THREADS:-8}"
+
+# The replay workers' engine: MLE_REPLAY_WORKERS=aot | interpreter. Unset, the workers replay on the
+# interpreter; `aot` puts them on the AOT-compiled guest the binary registered, and refuses to start
+# where it registered none. `MLE replay workers: <engine>` in the log says which ran. Not defaulted
+# here, so the prover's own default is the one in force.
 
 # Global rayon pool; rayon otherwise sizes it from num_cpus (124 on the box measured here).
 # 32 is worth -3.3% e2e, and it lands in the riscv and convert phases -- combine goes +4.0% the

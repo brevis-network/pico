@@ -12,20 +12,18 @@
 
 use crate::{
     chips::chips::{
-        alu::{bitwise::BitwiseChip, divrem::DivRemChip, sll::SLLChip, sr::traces::ShiftRightChip},
-        riscv_cpu::CpuChip,
         riscv_global::GlobalChip,
         riscv_memory::{
             initialize_finalize::MemoryInitializeFinalizeChip,
             local::{traces::local_mem_global_events, MemoryLocalChip},
-            read_write::MemoryReadWriteChip,
         },
-        syscall::SyscallChip,
     },
-    compiler::riscv::opcode::Opcode,
     emulator::{
         record::RecordBehavior,
         riscv::{
+            history::ExecutionHistory,
+            history_fill::DerivedRows,
+            history_view::history_of,
             record::EmulationRecord,
             syscalls::{precompiles::PrecompileLocalMemory, SyscallCode},
         },
@@ -85,11 +83,6 @@ pub use crate::chips::chips::alu::divrem::utils::DivremExtraEventIndices;
 /// to ensure proper alignment and organization in GPU memory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct StartIndices {
-    pub cpu_extra_add_sub_start_index: usize,
-    pub cpu_extra_lt_start_index: usize,
-    pub divrem_extra_add_sub_start_index: usize,
-    pub divrem_extra_lt_start_index: usize,
-
     pub memory_initialize_extra_global_start_index: usize,
     pub memory_finalize_extra_global_start_index: usize,
     pub memory_local_extra_global_start_index: usize,
@@ -187,7 +180,6 @@ struct PrecompileLocalMemCounts {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct EventCounter {
     pub chunk_index: usize,
-    pub num_program_events: usize,
     pub num_cpu_events: usize,
     pub num_add_sub_events: usize,
     pub num_add_events: usize,
@@ -219,11 +211,11 @@ pub struct EventCounter {
     pub num_global_lookup_events: usize,
     pub num_memory_read_writes: usize,
 
-    // Per event counting for different number of extra events generated
-    pub cpu_extra_event_indices: Vec<CpuExtraEventIndices>,
-    pub divrem_extra_event_indices: Vec<DivremExtraEventIndices>,
-
     pub start_indices: StartIndices,
+
+    /// The device fill header's counts, from the host's scan of the history a record carries; `None`
+    /// for a deferred record, which carries none and uploads none.
+    pub history_header: Option<DerivedRows>,
 }
 
 impl EventCounter {
@@ -538,230 +530,208 @@ fn count_all_precompile_events(
     (precompile_counts, local_mem_counts)
 }
 
-// The counting sequence follows the all_chips() in instances/chiptype/riscv_chiptype.rs
+/// Every count the device's trace generation sizes its buffers and traces by, from the record's
+/// execution history: a CPU chunk's history, or none for a deferred record, which counts as an empty
+/// one. The start indices are running totals, so the order of the steps below is theirs.
+///
+/// # Panics
+///
+/// On a CPU chunk's record that carries no history, the one representation it can be counted from.
 pub fn precompute_event_size<F: PrimeField32>(record: &EmulationRecord) -> EventCounter {
+    let history = history_of(record);
+    let header = DerivedRows::of(history, &record.program);
     let mut counter = EventCounter {
         chunk_index: record.chunk_index(),
+        history_header: record.history.is_some().then_some(header),
         ..Default::default()
     };
-
-    // Count basic events and extra records
-    count_basic_events_and_extras::<F>(record, &mut counter);
-
-    // Count final extra records
-    count_final_extra_records::<F>(record, &mut counter);
-
+    Traced { history, header }.count::<F>(record, &mut counter);
     counter
 }
 
-/// Count basic events and extra records for chips
-fn count_basic_events_and_extras<F: PrimeField32>(
-    record: &EmulationRecord,
-    counter: &mut EventCounter,
-) {
-    // Count the initial numbers of events that will be appended later
-    counter.num_lt_events = record.lt_events.len();
-    counter.num_add_sub_events = record.add_sub_events.len();
-    for e in record.add_sub_events.as_slice().iter() {
-        match e.opcode {
-            Opcode::ADD => counter.num_add_events += 1,
-            Opcode::SUB => counter.num_sub_events += 1,
-            Opcode::ADDW => counter.num_addw_events += 1,
-            Opcode::SUBW => counter.num_subw_events += 1,
-            _ => {}
+/// A record's history and the header scan of it.
+struct Traced<'a> {
+    history: &'a ExecutionHistory,
+    header: DerivedRows,
+}
+
+impl Traced<'_> {
+    fn count<F: PrimeField32>(&self, record: &EmulationRecord, counter: &mut EventCounter) {
+        self.count_alu_rows(counter);
+        counter.num_global_lookup_events = record.global_lookup_events.len();
+        counter.num_poseidon2_events = record.poseidon2_events.len();
+
+        self.count_cpu_extras(counter);
+
+        counter
+            .start_indices
+            .memory_initialize_extra_global_start_index = counter.num_memory_initialize_events;
+        MemoryInitializeFinalizeChip::<F>::count_extra_records(record, counter);
+        counter
+            .start_indices
+            .memory_finalize_extra_global_start_index = counter
+            .start_indices
+            .memory_initialize_extra_global_start_index
+            + counter.num_memory_initialize_events;
+
+        let mut cache = PrecompileEventCache::new();
+        let (precompile_counts, local_mem_counts) = count_all_precompile_events(record, &mut cache);
+        counter.precompile_counts = precompile_counts;
+        counter.precompile_local_mem_counts = local_mem_counts;
+        counter.total_precompile_local_mem_events = counter.get_total_precompile_local_mem_events();
+        counter.total_precompile_events = counter.get_total_precompile_events();
+
+        // Global events: two per entry less one per fresh entry (`riscv_memory/event.rs`), for the
+        // precompile entries here and the CPU entries in `MemoryLocalChip::count_extra_records`;
+        // the GPU kernel places each entry's events at the prefix sum
+        // `FfiMemoryLocalEvent::global_slot`, so the two counts must agree.
+        counter.start_indices.memory_local_extra_global_start_index =
+            counter.num_global_lookup_events;
+        counter.num_cpu_local_memory_access += counter.total_precompile_local_mem_events;
+        counter.num_global_lookup_events += local_mem_global_events(
+            record.precompile_events.get_local_mem_events(),
+            &record.program.memory_image,
+        );
+        MemoryLocalChip::<F>::count_extra_records(record, counter);
+
+        self.count_memory_rows(counter);
+
+        self.count_divrem_extras(counter);
+
+        counter
+            .start_indices
+            .syscall_riscv_extra_global_lookup_start_index = counter.num_global_lookup_events;
+        self.count_syscalls(record, counter);
+        counter
+            .start_indices
+            .syscall_precompile_extra_global_lookup_start_index = counter
+            .start_indices
+            .syscall_riscv_extra_global_lookup_start_index
+            + counter.num_syscall_events;
+
+        self.count_bitwise_and_shifts(counter);
+        counter.start_indices.global_extra_poseidon2_start_index = counter.num_poseidon2_events;
+        GlobalChip::<F>::count_extra_records(record, counter);
+    }
+
+    /// The ALU rows the emulator records, before any chip derives more.
+    fn count_alu_rows(&self, counter: &mut EventCounter) {
+        let lists = &self.history.chip_steps;
+        let header = self.header;
+        counter.num_lt_events = lists.lt.len();
+        counter.num_add_sub_events = lists.add.len() + lists.sub.len();
+        counter.num_add_events += header.add as usize;
+        counter.num_sub_events += header.sub as usize;
+        counter.num_addw_events += header.addw as usize;
+        counter.num_subw_events += header.subw as usize;
+        counter.num_mul_events = lists.mul.len();
+    }
+
+    /// The CPU chip's rows and the less-than row each branch step proves its comparison by.
+    fn count_cpu_extras(&self, counter: &mut EventCounter) {
+        counter.num_cpu_events += self.history.steps.len();
+        counter.num_lt_events += self.history.chip_steps.branch.len();
+    }
+
+    fn count_memory_rows(&self, counter: &mut EventCounter) {
+        let rows = self.history.chip_steps.memory.len();
+        if rows > 0 {
+            counter.num_memory_read_writes = rows;
         }
     }
-    counter.num_mul_events = record.mul_events.len();
-    counter.num_global_lookup_events = record.global_lookup_events.len();
-    counter.num_poseidon2_events = record.poseidon2_events.len();
 
-    // CPU extra events
-    counter.start_indices.cpu_extra_add_sub_start_index = counter.num_add_sub_events;
-    counter.start_indices.cpu_extra_lt_start_index = counter.num_lt_events;
-    CpuChip::<F>::count_extra_records(record, counter);
+    /// The div/rem chip's rows and the ADD rows it derives, which the add chip proves after its
+    /// own.
+    fn count_divrem_extras(&self, counter: &mut EventCounter) {
+        counter.num_divrem_events += self.history.chip_steps.divrem.len();
+        let added = self.header.divrem_add as usize;
+        counter.num_add_sub_events += added;
+        counter.num_add_events += added;
+    }
 
-    // Memory extra events
-    counter
-        .start_indices
-        .memory_initialize_extra_global_start_index = counter.num_memory_initialize_events;
-    MemoryInitializeFinalizeChip::<F>::count_extra_records(record, counter);
-    counter
-        .start_indices
-        .memory_finalize_extra_global_start_index = counter
-        .start_indices
-        .memory_initialize_extra_global_start_index
-        + counter.num_memory_initialize_events;
+    fn count_syscalls(&self, record: &EmulationRecord, counter: &mut EventCounter) {
+        counter.num_syscall_events += self.history.syscalls.len();
+        counter.num_global_lookup_events += counter.num_syscall_events;
+        counter.num_precompile_syscall_events += record
+            .precompile_events
+            .events
+            .iter()
+            .map(|(_, v)| v.len())
+            .sum::<usize>();
+        counter.num_global_lookup_events += counter.num_precompile_syscall_events;
+    }
 
-    // Count all precompile events and their local memory events efficiently
-    let mut cache = PrecompileEventCache::new();
-    let (precompile_counts, local_mem_counts) = count_all_precompile_events(record, &mut cache);
-
-    counter.precompile_counts = precompile_counts;
-    counter.precompile_local_mem_counts = local_mem_counts;
-
-    // Calculate totals for verification
-    counter.total_precompile_local_mem_events = counter.get_total_precompile_local_mem_events();
-    counter.total_precompile_events = counter.get_total_precompile_events();
-
-    // Verify that our individual counts sum up to the totals
-    debug_assert_eq!(
-        counter.total_precompile_local_mem_events,
-        counter.get_total_precompile_local_mem_events(),
-        "Total precompile local memory events mismatch: calculated {} vs summed {}",
-        counter.total_precompile_local_mem_events,
-        counter.get_total_precompile_local_mem_events()
-    );
-    debug_assert_eq!(
-        counter.total_precompile_events,
-        counter.get_total_precompile_events(),
-        "Total precompile events mismatch: calculated {} vs summed {}",
-        counter.total_precompile_events,
-        counter.get_total_precompile_events()
-    );
-
-    // Update memory local chip indices and counts. Global events: two per entry less one per
-    // fresh entry (`riscv_memory/event.rs`), for the precompile entries here and the CPU entries
-    // in `MemoryLocalChip::count_extra_records`; the GPU kernel places each entry's events at
-    // the prefix sum `FfiMemoryLocalEvent::global_slot`, so the two counts must agree.
-    counter.start_indices.memory_local_extra_global_start_index = counter.num_global_lookup_events;
-    counter.num_cpu_local_memory_access += counter.total_precompile_local_mem_events;
-    counter.num_global_lookup_events += local_mem_global_events(
-        record.precompile_events.get_local_mem_events(),
-        &record.program.memory_image,
-    );
-    MemoryLocalChip::<F>::count_extra_records(record, counter);
-
-    MemoryReadWriteChip::<F>::count_extra_records(record, counter);
-
-    // DivRem extra events
-    counter.start_indices.divrem_extra_add_sub_start_index = counter.num_add_sub_events;
-    counter.start_indices.divrem_extra_lt_start_index = counter.num_lt_events;
-
-    DivRemChip::<F>::count_extra_records(record, counter);
-
-    counter
-        .start_indices
-        .syscall_riscv_extra_global_lookup_start_index = counter.num_global_lookup_events;
-    SyscallChip::<F>::count_extra_records(record, counter);
-    counter
-        .start_indices
-        .syscall_precompile_extra_global_lookup_start_index = counter
-        .start_indices
-        .syscall_riscv_extra_global_lookup_start_index
-        + counter.num_syscall_events;
-}
-
-/// Count final extra records for remaining chips
-fn count_final_extra_records<F: PrimeField32>(
-    record: &EmulationRecord,
-    counter: &mut EventCounter,
-) {
-    ShiftRightChip::<F>::count_extra_records(record, counter);
-    SLLChip::<F>::count_extra_records(record, counter);
-    BitwiseChip::<F>::count_extra_records(record, counter);
-    counter.start_indices.global_extra_poseidon2_start_index = counter.num_poseidon2_events;
-    GlobalChip::<F>::count_extra_records(record, counter);
+    fn count_bitwise_and_shifts(&self, counter: &mut EventCounter) {
+        let lists = &self.history.chip_steps;
+        counter.num_shift_right_events += lists.shift_right.len();
+        counter.num_shift_left_events += lists.shift_left.len();
+        counter.num_bitwise_events += lists.bitwise.len();
+    }
 }
 
 impl EventCounter {
+    /// Holds the counts to `record` once every chip has appended its extra records: the history's
+    /// lists, the branch comparisons the less-than chip proves beside its own rows, and the ADD rows
+    /// div/rem derives, which augmentation appends to the record.
     pub fn assert_event_counts_match(&self, record: &EmulationRecord) {
-        assert_eq!(
-            self.num_cpu_events,
-            record.cpu_events.len(),
-            "CPU event counts mismatch: expected {}, got {}",
-            record.cpu_events.len(),
-            self.num_cpu_events,
-        );
-        assert_eq!(
-            self.num_add_sub_events,
-            record.add_sub_events.len(),
-            "Add Sub events mismatch: expected {}, got {}",
-            record.add_sub_events.len(),
-            self.num_add_sub_events,
-        );
-        assert_eq!(
-            self.num_mul_events,
-            record.mul_events.len(),
-            "Mul events mismatch: expected {}, got {}",
-            record.mul_events.len(),
-            self.num_mul_events,
-        );
-        assert_eq!(
-            self.num_bitwise_events,
-            record.bitwise_events.len(),
-            "Bitwise events mismatch: expected {}, got {}",
-            record.bitwise_events.len(),
-            self.num_bitwise_events,
-        );
-        assert_eq!(
-            self.num_shift_left_events,
-            record.shift_left_events.len(),
-            "Shift left events mismatch: expected {}, got {}",
-            record.shift_left_events.len(),
-            self.num_shift_left_events,
-        );
-        assert_eq!(
-            self.num_shift_right_events,
-            record.shift_right_events.len(),
-            "Shift right events mismatch: expected {}, got {}",
-            record.shift_right_events.len(),
-            self.num_shift_right_events,
-        );
-        assert_eq!(
-            self.num_divrem_events,
-            record.divrem_events.len(),
-            "DivRem events mismatch: expected {}, got {}",
-            record.divrem_events.len(),
-            self.num_divrem_events,
-        );
-        assert_eq!(
-            self.num_lt_events,
-            record.lt_events.len(),
-            "LT events mismatch: expected {}, got {}",
-            record.lt_events.len(),
-            self.num_lt_events,
-        );
-        assert_eq!(
-            self.num_memory_initialize_events,
-            record.memory_initialize_events.len(),
-            "Memory initialize events mismatch: expected {}, got {}",
-            record.memory_initialize_events.len(),
-            self.num_memory_initialize_events,
-        );
-        assert_eq!(
-            self.num_memory_finalize_events,
-            record.memory_finalize_events.len(),
-            "Memory finalize events mismatch: expected {}, got {}",
-            record.memory_finalize_events.len(),
-            self.num_memory_finalize_events,
-        );
-        assert_eq!(
-            self.num_cpu_local_memory_access,
-            record.get_local_mem_events().count(),
-            "CPU local memory access mismatch: expected {}, got {}",
-            record.get_local_mem_events().count(),
-            self.num_cpu_local_memory_access,
-        );
-        assert_eq!(
-            self.num_syscall_events,
-            record.syscall_events.len(),
-            "Syscall events mismatch: expected {}, got {}",
-            record.syscall_events.len(),
-            self.num_syscall_events,
-        );
-        assert_eq!(
-            self.num_global_lookup_events,
-            record.global_lookup_events.len(),
-            "Global lookup events mismatch: expected {}, got {}",
-            record.global_lookup_events.len(),
-            self.num_global_lookup_events,
-        );
-        assert_eq!(
-            self.num_poseidon2_events,
-            record.poseidon2_events.len(),
-            "Poseidon2 events mismatch: expected {}, got {}",
-            record.poseidon2_events.len(),
-            self.num_poseidon2_events,
-        );
+        let history = history_of(record);
+        let lists = &history.chip_steps;
+        for (what, counted, held) in [
+            ("CPU", self.num_cpu_events, history.steps.len()),
+            (
+                "add/sub",
+                self.num_add_sub_events,
+                lists.add.len() + lists.sub.len() + record.add_events.len(),
+            ),
+            ("mul", self.num_mul_events, lists.mul.len()),
+            ("bitwise", self.num_bitwise_events, lists.bitwise.len()),
+            (
+                "shift left",
+                self.num_shift_left_events,
+                lists.shift_left.len(),
+            ),
+            (
+                "shift right",
+                self.num_shift_right_events,
+                lists.shift_right.len(),
+            ),
+            ("div/rem", self.num_divrem_events, lists.divrem.len()),
+            (
+                "less-than",
+                self.num_lt_events,
+                lists.lt.len() + lists.branch.len(),
+            ),
+            (
+                "memory initialize",
+                self.num_memory_initialize_events,
+                record.memory_initialize_events.len(),
+            ),
+            (
+                "memory finalize",
+                self.num_memory_finalize_events,
+                record.memory_finalize_events.len(),
+            ),
+            (
+                "local memory",
+                self.num_cpu_local_memory_access,
+                record.get_local_mem_events().count(),
+            ),
+            ("syscall", self.num_syscall_events, history.syscalls.len()),
+            (
+                "global lookup",
+                self.num_global_lookup_events,
+                record.global_lookup_events.len(),
+            ),
+            (
+                "Poseidon2",
+                self.num_poseidon2_events,
+                record.poseidon2_events.len(),
+            ),
+        ] {
+            assert_eq!(
+                counted, held,
+                "{what} events: counted {counted}, the record holds {held}"
+            );
+        }
     }
 }

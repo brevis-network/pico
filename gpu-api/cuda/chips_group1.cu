@@ -33,13 +33,15 @@
 // Memory_read_write
 #include "tracegen/riscv/memory_read_write.cuh"
 
-// Packed-event (MLE_PACKED_EVENTS=1) trace-gen kernels
-#include "tracegen/riscv/packed_tracegen.cuh"
-
 // Riscv_Poseidon2
 #include "tracegen/riscv/riscv_poseidon2.cuh"
 
 #include "tracegen/common/selectors_on_coset.cuh"
+
+// Trace builders that read the execution history, one header per chip family
+#include "history/bitwise_mul_shift.cuh"
+#include "history/add_sub_divrem.cuh"
+#include "history/cpu_memory_lt.cuh"
 
 namespace pico_gpu {
 
@@ -59,22 +61,6 @@ namespace pico_gpu {
         instrs, num_instrs, padded_num_rows, pc_base, trace, num_cols, stream);
     }
   } // namespace program_preprocess_u64
-
-  namespace program_u64 {
-    PICO_FFI
-    RustError::by_value cuda_riscv_program_generate_main_u64(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      uint64_t pc_base,
-      const FfiCpuEventU64* events,
-      field_t* trace,
-      cudaStream_t stream,
-      size_t num_instrs)
-    {
-      return generate_main(num_cols, event_size, trace_size, pc_base, events, trace, stream, num_instrs);
-    } // cuda_riscv_program_generate_main_u64
-  } // namespace program_u64
 
   namespace alu_base {
     PICO_FFI
@@ -322,193 +308,6 @@ namespace pico_gpu {
     } // cuda_poseidon2_packed_generate_preprocessed
   } // namespace poseidon2_packed
 
-  namespace add_u64 {
-    PICO_FFI
-    RustError::by_value cuda_add_generate_extra_record_and_main(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const AluEventU64* events,
-      field_t* trace,
-      field_t* byte_trace,
-      cudaStream_t stream)
-    {
-      return generate_extra_record_and_main(num_cols, event_size, trace_size, events, trace, byte_trace, stream);
-    }
-  } // namespace add_u64
-
-  namespace addw_u64 {
-    PICO_FFI
-    RustError::by_value cuda_addw_generate_extra_record_and_main(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const AluEventU64* events,
-      field_t* trace,
-      field_t* byte_trace,
-      cudaStream_t stream)
-    {
-      return generate_extra_record_and_main(num_cols, event_size, trace_size, events, trace, byte_trace, stream);
-    }
-  } // namespace addw_u64
-
-  namespace sub_u64 {
-    PICO_FFI
-    RustError::by_value cuda_sub_generate_extra_record_and_main(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const AluEventU64* events,
-      field_t* trace,
-      field_t* byte_trace,
-      cudaStream_t stream)
-    {
-      return generate_extra_record_and_main(num_cols, event_size, trace_size, events, trace, byte_trace, stream);
-    }
-  } // namespace sub_u64
-
-  namespace subw_u64 {
-    PICO_FFI
-    RustError::by_value cuda_subw_generate_extra_record_and_main(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const AluEventU64* events,
-      field_t* trace,
-      field_t* byte_trace,
-      cudaStream_t stream)
-    {
-      return generate_extra_record_and_main(num_cols, event_size, trace_size, events, trace, byte_trace, stream);
-    }
-  } // namespace subw_u64
-
-  namespace bitwise_u64 {
-    PICO_FFI
-    RustError::by_value cuda_bitwise_generate_extra_record_and_main_u64(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const AluEventU64* events,
-      field_t* trace,
-      field_t* byte_trace,
-      cudaStream_t stream)
-    {
-      return bitwise_u64::generate_extra_record_and_main(num_cols, event_size, trace_size, events, trace, byte_trace, stream);
-    }
-  } // namespace bitwise_u64
-
-  namespace divrem {
-    PICO_FFI
-    RustError::by_value cuda_divrem_generate_extra_record_and_main(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const AluEventU64* events,
-      field_t* trace,
-      cudaStream_t stream,
-      const DivremExtraEventIndices* extra_event_indices,
-      field_t* byte_trace,
-      AluEventU64* alu_add_sub_events,
-      size_t alu_add_sub_events_start_index)
-    {
-      return generate_extra_record_and_main(
-        num_cols, event_size, trace_size, events, trace, stream, extra_event_indices, byte_trace, alu_add_sub_events,
-        alu_add_sub_events_start_index);
-    }
-  } // namespace divrem
-
-  namespace lt_u64 {
-    PICO_FFI
-    RustError::by_value cuda_lt_generate_extra_record_and_main_u64(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const AluEventU64* events,
-      field_t* trace,
-      field_t* byte_trace,
-      cudaStream_t stream)
-    {
-      return generate_extra_record_and_main(num_cols, event_size, trace_size, events, trace, byte_trace, stream);
-    }
-  } // namespace lt_u64
-
-  namespace mul_u64 {
-    PICO_FFI
-    RustError::by_value cuda_mul_generate_extra_record_and_main_u64(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const AluEventU64* events,
-      field_t* trace,
-      field_t* byte_trace,
-      cudaStream_t stream)
-    {
-      return pico_gpu::mul_u64::generate_extra_record_and_main(
-        num_cols, event_size, trace_size, events, trace, byte_trace, stream);
-    }
-  } // namespace mul_u64
-
-  namespace sll_u64 {
-    PICO_FFI
-    RustError::by_value cuda_sll_generate_extra_record_and_main_u64(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const AluEventU64* events,
-      field_t* trace,
-      field_t* byte_trace,
-      cudaStream_t stream)
-    {
-      return pico_gpu::sll_u64::generate_extra_record_and_main(
-        num_cols, event_size, trace_size, events, trace, byte_trace, stream);
-    }
-  } // namespace sll_u64
-
-  namespace sr_u64 {
-    PICO_FFI
-    RustError::by_value cuda_sr_generate_extra_record_and_main_u64(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const AluEventU64* events,
-      field_t* trace,
-      field_t* byte_trace,
-      cudaStream_t stream)
-    {
-      return pico_gpu::sr_u64::generate_extra_record_and_main(
-        num_cols, event_size, trace_size, events, trace, byte_trace, stream);
-    }
-  } // namespace sr_u64
-
-  namespace cpu_u64 {
-    PICO_FFI
-    RustError::by_value cuda_cpu_generate_extra_record_and_main_u64(
-      size_t num_cols,
-      size_t event_size,
-      const FfiCpuEventU64* events,
-      field_t* trace,
-      cudaStream_t stream,
-      const CpuExtraEventIndices* extra_event_indices,
-      field_t* byte_trace,
-      AluEventU64* alu_add_sub_events,
-      size_t alu_add_sub_events_start_index,
-      AluEventU64* alu_lt_events,
-      size_t alu_lt_events_start_index)
-    {
-      return generate_extra_record_and_main(
-        num_cols, event_size, events, trace, stream, extra_event_indices, byte_trace,
-        alu_add_sub_events, alu_add_sub_events_start_index,
-        alu_lt_events, alu_lt_events_start_index);
-    }
-
-    PICO_FFI
-    RustError::by_value
-    cuda_cpu_pad_trace_u64(size_t num_cols, size_t start_row, size_t end_row, field_t* trace, cudaStream_t stream)
-    {
-      return pad_trace(num_cols, start_row, end_row, trace, stream);
-    }
-  } // namespace cpu_u64
-
   namespace riscv_global {
     PICO_FFI
     RustError::by_value cuda_riscv_global_generate_extra_record_and_main(
@@ -521,30 +320,14 @@ namespace pico_gpu {
       field_t* byte_trace,
       Poseidon2Event* poseidon2_events,
       size_t poseidon2_events_start_index,
-      const field_t* round_constants)
+      const field_t* round_constants,
+      StepEvents* steps)
     {
       return generate_extra_record_and_main(
         num_cols, event_size, trace_size, events, trace, stream, byte_trace, poseidon2_events,
-        poseidon2_events_start_index, round_constants);
+        poseidon2_events_start_index, round_constants, steps);
     }
   } // namespace riscv_global
-
-  namespace memory_read_write_u64 {
-    PICO_FFI
-    RustError::by_value cuda_memory_read_write_generate_extra_record_and_main_u64(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const FfiCpuEventU64* events,
-      const size_t* event_indices,
-      field_t* trace,
-      cudaStream_t stream,
-      field_t* byte_trace)
-    {
-      return generate_extra_record_and_main(
-        num_cols, event_size, trace_size, events, event_indices, trace, stream, byte_trace);
-    }
-  } // namespace memory_read_write_u64
 
   namespace riscv_poseidon2 {
     PICO_FFI
@@ -556,10 +339,11 @@ namespace pico_gpu {
       field_t* trace,
       field_t* dummy_row,
       const field_t* round_constants,
-      cudaStream_t stream)
+      cudaStream_t stream,
+      StepEvents* steps)
     {
       return generate_main(
-        num_cols, event_size, trace_size, events, trace, dummy_row, round_constants, stream);
+        num_cols, event_size, trace_size, events, trace, dummy_row, round_constants, stream, steps);
     } // cuda_riscv_poseidon2_generate_main
   } // namespace riscv_poseidon2
 
@@ -578,202 +362,5 @@ namespace pico_gpu {
     return selectors_on_coset_gpu(
       coset_constants, xs_len, evals_len, evals, is_first_row, is_last_row, is_transition, inv_zeroifier, stream);
   }
-
-  namespace alu_common {
-    PICO_FFI
-    RustError::by_value cuda_alu_partition_events(
-      const AluEventU64* all_events,
-      size_t total_count,
-      AluEventU64* out_add,
-      AluEventU64* out_sub,
-      AluEventU64* out_addw,
-      AluEventU64* out_subw,
-      cudaStream_t stream)
-    {
-      return pico_gpu::add_sub_common::partition_events(
-        all_events, total_count, out_add, out_sub, out_addw, out_subw, stream);
-    }
-  } // namespace alu_common
-
-
-  // ─── Packed-event (MLE_PACKED_EVENTS=1) FFI entries ─────────────────────────────────────
-  // New symbols only; every entry validates the format handshake so an unpaired
-  // pico / pico-gpu deploy fails loudly instead of misreading bytes.
-
-  namespace cpu_u64_packed {
-    PICO_FFI
-    RustError::by_value cuda_cpu_generate_extra_record_and_main_u64_packed(
-      size_t num_cols,
-      size_t event_size,
-      const FfiCpuEventPacked* events,
-      size_t chunk,
-      field_t* trace,
-      cudaStream_t stream,
-      const CpuExtraEventIndices* extra_event_indices,
-      field_t* byte_trace,
-      AddSubEventPacked* alu_add_sub_events,
-      size_t alu_add_sub_events_start_index,
-      LtEventPacked* alu_lt_events,
-      size_t alu_lt_events_start_index,
-      size_t format_version)
-    {
-      if (format_version != PICO_PACKED_EVENT_FORMAT_V1) return RustError{cudaErrorInvalidValue};
-      return generate_extra_record_and_main_packed(
-        num_cols, event_size, events, (uint32_t)chunk, trace, stream, extra_event_indices,
-        byte_trace, alu_add_sub_events, alu_add_sub_events_start_index,
-        alu_lt_events, alu_lt_events_start_index);
-    }
-  } // namespace cpu_u64_packed
-
-  namespace memory_read_write_u64_packed {
-    PICO_FFI
-    RustError::by_value cuda_memory_read_write_generate_extra_record_and_main_u64_packed(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const FfiCpuEventPacked* events,
-      const FfiMemRecordPacked* mem_records,
-      size_t chunk,
-      const size_t* event_indices,
-      field_t* trace,
-      cudaStream_t stream,
-      field_t* byte_trace,
-      size_t format_version)
-    {
-      if (format_version != PICO_PACKED_EVENT_FORMAT_V1) return RustError{cudaErrorInvalidValue};
-      return generate_extra_record_and_main_packed(
-        num_cols, event_size, trace_size, events, mem_records, (uint32_t)chunk, event_indices,
-        trace, stream, byte_trace);
-    }
-  } // namespace memory_read_write_u64_packed
-
-  namespace lt_u64_packed {
-    PICO_FFI
-    RustError::by_value cuda_lt_generate_extra_record_and_main_u64_packed(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const LtEventPacked* events,
-      field_t* trace,
-      field_t* byte_trace,
-      cudaStream_t stream,
-      size_t format_version)
-    {
-      if (format_version != PICO_PACKED_EVENT_FORMAT_V1) return RustError{cudaErrorInvalidValue};
-      return generate_extra_record_and_main_packed(
-        num_cols, event_size, trace_size, events, trace, byte_trace, stream);
-    }
-  } // namespace lt_u64_packed
-
-  namespace add_u64_packed {
-    PICO_FFI
-    RustError::by_value cuda_add_generate_extra_record_and_main_packed(
-      size_t num_cols, size_t event_size, size_t trace_size,
-      const AddSubEventPacked* events, field_t* trace, field_t* byte_trace,
-      cudaStream_t stream, size_t format_version)
-    {
-      if (format_version != PICO_PACKED_EVENT_FORMAT_V1) return RustError{cudaErrorInvalidValue};
-      return generate_extra_record_and_main_packed(
-        num_cols, event_size, trace_size, events, trace, byte_trace, stream);
-    }
-  } // namespace add_u64_packed
-
-  namespace addw_u64_packed {
-    PICO_FFI
-    RustError::by_value cuda_addw_generate_extra_record_and_main_packed(
-      size_t num_cols, size_t event_size, size_t trace_size,
-      const AddSubEventPacked* events, field_t* trace, field_t* byte_trace,
-      cudaStream_t stream, size_t format_version)
-    {
-      if (format_version != PICO_PACKED_EVENT_FORMAT_V1) return RustError{cudaErrorInvalidValue};
-      return generate_extra_record_and_main_packed(
-        num_cols, event_size, trace_size, events, trace, byte_trace, stream);
-    }
-  } // namespace addw_u64_packed
-
-  namespace sub_u64_packed {
-    PICO_FFI
-    RustError::by_value cuda_sub_generate_extra_record_and_main_packed(
-      size_t num_cols, size_t event_size, size_t trace_size,
-      const AddSubEventPacked* events, field_t* trace, field_t* byte_trace,
-      cudaStream_t stream, size_t format_version)
-    {
-      if (format_version != PICO_PACKED_EVENT_FORMAT_V1) return RustError{cudaErrorInvalidValue};
-      return generate_extra_record_and_main_packed(
-        num_cols, event_size, trace_size, events, trace, byte_trace, stream);
-    }
-  } // namespace sub_u64_packed
-
-  namespace subw_u64_packed {
-    PICO_FFI
-    RustError::by_value cuda_subw_generate_extra_record_and_main_packed(
-      size_t num_cols, size_t event_size, size_t trace_size,
-      const AddSubEventPacked* events, field_t* trace, field_t* byte_trace,
-      cudaStream_t stream, size_t format_version)
-    {
-      if (format_version != PICO_PACKED_EVENT_FORMAT_V1) return RustError{cudaErrorInvalidValue};
-      return generate_extra_record_and_main_packed(
-        num_cols, event_size, trace_size, events, trace, byte_trace, stream);
-    }
-  } // namespace subw_u64_packed
-
-  namespace divrem_packed {
-    PICO_FFI
-    RustError::by_value cuda_divrem_generate_extra_record_and_main_packed(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const AluEventU64* events,
-      field_t* trace,
-      cudaStream_t stream,
-      const DivremExtraEventIndices* extra_event_indices,
-      field_t* byte_trace,
-      AddSubEventPacked* alu_add_sub_events,
-      size_t alu_add_sub_events_start_index,
-      size_t format_version)
-    {
-      if (format_version != PICO_PACKED_EVENT_FORMAT_V1) return RustError{cudaErrorInvalidValue};
-      return generate_extra_record_and_main_packed(
-        num_cols, event_size, trace_size, events, trace, stream, extra_event_indices,
-        byte_trace, alu_add_sub_events, alu_add_sub_events_start_index);
-    }
-  } // namespace divrem_packed
-
-  namespace program_u64_packed {
-    PICO_FFI
-    RustError::by_value cuda_riscv_program_generate_main_u64_packed(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      uint64_t pc_base,
-      const FfiCpuEventPacked* events,
-      field_t* trace,
-      cudaStream_t stream,
-      size_t num_instrs,
-      size_t format_version)
-    {
-      if (format_version != PICO_PACKED_EVENT_FORMAT_V1) return RustError{cudaErrorInvalidValue};
-      return generate_main_packed(
-        num_cols, event_size, trace_size, pc_base, events, trace, stream, num_instrs);
-    }
-  } // namespace program_u64_packed
-
-  namespace alu_common_packed {
-    PICO_FFI
-    RustError::by_value cuda_alu_partition_events_packed(
-      const AddSubEventPacked* all_events,
-      size_t total_count,
-      AddSubEventPacked* out_add,
-      AddSubEventPacked* out_sub,
-      AddSubEventPacked* out_addw,
-      AddSubEventPacked* out_subw,
-      cudaStream_t stream,
-      size_t format_version)
-    {
-      if (format_version != PICO_PACKED_EVENT_FORMAT_V1) return RustError{cudaErrorInvalidValue};
-      return pico_gpu::add_sub_common_packed::partition_events_packed(
-        all_events, total_count, out_add, out_sub, out_addw, out_subw, stream);
-    }
-  } // namespace alu_common_packed
 
 } // namespace pico_gpu

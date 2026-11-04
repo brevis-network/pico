@@ -98,28 +98,6 @@ impl<const N: usize> CachedModulus<N> {
     }
 }
 
-/// Modular addition: (a + b) % modulus
-#[inline(always)]
-pub fn mod_add<const N: usize>(a: &Limbs<N>, b: &Limbs<N>, modulus: &CachedModulus<N>) -> Limbs<N> {
-    mod_add_limbs(a, b, &modulus.modulus)
-}
-
-/// Modular subtraction: (a - b) % modulus
-#[inline(always)]
-pub fn mod_sub<const N: usize>(a: &Limbs<N>, b: &Limbs<N>, modulus: &CachedModulus<N>) -> Limbs<N> {
-    mod_sub_limbs(a, b, &modulus.modulus)
-}
-
-/// Modular multiplication: (a * b) % modulus
-#[inline(always)]
-pub fn mod_mul<const N: usize>(a: &Limbs<N>, b: &Limbs<N>, modulus: &CachedModulus<N>) -> Limbs<N> {
-    debug_assert!(!modulus.modulus.is_zero(), "modulus must be non-zero");
-    let a_mont = montgomery_mul(a, &modulus.r2, modulus);
-    let b_mont = montgomery_mul(b, &modulus.r2, modulus);
-    let ab_mont = montgomery_mul(&a_mont, &b_mont, modulus);
-    montgomery_mul(&ab_mont, &Limbs::from_slice(&[1u32]), modulus)
-}
-
 // ============================================================================
 // Specialized limb sizes for different field types
 // ============================================================================
@@ -222,17 +200,6 @@ fn mod_add_limbs<const N: usize>(a: &Limbs<N>, b: &Limbs<N>, modulus: &Limbs<N>)
         reduced
     } else {
         sum
-    }
-}
-
-#[inline(always)]
-fn mod_sub_limbs<const N: usize>(a: &Limbs<N>, b: &Limbs<N>, modulus: &Limbs<N>) -> Limbs<N> {
-    let (diff, borrow) = sub_limbs(a, b);
-    if borrow != 0 {
-        let (sum, _) = add_limbs(&diff, modulus);
-        sum
-    } else {
-        diff
     }
 }
 

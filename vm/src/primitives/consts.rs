@@ -76,17 +76,14 @@ pub const TEST_CHUNK_SIZE: u32 = 1 << 16;
 // One, not two: the deferred split's committed-chunk filter is only valid at one chunk per
 // batch (see `chunk_batch_size`).
 pub const TEST_CHUNK_BATCH_SIZE: u32 = 1;
-pub const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 7;
 
 // for benchmark
 // Unlocked by the 25-bit chunk-clk widening (which makes this size sound), the slimmed AIR
 // (a narrower RS-code matrix) and the streaming RS/WHIR commit (which caps its peak
 // allocation). Was 2^22, the old 24-bit chunk-clk cap.
 pub const BENCH_MAX_CHUNK_SIZE: u32 = 1 << 23;
-pub const BENCH_MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 20;
 // One chunk per batch, for the same reason as `TEST_CHUNK_BATCH_SIZE`.
 pub const BENCH_MAX_CHUNK_BATCH_SIZE: u32 = 1;
-pub const BENCH_RECURSION_MAX_CHUNK_SIZE: u32 = 1 << 22;
 
 /*
 For RiscV

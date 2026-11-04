@@ -16,11 +16,11 @@ use crate::{
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
         emulator::MetaEmulator,
-        opts::EmulatorOpts,
+        opts::{EmulatorOpts, ReplayWorkers, SnapshotMainMode},
         record::RecordBehavior,
         riscv::{
-            emulator::RiscvEmulator, event_pool::HostAllocFlags,
-            public_values::RecordFinalPvsState, record::EmulationRecord,
+            emulator::RiscvEmulator, public_values::RecordFinalPvsState, record::EmulationRecord,
+            record_slots::hold_records_unbounded,
         },
         stdin::EmulatorStdin,
     },
@@ -34,19 +34,6 @@ use crate::{
 use cudart::stream::CudaStream;
 use p3_koala_bear::KoalaBear;
 use std::{fs, path::PathBuf, sync::Arc};
-
-/// Initialise the global CPU event buffer pool if nothing else has yet.
-///
-/// A `std::sync::Once` is not enough: it only covers this call site, while the same pool is also
-/// initialised from chip and emulator code. Guarding on the pool's own state matches the other call
-/// sites and is correct whoever got there first.
-#[allow(dead_code)] // kept for the chip tests to be rewritten on the MLE engine
-fn init_cpu_event_pool_once() {
-    use crate::emulator::riscv::cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized};
-    if !is_pool_initialized() {
-        init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
-    }
-}
 
 /// Run emulation and return all records.
 #[allow(dead_code)] // kept for the chip tests to be rewritten on the MLE engine
@@ -64,12 +51,10 @@ pub(crate) fn test_rv64_emulate_with_opts(
     stdin: EmulatorStdin<Program, Vec<u8>>,
     opts: EmulatorOpts,
 ) -> Vec<crate::emulator::riscv::record::EmulationRecord> {
-    init_cpu_event_pool_once();
-
     println!("Setting up emulator (chunk_size={})", opts.chunk_size);
     let final_pvs_state = Arc::new(RecordFinalPvsState::default());
     let mut emulator =
-        RiscvEmulator::new_single::<KoalaBear>(program.clone(), final_pvs_state, opts, None);
+        RiscvEmulator::new_single::<KoalaBear>(program.clone(), final_pvs_state, opts);
 
     emulator.write_stdin(&stdin);
 
@@ -87,6 +72,37 @@ pub(crate) fn test_rv64_emulate_with_opts(
     }
 
     all_records
+}
+
+/// Every record of the fib guest's run on `n = 10` in 2048-cycle chunks, in emission order: a few
+/// CPU chunks with branches, loads, stores and the ECALLs a guest makes to commit and halt.
+pub(crate) fn fib_records() -> Vec<EmulationRecord> {
+    const FIB_ELF: &[u8] = include_bytes!("../compiler/test_elf/fib-elf");
+    let program = Compiler::new(SourceType::RISCV, FIB_ELF)
+        .expect("parse the fib ELF")
+        .compile();
+    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    stdin.write(&10u32);
+    let opts = EmulatorOpts {
+        chunk_size: 2048,
+        chunk_batch_size: 1,
+        max_cycles: Some(1 << 32),
+        cycle_tracker: false,
+        cost_estimator: false,
+        snapshot_main: SnapshotMainMode::Interpreter,
+        replay_workers: ReplayWorkers::Interpreter,
+    };
+    hold_records_unbounded();
+    let final_pvs_state = Arc::new(RecordFinalPvsState::default());
+    let mut emulator = RiscvEmulator::new_single::<KoalaBear>(program, final_pvs_state, opts);
+    emulator.write_stdin(&stdin.finalize());
+    let mut records = Vec::new();
+    while !emulator
+        .emulate_batch(&mut |record| records.push(record))
+        .expect("fib")
+        .done
+    {}
+    records
 }
 
 /// Run extra_record for all active chips to populate derived events
@@ -213,7 +229,7 @@ pub(crate) fn generate_test_chunks(elf: TestElf, input: TestInput) -> Vec<Emulat
         EmulatorOpts::bench_riscv_ops(),
     );
     let final_pvs_state = Arc::new(RecordFinalPvsState::default());
-    let mut emulator = MetaEmulator::setup_riscv(&witness, final_pvs_state, None);
+    let mut emulator = MetaEmulator::setup_riscv(&witness, final_pvs_state);
     let mut records = vec![];
     loop {
         let done = emulator.next_record_batch(&mut |r| records.push(r)).done;

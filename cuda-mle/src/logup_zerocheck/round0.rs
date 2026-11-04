@@ -332,6 +332,7 @@ pub fn evaluate_round0_constraints_gpu<
                     if z1_verify {
                         z1_result = Some(sp); // fall through to interpreter and compare
                     } else {
+                        crate::air_times::note_path("compiled");
                         return Ok(sp);
                     }
                 }
@@ -406,6 +407,7 @@ pub fn evaluate_round0_constraints_gpu<
 
     let mut sp_evals =
         crate::scratch::alloc::<FK::ValExt>(num_cosets as usize * skip_domain as usize);
+    crate::air_times::note_path("interpreter");
     // SAFETY:
     // - The kernel performs no bounds checking; it relies on the rules being well-formed, with
     //   every node index valid.

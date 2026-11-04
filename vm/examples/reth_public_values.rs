@@ -61,7 +61,7 @@ use pico_vm::{
     },
 };
 
-/// Fallback chunk size, and the default capacity of the pinned CPU and ALU event buffers.
+/// Fallback chunk size: `riscv::DEFAULT_MAX_CHUNK_SIZE`, the most `emulate` derives on its own.
 const DEFAULT_CHUNK_SIZE: &str = "4194304";
 
 /// Fields are tab-separated because event-kind names contain spaces (`Cpu Events`).
@@ -120,7 +120,7 @@ struct Args {
 struct BlockReport {
     block: u64,
     /// Always 0 in practice: a `HALT` with a non-zero code surfaces as an emulation *error*
-    /// (`EmulationError::HaltWithNonZeroExitCode`), which aborts the run, rather than reaching
+    /// (`EmulationError::AbnormalTermination`), which aborts the run, rather than reaching
     /// these public values. Recorded because the report should say what the run saw, not because
     /// it is a gate — the gate is that the emulation returned at all.
     exit_code: u32,
@@ -163,11 +163,8 @@ fn main() {
         );
     }
 
-    // `EmulatorOpts::default()` derives the chunk size from host RAM, while the pinned CPU and ALU
-    // event buffers are sized from `CHUNK_SIZE` alone and default to 2^22. A derived chunk larger
-    // than the buffers overflows them part-way through a block — "Buffer is full", from
-    // `event_pool.rs`. `mle::machine::riscv::emulate` clamps instead, using two `pub(crate)`
-    // constants an example cannot see, so setting the variable is the seam that is public.
+    // `EmulatorOpts::default()` derives the chunk size from host RAM, and the report is keyed by
+    // `CHUNK_SIZE`, so the variable names the size every run of this example takes.
     if std::env::var_os("CHUNK_SIZE").is_none() {
         std::env::set_var("CHUNK_SIZE", DEFAULT_CHUNK_SIZE);
     }
@@ -317,7 +314,6 @@ fn run_block(block: u64, program: &Arc<Program>, input: &[u8]) -> BlockReport {
         program.clone(),
         Arc::new(RecordFinalPvsState::default()),
         EmulatorOpts::default(),
-        None,
     );
     for chunk in &*stdin.inputs {
         emulator.state.input_stream.push(chunk.clone());
@@ -335,7 +331,7 @@ fn run_block(block: u64, program: &Arc<Program>, input: &[u8]) -> BlockReport {
             .emulate_batch(&mut |record| batch.push(record))
             .unwrap_or_else(|e| panic!("block {block} failed to emulate: {e:?}"));
         for record in &batch {
-            retired += record.cpu_events.len();
+            retired += record.cpu_steps().len();
             // `stats()` already drops zero-valued entries; filtering again would say otherwise.
             event_kinds.extend(record.stats().into_keys());
             if record.public_values.exit_code != 0 {

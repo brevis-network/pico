@@ -1,6 +1,7 @@
 use super::AotEmulatorCore;
 use hashbrown::HashMap;
 use pico_vm::{
+    compiler::addr::fits_pc,
     emulator::{
         opts::EmulatorOpts,
         riscv::{
@@ -49,16 +50,16 @@ impl AotEmulatorCore {
                 >= self.program_len() as u64
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn run_to_completion(
-        &mut self,
-        run_dispatch: fn(&mut AotEmulatorCore) -> Result<(), String>,
-    ) -> Result<(), String> {
-        self.batch_chunk_target = 0;
-        self.batch_chunks_emulated = 0;
-        self.batch_stop = false;
-        self.chunk_split_config = ChunkSplitConfig::disabled(self.max_syscall_cycles);
-        run_dispatch(self)
+    /// The interpreter's error for a run that ends here, where it raises it: inside an
+    /// unconstrained block, or at a pc the CPU trace cannot hold.
+    pub(crate) fn run_end_error(&self) -> Option<EmulationError> {
+        if self.is_unconstrained_mode() {
+            Some(EmulationError::UnconstrainedEnd)
+        } else if !fits_pc(self.pc) {
+            Some(EmulationError::EndPcBeyondProofAddress(self.pc))
+        } else {
+            None
+        }
     }
 
     pub(crate) fn next_state_batch(
@@ -125,8 +126,13 @@ impl AotEmulatorCore {
         }
 
         let done = self.is_program_done();
+        if let Some(err) = done.then(|| self.run_end_error()).flatten() {
+            return Err(err);
+        }
 
-        if !done {
+        if done {
+            self.finish_emitted_chunk();
+        } else {
             self.current_batch = self.current_batch.wrapping_add(1);
         }
 
@@ -196,6 +202,15 @@ impl AotEmulatorCore {
         }
     }
 
+    /// The registers [`Self::restore_touched_snapshot_registers`] just restored: the register half of
+    /// the segment's prestate.
+    fn count_touched_registers(&mut self) {
+        let restored = (0..32)
+            .filter(|&i| self.accessed_regs[i] && self.batch_start_reg_present[i])
+            .count();
+        self.snapshot_counts.first_touch_registers += restored as u64;
+    }
+
     /// Build snapshot state header.
     ///
     /// Note: We only include fields essential for trace-mode integration.
@@ -206,9 +221,18 @@ impl AotEmulatorCore {
         // wait stops looking normal, but keep waiting: a merely slow run must not lose its prove,
         // and `split_segments` already warns at startup about the configuration that stands off.
         let mut reported = false;
+        let t_wait = std::time::Instant::now();
+        let waiting = pico_vm::mle::spans::wait(
+            pico_vm::mle::spans::WorkKind::Snapshot,
+            pico_vm::mle::ledger::context_batch(),
+        );
         let memory = loop {
             match GLOBAL_MEMORY_POOL.1.recv_timeout(POOL_WAIT) {
-                Ok(memory) => break memory,
+                Ok(memory) => {
+                    drop(waiting);
+                    pico_vm::mle::ledger::pool_wait(t_wait, std::time::Instant::now(), reported);
+                    break memory;
+                }
                 Err(RecvTimeoutError::Disconnected) => {
                     panic!("Global memory pool channel closed")
                 }
@@ -223,25 +247,13 @@ impl AotEmulatorCore {
                 }
             }
         };
-        let mut registers = [RuntimeRegisterRecord::default(); 32];
-        for (idx, present) in self.reg_present.iter().copied().enumerate() {
-            if present {
-                let record = self.register_records[idx];
-                registers[idx] = RuntimeRegisterRecord {
-                    chunk: record.chunk,
-                    timestamp: record.timestamp,
-                    value: self.registers[idx],
-                };
-            }
-        }
-
         let mut snapshot = RiscvEmulationState {
             global_clk: self.insn_count,
             current_batch: self.current_batch,
             current_chunk: self.current_chunk,
             clk: self.clk as u64,
             pc: self.pc,
-            registers,
+            registers: self.runtime_registers(),
             uninitialized_memory: Memory::default(),
             // Stream fields are filled by `snapshot_stream_state` below; cloning them here
             // is redundant (the clones would be immediately overwritten). Start empty to
@@ -256,6 +268,23 @@ impl AotEmulatorCore {
         snapshot
     }
 
+    /// The register file as the interpreter keeps it: a register never accessed is the zero
+    /// record.
+    pub(crate) fn runtime_registers(&self) -> [RuntimeRegisterRecord; 32] {
+        let mut registers = [RuntimeRegisterRecord::default(); 32];
+        for (idx, present) in self.reg_present.iter().copied().enumerate() {
+            if present {
+                let record = self.register_records[idx];
+                registers[idx] = RuntimeRegisterRecord {
+                    chunk: record.chunk,
+                    timestamp: record.timestamp,
+                    value: self.registers[idx],
+                };
+            }
+        }
+        registers
+    }
+
     /// Fill snapshot with memory delta (old values of accessed locations).
     ///
     /// Only includes registers and memory addresses that were accessed during the batch.
@@ -267,6 +296,7 @@ impl AotEmulatorCore {
         // `build_snapshot_state`, so the next batch can skip its `clear()` scan.
         self.memory_snapshot_clean = true;
         self.restore_touched_snapshot_registers(snapshot);
+        self.count_touched_registers();
     }
 
     /// Fill snapshot with full prestate (complete batch-start state).
@@ -282,6 +312,7 @@ impl AotEmulatorCore {
         std::mem::swap(&mut snapshot.memory, &mut self.memory);
         snapshot.memory.par_restore_from(&batch_memory_snapshot);
         self.restore_touched_snapshot_registers(snapshot);
+        self.count_touched_registers();
         batch_memory_snapshot.reset();
         self.memory_snapshot = batch_memory_snapshot;
         // `batch_memory_snapshot` was just `reset()` (clean). (This is the final/`done` batch, so
@@ -349,6 +380,7 @@ mod tests {
             opts::EmulatorOpts,
             riscv::{
                 memory::{memory_pool_size, GLOBAL_MEMORY_RECYCLER},
+                record_slots::hold_records_unbounded,
                 riscv_emulator::EmulationError,
                 state::RiscvEmulationState,
             },
@@ -436,6 +468,66 @@ mod tests {
             assert!(report.done);
             assert_eq!(report.current_cycle, 3);
             recycle(segments);
+        }
+    }
+
+    /// Jumps to `(1 << shift) + offset`, with every instruction filling a chunk and every chunk
+    /// ending a batch, and returns how the run ended, with the sink off or on.
+    fn run_ending_at(shift: u64, offset: i64) -> [Result<(), EmulationError>; 2] {
+        let program = Arc::new(Program::new(
+            vec![
+                Instruction::new(Opcode::ADD, 1, 0, 1, false, true),
+                Instruction::new(Opcode::SLL, 1, 1, shift, false, true),
+                Instruction::new(Opcode::JALR, 0, 1, offset as u64, false, true),
+            ],
+            0x1000,
+            0x1000,
+        ));
+        let opts = EmulatorOpts {
+            chunk_size: 1,
+            chunk_batch_size: 1,
+            ..opts(None)
+        };
+        [false, true].map(|emitting| {
+            let mut emu = AotEmulatorCore::new(program.clone(), Vec::new());
+            if emitting {
+                emu.emit_records();
+            }
+            loop {
+                let (segments, report) = emu.next_state_batch_segments(opts, interpret, 1)?;
+                recycle(segments);
+                if report.done {
+                    return Ok(());
+                }
+            }
+        })
+    }
+
+    /// A jump to a pc the CPU trace cannot hold, crossing a chunk boundary as it ends the batch,
+    /// ends the run there, as the interpreter's error: no record is cut for an end no proof can
+    /// state.
+    #[test]
+    fn a_run_ending_beyond_the_proof_address_range_is_the_interpreters_error() {
+        hold_records_unbounded();
+        for shift in [32, 48] {
+            for ended in run_ending_at(shift, 0) {
+                assert!(
+                    matches!(
+                        ended,
+                        Err(EmulationError::EndPcBeyondProofAddress(pc)) if pc == 1 << shift
+                    ),
+                    "{ended:?}"
+                );
+            }
+        }
+    }
+
+    /// The last pc the CPU trace can hold ends a run as the interpreter's does.
+    #[test]
+    fn a_run_ending_at_the_last_proof_pc_is_no_error() {
+        hold_records_unbounded();
+        for ended in run_ending_at(32, -4) {
+            assert!(ended.is_ok(), "{ended:?}");
         }
     }
 

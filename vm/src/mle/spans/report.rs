@@ -8,7 +8,7 @@
 //! `wall` — see [`RoleFigures::lane_time_us`], which is also where the reconciliation lives.
 use std::collections::BTreeMap;
 
-use super::record::{LaneId, Role, Span, State, WorkKind};
+use super::{LaneId, Role, Span, State, WorkKind};
 
 // ------------------------------------------------------------------------------- per-role rollup
 
@@ -300,6 +300,7 @@ fn covered_in(spans: &[Span], lo: u64, hi: u64, pred: impl Fn(&Span) -> bool) ->
 const DRAWN: &[Role] = &[
     Role::Snapshot,
     Role::Emulate,
+    Role::Sequencer,
     Role::RiscvPreparer,
     Role::ConvertPreparer,
     Role::CombinePreparer,

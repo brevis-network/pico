@@ -172,7 +172,6 @@ mod tests {
             test_program(),
             Arc::new(RecordFinalPvsState::default()),
             EmulatorOpts::default(),
-            None,
         )
         .tap_mut(|emu| {
             emu.state.input_stream = input_stream;

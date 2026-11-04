@@ -12,17 +12,8 @@ tests=(
 "test_byte_gpu_generate_preprocessed"
 "test_riscv_poseidon2_gpu_generate_main"
 "bench_riscv_poseidon2_cpu_vs_gpu"
-"test_divrem_gpu_generate_extra_record_and_main"
-"bench_divrem_cpu_vs_gpu"
-"test_riscv_program_gpu_generate_extra_record_and_main"
-"bench_riscv_program_cpu_vs_gpu"
 "test_riscv_global_gpu_generate_extra_record_and_main"
 "bench_riscv_global_cpu_vs_gpu"
-"test_syscall_gpu_generate_extra_record_and_main"
-"bench_syscall_cpu_vs_gpu"
-"test_lt_gpu_generate_extra_record_and_main"
-"test_bitwise_gpu_generate_extra_record_and_main"
-"bench_bitwise_cpu_vs_gpu"
 "test_keccak_gpu_generate_extra_record_and_main"
 "test_sha_compress_gpu_generate_extra_record_and_main"
 "bench_sha_compress_cpu_vs_gpu"
@@ -34,10 +25,8 @@ tests=(
 "bench_sha_extend_control_cpu_vs_gpu"
 "test_memory_local_gpu_generate_extra_record_and_main"
 "test_memory_init_finalize_gpu_generate_extra_record_and_main"
-"test_memory_read_write_gpu_generate_extra_record_and_main"
 "bench_memory_local_cpu_vs_gpu"
 "bench_memory_init_finalize_cpu_vs_gpu"
-"bench_memory_read_write_cpu_vs_gpu"
 "test_secp256k1_addassign_generate_extra_record_and_main"
 "test_bn254_addassign_generate_extra_record_and_main"
 "test_bls12381_addassign_generate_extra_record_and_main"
@@ -69,6 +58,20 @@ for t in "${tests[@]}"; do
     passed=$(awk '/^test result: ok\./ { n += $4 } END { print n + 0 }' "$log")
     if [ "$passed" -eq 0 ]; then
         echo "run_all_tests.sh: '$t' matched no test" >&2
+        exit 1
+    fi
+    summary+=("$passed $t")
+done
+# The RISC-V chips that build their traces from the execution history are checked against the
+# host by these integration tests instead.
+for t in history_add_sub_divrem history_bitwise_mul_shift history_cpu_memory_lt history_ecall_syscall device_history; do
+    echo "========================================="
+    echo "Running $t"
+    echo "========================================="
+    cargo test --release -p pico-vm --features cuda --test "$t" -- --test-threads=1 2>&1 | tee "$log"
+    passed=$(awk '/^test result: ok\./ { n += $4 } END { print n + 0 }' "$log")
+    if [ "$passed" -eq 0 ]; then
+        echo "run_all_tests.sh: '$t' passed no test" >&2
         exit 1
     fi
     summary+=("$passed $t")

@@ -96,3 +96,21 @@ pub struct DivremExtraEventIndices {
     pub add: usize,
     pub lt: usize,
 }
+
+/// The ADD rows a div/rem of `opcode` on `b` and `c` appends to the add chip: one for each of the
+/// divisor and the remainder that a signed operation finds negative, so none, one or two.
+#[must_use]
+pub fn derived_add_rows(opcode: Opcode, b: u64, c: u64) -> usize {
+    let (_, remainder) = get_quotient_and_remainder(b, c, opcode);
+    let (c_neg, rem_neg) = if is_signed_64bit_operation(opcode) {
+        (get_msb(c), get_msb(remainder))
+    } else if is_signed_word_operation(opcode) {
+        (
+            get_msb((c as i32) as i64 as u64),
+            get_msb((remainder as i32) as i64 as u64),
+        )
+    } else {
+        (0, 0)
+    };
+    usize::from(c_neg) + usize::from(rem_neg)
+}

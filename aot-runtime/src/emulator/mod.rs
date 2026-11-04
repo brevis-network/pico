@@ -14,12 +14,14 @@ mod clock;
 mod constants;
 mod instructions_base;
 mod instructions_no_count;
-mod instructions_tracked;
 mod memory;
 mod registers;
+mod replay;
+mod sink;
 mod snapshot;
 mod state;
 mod types;
 mod unconstrained;
 
+pub use sink::{AotSink, EmittedChunk, RecordingAotSink};
 pub use state::AotEmulatorCore;

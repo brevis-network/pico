@@ -16,6 +16,8 @@ pub mod exe;
 pub mod recursion;
 pub mod riscv;
 pub mod shape;
+// The fixed oracle: a chunk's device traces held to the host's under one per-air table.
+pub mod trace_oracle;
 // Needs `pico-verifier/codec`, which a guest build leaves out.
 #[cfg(not(target_os = "zkvm"))]
 pub mod vk_bundle;

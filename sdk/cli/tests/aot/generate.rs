@@ -6,11 +6,9 @@ use std::{
     process::{Command, Output},
 };
 
-use pico_cli::source::release_has_aot;
-
 use crate::{
-    assert_error, cargo_pico, fib_sha256, from_release, output, scratch::scratch_dir,
-    stand_in_pico, FIB_ELF, VERSION,
+    assert_error, cargo_pico, fib_sha256, from_release, output, release_refusal,
+    scratch::scratch_dir, stand_in_pico, FIB_ELF, VERSION,
 };
 
 /// This checkout, the Pico source of every case not about the release.
@@ -122,9 +120,9 @@ fn the_release_runtime_needs_a_release_with_aot_and_its_tag() {
     let (output, stdout, stderr) = cargo_pico_aot(Path::new(FIB_ELF), &out, |command| {
         from_release(command, &tagged);
     });
-    if !release_has_aot() {
-        assert_error(&output, &stderr, "the first Pico release with AOT");
-        assert!(!out.exists(), "crates generated for a release without AOT");
+    if let Some(refusal) = release_refusal() {
+        assert_error(&output, &stderr, refusal);
+        assert!(!out.exists(), "crates generated for a refused release");
         return;
     }
     assert_generated(&output, &stdout, &stderr, &out);

@@ -50,7 +50,10 @@ p3-maybe-rayon.workspace = true
 pico-perf.workspace = true
 pico-sdk.workspace = true
 pico-verifier = { workspace = true, features = ["codec"] }
-pico-vm.workspace = true
+# `stage-ledger` on: the driver opens the span window itself (`spans::set_origin`), validates and
+# exports what was recorded and derives figures from it (`spans::report`), none of which the inert
+# build has.
+pico-vm = { workspace = true, features = ["stage-ledger"] }
 pico-aot-runtime = { workspace = true, optional = true }
 pico-aot-dispatch = { path = "../aot-generated", optional = true }
 prost-types.workspace = true

@@ -20,7 +20,7 @@ use pico_vm::{
     },
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
-        opts::{EmulatorOpts, SnapshotMainMode, SplitOpts},
+        opts::{EmulatorOpts, ReplayWorkers, SnapshotMainMode},
         riscv::{
             chunk_split::ChunkSplitConfig, public_values::RecordFinalPvsState,
             riscv_emulator::RiscvEmulator,
@@ -58,11 +58,11 @@ fn opts() -> EmulatorOpts {
     EmulatorOpts {
         chunk_size,
         chunk_batch_size: 1,
-        split_opts: SplitOpts::new(chunk_size as usize >> 2),
         max_cycles: Some(1 << 32),
         cycle_tracker: false,
         cost_estimator: false,
         snapshot_main: SnapshotMainMode::Interpreter,
+        replay_workers: ReplayWorkers::Interpreter,
     }
 }
 
@@ -77,7 +77,6 @@ fn the_ed25519_guest_runs_the_same_under_aot() {
         program.clone(),
         Arc::new(RecordFinalPvsState::default()),
         opts(),
-        None,
     );
     interpreter.write_stdin(&stdin);
     loop {

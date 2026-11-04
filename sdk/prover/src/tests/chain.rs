@@ -577,7 +577,8 @@ fn the_end_to_end_example_still_drives_the_machines_directly() {
         !source.contains("pico_prover"),
         "the independent oracle now runs through the facade"
     );
-    // `emulate_with_committed_bytes` here: it sizes the pinned event buffers from the chunk size.
+    // `emulate_with_committed_bytes` here: it returns the bytes the guest committed beside the
+    // records.
     for call in [
         "riscv::emulate_with_committed_bytes(",
         "riscv::prove_riscv(",

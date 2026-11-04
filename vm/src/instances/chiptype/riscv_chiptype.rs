@@ -59,7 +59,10 @@ use crate::{
     },
     compiler::riscv::program::Program,
     define_chip_type,
-    emulator::riscv::{record::EmulationRecord, syscalls::precompiles::PrecompileLocalMemory},
+    emulator::riscv::{
+        record::{AluStream, EmulationRecord},
+        syscalls::precompiles::PrecompileLocalMemory,
+    },
     instances::compiler::shapes::riscv_shape::{
         precompile_rows_per_event, precompile_syscall_code,
     },
@@ -341,80 +344,62 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
     /// Get the heights of the chips for a given execution record.
     /// Public for the MLE shape probe (`examples/mle_shape_probe.rs`) and coarse-bucket tuning.
     pub fn riscv_heights(record: &EmulationRecord) -> Vec<(String, usize)> {
-        let num_global_events =
-            2 * record.get_local_mem_events().count() + record.syscall_events.len();
+        let syscalls = record.syscalls().len();
+        let num_global_events = 2 * record.get_local_mem_events().count() + syscalls;
+        let steps = record.cpu_steps();
+        // The add and sub lists each split into two chips by opcode; one pass sizes both.
+        let [adds, addws] = record
+            .alu_ops(AluStream::Add)
+            .counts([Opcode::ADD, Opcode::ADDW]);
+        let [subs, subws] = record
+            .alu_ops(AluStream::Sub)
+            .counts([Opcode::SUB, Opcode::SUBW]);
+        let alu_len = |stream| record.alu_ops(stream).len();
         vec![
-            (
-                Self::Cpu(Default::default()).name(),
-                record.cpu_events.len(),
-            ),
+            (Self::Cpu(Default::default()).name(), steps.len()),
             // NOTE: the Ecall chip is intentionally NOT listed here: the shape
             // specs carry no `Ecall` entry and `find_shape_from_allowed_heights` fails on
             // chips it has no allowed heights for. The Ecall chip always pads dynamically to
             // a power of two (its trace is tiny — one row per ecall).
             (
                 Self::DivRem(Default::default()).name(),
-                record.divrem_events.len().div_ceil(DIVREM_DATAPAR),
+                alu_len(AluStream::DivRem).div_ceil(DIVREM_DATAPAR),
             ),
             (
                 Self::Add(Default::default()).name(),
-                (record
-                    .add_sub_events
-                    .as_slice()
-                    .iter()
-                    .filter(|e| e.opcode == Opcode::ADD)
-                    .count())
-                .div_ceil(ADD_DATAPAR),
+                adds.div_ceil(ADD_DATAPAR),
             ),
             (
                 Self::Sub(Default::default()).name(),
-                (record
-                    .add_sub_events
-                    .as_slice()
-                    .iter()
-                    .filter(|e| e.opcode == Opcode::SUB)
-                    .count())
-                .div_ceil(SUB_DATAPAR),
+                subs.div_ceil(SUB_DATAPAR),
             ),
             (
                 Self::Addw(Default::default()).name(),
-                (record
-                    .add_sub_events
-                    .as_slice()
-                    .iter()
-                    .filter(|e| e.opcode == Opcode::ADDW)
-                    .count())
-                .div_ceil(ADD_DATAPAR),
+                addws.div_ceil(ADD_DATAPAR),
             ),
             (
                 Self::Subw(Default::default()).name(),
-                (record
-                    .add_sub_events
-                    .as_slice()
-                    .iter()
-                    .filter(|e| e.opcode == Opcode::SUBW)
-                    .count())
-                .div_ceil(SUB_DATAPAR),
+                subws.div_ceil(SUB_DATAPAR),
             ),
             (
                 Self::Bitwise(Default::default()).name(),
-                record.bitwise_events.len().div_ceil(BITWISE_DATAPAR),
+                alu_len(AluStream::Bitwise).div_ceil(BITWISE_DATAPAR),
             ),
             (
                 Self::Mul(Default::default()).name(),
-                record.mul_events.len().div_ceil(MUL_DATAPAR),
+                alu_len(AluStream::Mul).div_ceil(MUL_DATAPAR),
             ),
             (
                 Self::SR(Default::default()).name(),
-                record.shift_right_events.len().div_ceil(SR_DATAPAR),
+                alu_len(AluStream::ShiftRight).div_ceil(SR_DATAPAR),
             ),
             (
                 Self::SLL(Default::default()).name(),
-                record.shift_left_events.len().div_ceil(SLL_DATAPAR),
+                alu_len(AluStream::ShiftLeft).div_ceil(SLL_DATAPAR),
             ),
             (
                 Self::Lt(Default::default()).name(),
-                record.lt_events.len().div_ceil(LT_DATAPAR),
+                alu_len(AluStream::Lt).div_ceil(LT_DATAPAR),
             ),
             (
                 Self::MemoryLocal(Default::default()).name(),
@@ -425,13 +410,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             ),
             (
                 Self::MemoryReadWrite(Default::default()).name(),
-                record
-                    .cpu_events
-                    .as_slice()
-                    .iter()
-                    .filter(|e| e.instruction.is_memory_instruction())
-                    .count()
-                    .div_ceil(MEMORY_RW_DATAPAR),
+                steps.memory().len().div_ceil(MEMORY_RW_DATAPAR),
             ),
             // `+ 1`: the Global trace always ends with one padding row (its accumulation
             // constraints require it); Poseidon2 follows so the log-height gap stays 2.
@@ -443,10 +422,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
                 <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
                 (num_global_events + 1).div_ceil(RISCV_POSEIDON2_DATAPAR),
             ),
-            (
-                Self::SyscallRiscv(SyscallChip::riscv()).name(),
-                record.syscall_events.len(),
-            ),
+            (Self::SyscallRiscv(SyscallChip::riscv()).name(), syscalls),
         ]
     }
 

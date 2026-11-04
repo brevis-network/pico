@@ -6,6 +6,12 @@ license.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+# The Rust declaration of `cuda_history_validate`, the whole-fill checks of the execution history.
+# No Rust code launches them yet; the device self test reaches them from C++. The device-written
+# history of the second route launches them once per fill, and enables this feature then.
+history-validate = []
+
 [dependencies]
 cudart-sys.workspace = true
 pico-gpu.workspace = true

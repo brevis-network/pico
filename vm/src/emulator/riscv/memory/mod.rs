@@ -11,7 +11,7 @@ mod tests_contiguous;
 mod tests_paged;
 
 pub use constants::{METADATA_SIZE, NUM_REGISTERS, VALUES_SIZE};
-pub use contiguous::{ContiguousMemoryCheckpoint, ContiguousRiscvMemory};
+pub use contiguous::ContiguousRiscvMemory;
 pub use contiguous_ops::MemoryRecordRef;
 pub use paged::{
     Addr, Memory, Memory32, Memory64, PagedMemory, PagedMemory32, PagedMemory64, Registers,

@@ -2,56 +2,15 @@ use super::super::{columns::CpuCols, CpuChip};
 use crate::{
     chips::chips::{alu::event::AluEvent, riscv_cpu::event::CpuEvent},
     compiler::riscv::opcode::Opcode,
+    emulator::riscv::event_types::{RvClk, RvValue},
 };
-use hashbrown::HashMap;
 use p3_field::Field;
 
 impl<F: Field> CpuChip<F> {
     /// Populates columns related to branching.
-    pub(crate) fn populate_branch(
-        &self,
-        cols: &mut CpuCols<F>,
-        event: &CpuEvent,
-        alu_events: &mut HashMap<Opcode, Vec<AluEvent>>,
-    ) {
+    pub(crate) fn populate_branch(&self, cols: &mut CpuCols<F>, event: &CpuEvent) {
         if event.instruction.is_branch_instruction() {
-            let use_signed_comparison =
-                matches!(event.instruction.opcode, Opcode::BLT | Opcode::BGE);
-
-            let a_lt_b = if use_signed_comparison {
-                (event.a as i64) < (event.b as i64)
-            } else {
-                event.a < event.b
-            };
-            let a_gt_b = if use_signed_comparison {
-                (event.a as i64) > (event.b as i64)
-            } else {
-                event.a > event.b
-            };
-
-            let alu_op_code = if use_signed_comparison {
-                Opcode::SLT
-            } else {
-                Opcode::SLTU
-            };
-
-            // One merged comparison event: the Lt row pins both bits (`a[0] = a_lt_b`,
-            // `a[1] = a_gt_b`), so `a` packs them as limbs 0 and 1. Must stay in step with
-            // `count_cpu_event` (one lt slot per branch) and the two GPU mirrors.
-            let cmp_event = AluEvent {
-                clk: event.clk,
-                opcode: alu_op_code,
-                a: (a_lt_b as u64) | ((a_gt_b as u64) << 16),
-                b: event.a,
-                c: event.b,
-                is_cmp: true,
-                ..Default::default()
-            };
-
-            alu_events
-                .entry(alu_op_code)
-                .and_modify(|op_new_events| op_new_events.push(cmp_event))
-                .or_insert(vec![cmp_event]);
+            let (a_lt_b, a_gt_b) = compare(event.instruction.opcode, event.a, event.b);
 
             // `a_eq_b` is derived in the constraints (1 - a_lt_b - a_gt_b); no column.
             cols.a_lt_b = F::from_bool(a_lt_b);
@@ -62,5 +21,40 @@ impl<F: Field> CpuChip<F> {
             // branch emits no ADD event -- the AIR proves `next_pc = pc + c` with one field
             // equation over the sign-extended offset instead of dispatching to the Add chip.
         }
+    }
+}
+
+/// The less-than row proving the comparison of the branch `opcode` at `clk`, whose raw operands
+/// are `a` and `b`.
+pub(crate) fn branch_compare(opcode: Opcode, clk: RvClk, a: RvValue, b: RvValue) -> AluEvent {
+    let (a_lt_b, a_gt_b) = compare(opcode, a, b);
+    // One merged comparison event: the Lt row pins both bits (`a[0] = a_lt_b`,
+    // `a[1] = a_gt_b`), so `a` packs them as limbs 0 and 1. Must stay in step with
+    // `count_cpu_event` (one lt slot per branch) and the two GPU mirrors.
+    AluEvent {
+        clk,
+        opcode: if is_signed(opcode) {
+            Opcode::SLT
+        } else {
+            Opcode::SLTU
+        },
+        a: (a_lt_b as u64) | ((a_gt_b as u64) << 16),
+        b: a,
+        c: b,
+        is_cmp: true,
+        ..Default::default()
+    }
+}
+
+fn is_signed(opcode: Opcode) -> bool {
+    matches!(opcode, Opcode::BLT | Opcode::BGE)
+}
+
+/// `(a < b, a > b)`, signed for the signed branches.
+fn compare(opcode: Opcode, a: RvValue, b: RvValue) -> (bool, bool) {
+    if is_signed(opcode) {
+        ((a as i64) < (b as i64), (a as i64) > (b as i64))
+    } else {
+        (a < b, a > b)
     }
 }

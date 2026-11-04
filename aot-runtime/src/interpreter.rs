@@ -3,6 +3,13 @@
 //! This module provides interpreter-based execution for code paths that
 //! cannot be handled by AOT-compiled blocks (e.g., dynamic jumps to
 //! addresses not known at compile time).
+//!
+//! Registers are read in the interpreter's order, operand `c` before `b` before `a`: an
+//! instruction that reads one register twice leaves it at the later timestamp, and the record a
+//! register holds at a chunk boundary is what the snapshot hands the replay worker.
+//!
+//! It runs at every chunk cut and at every resume from a pc no compiled block starts at, so it
+//! writes each instruction's events as the helpers do, and counts the instructions it runs.
 
 use super::{emulator::AotEmulatorCore, NextStep};
 use pico_vm::{
@@ -46,6 +53,13 @@ impl AotEmulatorCore {
         Ok(())
     }
 
+    /// How many instructions the fallback interpreter has run, beside
+    /// [`Self::compiled_block_dispatches`]: a chunk that dispatches into compiled blocks can still
+    /// have interpreted most of its cycles.
+    pub fn fallback_insns(&self) -> u64 {
+        self.fallback_insns
+    }
+
     /// Execute a single instruction via the interpreter.
     #[cold]
     #[inline(never)]
@@ -55,15 +69,16 @@ impl AotEmulatorCore {
         inst: Instruction,
     ) -> Result<Option<NextStep>, String> {
         use Opcode::*;
+        self.fallback_insns += 1;
         match inst.opcode {
             JAL => Ok(Some(self.interpret_jal(pc, &inst)?)),
             JALR => Ok(Some(self.interpret_jalr(pc, &inst)?)),
             BEQ | BNE | BLT | BGE | BLTU | BGEU => Ok(Some(self.interpret_branch(pc, &inst)?)),
             ECALL => Ok(Some(self.interpret_ecall(pc)?)),
-            EBREAK => Err("Breakpoint".to_string()),
+            EBREAK => Err(self.breakpoint(pc)),
             UNIMP => {
                 self.update_insn_clock();
-                Err(format!("Unimplemented instruction (UNIMP) at PC {:#x}", pc))
+                Err(self.illegal_instruction(pc))
             }
             ADD => self.exec_rr_imm_op(pc, &inst, |b, c| b.wrapping_add(c)),
             SUB => self.exec_rr_imm_op(pc, &inst, |b, c| b.wrapping_sub(c)),
@@ -178,6 +193,7 @@ impl AotEmulatorCore {
             let rhs = inst.op_c;
             let value = op(lhs, rhs);
             self.write_reg(rd, value);
+            self.emit_alu(pc, value, lhs, rhs);
             self.pc = pc.wrapping_add(4);
             self.update_insn_clock();
             return Ok(self.finish_interpreter_step());
@@ -187,6 +203,7 @@ impl AotEmulatorCore {
         let lhs = self.read_reg_b(rs1);
         let value = op(lhs, rhs);
         self.write_reg(rd, value);
+        self.emit_alu(pc, value, lhs, rhs);
         self.pc = pc.wrapping_add(4);
         self.update_insn_clock();
         Ok(self.finish_interpreter_step())
@@ -202,11 +219,8 @@ impl AotEmulatorCore {
     fn decode_word_rr_imm(&mut self, inst: &Instruction) -> (usize, u64, u64) {
         if !inst.imm_c {
             let (rd, rs1, rs2) = inst.r_type();
-            (
-                rd as usize,
-                self.read_reg_b(rs1 as usize),
-                self.read_reg_c(rs2 as usize),
-            )
+            let rhs = self.read_reg_c(rs2 as usize);
+            (rd as usize, self.read_reg_b(rs1 as usize), rhs)
         } else if !inst.imm_b {
             let (rd, rs1, imm) = inst.i_type();
             (rd as usize, self.read_reg_b(rs1 as usize), imm)
@@ -222,42 +236,15 @@ impl AotEmulatorCore {
         inst: &Instruction,
     ) -> Result<Option<NextStep>, String> {
         let (rd, lhs, rhs) = self.decode_word_rr_imm(inst);
-        let next_pc = pc.wrapping_add(4);
-
-        match inst.opcode {
-            Opcode::ADDW => {
-                let value = u64::from((lhs as u32).wrapping_add(rhs as u32));
-                self.write_reg(rd, Self::sign_extend_word_result_u64(value));
-                self.pc = next_pc;
-            }
-            Opcode::SUBW => {
-                let value = u64::from((lhs as u32).wrapping_sub(rhs as u32));
-                self.write_reg(rd, Self::sign_extend_word_result_u64(value));
-                self.pc = next_pc;
-            }
-            Opcode::SLLW => {
-                let shamt = Self::word_shift_amount_u32(rhs);
-                let value = u64::from((lhs as u32).wrapping_shl(shamt));
-                self.write_reg(rd, Self::sign_extend_word_result_u64(value));
-                self.pc = next_pc;
-            }
-            Opcode::SRLW => {
-                let shamt = Self::word_shift_amount_u32(rhs);
-                let value = u64::from((lhs as u32).wrapping_shr(shamt));
-                self.write_reg(rd, Self::sign_extend_word_result_u64(value));
-                self.pc = next_pc;
-            }
+        let value = match inst.opcode {
+            Opcode::ADDW => u64::from((lhs as u32).wrapping_add(rhs as u32)),
+            Opcode::SUBW => u64::from((lhs as u32).wrapping_sub(rhs as u32)),
+            Opcode::SLLW => u64::from((lhs as u32).wrapping_shl(Self::word_shift_amount_u32(rhs))),
+            Opcode::SRLW => u64::from((lhs as u32).wrapping_shr(Self::word_shift_amount_u32(rhs))),
             Opcode::SRAW => {
-                let shamt = Self::word_shift_amount_u32(rhs);
-                let value = (lhs as u32 as i32).wrapping_shr(shamt);
-                self.write_reg(rd, Self::sign_extend_word_result_u64(value as u32 as u64));
-                self.pc = next_pc;
+                (lhs as u32 as i32).wrapping_shr(Self::word_shift_amount_u32(rhs)) as u32 as u64
             }
-            Opcode::MULW => {
-                let value = u64::from((lhs as u32).wrapping_mul(rhs as u32));
-                self.write_reg(rd, Self::sign_extend_word_result_u64(value));
-                self.pc = next_pc;
-            }
+            Opcode::MULW => u64::from((lhs as u32).wrapping_mul(rhs as u32)),
             Opcode::DIVW => {
                 let lhs = lhs as u32 as i32;
                 let rhs = rhs as u32 as i32;
@@ -268,8 +255,7 @@ impl AotEmulatorCore {
                 } else {
                     lhs.wrapping_div(rhs)
                 };
-                self.write_reg(rd, Self::sign_extend_word_result_u64(value as u32 as u64));
-                self.pc = next_pc;
+                value as u32 as u64
             }
             Opcode::DIVUW => {
                 let lhs = lhs as u32;
@@ -279,8 +265,7 @@ impl AotEmulatorCore {
                 } else {
                     lhs.wrapping_div(rhs)
                 };
-                self.write_reg(rd, Self::sign_extend_word_result_u64(u64::from(value)));
-                self.pc = next_pc;
+                u64::from(value)
             }
             Opcode::REMW => {
                 let lhs = lhs as u32 as i32;
@@ -292,19 +277,19 @@ impl AotEmulatorCore {
                 } else {
                     lhs.wrapping_rem(rhs)
                 };
-                self.write_reg(rd, Self::sign_extend_word_result_u64(value as u32 as u64));
-                self.pc = next_pc;
+                value as u32 as u64
             }
             Opcode::REMUW => {
                 let lhs = lhs as u32;
                 let rhs = rhs as u32;
-                let value = if rhs == 0 { lhs } else { lhs.wrapping_rem(rhs) };
-                self.write_reg(rd, Self::sign_extend_word_result_u64(u64::from(value)));
-                self.pc = next_pc;
+                u64::from(if rhs == 0 { lhs } else { lhs.wrapping_rem(rhs) })
             }
             _ => unreachable!(),
-        }
-
+        };
+        let result = Self::sign_extend_word_result_u64(value);
+        self.write_reg(rd, result);
+        self.emit_alu(pc, result, lhs, rhs);
+        self.pc = pc.wrapping_add(4);
         self.finish_word_op()
     }
 
@@ -314,6 +299,7 @@ impl AotEmulatorCore {
         let return_addr = pc.wrapping_add(4);
         let target = pc.wrapping_add(imm);
         self.write_reg(rd as usize, return_addr);
+        self.emit_cpu(pc, target, return_addr, imm, 0);
         self.pc = target;
         self.update_insn_clock();
         if let Some(step) = self.finish_interpreter_step() {
@@ -329,6 +315,7 @@ impl AotEmulatorCore {
         let base = self.read_reg_b(rs1 as usize);
         let target = base.wrapping_add(imm) & !1_u64;
         self.write_reg(rd as usize, return_addr);
+        self.emit_cpu(pc, target, return_addr, base, imm);
         self.pc = target;
         self.update_insn_clock();
         if let Some(step) = self.finish_interpreter_step() {
@@ -353,7 +340,9 @@ impl AotEmulatorCore {
             Opcode::BGEU => lhs >= rhs,
             _ => false,
         };
-        self.pc = if cond { target } else { fallthrough };
+        let next_pc = if cond { target } else { fallthrough };
+        self.emit_cpu(pc, next_pc, lhs, rhs, imm);
+        self.pc = next_pc;
         self.update_insn_clock();
         if let Some(step) = self.finish_interpreter_step() {
             return Ok(step);
@@ -367,6 +356,7 @@ impl AotEmulatorCore {
         let next_pc = pc.wrapping_add(4);
         let value = pc.wrapping_add(imm);
         self.write_reg(rd as usize, value);
+        self.emit_cpu(pc, next_pc, value, imm, imm);
         self.pc = next_pc;
         self.update_insn_clock();
         Ok(self.finish_interpreter_step())
@@ -392,53 +382,28 @@ impl AotEmulatorCore {
                 inst.opcode
             ));
         }
+        let unaligned = match inst.opcode {
+            Opcode::LH | Opcode::LHU => (!addr.is_multiple_of(2)).then_some("halfword"),
+            Opcode::LW | Opcode::LWU => (!addr.is_multiple_of(4)).then_some("word"),
+            Opcode::LD => (!addr.is_multiple_of(8)).then_some("doubleword"),
+            _ => None,
+        };
+        if let Some(width) = unaligned {
+            return Err(format!("Unaligned {width} access at {:#x}", addr));
+        }
+        let dword = self.read_mem_dword(Self::dword_addr(addr));
         let value = match inst.opcode {
-            Opcode::LB => {
-                let word = self.read_mem_dword(Self::dword_addr(addr));
-                let byte = Self::read_u8_from_word(word, addr) as i8;
-                byte as i64 as u64
-            }
-            Opcode::LH => {
-                if !addr.is_multiple_of(2) {
-                    return Err(format!("Unaligned halfword access at {:#x}", addr));
-                }
-                let word = self.read_mem_dword(Self::dword_addr(addr));
-                let raw = Self::read_u16_from_word(word, addr);
-                (raw as i16) as i64 as u64
-            }
-            Opcode::LW => {
-                if !addr.is_multiple_of(4) {
-                    return Err(format!("Unaligned word access at {:#x}", addr));
-                }
-                let word = self.read_mem_word(addr);
-                (word as u32 as i32) as i64 as u64
-            }
-            Opcode::LWU => {
-                if !addr.is_multiple_of(4) {
-                    return Err(format!("Unaligned word access at {:#x}", addr));
-                }
-                self.read_mem_word(addr)
-            }
-            Opcode::LD => {
-                if !addr.is_multiple_of(8) {
-                    return Err(format!("Unaligned doubleword access at {:#x}", addr));
-                }
-                self.read_mem_dword(addr)
-            }
-            Opcode::LBU => {
-                let word = self.read_mem_dword(Self::dword_addr(addr));
-                u64::from(Self::read_u8_from_word(word, addr))
-            }
-            Opcode::LHU => {
-                if !addr.is_multiple_of(2) {
-                    return Err(format!("Unaligned halfword access at {:#x}", addr));
-                }
-                let word = self.read_mem_dword(Self::dword_addr(addr));
-                u64::from(Self::read_u16_from_word(word, addr))
-            }
+            Opcode::LB => Self::read_u8_from_word(dword, addr) as i8 as i64 as u64,
+            Opcode::LH => (Self::read_u16_from_word(dword, addr) as i16) as i64 as u64,
+            Opcode::LW => (Self::extract_word(dword, addr) as u32 as i32) as i64 as u64,
+            Opcode::LWU => Self::extract_word(dword, addr),
+            Opcode::LD => dword,
+            Opcode::LBU => u64::from(Self::read_u8_from_word(dword, addr)),
+            Opcode::LHU => u64::from(Self::read_u16_from_word(dword, addr)),
             _ => unreachable!(),
         };
         self.write_reg(rd, value);
+        self.emit_memory(pc, value, base, imm, dword);
         self.pc = next_pc;
         self.update_insn_clock();
         Ok(self.finish_interpreter_step())
@@ -448,8 +413,8 @@ impl AotEmulatorCore {
     fn interpret_store(&mut self, pc: u64, inst: &Instruction) -> Result<Option<NextStep>, String> {
         let next_pc = pc.wrapping_add(4);
         let (rs2, rs1, imm) = inst.s_type();
-        let value = self.read_reg_a(rs2 as usize);
         let base = self.read_reg_b(rs1 as usize);
+        let value = self.read_reg_a(rs2 as usize);
         let addr = base.wrapping_add(imm);
         let max_addr = match inst.opcode {
             Opcode::SD => (VALUES_SIZE - 8) as u64,
@@ -464,36 +429,36 @@ impl AotEmulatorCore {
                 inst.opcode
             ));
         }
-        match inst.opcode {
-            Opcode::SB => {
-                let word_addr = Self::dword_addr(addr);
-                let word = self.read_mem_dword(word_addr);
-                let new_word = Self::write_u8_into_word(word, addr, value);
-                self.write_mem_dword(word_addr, new_word);
-            }
+        let dword = match inst.opcode {
+            Opcode::SB => self.write_mem_dword_merged(Self::dword_addr(addr), |word| {
+                Self::write_u8_into_word(word, addr, value)
+            }),
             Opcode::SH => {
                 if !addr.is_multiple_of(2) {
                     return Err(format!("Unaligned halfword store at {:#x}", addr));
                 }
-                let word_addr = Self::dword_addr(addr);
-                let word = self.read_mem_dword(word_addr);
-                let new_word = Self::write_u16_into_word(word, addr, value);
-                self.write_mem_dword(word_addr, new_word);
+                self.write_mem_dword_merged(Self::dword_addr(addr), |word| {
+                    Self::write_u16_into_word(word, addr, value)
+                })
             }
             Opcode::SW => {
                 if !addr.is_multiple_of(4) {
                     return Err(format!("Unaligned word store at {:#x}", addr));
                 }
-                self.write_mem_word(addr, value);
+                self.write_mem_dword_merged(Self::dword_addr(addr), |word| {
+                    Self::insert_word(word, addr, value)
+                })
             }
             Opcode::SD => {
                 if !addr.is_multiple_of(8) {
                     return Err(format!("Unaligned doubleword store at {:#x}", addr));
                 }
                 self.write_mem_dword(addr, value);
+                value
             }
             _ => unreachable!(),
-        }
+        };
+        self.emit_memory(pc, value, base, imm, dword);
         self.pc = next_pc;
         self.update_insn_clock();
         Ok(self.finish_interpreter_step())
@@ -519,6 +484,7 @@ impl AotEmulatorCore {
             Self::rv64_mulhu_result_u64(lhs, rhs)
         };
         self.write_reg(rd, prod);
+        self.emit_alu(pc, prod, lhs, rhs);
         self.pc = next_pc;
         self.update_insn_clock();
         Ok(self.finish_interpreter_step())
@@ -533,12 +499,15 @@ impl AotEmulatorCore {
     ) -> Result<Option<NextStep>, String> {
         let (rd, rs1, rs2, _, _) = Self::decode_rr_imm(inst);
         let next_pc = pc.wrapping_add(4);
+        let rhs = self.read_reg_c(rs2);
+        let lhs = self.read_reg_b(rs1);
         let result = if signed {
-            Self::rv64_div_result_u64(self.read_reg_b(rs1), self.read_reg_c(rs2))
+            Self::rv64_div_result_u64(lhs, rhs)
         } else {
-            Self::rv64_divu_result_u64(self.read_reg_b(rs1), self.read_reg_c(rs2))
+            Self::rv64_divu_result_u64(lhs, rhs)
         };
         self.write_reg(rd, result);
+        self.emit_alu(pc, result, lhs, rhs);
         self.pc = next_pc;
         self.update_insn_clock();
         Ok(self.finish_interpreter_step())
@@ -553,12 +522,15 @@ impl AotEmulatorCore {
     ) -> Result<Option<NextStep>, String> {
         let (rd, rs1, rs2, _, _) = Self::decode_rr_imm(inst);
         let next_pc = pc.wrapping_add(4);
+        let rhs = self.read_reg_c(rs2);
+        let lhs = self.read_reg_b(rs1);
         let result = if signed {
-            Self::rv64_rem_result_u64(self.read_reg_b(rs1), self.read_reg_c(rs2))
+            Self::rv64_rem_result_u64(lhs, rhs)
         } else {
-            Self::rv64_remu_result_u64(self.read_reg_b(rs1), self.read_reg_c(rs2))
+            Self::rv64_remu_result_u64(lhs, rhs)
         };
         self.write_reg(rd, result);
+        self.emit_alu(pc, result, lhs, rhs);
         self.pc = next_pc;
         self.update_insn_clock();
         Ok(self.finish_interpreter_step())
@@ -574,6 +546,7 @@ impl AotEmulatorCore {
         match self.execute_syscall(syscall_id, arg1, arg2) {
             Ok((return_value, new_next_pc, extra_cycles, should_halt)) => {
                 self.write_reg(5, return_value);
+                self.emit_ecall(pc, new_next_pc, return_value, arg1, arg2);
                 self.pc = new_next_pc;
                 self.update_insn_clock();
 

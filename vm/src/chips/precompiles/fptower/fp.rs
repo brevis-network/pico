@@ -1,4 +1,6 @@
 use super::words_to_bytes_le_slice;
+#[cfg(feature = "cuda")]
+use crate::mle::spans::device;
 use crate::{
     chips::{
         chips::{
@@ -428,6 +430,7 @@ impl<F: PrimeField32, P: FpOpField> GpuChipBehavior<F> for FpOpChip<F, P> {
         .unwrap();
 
         let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+        let kernels = device::start(stream);
         match P::FIELD_TYPE {
             FieldType::Bls381 => {
                 unsafe {
@@ -502,10 +505,11 @@ impl<F: PrimeField32, P: FpOpField> GpuChipBehavior<F> for FpOpChip<F, P> {
 
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
+        device::launched(kernels, stream);
+        device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
+        device::wait(main_stream).unwrap();
 
         TraceData::Gpu(num_fp_cols::<P>(), d_trace)
     }

@@ -3,20 +3,21 @@ use crate::{
     emulator::riscv::{
         event_types::RvValue,
         syscalls::{
+            host::{Precompile, SyscallHost},
             precompiles::{edwards::event::create_ec_add_event, PrecompileEvent},
-            syscall_context::SyscallContext,
-            Syscall, SyscallCode,
+            SyscallCode,
         },
     },
 };
 use std::marker::PhantomData;
 
-pub(crate) struct WeierstrassAddAssignSyscall<E: EllipticCurve> {
+pub struct WeierstrassAddAssignSyscall<E: EllipticCurve> {
     _phantom: PhantomData<E>,
 }
 
 impl<E: EllipticCurve> WeierstrassAddAssignSyscall<E> {
     /// Create a new instance of the [`WeierstrassAddAssignSyscall`].
+    #[allow(clippy::new_without_default)]
     pub const fn new() -> Self {
         Self {
             _phantom: PhantomData,
@@ -24,19 +25,17 @@ impl<E: EllipticCurve> WeierstrassAddAssignSyscall<E> {
     }
 }
 
-impl<E: EllipticCurve> Syscall for WeierstrassAddAssignSyscall<E> {
-    fn emulate(
+impl<E: EllipticCurve> Precompile for WeierstrassAddAssignSyscall<E> {
+    fn emulate<H: SyscallHost>(
         &self,
-        rt: &mut SyscallContext,
+        rt: &mut H,
         syscall_code: SyscallCode,
         arg1: RvValue,
         arg2: RvValue,
     ) -> Option<RvValue> {
-        let event = create_ec_add_event::<E>(rt, arg1, arg2);
+        let event = create_ec_add_event::<E, _>(rt, arg1, arg2);
 
-        let syscall_event = rt
-            .rt
-            .syscall_event(event.clk, syscall_code.syscall_id(), arg1, arg2);
+        let syscall_event = rt.syscall_event(event.clk, syscall_code.syscall_id(), arg1, arg2);
         match E::CURVE_TYPE {
             CurveType::Secp256k1 => rt.record_mut().add_precompile_event(
                 syscall_code,

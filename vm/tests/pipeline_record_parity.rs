@@ -20,7 +20,10 @@ use pico_vm::{
     },
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::witness::ProvingWitness,
-    mle::machine::riscv::{emulate_with_opts, emulate_with_pipeline, EmulateError, Kb},
+    mle::machine::riscv::{
+        emulate_with_opts_streaming, emulate_with_pipeline, emulate_with_pipeline_streaming,
+        EmulateError, Kb,
+    },
     proverchain::riscv::{emulate_snapshot_pipeline_with, max_pipeline_workers, DeferredSplit},
 };
 
@@ -48,12 +51,14 @@ fn check(name: &str) {
         [
             Arm {
                 name: "emulate_with_opts",
-                emulate: &emulate_with_opts,
+                emulate: &|program, stdin, opts, each| {
+                    emulate_with_opts_streaming(program, stdin, opts, each)
+                },
             },
             Arm {
                 name: "emulate_with_pipeline",
-                emulate: &|program, stdin, opts| {
-                    emulate_with_pipeline(program, stdin, opts, workers)
+                emulate: &|program, stdin, opts, each| {
+                    emulate_with_pipeline_streaming(program, stdin, opts, workers, each)
                 },
             },
         ],
@@ -84,6 +89,41 @@ fn aggregator() {
 #[test]
 fn bls12381_fp() {
     check("bls12381-fp");
+}
+
+#[test]
+fn sha2() {
+    check("sha2");
+}
+
+#[test]
+fn sha3() {
+    check("sha3");
+}
+
+#[test]
+fn tiny_keccak() {
+    check("tiny-keccak");
+}
+
+#[test]
+fn k256() {
+    check("k256");
+}
+
+#[test]
+fn bn254_fp() {
+    check("bn254-fp");
+}
+
+#[test]
+fn bls12381_ws() {
+    check("bls12381-ws");
+}
+
+#[test]
+fn bn254_ws() {
+    check("bn254-ws");
 }
 
 /// The BLS12-381 field guest's run through the shared pipeline's own split, which the GPU

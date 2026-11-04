@@ -1,7 +1,7 @@
 //! A proved RISC-V bundle that does not attest to a successful run.
 //!
 //! A run that halts non-zero cannot be produced here: the emulator refuses it at the HALT with
-//! `HaltWithNonZeroExitCode` and emits no record for the halting chunk. What can be produced is a
+//! `AbnormalTermination` and emits no record for the halting chunk. What can be produced is a
 //! real bundle in which a chunk with no CPU rows carries a non-zero exit code, to exercise this
 //! check directly.
 
@@ -28,7 +28,7 @@ fn a_proved_bundle_carrying_a_non_zero_exit_code_is_refused() {
         .records
         .iter_mut()
         .enumerate()
-        .find(|(_, record)| record.cpu_events.is_empty())
+        .find(|(_, record)| record.cpu_steps().is_empty())
         .expect("the deferred split emits a chunk with no CPU rows");
     record.public_values.exit_code = 1;
 

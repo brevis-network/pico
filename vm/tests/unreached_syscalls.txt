@@ -1,0 +1,15 @@
+# Syscalls the emulator implements that no record-parity guest reaches, one name per line. An
+# event-writing syscall is reached when a record carries its event, any other when the emulator
+# counted a call. record_digest_golden fails on a name here that a guest reaches, and on an
+# unreached syscall missing from here. Rewritten with the digests, never by hand.
+BLS12381_FP2_ADD
+BLS12381_FP2_SUB
+BN254_FP2_ADD
+BN254_FP2_SUB
+SECP256K1_DECOMPRESS
+SECP256K1_FP_ADD
+SECP256K1_FP_MUL
+SECP256K1_FP_SUB
+SECP256R1_ADD
+SECP256R1_DECOMPRESS
+SECP256R1_DOUBLE

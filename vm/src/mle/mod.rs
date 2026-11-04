@@ -11,6 +11,8 @@
 //! verifier-program lowering).
 pub mod compiler;
 pub mod config;
+pub mod heights;
+pub mod ledger;
 pub mod machine;
 pub mod spans;
 

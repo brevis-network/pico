@@ -1,11 +1,11 @@
 #[cfg(feature = "aot-emulator")]
-use crate::emulator::aot::create_aot_emulator;
+use crate::emulator::aot::{create_aot_emulator, create_aot_replay_emulator, AotReplayEmulator};
 use crate::{
     compiler::riscv::program::Program,
     configs::config::{StarkGenericConfig, Val},
     emulator::{
         riscv::{
-            emulator::{ParOptions, SharedDeferredState},
+            emulator::SharedDeferredState,
             memory::ContiguousRiscvMemory,
             public_values::RecordFinalPvsState,
             record::EmulationRecord,
@@ -35,7 +35,6 @@ where
 {
     pub stdin: EmulatorStdin<P, I>,
     pub emulator: Option<E>,
-    pub batch_size: u32, // max parallelism
     pub _sc_and_chip: PhantomData<(SC, C)>,
 }
 
@@ -49,40 +48,19 @@ where
     pub fn setup_riscv(
         proving_witness: &ProvingWitness<SC, C, Vec<u8>>,
         final_pvs_state: Arc<RecordFinalPvsState>,
-        par_opts: Option<ParOptions>,
     ) -> Self {
-        // Ensure the CUDA pinned-memory event pools are initialised.
-        // They are required by CpuEventBuffer / AluEventBuffer which
-        // back EmulationRecord. The pools are process-global singletons,
-        // so the guarded init is a cheap no-op after the first call.
-        {
-            use crate::emulator::riscv::{
-                alu_event_pool::{init_alu_event_buffer_pool, is_alu_pool_initialized},
-                cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
-                event_pool::HostAllocFlags,
-            };
-            if !is_pool_initialized() {
-                init_cpu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
-            }
-            if !is_alu_pool_initialized() {
-                init_alu_event_buffer_pool(50, HostAllocFlags::DEFAULT);
-            }
-        }
-
         // create a new emulator based on the emulator type
         let opts = proving_witness.opts.unwrap();
         let mut emulator = RiscvEmulator::new_single::<SC::Val>(
             proving_witness.program.clone().unwrap(),
             final_pvs_state,
             opts,
-            par_opts,
         );
         emulator.write_stdin(proving_witness.stdin.as_ref().unwrap());
 
         Self {
             stdin: proving_witness.stdin.clone().unwrap(),
             emulator: Some(emulator),
-            batch_size: opts.chunk_batch_size,
             _sc_and_chip: PhantomData,
         }
     }
@@ -90,7 +68,6 @@ where
     pub fn recover_riscv(
         witness: &ProvingWitness<SC, C, Vec<u8>>,
         state: RiscvEmulationState,
-        par_opts: Option<ParOptions>,
         shared_ds: SharedDeferredState,
         target_clk: u64,
         final_segment: bool,
@@ -110,7 +87,6 @@ where
             prog,
             state,
             opts,
-            par_opts,
             shared_ds,
             target_clk,
             final_segment,
@@ -118,7 +94,6 @@ where
         Self {
             stdin: witness.stdin.clone().unwrap(),
             emulator: Some(emulator),
-            batch_size: opts.chunk_batch_size,
             _sc_and_chip: PhantomData,
         }
     }
@@ -191,21 +166,6 @@ where
         self.emulator.as_ref().unwrap().state.global_clk
     }
 
-    pub fn get_pv_stream_with_dryrun(&mut self) -> Vec<u8> {
-        loop {
-            let report = self.next_record_batch(&mut |_| {});
-            if report.done {
-                break;
-            }
-        }
-        self.emulator
-            .as_ref()
-            .unwrap()
-            .state
-            .public_values_stream
-            .clone()
-    }
-
     pub fn get_pv_stream(&mut self) -> Vec<u8> {
         self.emulator
             .as_ref()
@@ -236,7 +196,6 @@ where
     pub fn setup_riscv(
         proving_witness: &ProvingWitness<SC, C, Vec<u8>>,
         final_pvs_state: Arc<RecordFinalPvsState>,
-        _par_opts: Option<ParOptions>,
     ) -> Self {
         let opts = proving_witness.opts.as_ref().expect("witness.opts not set");
         let program = proving_witness
@@ -289,6 +248,134 @@ where
     pub fn get_pv_stream(&mut self) -> Vec<u8> {
         self.emulator.get_pv_stream()
     }
+
+    pub fn counters(&self) -> crate::emulator::snapshot::SnapshotCounters {
+        self.emulator.counters()
+    }
+}
+
+/// A replay worker running the AOT-compiled guest: [`MetaEmulator::recover_riscv`] and
+/// [`MetaEmulator::try_next_record_batch`] with the AOT core in the interpreter's place. Its
+/// records take the interpreter worker's road, through the same deferral and callback, so nothing
+/// downstream learns which engine replayed them.
+#[cfg(feature = "aot-emulator")]
+pub struct AotReplayMetaEmulator<SC, C>
+where
+    SC: StarkGenericConfig,
+    C: ChipBehavior<Val<SC>>,
+{
+    emulator: Box<dyn AotReplayEmulator>,
+    program: Arc<Program>,
+    shared_ds: SharedDeferredState,
+    _sc_and_chip: PhantomData<(SC, C)>,
+}
+
+#[cfg(feature = "aot-emulator")]
+impl<SC, C> AotReplayMetaEmulator<SC, C>
+where
+    SC: StarkGenericConfig,
+    SC::Val: PrimeField32 + FieldSpecificPoseidon2Config,
+    C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
+{
+    /// A worker's first replay, of `state` up to `target_clk`.
+    ///
+    /// # Panics
+    ///
+    /// If no AOT replay factory is registered.
+    pub fn recover_riscv(
+        witness: &ProvingWitness<SC, C, Vec<u8>>,
+        state: RiscvEmulationState,
+        shared_ds: SharedDeferredState,
+        target_clk: u64,
+        final_segment: bool,
+    ) -> Self {
+        let program = witness
+            .program
+            .as_ref()
+            .expect("witness.program not set")
+            .clone();
+        let emulator =
+            create_aot_replay_emulator(program.clone(), state, target_clk, final_segment)
+                .expect("AOT replay factory not registered");
+        Self {
+            emulator,
+            program,
+            shared_ds,
+            _sc_and_chip: PhantomData,
+        }
+    }
+
+    /// [`Self::recover_riscv`] on a worker that has replayed before, reusing it. Returns the
+    /// previous state's memory, which only the caller knows whether to give back to the pool.
+    #[must_use]
+    pub fn recover_riscv_in_place(
+        &mut self,
+        state: RiscvEmulationState,
+        shared_ds: SharedDeferredState,
+        target_clk: u64,
+        final_segment: bool,
+    ) -> crate::emulator::riscv::memory::ContiguousRiscvMemory {
+        self.shared_ds = shared_ds;
+        self.emulator
+            .recover_in_place(state, target_clk, final_segment)
+    }
+
+    /// Replays to the target, deferring the record into the shared pool and handing it to
+    /// `record_callback` as the interpreter's worker does. A replay that ends the run defers the
+    /// memory initialize and finalize events after it.
+    pub fn try_next_record_batch<F>(
+        &mut self,
+        record_callback: &mut F,
+    ) -> Result<EmulationReport, EmulationError>
+    where
+        F: FnMut(EmulationRecord),
+    {
+        let (record, report) = self.emulator.replay()?;
+        // A worker's record is traced and only deferred: the sequencer stamps its public values.
+        self.shared_ds.lock().complete_and_return_record(
+            report.done,
+            record,
+            true,
+            true,
+            record_callback,
+        );
+        if report.done {
+            let mut memory_events = EmulationRecord::new(self.program.clone());
+            self.emulator.postprocess(&mut memory_events);
+            self.shared_ds.lock().defer_record(&mut memory_events);
+        }
+        Ok(report)
+    }
+
+    /// Compiled blocks entered, over every replay this worker ran.
+    pub fn compiled_block_dispatches(&self) -> u64 {
+        self.emulator.compiled_block_dispatches()
+    }
+
+    /// Instructions the fallback interpreter ran, over every replay this worker ran.
+    pub fn fallback_insns(&self) -> u64 {
+        self.emulator.fallback_insns()
+    }
+}
+
+#[cfg(feature = "aot-emulator")]
+impl<SC, C> AotReplayMetaEmulator<SC, C>
+where
+    SC: StarkGenericConfig,
+    C: ChipBehavior<Val<SC>>,
+{
+    /// See [`AotReplayEmulator::replace_memory`].
+    pub fn replace_memory(
+        &mut self,
+        memory: crate::emulator::riscv::memory::ContiguousRiscvMemory,
+    ) -> crate::emulator::riscv::memory::ContiguousRiscvMemory {
+        self.emulator.replace_memory(memory)
+    }
+
+    /// The memory the last replay ran on, for the caller to give back.
+    pub fn into_memory(self) -> crate::emulator::riscv::memory::ContiguousRiscvMemory {
+        self.emulator.into_memory()
+    }
 }
 
 impl<SC, C> SnapshotEmulator for MetaEmulator<SC, C, Program, Vec<u8>, RiscvEmulator>
@@ -331,5 +418,9 @@ where
 
     fn get_pv_stream(&mut self) -> Vec<u8> {
         AotMetaEmulator::get_pv_stream(self)
+    }
+
+    fn counters(&self) -> crate::emulator::snapshot::SnapshotCounters {
+        AotMetaEmulator::counters(self)
     }
 }

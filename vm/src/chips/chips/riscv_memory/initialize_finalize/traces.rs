@@ -27,6 +27,7 @@ use crate::{
     },
     instances::preparer::{EventCounter, PreparedGpuEvents},
     machine::chip::GpuChipBehavior,
+    mle::spans::device,
 };
 #[cfg(feature = "cuda")]
 use cudart::{
@@ -361,6 +362,7 @@ impl<F: PrimeField32> GpuChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
             }
         };
 
+        let kernels = device::start(stream);
         unsafe {
             cuda_memory_initialize_finalize_generate_extra_record_and_main_u64(
                 NUM_MEMORY_INITIALIZE_FINALIZE_COLS,
@@ -379,10 +381,11 @@ impl<F: PrimeField32> GpuChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
 
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
+        device::launched(kernels, stream);
+        device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
+        device::wait(main_stream).unwrap();
 
         info!("[memory-initialize-finalize-chip] generate_extra_record_and_main on GPU");
 

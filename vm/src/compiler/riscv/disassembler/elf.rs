@@ -8,29 +8,24 @@ use elf::{
 };
 use std::collections::BTreeMap;
 
-use crate::primitives::consts::WORD_SIZE;
+use crate::primitives::{
+    consts::WORD_SIZE,
+    layout::{self, MIN_SEGMENT_ADDR},
+};
 
 // TODO(rv64im-3r4): remove or repurpose this generic ceiling once memory/event address handling is fully widened end-to-end.
 /// The maximum size of the memory in bytes.
 pub const MAXIMUM_MEMORY_SIZE: u64 = 0xFFFF_FFFF;
 
 const WORD_SIZE_U64: u64 = WORD_SIZE as u64;
-/// The current RISC-V emulator uses a contiguous SDK-limited memory model.
+/// The current RISC-V emulator uses a contiguous memory model.
 ///
-/// The backing storage (`ContiguousRiscvMemory`) allocates `0x7800_0000` bytes for
+/// The backing storage (`ContiguousRiscvMemory`) allocates `layout::MEMORY_SIZE` bytes for
 /// addressable guest memory. The disassembler must reject ELFs that place segments
 /// outside this range to prevent out-of-bounds runtime accesses.
-const EMULATOR_MEMORY_SIZE_BYTES: u64 = 0x7800_0000;
+const EMULATOR_MEMORY_SIZE_BYTES: u64 = layout::MEMORY_SIZE;
 /// The last valid *word* start address for 4-byte reads/writes.
 const MAX_GUEST_WORD_ADDR: u64 = EMULATOR_MEMORY_SIZE_BYTES - WORD_SIZE as u64;
-
-/// The lowest address a `PT_LOAD` segment may start at.
-///
-/// `[0, NUM_REGISTERS)` is the register file, and the memory chip's stack guard
-/// (`addr[1] + addr[2] != 0`, `riscv_memory/read_write/constraints.rs`) makes every data access
-/// below `2^16` unprovable. A segment placed lower either aliases a register or lands where no
-/// provable access can reach it.
-const MIN_SEGMENT_ADDR: u64 = 1 << 16;
 
 /// The most instructions the preprocessed program table can hold.
 ///

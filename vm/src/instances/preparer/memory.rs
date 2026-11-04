@@ -13,42 +13,31 @@ use cudart_sys::{cudaMemcpyAsync, CudaError, CudaMemoryCopyKind};
 use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 use pico_gpu_api::{
-    cuda_extra_record_finalize_byte_trace, cuda_extra_record_initialize_byte_trace,
+    cuda_extra_record_add_byte_trace_counts, cuda_extra_record_finalize_byte_trace,
+    cuda_extra_record_initialize_byte_trace,
 };
+use std::sync::OnceLock;
 
 use crate::{
     chips::chips::{
+        alu::divrem::traces::DivRemAddRows,
         byte::{
             columns::NUM_BYTE_MULT_COLS,
             event::ByteLookupEvent,
             traces::{byte_lookup_row, NUM_ROWS},
         },
-        events::{AluEvent, CpuEvent},
         riscv_global::event::GlobalInteractionEvent,
         riscv_poseidon2::Poseidon2Event,
     },
     cuda_adaptor::get_global_mem_pool,
-    emulator::riscv::{event_pool::EventBuffer, record::EmulationRecord},
-    instances::preparer::PreparedGpuEvents,
+    emulator::riscv::record::EmulationRecord,
+    instances::preparer::{DeviceHistory, PreparedGpuEvents},
+    mle::spans::device,
 };
 
 /// GPU memory structure with separate allocations for different event types
 #[derive(Default)]
 pub struct PreallocatedGpuMemory<'a> {
-    // CPU events
-    pub d_cpu_events: Option<DevicePoolAllocation<'a, CpuEvent>>,
-
-    // ALU events (combined, used by Batch 1 / DivRem for extra-event writes)
-    pub d_add_sub_events: Option<DevicePoolAllocation<'a, AluEvent>>,
-    // ALU events partitioned by opcode (filled after DivRem, consumed by individual chips)
-    pub d_partitioned_add_events: Option<DevicePoolAllocation<'a, AluEvent>>,
-    pub d_partitioned_sub_events: Option<DevicePoolAllocation<'a, AluEvent>>,
-    pub d_partitioned_addw_events: Option<DevicePoolAllocation<'a, AluEvent>>,
-    pub d_partitioned_subw_events: Option<DevicePoolAllocation<'a, AluEvent>>,
-
-    pub d_lt_events: Option<DevicePoolAllocation<'a, AluEvent>>,
-    pub d_mul_events: Option<DevicePoolAllocation<'a, AluEvent>>,
-
     // Global events
     pub d_global_events: Option<DevicePoolAllocation<'a, GlobalInteractionEvent>>,
 
@@ -57,45 +46,15 @@ pub struct PreallocatedGpuMemory<'a> {
 
     // Byte trace
     pub d_byte_trace: Option<DevicePoolAllocation<'a, KoalaBear>>,
+
+    /// The chunk's execution history, for a record that carries one. A chip's kernels read it
+    /// through a reader made on their stream (`DeviceHistory::reader`), dropped after the last of
+    /// them is launched.
+    pub d_history: Option<DeviceHistory<'a>>,
+    pub d_divrem_add_rows: Option<DivRemAddRows<'a>>,
 }
 
 impl<'a> PreallocatedGpuMemory<'a> {
-    /// Get mutable reference to CPU events
-    pub fn cpu_events_mut(
-        &mut self,
-    ) -> Result<&mut DevicePoolAllocation<'a, CpuEvent>, GpuMemoryError> {
-        self.d_cpu_events
-            .as_mut()
-            .ok_or_else(|| GpuMemoryError::AllocationFailed("CPU events not allocated".to_string()))
-    }
-
-    /// Get mutable reference to add/sub events
-    pub fn add_sub_events_mut(
-        &mut self,
-    ) -> Result<&mut DevicePoolAllocation<'a, AluEvent>, GpuMemoryError> {
-        self.d_add_sub_events.as_mut().ok_or_else(|| {
-            GpuMemoryError::AllocationFailed("Add/sub events not allocated".to_string())
-        })
-    }
-
-    /// Get mutable reference to LT events
-    pub fn lt_events_mut(
-        &mut self,
-    ) -> Result<&mut DevicePoolAllocation<'a, AluEvent>, GpuMemoryError> {
-        self.d_lt_events
-            .as_mut()
-            .ok_or_else(|| GpuMemoryError::AllocationFailed("LT events not allocated".to_string()))
-    }
-
-    /// Get mutable reference to MUL events
-    pub fn mul_events_mut(
-        &mut self,
-    ) -> Result<&mut DevicePoolAllocation<'a, AluEvent>, GpuMemoryError> {
-        self.d_mul_events
-            .as_mut()
-            .ok_or_else(|| GpuMemoryError::AllocationFailed("MUL events not allocated".to_string()))
-    }
-
     /// Get mutable reference to global events
     pub fn global_events_mut(
         &mut self,
@@ -122,19 +81,6 @@ impl<'a> PreallocatedGpuMemory<'a> {
             GpuMemoryError::ByteTraceNotAllocated("Byte trace not allocated".to_string())
         })
     }
-
-    /// Check if ALU and byte memory are allocated
-    pub fn has_alu_and_byte_memory(&self) -> bool {
-        self.d_add_sub_events.is_some()
-            && self.d_lt_events.is_some()
-            && self.d_mul_events.is_some()
-            && self.d_byte_trace.is_some()
-    }
-
-    /// Check if CPU memory is allocated
-    pub fn has_cpu_memory(&self) -> bool {
-        self.d_cpu_events.is_some() && self.has_alu_and_byte_memory()
-    }
 }
 
 /// Error type for GPU memory operations
@@ -150,54 +96,17 @@ pub enum GpuMemoryError {
     ByteTraceFinalizeFailed(String),
     #[error("Byte trace not allocated: {0}")]
     ByteTraceNotAllocated(String),
+    #[error("Byte trace count reaches the field order: {0}")]
+    ByteTraceOverflow(String),
 }
 
-/// Allocate and copy event data to GPU
-fn allocate_and_copy_events_cuda_slice<'a, T>(
-    source_slice: &EventBuffer<T>,
-    mem_pool: &'a CudaMemPool,
-    stream: &'a CudaStream,
-    complete_event_size: usize,
-) -> Result<Option<DevicePoolAllocation<'a, T>>, GpuMemoryError>
-where
-    T: Copy,
-{
-    if complete_event_size == 0 {
-        return Ok(None);
-    }
-
-    let mut d_events =
-        DevicePoolAllocation::<T>::alloc_from_pool_async(complete_event_size, mem_pool, stream)
-            .map_err(|e| GpuMemoryError::AllocationFailed(e.to_string()))?;
-
-    if !source_slice.is_empty() {
-        unsafe {
-            let source_cuda_slice = CudaSlice::as_slice(source_slice);
-            let err = cudaMemcpyAsync(
-                d_events.as_mut_c_void_ptr(),
-                source_cuda_slice.as_c_void_ptr(),
-                std::mem::size_of_val(source_cuda_slice),
-                CudaMemoryCopyKind::HostToDevice,
-                stream.into(),
-            );
-            if err != CudaError::Success {
-                return Err(GpuMemoryError::CopyFailed(format!(
-                    "cudaMemcpyAsync failed with code {}",
-                    err
-                )));
-            }
-        }
-    }
-
-    Ok(Some(d_events))
-}
-
-/// Allocate and copy Vec event data to GPU
+/// Allocate and copy Vec event data to GPU, a copy of `what` to the device readings
 fn allocate_and_copy_vec_events_cuda_slice<'a, T>(
     source_slice: &Vec<T>,
     mem_pool: &'a CudaMemPool,
     stream: &'a CudaStream,
     complete_event_size: usize,
+    what: &'static str,
 ) -> Result<Option<DevicePoolAllocation<'a, T>>, GpuMemoryError>
 where
     T: Copy,
@@ -213,12 +122,22 @@ where
     if !source_slice.is_empty() {
         unsafe {
             let source_cuda_slice = CudaSlice::as_slice(source_slice);
+            let copy = device::start(stream);
             let err = cudaMemcpyAsync(
                 d_events.as_mut_c_void_ptr(),
                 source_cuda_slice.as_c_void_ptr(),
                 std::mem::size_of_val(source_cuda_slice),
                 CudaMemoryCopyKind::HostToDevice,
                 stream.into(),
+            );
+            device::copied(
+                copy,
+                stream,
+                what,
+                Some((
+                    source_cuda_slice.as_c_void_ptr(),
+                    std::mem::size_of_val(source_cuda_slice),
+                )),
             );
             if err != CudaError::Success {
                 return Err(GpuMemoryError::CopyFailed(format!(
@@ -230,208 +149,6 @@ where
     }
 
     Ok(Some(d_events))
-}
-
-/// Allocate GPU memory for CPU events and copy CPU events to GPU
-pub fn gpu_allocate_and_copy_cpu_events<'a>(
-    stream: &'a CudaStream,
-    device_id: usize,
-    record: &'a EmulationRecord,
-    prepared_gpu_events: &'a PreparedGpuEvents,
-) -> Result<Option<DevicePoolAllocation<'a, CpuEvent>>, GpuMemoryError> {
-    let sync_mem_pool = get_global_mem_pool(device_id);
-    let mem_pool = &sync_mem_pool.0;
-
-    let d_cpu_events = allocate_and_copy_events_cuda_slice(
-        &record.cpu_events,
-        mem_pool,
-        stream,
-        prepared_gpu_events.event_counter.num_cpu_events,
-    )?;
-
-    Ok(d_cpu_events)
-}
-
-/// Allocate GPU memory for CPU events only
-pub fn gpu_allocate_cpu_events<'a>(
-    stream: &'a CudaStream,
-    device_id: usize,
-    prepared_gpu_events: &'a PreparedGpuEvents,
-) -> Result<Option<DevicePoolAllocation<'a, CpuEvent>>, GpuMemoryError> {
-    let sync_mem_pool = get_global_mem_pool(device_id);
-    let mem_pool = &sync_mem_pool.0;
-
-    let complete_event_size = prepared_gpu_events.event_counter.num_cpu_events;
-
-    if complete_event_size == 0 {
-        return Ok(None);
-    }
-
-    let d_cpu_events = DevicePoolAllocation::<CpuEvent>::alloc_from_pool_async(
-        complete_event_size,
-        mem_pool,
-        stream,
-    )
-    .map_err(|e| GpuMemoryError::AllocationFailed(e.to_string()))?;
-
-    // stream.synchronize().unwrap();
-
-    Ok(Some(d_cpu_events))
-}
-
-/// Copy a packed event stream (`MLE_PACKED_EVENTS`) into a device buffer sized for the fat
-/// layout — the packed entries are smaller, so the prefix fits by construction.
-fn copy_packed_prefix_into<S: Copy, D>(
-    src: &[S],
-    dst: &mut DevicePoolAllocation<'_, D>,
-    stream: &CudaStream,
-) -> Result<(), GpuMemoryError> {
-    if src.is_empty() {
-        return Ok(());
-    }
-    assert!(
-        std::mem::size_of_val(src) <= std::mem::size_of::<D>() * dst.len(),
-        "packed stream exceeds device buffer"
-    );
-    unsafe {
-        let err = cudaMemcpyAsync(
-            dst.as_mut_c_void_ptr(),
-            src.as_ptr() as *const std::ffi::c_void,
-            std::mem::size_of_val(src),
-            CudaMemoryCopyKind::HostToDevice,
-            stream.into(),
-        );
-        if err != CudaError::Success {
-            return Err(GpuMemoryError::CopyFailed(format!(
-                "cudaMemcpyAsync failed with code {err}"
-            )));
-        }
-    }
-    Ok(())
-}
-
-/// Allocate GPU memory for ALU events and copy ALU events to GPU
-// allow: domain-complex signature — tuple reflects prover data-flow structure
-#[allow(clippy::type_complexity)]
-pub fn gpu_allocate_and_copy_alu_events<'a>(
-    stream: &'a CudaStream,
-    device_id: usize,
-    record: &'a EmulationRecord,
-    prepared_gpu_events: &'a PreparedGpuEvents,
-) -> Result<
-    (
-        Option<DevicePoolAllocation<'a, AluEvent>>,
-        Option<DevicePoolAllocation<'a, AluEvent>>,
-        Option<DevicePoolAllocation<'a, AluEvent>>,
-    ),
-    GpuMemoryError,
-> {
-    let sync_mem_pool = get_global_mem_pool(device_id);
-    let mem_pool = &sync_mem_pool.0;
-
-    let d_add_sub_events = allocate_and_copy_events_cuda_slice(
-        &record.add_sub_events,
-        mem_pool,
-        stream,
-        prepared_gpu_events.event_counter.num_add_sub_events,
-    )?;
-
-    let d_lt_events = allocate_and_copy_events_cuda_slice(
-        &record.lt_events,
-        mem_pool,
-        stream,
-        prepared_gpu_events.event_counter.num_lt_events,
-    )?;
-
-    let d_mul_events = allocate_and_copy_vec_events_cuda_slice(
-        &record.mul_events,
-        mem_pool,
-        stream,
-        prepared_gpu_events.event_counter.num_mul_events,
-    )?;
-
-    Ok((d_add_sub_events, d_lt_events, d_mul_events))
-}
-
-/// Allocate GPU memory for add/sub events and copy add/sub events to GPU
-pub fn gpu_allocate_and_copy_add_sub_events<'a>(
-    stream: &'a CudaStream,
-    device_id: usize,
-    record: &'a EmulationRecord,
-    prepared_gpu_events: &'a PreparedGpuEvents,
-) -> Result<Option<DevicePoolAllocation<'a, AluEvent>>, GpuMemoryError> {
-    let sync_mem_pool = get_global_mem_pool(device_id);
-    let mem_pool = &sync_mem_pool.0;
-
-    // MLE_PACKED_EVENTS: same fat-typed allocation (partition/extra tails share it), but only
-    // the 24B-per-event packed prefix is copied; kernels reinterpret the pointer.
-    if let Some(pk) = prepared_gpu_events.packed.as_deref() {
-        let n = prepared_gpu_events.event_counter.num_add_sub_events;
-        if n == 0 {
-            return Ok(None);
-        }
-        let mut d_events =
-            DevicePoolAllocation::<AluEvent>::alloc_from_pool_async(n, mem_pool, stream)
-                .map_err(|e| GpuMemoryError::AllocationFailed(e.to_string()))?;
-        copy_packed_prefix_into(pk.add_sub_events(), &mut d_events, stream)?;
-        return Ok(Some(d_events));
-    }
-
-    allocate_and_copy_events_cuda_slice(
-        &record.add_sub_events,
-        mem_pool,
-        stream,
-        prepared_gpu_events.event_counter.num_add_sub_events,
-    )
-}
-
-/// Allocate GPU memory for lt events and copy lt events to GPU
-pub fn gpu_allocate_and_copy_lt_events<'a>(
-    stream: &'a CudaStream,
-    device_id: usize,
-    record: &'a EmulationRecord,
-    prepared_gpu_events: &'a PreparedGpuEvents,
-) -> Result<Option<DevicePoolAllocation<'a, AluEvent>>, GpuMemoryError> {
-    let sync_mem_pool = get_global_mem_pool(device_id);
-    let mem_pool = &sync_mem_pool.0;
-
-    // MLE_PACKED_EVENTS: packed prefix into the fat-typed allocation (see add_sub twin).
-    if let Some(pk) = prepared_gpu_events.packed.as_deref() {
-        let n = prepared_gpu_events.event_counter.num_lt_events;
-        if n == 0 {
-            return Ok(None);
-        }
-        let mut d_events =
-            DevicePoolAllocation::<AluEvent>::alloc_from_pool_async(n, mem_pool, stream)
-                .map_err(|e| GpuMemoryError::AllocationFailed(e.to_string()))?;
-        copy_packed_prefix_into(pk.lt_events(), &mut d_events, stream)?;
-        return Ok(Some(d_events));
-    }
-
-    allocate_and_copy_events_cuda_slice(
-        &record.lt_events,
-        mem_pool,
-        stream,
-        prepared_gpu_events.event_counter.num_lt_events,
-    )
-}
-
-/// Allocate GPU memory for mul events and copy mul events to GPU
-pub fn gpu_allocate_and_copy_mul_events<'a>(
-    stream: &'a CudaStream,
-    device_id: usize,
-    record: &'a EmulationRecord,
-    prepared_gpu_events: &'a PreparedGpuEvents,
-) -> Result<Option<DevicePoolAllocation<'a, AluEvent>>, GpuMemoryError> {
-    let sync_mem_pool = get_global_mem_pool(device_id);
-    let mem_pool = &sync_mem_pool.0;
-
-    allocate_and_copy_vec_events_cuda_slice(
-        &record.mul_events,
-        mem_pool,
-        stream,
-        prepared_gpu_events.event_counter.num_mul_events,
-    )
 }
 
 /// Allocate GPU memory for global events and copy global events to GPU
@@ -449,6 +166,7 @@ pub fn gpu_allocate_and_copy_global_events<'a>(
         mem_pool,
         stream,
         prepared_gpu_events.event_counter.num_global_lookup_events,
+        "global_events",
     )?;
 
     Ok(d_global_events)
@@ -478,6 +196,7 @@ pub fn gpu_allocate_and_copy_poseidon2_events<'a>(
     // Copy original poseidon2 events from the record to GPU.
     // Global chip will later fill in the rest starting at global_extra_poseidon2_start_index.
     if !original_poseidon2_events.is_empty() {
+        let copy = device::start(stream);
         unsafe {
             let _ = cudaMemcpyAsync(
                 d_poseidon2_events.as_mut_c_void_ptr(),
@@ -487,6 +206,15 @@ pub fn gpu_allocate_and_copy_poseidon2_events<'a>(
                 stream.into(),
             );
         }
+        device::copied(
+            copy,
+            stream,
+            "poseidon2_events",
+            Some((
+                original_poseidon2_events.as_ptr() as *const _,
+                std::mem::size_of_val(original_poseidon2_events),
+            )),
+        );
     }
 
     Ok(Some(d_poseidon2_events))
@@ -596,17 +324,35 @@ pub fn add_byte_lookups_to_raw_table(
 /// [`add_byte_lookups_to_raw_table`] counts them.
 ///
 /// For the chips whose traces the GPU prover generates on the host: nothing else puts their
-/// lookups on the device, and without them the byte bus does not balance.
-///
-/// This is a read-modify-write through the host -- D2H, [`add_byte_lookups_to_raw_table`], H2D --
-/// on a stream of its own, and it waits on that stream only. The read and the write-back are
+/// lookups on the device, and without them the byte bus does not balance. Through the host
+/// ([`gpu_add_host_byte_lookups_through_host`]), or with `MLE_BYTE_TABLE_ADDITIVE=1` added on the
+/// device ([`gpu_add_host_byte_lookups_additive`]); both leave the table the same.
+pub fn gpu_add_host_byte_lookups(
+    byte_lookups: impl IntoIterator<Item = (ByteLookupEvent, usize)>,
+    preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+) -> Result<(), GpuMemoryError> {
+    if additive_byte_table() {
+        gpu_add_host_byte_lookups_additive(byte_lookups, preallocated_gpu_memory)
+    } else {
+        gpu_add_host_byte_lookups_through_host(byte_lookups, preallocated_gpu_memory)
+    }
+}
+
+/// `MLE_BYTE_TABLE_ADDITIVE=1`: [`gpu_add_host_byte_lookups`] takes the additive path.
+pub fn additive_byte_table() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::mle::env_flag("MLE_BYTE_TABLE_ADDITIVE"))
+}
+
+/// [`gpu_add_host_byte_lookups`] as a read-modify-write through the host -- D2H,
+/// [`add_byte_lookups_to_raw_table`], H2D -- on a stream of its own, waiting on that stream only. The read and the write-back are
 /// safe because nothing else touches the table meanwhile: `BaseProver::gpu_generate_extra_record_and_main`
 /// runs the chips one at a time, and every chip synchronizes its own streams before it returns, so
 /// when a chip calls this every earlier kernel's counts have landed and no later kernel has
 /// started. A device-wide synchronize would say the same thing more expensively and is not an
 /// option anyway: another prover lane on the card may be capturing a CUDA graph, and a
 /// `cudaDeviceSynchronize` from this thread fails that capture.
-pub fn gpu_add_host_byte_lookups(
+pub fn gpu_add_host_byte_lookups_through_host(
     byte_lookups: impl IntoIterator<Item = (ByteLookupEvent, usize)>,
     preallocated_gpu_memory: &mut PreallocatedGpuMemory,
 ) -> Result<(), GpuMemoryError> {
@@ -622,11 +368,9 @@ pub fn gpu_add_host_byte_lookups(
     );
     let stream = CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING)
         .map_err(|e| GpuMemoryError::CopyFailed(format!("stream creation failed: {e}")))?;
-    let sync = |stream: &CudaStream| {
-        stream
-            .synchronize()
-            .map_err(|e| GpuMemoryError::CopyFailed(format!("stream synchronize failed: {e}")))
-    };
+    // Each wait names its own line, which a wait inside a shared closure could not.
+    let sync_failed =
+        |e: CudaError| GpuMemoryError::CopyFailed(format!("stream synchronize failed: {e}"));
 
     // The slots hold raw `u32` counts until the finalize kernel runs, whatever the element type.
     let mut table = vec![0u32; d_byte_trace.len()];
@@ -645,7 +389,7 @@ pub fn gpu_add_host_byte_lookups(
             )));
         }
     }
-    sync(&stream)?;
+    device::wait(&stream).map_err(sync_failed)?;
 
     add_byte_lookups_to_raw_table(&mut table, byte_lookups);
 
@@ -664,5 +408,105 @@ pub fn gpu_add_host_byte_lookups(
         }
     }
     // Also what keeps `table` alive until the copy has read it.
-    sync(&stream)
+    device::wait(&stream).map_err(sync_failed)
+}
+
+/// [`gpu_add_host_byte_lookups`] without the read-modify-write: the lookups are counted into a
+/// table of raw counts on the host, as [`add_byte_lookups_to_raw_table`] counts them, and a kernel
+/// adds it into the device table with atomics. Nothing is read back but an overflow flag, so the
+/// add depends on no other writer of the table having finished; only the finalize has to follow it.
+/// It waits on its own stream before returning, which keeps the counts alive until the kernel has
+/// read them.
+///
+/// # Errors
+///
+/// [`GpuMemoryError::ByteTraceOverflow`] when a cell would reach the field order, which the
+/// finalize would read as a different element.
+pub fn gpu_add_host_byte_lookups_additive(
+    byte_lookups: impl IntoIterator<Item = (ByteLookupEvent, usize)>,
+    preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+) -> Result<(), GpuMemoryError> {
+    let mut byte_lookups = byte_lookups.into_iter().peekable();
+    if byte_lookups.peek().is_none() {
+        return Ok(());
+    }
+    let d_byte_trace = preallocated_gpu_memory.byte_trace_mut()?;
+    let cells = d_byte_trace.len();
+    assert_eq!(
+        cells,
+        NUM_ROWS * NUM_BYTE_MULT_COLS,
+        "device byte table has an unexpected size"
+    );
+    let mut counts = vec![0u32; cells];
+    add_byte_lookups_to_raw_table(&mut counts, byte_lookups);
+
+    let stream = CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING)
+        .map_err(|e| GpuMemoryError::CopyFailed(format!("stream creation failed: {e}")))?;
+    // The counts, then the overflow flag.
+    let mut d_counts = DevicePoolAllocation::<u32>::alloc_async(cells + 1, &stream)
+        .map_err(|e| GpuMemoryError::AllocationFailed(e.to_string()))?;
+    let copied = |err: CudaError, what: &str| {
+        if err == CudaError::Success {
+            Ok(())
+        } else {
+            Err(GpuMemoryError::CopyFailed(format!(
+                "{what} failed with code {err}"
+            )))
+        }
+    };
+    let mut overflow = 0u32;
+    unsafe {
+        let d_flag = d_counts.as_mut_ptr().add(cells);
+        copied(
+            cudaMemcpyAsync(
+                d_counts.as_mut_c_void_ptr(),
+                counts.as_ptr() as *const std::ffi::c_void,
+                std::mem::size_of_val(counts.as_slice()),
+                CudaMemoryCopyKind::HostToDevice,
+                (&stream).into(),
+            ),
+            "byte counts H2D",
+        )?;
+        copied(
+            cudaMemcpyAsync(
+                d_flag as *mut std::ffi::c_void,
+                &overflow as *const u32 as *const std::ffi::c_void,
+                std::mem::size_of::<u32>(),
+                CudaMemoryCopyKind::HostToDevice,
+                (&stream).into(),
+            ),
+            "overflow flag H2D",
+        )?;
+        let err = cuda_extra_record_add_byte_trace_counts(
+            d_byte_trace.as_mut_c_void_ptr(),
+            d_counts.as_c_void_ptr(),
+            cells,
+            d_flag as *mut std::ffi::c_void,
+            (&stream).into(),
+        );
+        if err.code != 0 {
+            return Err(GpuMemoryError::CopyFailed(format!(
+                "cuda_extra_record_add_byte_trace_counts failed with code {}",
+                err.code
+            )));
+        }
+        copied(
+            cudaMemcpyAsync(
+                &mut overflow as *mut u32 as *mut std::ffi::c_void,
+                d_flag as *const std::ffi::c_void,
+                std::mem::size_of::<u32>(),
+                CudaMemoryCopyKind::DeviceToHost,
+                (&stream).into(),
+            ),
+            "overflow flag D2H",
+        )?;
+    }
+    device::wait(&stream)
+        .map_err(|e| GpuMemoryError::CopyFailed(format!("stream synchronize failed: {e}")))?;
+    if overflow != 0 {
+        return Err(GpuMemoryError::ByteTraceOverflow(
+            "a host lookup took a device byte table count to the field order".to_string(),
+        ));
+    }
+    Ok(())
 }

@@ -17,13 +17,16 @@
 //! path additionally offers on-device trace generation via [`build_ctx_gpu`].
 
 use std::{
+    collections::BTreeMap,
     num::NonZeroUsize,
     sync::{Arc, Mutex, PoisonError},
+    time::Instant,
 };
 
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_maybe_rayon::prelude::*;
+use serde_json::json;
 
 use super::air::{GcsBindAir, PrepAir, GCS_DIGEST_LEN};
 use crate::{
@@ -76,19 +79,15 @@ use crate::{
     compiler::{program::ProgramBehavior, riscv::program::Program},
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
-        opts::{EmulatorOpts, SnapshotMainMode},
+        opts::{EmulatorOpts, ReplayWorkers, SnapshotMainMode},
         record::RecordBehavior,
         riscv::{
-            alu_event_pool::{
-                alu_event_buffer_capacity, init_alu_event_buffer_pool, is_alu_pool_initialized,
-            },
-            cpu_event_pool::{
-                cpu_event_buffer_capacity, init_cpu_event_buffer_pool, is_pool_initialized,
-            },
             emulator::{EmulationError, RiscvEmulator},
-            event_pool::{growable_event_buffers, GrowableEventBuffers},
+            history::ExecutionHistory,
             public_values::RecordFinalPvsState,
             record::EmulationRecord,
+            record_digest::{digest_words, record_bytes, record_counts},
+            record_slots::unbounded_scope,
         },
         stdin::EmulatorStdin,
     },
@@ -99,8 +98,9 @@ use crate::{
         septic::{SepticCurve, SepticDigest, SepticExtension},
         witness::ProvingWitness,
     },
+    mle::ledger::{self, At, Lane, ProveSlot},
     primitives::consts::{MAX_NUM_PVS, RISCV_NUM_PVS},
-    proverchain::riscv::{emulate_snapshot_pipeline_with_selector, DeferredSplit, TraceKind},
+    proverchain::riscv::{check_pipeline, emulate_snapshot_pipeline_with, DeferredSplit},
 };
 use pico_mle_core::{
     config::{
@@ -174,9 +174,20 @@ pub fn ctx_to_engine(ctx: ProvingContext<HostPb>) -> ProvingContext<Pb> {
 /// pico's GPU trace-gen draw from one pool. Idempotent, and called at the top of every block the
 /// pipeline proves — the pool itself is created once (`create_ctx`'s `OnceLock`); what repeats is
 /// the read-back and the lines below. It must run **before** any MLE prover is constructed
-/// (enforced by an assert in [`RiscvMachine::new`]).
+/// (enforced by an assert in [`RiscvMachine::new`]). It also bounds the records the process holds
+/// at once ([`bound_records`](crate::emulator::riscv::record_slots::bound_records)): the pipeline
+/// emulates ahead of proving, and the bound is what holds it back. The bound is the history
+/// arena's slots, so from here on each chunk's history is written into pinned memory, the source
+/// of its upload; a process that did not pin them at startup pins them at its first take.
 #[cfg(feature = "cuda")]
 pub fn init_mle_gpu_pool(device_id: usize) {
+    crate::emulator::riscv::record_slots::bound_records();
+    share_mle_gpu_pool(device_id);
+}
+
+/// [`init_mle_gpu_pool`] without the bound, for a process that replays no RISC-V program.
+#[cfg(feature = "cuda")]
+pub(crate) fn share_mle_gpu_pool(device_id: usize) {
     crate::cuda_adaptor::create_mem_pool(device_id);
     // The chips' GPU trace-gen path also needs the per-device global stream pool.
     crate::cuda_adaptor::create_stream(device_id);
@@ -220,30 +231,69 @@ pub fn init_mle_gpu_pool(device_id: usize) {
 }
 
 /// A chunk packaged for proving: the record plus, on GPU, its FFI-precomputed events. Built by
-/// [`prepare_chunk`] on the preparer thread and consumed by [`RiscvMachine::prove_chunk`]; the
-/// orchestration layer never needs backend cfg.
+/// [`prepare_chunk_shaped`] on the preparer thread and consumed by [`RiscvMachine::prove_chunk`];
+/// the orchestration layer never needs backend cfg.
 pub struct PreparedChunk {
     pub record: EmulationRecord,
+    /// What proving it is estimated to cost ([`chunk_trace_cells`]); 0 where no estimate was made.
+    /// The dispatcher hands the largest waiting chunk out first (unless `MLE_CHUNK_ORDER=fifo`).
+    pub cost: u64,
     #[cfg(feature = "cuda")]
     pub prepared: crate::instances::preparer::PreparedGpuEvents,
 }
 
-/// Package a record for proving (on GPU: `precompute_event_size` + `PreparedGpuEvents::new` feed
-/// the trace-gen orchestrator; on CPU: pass-through).
-pub fn prepare_chunk(record: EmulationRecord) -> PreparedChunk {
-    #[cfg(feature = "cuda")]
-    {
-        use crate::instances::preparer::{precompute_event_size, PreparedGpuEvents};
-        let counter = precompute_event_size::<Kb>(&record);
-        let prepared = PreparedGpuEvents::new(&record, counter);
-        PreparedChunk { record, prepared }
+/// Every host reader takes a CPU chunk from its execution history, so a CPU chunk's record must
+/// carry one with steps; a deferred record carries none.
+#[cfg(feature = "cuda")]
+fn refuse_history_less(record: &EmulationRecord) {
+    if !record.is_cpu_chunk {
+        return;
     }
-    #[cfg(not(feature = "cuda"))]
-    PreparedChunk { record }
+    let steps = record
+        .history
+        .as_ref()
+        .map_or(0, |history| history.steps.len());
+    assert!(
+        steps > 0,
+        "chunk {}: a CPU chunk record carries no execution history step, which every host reader \
+         takes the chunk from",
+        record.public_values.chunk
+    );
 }
 
-/// [`prepare_chunk`] with the whitelist shape decided first when `bucket` is on. The shape comes
-/// from the GPU event counter the packaging computes anyway
+/// The dispatcher's estimate of what a chunk costs to prove: its trace cells, width x height summed
+/// over the shape it proves under -- the whitelist shape when it has one, else its natural heights
+/// padded to a power of two and never below `2^MLE_MIN_LOG_HEIGHT`.
+#[cfg(feature = "cuda")]
+pub fn chunk_trace_cells(
+    chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
+    record: &EmulationRecord,
+    counter: &crate::instances::preparer::EventCounter,
+) -> u64 {
+    let width = |name: &str| {
+        chips
+            .iter()
+            .find(|c| c.name() == name)
+            .map_or(0, |c| p3_air::BaseAir::<Kb>::width(c) as u64)
+    };
+    let min = crate::mle::machine::shape::MLE_MIN_LOG_HEIGHT;
+    match &record.shape {
+        Some(shape) => shape
+            .inner
+            .iter()
+            .map(|(name, &log)| width(name) << log.max(min))
+            .sum(),
+        None => crate::mle::machine::shape::mle_natural_heights_from_counter(record, counter)
+            .iter()
+            .filter(|(_, &rows)| rows > 0)
+            .map(|(name, &rows)| width(name) * rows.next_power_of_two().max(1 << min) as u64)
+            .sum(),
+    }
+}
+
+/// Package a record for proving (on GPU: `precompute_event_size` + `PreparedGpuEvents::new` feed
+/// the trace-gen orchestrator; on CPU: pass-through), with the whitelist shape decided first when
+/// `bucket` is on. The shape comes from the GPU event counter the packaging computes anyway
 /// (`mle_natural_heights_from_counter`), so no chunk pays the record clone and the host
 /// extra-record pass of [`shape_record`]. `MLE_SHAPE_CROSSCHECK=1` runs that path too and
 /// asserts the shapes agree.
@@ -255,11 +305,13 @@ pub fn prepare_chunk_shaped(
     #[cfg(feature = "cuda")]
     {
         use crate::instances::preparer::{precompute_event_size, PreparedGpuEvents};
+        refuse_history_less(&record);
         // MLE_PREP_PROF=1: one line per chunk with the three steps' times, for the preparer lane.
         let prof = crate::mle::env_flag("MLE_PREP_PROF");
         let t0 = std::time::Instant::now();
         let counter = precompute_event_size::<Kb>(&record);
         let t_counter = t0.elapsed();
+        crate::mle::heights::chunk(chips, &record, &counter);
         if crate::mle::env_flag("SHAPE_PROBE_NATURAL") {
             log_natural_shape_probe(&record, &counter);
         }
@@ -277,39 +329,54 @@ pub fn prepare_chunk_shaped(
             record.shape = Some(shape);
         }
         let t_shape = t1.elapsed();
+        let t_cost = std::time::Instant::now();
+        let cost = chunk_trace_cells(chips, &record, &counter);
+        let t_cost = t_cost.elapsed();
+        if crate::mle::env_flag("MLE_COST_PROBE") {
+            tracing::info!(
+                target: "bench",
+                "[cost-probe] chunk={} cpu={} cells={cost}",
+                record.chunk_index().saturating_sub(1),
+                record.is_cpu_chunk,
+            );
+        }
         let t2 = std::time::Instant::now();
         let prepared = PreparedGpuEvents::new(&record, counter);
         if prof {
             tracing::info!(
-                "[prepprof] chunk={} cpu={} counter={}us shape={}us package={}us",
+                "[prepprof] chunk={} cpu={} counter={}us shape={}us cost={}us package={}us",
                 record.chunk_index().saturating_sub(1),
                 record.is_cpu_chunk,
                 t_counter.as_micros(),
                 t_shape.as_micros(),
+                t_cost.as_micros(),
                 t2.elapsed().as_micros()
             );
         }
-        PreparedChunk { record, prepared }
+        PreparedChunk {
+            record,
+            prepared,
+            cost,
+        }
     }
     // The CPU build leaves the shape to `build_ctx`, which picks it from the augmented record
     // it builds anyway.
     #[cfg(not(feature = "cuda"))]
     {
         let _ = (chips, bucket);
-        PreparedChunk { record }
+        PreparedChunk { record, cost: 0 }
     }
 }
 
 impl PreparedChunk {
-    /// Prove this chunk. Consumes self, so the record's pooled event buffers are released as the
-    /// prove pipeline finishes with them.
+    /// Prove this chunk. Consumes self, so the record, its history with it, is released as the
+    /// prove pipeline finishes with it.
     pub fn prove(self, prover: &RiscvMachine, verify: bool) -> Proof<Sc> {
         prover.prove_chunk(&self, verify)
     }
 
     /// [`Self::prove`] with the trace-gen hook of [`RiscvMachine::prove_chunk_hooked`]. Same drop
-    /// point for the pooled event buffers: the chunk is released when this returns, exactly as in
-    /// [`Self::prove`].
+    /// point: the chunk is released when this returns, exactly as in [`Self::prove`].
     pub fn prove_hooked(
         self,
         prover: &RiscvMachine,
@@ -564,6 +631,48 @@ fn resolved_concurrency(explicit: Option<NonZeroUsize>) -> usize {
     explicit.map_or_else(prove_concurrency, |n| n.get())
 }
 
+/// Runs `job` on every record, `concurrency` at a time, each inside the [`ProveSlot`] the stage
+/// ledger names it by, and returns the results in record order. `job` is given the record's index.
+///
+/// [`RiscvMachine::prove`] and [`trace_records`] both run through here, so a record carries the same
+/// `record`, `chunk` and lane in a ledger whichever of them wrote it.
+fn par_in_prove_slots<T: Send, E: Send>(
+    records: &[EmulationRecord],
+    concurrency: usize,
+    job: impl Fn(usize, &EmulationRecord) -> Result<T, E> + Sync,
+) -> Result<Vec<T>, E> {
+    // The CPU chunk each record is, counted in proving order, which is chunk order: the stage
+    // ledger names a chunk by the same index on both sides of the run.
+    let mut cpu_chunks = 0u64;
+    let chunk_of: Vec<Option<u64>> = records
+        .iter()
+        .map(|record| {
+            record.is_cpu_chunk.then(|| {
+                cpu_chunks += 1;
+                cpu_chunks - 1
+            })
+        })
+        .collect();
+    let mut results = Vec::with_capacity(records.len());
+    for (batch_idx, batch) in records.chunks(concurrency).enumerate() {
+        let base = batch_idx * concurrency;
+        let batch_results: Vec<T> = batch
+            .par_iter()
+            .enumerate()
+            .map(|(j, record)| {
+                let slot = ProveSlot {
+                    record: (base + j) as u64,
+                    chunk: chunk_of[base + j],
+                    slot: j,
+                };
+                ledger::with_prove_slot(slot, || job(base + j, record))
+            })
+            .collect::<Result<_, E>>()?;
+        results.extend(batch_results);
+    }
+    Ok(results)
+}
+
 /// The machine's params-free constraint dump: one line per AIR plus an overall digest, covering
 /// constraints, interactions, column widths, public-value counts and degrees, and nothing that
 /// depends on the operating point.
@@ -715,6 +824,10 @@ pub enum EmulateError {
     /// this path does not run. Ignoring it would run the interpreter and report success.
     #[error("emulate_with_opts drives one RiscvEmulator and cannot honour snapshot_main = {0:?}")]
     UnsupportedSnapshotMain(SnapshotMainMode),
+    /// `replay_workers` picks the emulator for `emulate_snapshot_pipeline`'s replay workers, which
+    /// this path does not run, for the same reason.
+    #[error("emulate_with_opts drives one RiscvEmulator and cannot honour replay_workers = {0:?}")]
+    UnsupportedReplayWorkers(ReplayWorkers),
     /// The snapshot pipeline splits the deferred pool once per chunk, so it runs one chunk per
     /// batch.
     #[error("emulate_with_pipeline needs chunk_batch_size = 1, not {0}")]
@@ -729,34 +842,51 @@ pub enum EmulateError {
     Emulation(#[from] EmulationError),
 }
 
-/// Emulate to completion under `opts`, reading no environment variable.
+/// Emulate to completion under `opts`, reading no environment variable of its own. Each CPU chunk's
+/// record carries its execution history.
 ///
-/// `EmulatorOpts::default` reads `CHUNK_SIZE`, `CHUNK_BATCH_SIZE` and `SPLIT_THRESHOLD`, and
+/// `EmulatorOpts::default` reads `CHUNK_SIZE` and `CHUNK_BATCH_SIZE`, and
 /// `EmulatorOpts::from_env_chunk_size` reads the first of those; a caller needing a determined
 /// proof shape states the fields rather than starting from either.
 ///
 /// The chunk size and the caller's `log_stacked_height` are one decision: a chunk holds one CPU row
 /// per instruction, so a full chunk of `2^n` instructions needs a stacked height of at least `n`.
 ///
-/// Every record is held until the caller drops the output, so the buffers this emulation takes are
-/// growable rather than pooled; [`emulate_each`] streams instead. While it runs, a GPU pipeline in
-/// the same process waits, and it waits for one.
+/// Every record is held until the caller drops the output, so this lifts the process's bound on
+/// records held at once while it runs ([`unbounded_scope`]); [`emulate_with_opts_streaming`] streams
+/// instead, and lifts it the same way, since its caller may still hold what it is handed.
 pub fn emulate_with_opts(
     program: Arc<Program>,
     stdin: &EmulatorStdin<Program, Vec<u8>>,
     opts: EmulatorOpts,
 ) -> Result<EmulationOutput, EmulateError> {
+    let mut records = Vec::new();
+    let output = emulate_with_opts_streaming(program, stdin, opts, |record| records.push(record))?;
+    Ok(EmulationOutput { records, ..output })
+}
+
+/// [`emulate_with_opts`], each record handed to `handle_record` in emission order as the emulator
+/// returns it, so a caller that reduces records never holds a run whole. The output's `records`
+/// is empty.
+pub fn emulate_with_opts_streaming(
+    program: Arc<Program>,
+    stdin: &EmulatorStdin<Program, Vec<u8>>,
+    opts: EmulatorOpts,
+    mut handle_record: impl FnMut(EmulationRecord),
+) -> Result<EmulationOutput, EmulateError> {
     if opts.snapshot_main != SnapshotMainMode::Interpreter {
         return Err(EmulateError::UnsupportedSnapshotMain(opts.snapshot_main));
     }
-    let _growable = hold_records_in_growable_buffers();
+    if opts.replay_workers != ReplayWorkers::Interpreter {
+        return Err(EmulateError::UnsupportedReplayWorkers(opts.replay_workers));
+    }
+    let _unbounded = unbounded_scope();
     let final_pvs_state = Arc::new(RecordFinalPvsState::default());
-    let mut emulator = RiscvEmulator::new_single::<Kb>(program, final_pvs_state, opts, None);
+    let mut emulator = RiscvEmulator::new_single::<Kb>(program, final_pvs_state, opts);
     emulator.write_stdin(stdin);
-    let mut records = Vec::new();
     let mut reports = Vec::new();
     loop {
-        let report = emulator.emulate_batch(&mut |r| records.push(r))?;
+        let report = emulator.emulate_batch(&mut handle_record)?;
         let done = report.done;
         reports.push(report);
         if done {
@@ -764,7 +894,7 @@ pub fn emulate_with_opts(
         }
     }
     Ok(EmulationOutput {
-        records,
+        records: Vec::new(),
         chunks: emulator.state.current_chunk,
         committed_bytes: std::mem::take(&mut emulator.state.public_values_stream),
         cycles: emulator.state.global_clk,
@@ -772,30 +902,9 @@ pub fn emulate_with_opts(
     })
 }
 
-/// Switches the event buffers this emulation takes from the fixed pools, which a caller holding
-/// every record would run dry, to growable ones, for as long as the returned scope lives; a GPU
-/// pipeline later in the process gets its bounded pools back. Claims the pools empty before an
-/// emulator would fill them with full-size buffers it never uses.
-fn hold_records_in_growable_buffers() -> GrowableEventBuffers {
-    let scope = growable_event_buffers();
-    if !is_pool_initialized() {
-        init_cpu_event_buffer_pool(
-            0,
-            crate::emulator::riscv::event_pool::HostAllocFlags::DEFAULT,
-        );
-    }
-    if !is_alu_pool_initialized() {
-        init_alu_event_buffer_pool(
-            0,
-            crate::emulator::riscv::event_pool::HostAllocFlags::DEFAULT,
-        );
-    }
-    scope
-}
-
 /// [`emulate_with_opts`] through the snapshot pipeline: one snapshot thread, running the
-/// interpreter or AOT code as `opts.snapshot_main` says, and `workers` interpreters replaying its
-/// snapshots into the records. A run [`check_pipeline`](crate::proverchain::riscv::check_pipeline)
+/// interpreter or AOT code as `opts.snapshot_main` says, and `workers` workers replaying its
+/// snapshots into the records, interpreters or the AOT core as `opts.replay_workers` says. A run [`check_pipeline`](crate::proverchain::riscv::check_pipeline)
 /// refuses is refused before anything runs, and `NUM_THREADS` does not size the pipeline. The AOT snapshot thread still
 /// reads it, with `PROVER_COUNT` and `MLE_SPLIT_REPLAY`, to decide whether to cut a chunk's replay
 /// into segments (`emulator::aot::split_segments`); the workers fold those back into one record.
@@ -813,63 +922,26 @@ pub fn emulate_with_pipeline(
     opts: EmulatorOpts,
     workers: NonZeroUsize,
 ) -> Result<EmulationOutput, EmulateError> {
-    let records = Mutex::new(Vec::new());
-    let (reports, cycles, committed_bytes) =
-        pipeline_emulation(program, stdin, opts, workers, TraceKind::Full, |record| {
-            records
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(record)
-        })?;
-    let records = records.into_inner().unwrap_or_else(PoisonError::into_inner);
-    let chunks = records.iter().filter(|record| record.is_cpu_chunk).count() as u32;
-    Ok(EmulationOutput {
-        records,
-        chunks,
-        committed_bytes,
-        cycles,
-        reports,
-    })
+    let mut records = Vec::new();
+    let output = emulate_with_pipeline_streaming(program, stdin, opts, workers, |record| {
+        records.push(record)
+    })?;
+    Ok(EmulationOutput { records, ..output })
 }
 
-/// [`emulate_with_pipeline`] for a caller that needs what the run did, not its witness: the
-/// replays make light-trace records, without CPU and ALU events, and each goes to `on_record` and
-/// is dropped. `records` comes back empty; `chunks`, `cycles`, `committed_bytes` and `reports` are
-/// [`emulate_with_pipeline`]'s, and so is every record's chunk boundary and precompile event.
-pub fn execute_with_pipeline(
+/// [`emulate_with_pipeline`], each record handed to `handle_record` in chunk order as the
+/// pipeline's sequencer hands it on; the output's `records` is empty. The sequencer calls it under
+/// the deferred-state lock a worker takes to hand back a replayed record, so a slow
+/// `handle_record` holds the replays back rather than letting their records queue. Its caller may
+/// still hold what it is handed, so it lifts the bound on records held at once as
+/// [`emulate_with_opts`] does.
+pub fn emulate_with_pipeline_streaming(
     program: Arc<Program>,
     stdin: &EmulatorStdin<Program, Vec<u8>>,
     opts: EmulatorOpts,
     workers: NonZeroUsize,
-    on_record: impl Fn(&EmulationRecord) + Send + Sync,
+    handle_record: impl FnMut(EmulationRecord) + Send,
 ) -> Result<EmulationOutput, EmulateError> {
-    let chunks = std::sync::atomic::AtomicU32::new(0);
-    let (reports, cycles, committed_bytes) =
-        pipeline_emulation(program, stdin, opts, workers, TraceKind::Light, |record| {
-            if record.is_cpu_chunk {
-                chunks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            }
-            on_record(&record);
-        })?;
-    Ok(EmulationOutput {
-        records: Vec::new(),
-        chunks: chunks.into_inner(),
-        committed_bytes,
-        cycles,
-        reports,
-    })
-}
-
-/// The snapshot pipeline under `opts`, splitting the deferred pool after every chunk and handing
-/// each record to `sink`; the reports come back sorted by `start_chunk`.
-fn pipeline_emulation(
-    program: Arc<Program>,
-    stdin: &EmulatorStdin<Program, Vec<u8>>,
-    opts: EmulatorOpts,
-    workers: NonZeroUsize,
-    trace: TraceKind,
-    sink: impl Fn(EmulationRecord) + Send + Sync,
-) -> Result<(Vec<EmulationReport>, u64, Vec<u8>), EmulateError> {
     if opts.chunk_batch_size != 1 {
         return Err(EmulateError::UnsupportedChunkBatchSize(
             opts.chunk_batch_size,
@@ -882,7 +954,7 @@ fn pipeline_emulation(
     if opts.snapshot_main == SnapshotMainMode::Aot && !aot_ready {
         return Err(EmulateError::AotUnavailable);
     }
-    let _growable = hold_records_in_growable_buffers();
+    let _unbounded = unbounded_scope();
     let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<Kb>, Vec<u8>> {
         program: Some(program),
         vk_root: None,
@@ -892,23 +964,72 @@ fn pipeline_emulation(
         opts: Some(opts),
         records: Vec::new(),
     };
-    let (mut reports, cycles, committed_bytes) = emulate_snapshot_pipeline_with_selector(
+    // Only the sequencer calls it, a record at a time, so the lock is never contended.
+    let handler = Mutex::new((handle_record, 0u32));
+    // The pipeline makes the same check before it starts a thread; made here too, so a run it
+    // refuses opens no window and records nothing.
+    check_pipeline(workers, &opts)?;
+    // The window's emulation ends when the pipeline returns or unwinds; the prove stages that
+    // follow stay in the same ledger run, which a failed emulation ends.
+    let window = ledger::open_window(
+        Instant::now(),
+        match opts.snapshot_main {
+            SnapshotMainMode::Aot => "aot",
+            SnapshotMainMode::Interpreter => "interpreter",
+        },
+        match opts.replay_workers {
+            ReplayWorkers::Aot => "aot",
+            ReplayWorkers::Interpreter => "interpreter",
+        },
+        workers.get(),
+    );
+    let piped = emulate_snapshot_pipeline_with(
         &witness,
         workers,
         DeferredSplit::AfterEveryChunk,
-        |record, _done| sink(record),
-        |_| trace,
-    )?;
+        |record, _done| {
+            let mut handler = handler.lock().unwrap_or_else(PoisonError::into_inner);
+            let (handle_record, chunks) = &mut *handler;
+            *chunks += u32::from(record.is_cpu_chunk);
+            handle_record(record);
+        },
+    );
+    drop(window);
+    let (mut reports, cycles, committed_bytes) = piped.inspect_err(|_| ledger::close_window())?;
     reports.sort_by_key(|report| report.start_chunk);
-    Ok((reports, cycles, committed_bytes))
+    let (_, chunks) = handler.into_inner().unwrap_or_else(PoisonError::into_inner);
+    Ok(EmulationOutput {
+        records: Vec::new(),
+        chunks,
+        committed_bytes,
+        cycles,
+        reports,
+    })
 }
+
+/// [`emulate_with_pipeline`] for a caller that needs what the run did, not its witness: each record
+/// goes to `on_record` and is dropped. `records` comes back empty; `chunks`, `cycles`,
+/// `committed_bytes` and `reports` are [`emulate_with_pipeline`]'s.
+pub fn execute_with_pipeline(
+    program: Arc<Program>,
+    stdin: &EmulatorStdin<Program, Vec<u8>>,
+    opts: EmulatorOpts,
+    workers: NonZeroUsize,
+    on_record: impl Fn(&EmulationRecord) + Send + Sync,
+) -> Result<EmulationOutput, EmulateError> {
+    emulate_with_pipeline_streaming(program, stdin, opts, workers, |record| on_record(&record))
+}
+
+/// The chunk [`emulate`] takes at most when neither its caller nor `CHUNK_SIZE` names one: the
+/// stacked height of 22 its callers check records against holds it.
+pub const DEFAULT_MAX_CHUNK_SIZE: u32 = 1 << 22;
 
 /// Emulate the program to completion, collecting one [`EmulationRecord`] per chunk.
 ///
 /// `chunk_size` and the caller's `log_stacked_height` are one decision: a chunk holds one CPU row
 /// per instruction, so a full chunk of `2^n` instructions needs a stacked height of at least `n`.
-/// `None` inherits the emulator's RAM-derived default, which then decides the proof shape;
-/// `CHUNK_SIZE` wins over both.
+/// `None` takes the emulator's RAM-derived default, at most [`DEFAULT_MAX_CHUNK_SIZE`], which then
+/// decides the proof shape; `CHUNK_SIZE` wins over both.
 pub fn emulate(
     program: Arc<Program>,
     stdin: EmulatorStdin<Program, Vec<u8>>,
@@ -930,8 +1051,9 @@ pub fn emulate_with_committed_bytes(
 }
 
 /// [`emulate`], handing each record to `on_record` as the emulator yields it instead of collecting
-/// them, and returning the committed bytes. A record holds pinned CPU/ALU event buffers from fixed
-/// pools until it is dropped, so a run with more chunks than the pools hold blocks in [`emulate`];
+/// them, and returning the committed bytes. In a process that bounds the records it holds at once,
+/// a chunk record holds its place under the bound until it is dropped, so a run with more chunks
+/// than the bound blocks in [`emulate`] unless the caller lifted it ([`unbounded_scope`]);
 /// here it does not, as long as `on_record` drops what it is given.
 pub fn emulate_each(
     program: Arc<Program>,
@@ -939,28 +1061,18 @@ pub fn emulate_each(
     chunk_size: Option<u32>,
     mut on_record: impl FnMut(EmulationRecord),
 ) -> Vec<u8> {
-    // The chunk size also sizes the pinned CPU/ALU event buffers, which read `CHUNK_SIZE` and
-    // expose no other seam for the CPU pool. Set the variable rather than `opts.chunk_size`, or a
-    // chunk larger than the buffers overflows them mid-emulation ("Buffer is full").
-    if let (Some(n), None) = (chunk_size, std::env::var_os("CHUNK_SIZE")) {
+    // Through `CHUNK_SIZE`, which `EmulatorOpts::default` derives the cycle limit from too, unless
+    // the variable names a size already.
+    let named = std::env::var_os("CHUNK_SIZE").is_some();
+    if let (Some(n), false) = (chunk_size, named) {
         std::env::set_var("CHUNK_SIZE", n.to_string());
     }
     let mut opts = EmulatorOpts::default();
-    // The buffers can still come out smaller than the chunk: `ALU_EVENT_BUFFER_SIZE` overrides
-    // `CHUNK_SIZE` for the ALU pool, and a caller that named no size inherits a RAM-derived chunk
-    // that can exceed the 2^22 default. Clamp rather than panic, but say so — it silently shrinks
-    // the chunk a caller asked for.
-    let buffer_cap = u32::try_from(cpu_event_buffer_capacity().min(alu_event_buffer_capacity()))
-        .unwrap_or(u32::MAX);
-    if opts.chunk_size > buffer_cap {
-        tracing::warn!(
-            "chunk size {} exceeds the pinned event buffers ({buffer_cap}); clamping",
-            opts.chunk_size
-        );
-        opts.chunk_size = buffer_cap;
+    if chunk_size.is_none() && !named {
+        opts.chunk_size = opts.chunk_size.min(DEFAULT_MAX_CHUNK_SIZE);
     }
     let final_pvs_state = Arc::new(RecordFinalPvsState::default());
-    let mut emulator = RiscvEmulator::new_single::<Kb>(program, final_pvs_state, opts, None);
+    let mut emulator = RiscvEmulator::new_single::<Kb>(program, final_pvs_state, opts);
     emulator.write_stdin(&stdin);
     loop {
         let report = emulator
@@ -977,7 +1089,10 @@ pub fn emulate_each(
 /// `RISCV_NUM_PVS`; MemInit / MemFinal / GLOBAL read the `MAX_NUM_PVS`-padded array (the tail is
 /// recursion-padding, zero here). Shared by the host [`build_ctx`] and GPU [`build_ctx_gpu`] paths.
 fn pvs_for_record(record: &EmulationRecord) -> (Vec<Kb>, Vec<Kb>) {
-    let raw_pvs: Vec<Kb> = record.public_values::<Kb>();
+    pvs_from_raw(record.public_values::<Kb>())
+}
+
+fn pvs_from_raw(raw_pvs: Vec<Kb>) -> (Vec<Kb>, Vec<Kb>) {
     let pvs_riscv: Vec<Kb> = raw_pvs.iter().copied().take(RISCV_NUM_PVS).collect();
     let mut pvs_max = raw_pvs;
     pvs_max.resize(MAX_NUM_PVS, Kb::ZERO);
@@ -1016,7 +1131,33 @@ pub fn augmented_record(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
     record: &EmulationRecord,
 ) -> EmulationRecord {
-    augment_record(chips, record.clone())
+    let t_clone = ledger::ProveMark::now();
+    let record = record.clone();
+    if ledger::in_prove_slot() {
+        ledger::prove_stage("prove.augment.clone", t_clone, || {
+            let history = record.history.as_ref();
+            json!({
+                "record_bytes": record_bytes(&record),
+                "trace_source": "history",
+                "branch_compares": "indices",
+                "history_bytes": history.map(ExecutionHistory::bytes),
+                "history_steps": history.map(|history| history.steps.len()),
+                "history_accesses": history.map(|history| history.reads.len() + history.writes.len()),
+                "history_reads": history.map(|history| history.reads.len()),
+                "history_writes": history.map(|history| history.writes.len()),
+                "history_operand_exceptions": history.map(|history| history.operand_exceptions.len()),
+                "history_table_bytes": history.map(|history| {
+                    history
+                        .table_bytes()
+                        .into_iter()
+                        .map(|(table, bytes)| (table.to_string(), json!(bytes)))
+                        .collect::<serde_json::Map<String, serde_json::Value>>()
+                }),
+                "streams": { "add_events": record.add_events.len() },
+            })
+        });
+    }
+    augment_record(chips, record)
 }
 
 /// [`augmented_record`] on a record the caller gives up, without the clone.
@@ -1024,14 +1165,27 @@ pub fn augment_record(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
     mut record: EmulationRecord,
 ) -> EmulationRecord {
+    let logged = ledger::in_prove_slot();
     for chip in chips.iter() {
         if air_id_for(&chip.name()).is_none() {
             continue;
         }
         if chip.is_active(&record) {
+            let t_chip = ledger::ProveMark::now();
             let mut extra = EmulationRecord::default();
             chip.extra_record(&record, &mut extra);
+            let added = logged.then(|| {
+                let streams: serde_json::Map<String, serde_json::Value> = record_counts(&extra)
+                    .into_iter()
+                    .filter(|&(_, len)| len > 0)
+                    .map(|(stream, len)| (stream.to_string(), json!(len)))
+                    .collect();
+                json!({ "events_added": streams, "bytes_added": record_bytes(&extra) })
+            });
             record.append(&mut extra);
+            if let Some(facts) = added {
+                ledger::prove_stage(&format!("prove.augment.{}", chip.name()), t_chip, || facts);
+            }
         }
     }
     record
@@ -1073,8 +1227,16 @@ pub fn build_ctx(
     record: &EmulationRecord,
     bucket: bool,
 ) -> ProvingContext<HostPb> {
-    let mut record = augmented_record(chips, record);
+    build_ctx_augmented(chips, augmented_record(chips, record), bucket)
+}
 
+/// [`build_ctx`] over a record [`augmented_record`] already returned, for a caller that also reads
+/// the augmented events.
+pub(crate) fn build_ctx_augmented(
+    chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
+    mut record: EmulationRecord,
+    bucket: bool,
+) -> ProvingContext<HostPb> {
     // Coarse-bucket normalization (see `shape`), whitelist mode only. The shape fixes both
     // halves of a chunk's proof shape: every chip in it pads to its bucket height, and the chip
     // set itself is the canonical presence set for the chunk kind rather than the set the
@@ -1088,6 +1250,13 @@ pub fn build_ctx(
             record.shape.is_none(),
             "record already carries a shape; the FRI shape system and the MLE bucket must not mix"
         );
+        // Dev mode proves at natural heights: no shape is chosen, by design.
+        if let Some(slot) = ledger::in_prove_slot()
+            .then(ledger::current_prove_slot)
+            .flatten()
+        {
+            ledger::skipped("prove.shape", slot.at(), slot.lane());
+        }
         return build_ctx_inner(chips, &record);
     }
     // A record that reached the GPU path already carries the shape `shape_record` chose for it;
@@ -1104,8 +1273,9 @@ fn select_shape_for_augmented(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
     record: &EmulationRecord,
 ) -> crate::instances::compiler::shapes::riscv_shape::RiscvPadShape {
+    let t_shape = ledger::ProveMark::now();
     let natural = crate::mle::machine::shape::mle_natural_heights(record);
-    shape_of(chips, record, &natural)
+    shape_of(chips, record, &natural, t_shape)
 }
 
 /// `SHAPE_PROBE_NATURAL=1`: one line per chunk with the natural (event-driven) log-heights, in
@@ -1160,29 +1330,32 @@ fn select_shape_from_counter(
     record: &EmulationRecord,
     counter: &crate::instances::preparer::EventCounter,
 ) -> crate::instances::compiler::shapes::riscv_shape::RiscvPadShape {
+    let t_shape = ledger::ProveMark::now();
     let natural = crate::mle::machine::shape::mle_natural_heights_from_counter(record, counter);
-    shape_of(chips, record, &natural)
+    shape_of(chips, record, &natural, t_shape)
 }
 
 /// Presence from the record, the ladder / enumeration match on `natural`, and the GPU catch-all
-/// refusal.
+/// refusal. `t_shape` is where the caller started deriving `natural`: the `prove.shape` stage
+/// brackets that derivation and the match together, as the host path does.
 fn shape_of(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
     record: &EmulationRecord,
     natural: &std::collections::BTreeMap<String, usize>,
+    t_shape: ledger::ProveMark,
 ) -> crate::instances::compiler::shapes::riscv_shape::RiscvPadShape {
     let present: Vec<String> = chips
         .iter()
         .filter(|chip| bucketed_presence(chip, record))
         .map(|chip| chip.name())
         .collect();
-    let inner =
+    let selected =
         crate::mle::machine::shape::select_riscv_shape(&present, natural, record.is_cpu_chunk);
     // The catch-all core shape pads to m = 31 (a 64 GiB GKR leaf buffer): no 32 GB card holds
     // it. A GPU build refuses the chunk here, legibly, instead of dying in a device allocation.
     if cfg!(feature = "cuda")
         && record.is_cpu_chunk
-        && crate::mle::machine::shape::is_core_catch_all(&inner)
+        && crate::mle::machine::shape::is_core_catch_all(&selected)
     {
         panic!(
             "core chunk selects the catch-all whitelist shape, which no GPU holds (m = 31); \
@@ -1194,8 +1367,17 @@ fn shape_of(
                 .join(" ")
         );
     }
+    if ledger::in_prove_slot() {
+        ledger::prove_stage("prove.shape", t_shape, || {
+            json!({
+                "present": present.len(),
+                "natural": natural,
+                "selected": selected.iter().cloned().collect::<BTreeMap<_, _>>(),
+            })
+        });
+    }
     crate::instances::compiler::shapes::riscv_shape::RiscvPadShape {
-        inner: inner.into_iter().collect(),
+        inner: selected.into_iter().collect(),
     }
 }
 
@@ -1235,7 +1417,23 @@ fn build_ctx_inner(
                 chip.name()
             );
         };
+        let t_trace = ledger::ProveMark::now();
         let trace = chip.generate_main(record, &mut dummy);
+        if ledger::in_prove_slot() {
+            ledger::prove_stage(&format!("prove.tracegen.{}", chip.name()), t_trace, || {
+                json!({
+                    "rows": trace.values.len() / trace.width.max(1),
+                    "cols": trace.width,
+                    "bytes": std::mem::size_of_val(trace.values.as_slice()),
+                    "trace_digest": ledger::digests_enabled().then(|| {
+                        format!(
+                            "{:#018x}",
+                            digest_words(trace.values.iter().map(|v| v.as_canonical_u32()))
+                        )
+                    }),
+                })
+            });
+        }
         let ctx = match id {
             air_id::CPU | air_id::ECALL => AirProvingContext::simple(trace, pvs_riscv.clone()),
             air_id::MEM_INIT | air_id::MEM_FINAL => {
@@ -1275,13 +1473,20 @@ pub fn build_ctx_gpu(
 ) -> ProvingContext<Pb> {
     use crate::{
         chips::trace::TraceData, configs::stark_config::KoalaBearPoseidon2 as FriSc,
-        machine::prover::BaseProver,
+        machine::prover::BaseProver, mle::spans::device,
     };
     use cuda_mle::runtime::{
         copy::cuda_memcpy, d_buffer::DeviceBuffer, stream::current_stream_sync,
     };
     use std::{ffi::c_void, mem::ManuallyDrop};
 
+    let t_stage = ledger::ProveMark::now();
+    let device_id = bound_device();
+    let readings = device::begin(
+        record.chunk_index().saturating_sub(1) as u64,
+        record.is_cpu_chunk,
+        device_id,
+    );
     // Both orderings are same-typed and both are in the caller's scope, so passing the wrong one
     // compiles and then mis-binds every positional event buffer. Assert rather than trust. Not a
     // `debug_assert`: the prover runs in release, where that would never fire, and one name
@@ -1291,14 +1496,15 @@ pub fn build_ctx_gpu(
         Some("Cpu"),
         "build_ctx_gpu needs the orchestrator chip ordering, not all_chips()"
     );
-    let named = BaseProver::<FriSc, RiscvChipType<Kb>>::new().gpu_generate_extra_record_and_main(
-        bound_device(),
-        chips,
-        record,
-        prepared,
-    );
+    // The trace generator's stage, timed by the host around the orchestrator while the chunk's
+    // readings are on, the only time its brackets are written.
+    let t_tracegen = readings.records().then(ledger::ProveMark::now);
+    let named = BaseProver::<FriSc, RiscvChipType<Kb>>::new()
+        .gpu_generate_extra_record_and_main(device_id, chips, record, prepared);
+    let tracegen = t_tracegen.map(|since| (since, ledger::ProveMark::now()));
 
-    // Public values from the host record (same construction as `build_ctx`).
+    // Public values from the host record, as `build_ctx` takes them: the deferred-commit tally is
+    // read off the history's ECALL steps alone.
     let (pvs_riscv, pvs_max) = pvs_for_record(record);
 
     let mut per_trace: Vec<(usize, AirProvingContext<Pb>)> = vec![];
@@ -1335,14 +1541,14 @@ pub fn build_ctx_gpu(
                 let gcs = (id == air_id::GLOBAL).then(|| {
                     let mut host = vec![Kb::ZERO; GCS_DIGEST_LEN];
                     let offset = gcs_last_row_offset(h, w);
-                    unsafe {
+                    device::wait_with(|| unsafe {
                         cuda_memcpy::<true, false>(
                             host.as_mut_ptr() as *mut c_void,
                             alloc.as_ptr().add(offset) as *const c_void,
                             GCS_DIGEST_LEN * std::mem::size_of::<Kb>(),
                         )
-                        .expect("GCS extraction D2H failed");
-                    }
+                    })
+                    .expect("GCS extraction D2H failed");
                     host
                 });
                 // Borrow the pool allocation as a cuda-mle DeviceBuffer (ManuallyDrop: the buffer
@@ -1351,10 +1557,12 @@ pub fn build_ctx_gpu(
                     DeviceBuffer::from_raw_parts(alloc.as_ptr() as *mut Kb, h * w)
                 });
                 let output = DeviceBuffer::<Kb>::with_capacity(h * w);
+                let transpose = device::start_on_thread();
                 unsafe {
                     cuda_mle::matrix_transpose_fp_any(&output, &input, w, h)
                         .expect("row-major → col-major transpose failed");
                 }
+                device::transposed_on_thread(transpose);
                 live_allocs.push(alloc);
                 (
                     cuda_mle::base::DeviceMatrix::new(Arc::new(output), h, w),
@@ -1364,8 +1572,12 @@ pub fn build_ctx_gpu(
             TraceData::Cpu(m) => {
                 // CPU fallback chip: extract GCS on host, then reuse the existing H2D+transpose.
                 let gcs = (id == air_id::GLOBAL).then(|| read_gcs_from_host(&m.values, h, w));
-                let matrix = cuda_mle::data_transporter::transport_matrix_h2d_row_major(&m)
-                    .expect("CPU-fallback trace H2D failed");
+                let upload = device::start_on_thread();
+                let matrix = device::wait_with(|| {
+                    cuda_mle::data_transporter::transport_matrix_h2d_row_major(&m)
+                })
+                .expect("CPU-fallback trace H2D failed");
+                device::uploaded_on_thread(upload);
                 (matrix, gcs)
             }
             TraceData::Debug(..) => unreachable!("debug trace variant in production path"),
@@ -1381,206 +1593,147 @@ pub fn build_ctx_gpu(
 
     // One sync covers all per-thread-stream work (transposes + GCS D2H); after it the
     // orchestrator's allocations can be returned to the pool.
-    current_stream_sync().expect("sync after GPU trace bridge");
+    device::final_wait_with(current_stream_sync).expect("sync after GPU trace bridge");
     drop(live_allocs);
+    // Finished inside the facts, after the stage's clock is read, so reading the events stays out
+    // of the stage; outside a prove slot the facts never run and the summary is logged here.
+    let mut readings = Some(readings);
+    let mut brackets = None;
+    ledger::prove_stage("prove.build_ctx_gpu", t_stage, || {
+        let readout = readings.take().and_then(device::Session::finish);
+        let (facts, read) = readout.map(|r| (r.device, r.brackets)).unzip();
+        brackets = read;
+        facts.unwrap_or_else(|| json!({}))
+    });
+    if let Some(readings) = readings {
+        readings.finish();
+    }
+    if let (Some(brackets), Some((since, until))) = (brackets, tracegen) {
+        ledger::prove_stage_until("gpu.tracegen", since, until, || brackets);
+    }
 
     per_trace.sort_by_key(|(id, _)| *id);
     ProvingContext::new(per_trace)
 }
 
-/// The permutation-comparison `unit` for a trace: one row, except Poseidon2 packs
-/// `RISCV_NUM_POSEIDON2_VALUE_COLS` slots per row (reordered events repack across row boundaries,
-/// so the sound unit is one slot).
+/// Log one record's per-AIR prove times and return them as `air.<name>.prove_us` facts: each AIR's
+/// round-0 and GKR-input steps summed, host and device wall. The steps themselves, with the path
+/// each launched, go to the debug level.
 #[cfg(feature = "cuda")]
-fn trace_compare_unit(id: usize, w: usize) -> usize {
-    if id == air_id::POSEIDON2 {
-        use crate::{
-            chips::chips::riscv_poseidon2::columns::RISCV_NUM_POSEIDON2_VALUE_COLS,
-            primitives::consts::KoalaBearConfig,
-        };
-        RISCV_NUM_POSEIDON2_VALUE_COLS::<KoalaBearConfig>
-    } else {
-        w
-    }
-}
-
-/// A GPU-only air (CPU inactive — the family-level GPU activity predicate emitted an all-padding
-/// trace) must be pure padding: every row equals row 0. Padding rows send nothing on the bus, so
-/// this is sound; a non-uniform trace is a real divergence.
-#[cfg(feature = "cuda")]
-fn assert_gpu_only_padding(id: usize, host: &[Kb], h: usize, w: usize) {
-    let uniform_rows = (1..h).all(|r| (0..w).all(|c| host[c * h + r] == host[c * h]));
-    assert!(
-        uniform_rows,
-        "air {id}: GPU-only (CPU inactive) but trace is not pure padding — real divergence"
-    );
-    tracing::warn!(
-        "[trace-compare] air {id}: GPU-only all-padding trace ({h}x{w}) — sound \
-         (family-level GPU activity predicate)"
-    );
-}
-
-/// GPU/CPU traces disagree element-wise at `(r, c)`. Accept iff they are a unit-permutation of each
-/// other (GPU may emit events in a different order — sound for per-unit constraints + multiset
-/// interactions), or differ only in padding (dummy) rows (GPU bakes `RISCV_DUMMY_ROW_KB`, CPU recomputes
-/// its dummy; both are `is_real = 0`). Otherwise panic with the first-diff location.
-#[cfg(feature = "cuda")]
-fn assert_permutation_or_padding_diff(
-    id: usize,
-    r: usize,
-    c: usize,
-    h: usize,
-    w: usize,
-    host: &[Kb],
-    cpu_values: &[Kb],
-) {
-    use p3_field::PrimeField32;
-
-    let unit = trace_compare_unit(id, w);
-    assert_eq!(
-        w % unit,
-        0,
-        "air {id}: width {w} not a multiple of unit {unit}"
-    );
-    let units_per_row = w / unit;
-    let mut gpu_rows: Vec<Vec<Kb>> = (0..h)
-        .flat_map(|row| {
-            (0..units_per_row).map(move |u| {
-                (u * unit..(u + 1) * unit)
-                    .map(|col| host[col * h + row])
-                    .collect::<Vec<Kb>>()
-            })
-        })
-        .collect();
-    let mut cpu_rows: Vec<Vec<Kb>> = cpu_values.chunks_exact(unit).map(|s| s.to_vec()).collect();
-    let key = |row: &Vec<Kb>| row.iter().map(|x| x.as_canonical_u32()).collect::<Vec<_>>();
-    gpu_rows.sort_by_key(key);
-    cpu_rows.sort_by_key(key);
-    if gpu_rows == cpu_rows {
-        tracing::warn!(
-            "[trace-compare] air {id}: rows are a permutation of CPU rows (first diff \
-             at row {r} col {c}) — sound, but not byte-identical"
-        );
-        return;
-    }
-    // Not a permutation: accept iff the disagreeing rows on each side are copies of one single row
-    // (each side's dummy), in equal number; anything else is a real divergence.
-    let mut only_gpu: Vec<&Vec<Kb>> = Vec::new();
-    let mut only_cpu: Vec<&Vec<Kb>> = Vec::new();
-    let (mut i, mut j) = (0, 0);
-    while i < gpu_rows.len() || j < cpu_rows.len() {
-        match (gpu_rows.get(i), cpu_rows.get(j)) {
-            (Some(g), Some(cvals)) if g == cvals => {
-                i += 1;
-                j += 1;
+fn air_prove_facts(
+    chunk: u32,
+    times: Vec<cuda_mle::air_times::AirTime>,
+) -> serde_json::Map<String, serde_json::Value> {
+    use crate::mle::spans::device::TARGET;
+    let mut per_air = std::collections::BTreeMap::<String, u64>::new();
+    let mut unread = 0usize;
+    for time in &times {
+        match time.us {
+            Some(us) => {
+                tracing::debug!(
+                    target: TARGET,
+                    "[air-prove] chunk={chunk} air={} step={} path={} us={us}",
+                    time.air,
+                    time.step,
+                    time.path
+                );
+                *per_air.entry(time.air.clone()).or_default() += us;
             }
-            (Some(g), Some(cvals)) if key(g) < key(cvals) => {
-                only_gpu.push(g);
-                i += 1;
-            }
-            (Some(_), Some(_)) => {
-                only_cpu.push(&cpu_rows[j]);
-                j += 1;
-            }
-            (Some(g), None) => {
-                only_gpu.push(g);
-                i += 1;
-            }
-            (None, Some(_)) => {
-                only_cpu.push(&cpu_rows[j]);
-                j += 1;
-            }
-            (None, None) => break,
+            None => unread += 1,
         }
     }
-    let uniform = |rows: &[&Vec<Kb>]| rows.windows(2).all(|p| p[0] == p[1]);
-    assert!(
-        only_gpu.len() == only_cpu.len()
-            && !only_gpu.is_empty()
-            && uniform(&only_gpu)
-            && uniform(&only_cpu),
-        "air {id}: trace mismatch at row {r} col {c} (GPU={} CPU={}) — {} GPU-only \
-         vs {} CPU-only distinct rows; NOT a padding-row-only difference — real \
-         divergence",
-        host[c * h + r],
-        cpu_values[r * w + c],
-        only_gpu.len(),
-        only_cpu.len(),
-    );
-    tracing::warn!(
-        "[trace-compare] air {id}: differs only in {} padding (dummy) rows — sound \
-         (is_real = 0, no bus messages)",
-        only_gpu.len()
-    );
+    let mut facts = serde_json::Map::new();
+    for (air, us) in per_air {
+        facts.insert(format!("air.{air}.prove_us"), json!(us));
+    }
+    facts.insert("air_events_unread".into(), json!(unread));
+    let line = facts
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    tracing::info!(target: TARGET, "[gpu-air-prove] chunk={chunk} {line}");
+    facts
 }
 
-/// `MLE_TRACE_COMPARE=1` correctness harness: build the same chunk's context on CPU
-/// (`build_ctx`) and compare every GPU trace element against it (after undoing the col-major
-/// layout). Reports mismatches at air/row/col granularity — locates trace-bridge bugs that
-/// `verify` would only report as an opaque failure.
+/// `MLE_TRACE_COMPARE=1`: hold the chunk's device context to the host's under the fixed oracle
+/// ([`trace_oracle::check_chunk`]) and panic on any divergence, naming each air that diverged and
+/// where.
 #[cfg(feature = "cuda")]
 fn compare_gpu_ctx_against_cpu(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
     record: &EmulationRecord,
     gpu_ctx: &ProvingContext<Pb>,
 ) {
-    use cuda_mle::runtime::copy::MemCopyD2H;
-    use pico_mle_core::poly::matrix::MatrixDimensions;
-
-    // A whitelist-mode record already carries its shape; the host build must pad to it too.
-    let cpu_ctx = build_ctx(chips, record, record.shape.is_some());
-    let cpu: std::collections::HashMap<usize, _> = cpu_ctx.per_trace.into_iter().collect();
-    let gpu_ids: std::collections::HashSet<usize> =
-        gpu_ctx.per_trace.iter().map(|(id, _)| *id).collect();
-    // A CPU-active air missing from the GPU context would drop bus messages — fatal.
-    let missing: Vec<usize> = cpu
-        .keys()
-        .copied()
-        .filter(|id| !gpu_ids.contains(id))
-        .collect();
-    assert!(
-        missing.is_empty(),
-        "airs {missing:?} active on CPU but missing from GPU trace-gen — real divergence"
-    );
-
-    for (id, gpu_air) in &gpu_ctx.per_trace {
-        let Some(cpu_air) = cpu.get(id) else {
-            // GPU-only air (CPU inactive): must be pure padding (see `assert_gpu_only_padding`).
-            let (h, w) = (gpu_air.common_main.height(), gpu_air.common_main.width());
-            let host = gpu_air
-                .common_main
-                .buffer()
-                .to_host()
-                .expect("gpu-only air D2H");
-            assert_gpu_only_padding(*id, &host, h, w);
-            continue;
-        };
-        let cpu_trace = &cpu_air.common_main;
-        let w = cpu_trace.width;
-        let h = cpu_trace.values.len() / w;
-        assert_eq!(
-            (gpu_air.common_main.height(), gpu_air.common_main.width()),
-            (h, w),
-            "air {id}: dimensions differ"
-        );
-        let host = gpu_air
-            .common_main
-            .buffer()
-            .to_host()
-            .expect("trace D2H for compare");
-        let mismatch = (0..h)
-            .flat_map(|r| (0..w).map(move |c| (r, c)))
-            .find(|&(r, c)| host[c * h + r] != cpu_trace.values[r * w + c]);
-        if let Some((r, c)) = mismatch {
-            assert_permutation_or_padding_diff(*id, r, c, h, w, &host, &cpu_trace.values);
-        }
-        assert_eq!(
-            gpu_air.public_values, cpu_air.public_values,
-            "air {id}: public values differ"
-        );
-        tracing::info!("[trace-compare] air {id}: {h}x{w} OK");
+    let chunk = record.chunk_index().saturating_sub(1);
+    use super::trace_oracle;
+    match trace_oracle::check_chunk(chips, record, gpu_ctx, &[]) {
+        Ok(verdict) => trace_oracle::log_verdict(chunk, &verdict),
+        Err(failures) => panic!(
+            "chunk {chunk}: the device traces are not the host's:\n{}",
+            trace_oracle::describe(&failures)
+        ),
     }
-    tracing::info!("[trace-compare] all {} airs identical ✓", gpu_ids.len());
+}
+
+/// What [`trace_records`] generated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TraceReport {
+    /// Records traced, the deferred ones included.
+    pub records: usize,
+    /// How many of them are CPU chunks.
+    pub cpu_chunks: usize,
+    /// How many CPU chunks reached trace generation: the CPU chip's trace is in their context.
+    pub cpu_chunks_traced: usize,
+    /// Chip traces generated, over every record.
+    pub traces: usize,
+}
+
+/// Generate every record's main traces on the host as [`build_ctx`] does, and drop them: the
+/// extra-record pass, the shape in `bucket` mode and each active chip's `generate_main`, with no
+/// commit, no prove and no verify. The host path is what [`RiscvMachine::prove`] runs without
+/// `cuda`; with it, `prove` prepares each chunk's events for the device instead.
+///
+/// The stages are [`build_ctx`]'s own, in the prove slots `prove` uses and at its concurrency
+/// (`None`: `PROVE_CONCURRENCY`, else 4), so a stage ledger reads the same `prove.augment.*`,
+/// `prove.shape` and `prove.tracegen.*` lines here as in a host prove, and `prove.prove` and
+/// `prove.verify` as skipped. A record's traces drop before its slot takes the next record, so the
+/// peak is `concurrency` records' traces, not the run's.
+pub fn trace_records(
+    chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
+    records: &[EmulationRecord],
+    bucket: bool,
+    concurrency: Option<NonZeroUsize>,
+) -> TraceReport {
+    let traced = par_in_prove_slots::<_, std::convert::Infallible>(
+        records,
+        resolved_concurrency(concurrency),
+        |_, record| {
+            let ctx = build_ctx(chips, record, bucket);
+            let cpu = ctx.per_trace.iter().any(|(id, _)| *id == air_id::CPU);
+            let traces = ctx.per_trace.len();
+            drop(ctx);
+            if let Some(slot) = ledger::in_prove_slot()
+                .then(ledger::current_prove_slot)
+                .flatten()
+            {
+                for stage in ["prove.prove", "prove.verify"] {
+                    ledger::skipped(stage, slot.at(), slot.lane());
+                }
+            }
+            Ok((record.is_cpu_chunk, cpu, traces))
+        },
+    )
+    .unwrap_or_else(|never| match never {});
+    TraceReport {
+        records: traced.len(),
+        cpu_chunks: traced.iter().filter(|(is_cpu, ..)| *is_cpu).count(),
+        cpu_chunks_traced: traced
+            .iter()
+            .filter(|(is_cpu, cpu, _)| *is_cpu && *cpu)
+            .count(),
+        traces: traced.iter().map(|(.., traces)| traces).sum(),
+    }
 }
 
 /// Run the MLE debug checker (constraints + interactions/bus balance) over every chunk of
@@ -1824,7 +1977,9 @@ impl RiscvMachine {
         // card, and WHIR simply recomputes it from the traces (~0.1s/chunk).
         #[cfg(feature = "cuda")]
         engine.device_mut().set_cache_rs_code_matrix(false);
+        let t_keygen = Instant::now();
         let (pk, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
+        ledger::add_setup(ledger::Setup::Keygen, t_keygen.elapsed());
         admit_production_vk(
             "riscv",
             if cfg!(feature = "cuda") { "gpu" } else { "cpu" },
@@ -1901,7 +2056,7 @@ impl RiscvMachine {
             cb(self.ctx_per_air_log_heights(&ctx));
         }
         let index = chunk.record.chunk_index().saturating_sub(1);
-        self.try_prove_ctx(ctx, index, verify)
+        self.try_prove_ctx(ctx, index, chunk.record.public_values.chunk, verify)
             .unwrap_or_else(|e| panic!("{e}"))
     }
 
@@ -1915,7 +2070,7 @@ impl RiscvMachine {
         verify: bool,
     ) -> Result<Proof<Sc>, ProveRiscvError> {
         let ctx = self.chunk_ctx(chunk);
-        self.try_prove_ctx(ctx, index, verify)
+        self.try_prove_ctx(ctx, index, chunk.record.public_values.chunk, verify)
     }
 
     /// The chunk's proving context: GPU trace-gen under `cuda`, host `build_ctx` otherwise.
@@ -1965,17 +2120,23 @@ impl RiscvMachine {
         ctx
     }
 
-    /// Shared prove tail: engine prove (+ optional self-verify) + GCS accumulation.
+    /// Shared prove tail: engine prove (+ optional self-verify) + GCS accumulation. `pv_chunk` is
+    /// the record's stamped chunk index, which the ledger's prove line carries beside the slot.
     fn try_prove_ctx(
         &self,
         ctx: ProvingContext<Pb>,
         chunk: usize,
+        pv_chunk: u32,
         verify: bool,
     ) -> Result<Proof<Sc>, ProveRiscvError> {
         // Phase tag for the shared GPU prove path: the prover thread alternates riscv, convert
         // and combine proves, and the bench spans attribute by it.
         #[cfg(feature = "cuda")]
         cuda_mle::set_prove_phase("riscv");
+        #[cfg(feature = "cuda")]
+        let mut air_window =
+            crate::mle::spans::device::switched_on().then(cuda_mle::air_times::begin);
+        let t_prove = ledger::ProveMark::now();
         let proof = self
             .engine
             .prove(&self.d_pk, ctx)
@@ -1983,10 +2144,42 @@ impl RiscvMachine {
                 chunk,
                 message: format!("{e:?}"),
             })?;
+        // Taken inside the facts, after the stage's clock is read, so reading the events stays out
+        // of the stage; outside a prove slot the facts never run and the breakdown is logged below.
+        #[cfg(feature = "cuda")]
+        let mut air_facts = || {
+            air_window
+                .take()
+                .map(|window| air_prove_facts(pv_chunk.saturating_sub(1), window.take()))
+        };
+        if ledger::in_prove_slot() {
+            let slot = ledger::current_prove_slot();
+            ledger::prove_stage("prove.prove", t_prove, || {
+                #[cfg(feature = "cuda")]
+                let mut facts = air_facts().unwrap_or_default();
+                #[cfg(not(feature = "cuda"))]
+                let mut facts = serde_json::Map::new();
+                facts.insert(
+                    "proof_bytes".into(),
+                    json!(bincode::serialized_size(&proof).ok()),
+                );
+                facts.insert("slot".into(), json!(slot.map(|s| s.slot)));
+                facts.insert("pv_chunk".into(), json!(pv_chunk));
+                serde_json::Value::Object(facts)
+            });
+        }
+        #[cfg(feature = "cuda")]
+        air_facts();
         if verify {
+            let t_verify = ledger::ProveMark::now();
             self.engine
                 .verify(&self.vk, &proof)
                 .map_err(|source| ProveRiscvError::SelfVerify { chunk, source })?;
+            ledger::prove_stage(
+                "prove.verify",
+                t_verify,
+                || json!({ "ok": true, "kind": "inline" }),
+            );
         }
         let gcs = gcs_from_pvs(&proof.public_values[air_id::GLOBAL]);
         self.gcs_terms.lock().expect("gcs mutex poisoned").push(gcs);
@@ -2061,8 +2254,8 @@ impl RiscvMachine {
     /// the shared verifying key.
     ///
     /// Chunks are proved in bounded-concurrency batches (see [`prove_concurrency`]); each record is
-    /// wrapped via [`prepare_chunk`] before [`Self::prove_chunk`]. The batch bound caps peak memory
-    /// since every in-flight chunk holds a full proving working set.
+    /// wrapped via [`prepare_chunk_shaped`] before [`Self::prove_chunk`]. The batch bound caps peak
+    /// memory since every in-flight chunk holds a full proving working set.
     /// Whitelist mode: pin `record`'s proof shape before it is packaged for the GPU (see
     /// [`shape_record`]). A no-op with the whitelist off.
     pub fn shape_record(&self, record: &mut EmulationRecord) {
@@ -2078,33 +2271,27 @@ impl RiscvMachine {
     }
 
     pub fn prove(&self, records: &[EmulationRecord]) -> Result<RiscvProof, ProveRiscvError> {
-        let conc = resolved_concurrency(self.concurrency);
-        let mut chunk_proofs = Vec::with_capacity(records.len());
-        for (batch_idx, batch) in records.chunks(conc).enumerate() {
-            let base = batch_idx * conc;
-            let batch_proofs: Vec<Proof<Sc>> = batch
-                .par_iter()
-                .enumerate()
-                .map(|(j, record)| {
-                    // Only the GPU staging needs the record owned; the CPU build proves it borrowed.
-                    #[cfg(feature = "cuda")]
-                    let proof = self.try_prove_chunk(
-                        &self.prepare_chunk_shaped(record.clone()),
-                        base + j,
-                        false,
-                    )?;
-                    #[cfg(not(feature = "cuda"))]
-                    let proof = self.try_prove_ctx(
-                        ctx_to_engine(build_ctx(&self.chips, record, self.bucket)),
-                        base + j,
-                        false,
-                    )?;
-                    tracing::info!("chunk {}: MLE prove OK", base + j);
-                    Ok(proof)
-                })
-                .collect::<Result<_, ProveRiscvError>>()?;
-            chunk_proofs.extend(batch_proofs);
-        }
+        let chunk_proofs = par_in_prove_slots::<_, ProveRiscvError>(
+            records,
+            resolved_concurrency(self.concurrency),
+            |idx, record| {
+                // Only the GPU staging needs the record owned; the CPU build proves it borrowed.
+                // The shape choice is part of the record's prove job, so its stage lands in the
+                // slot too.
+                #[cfg(feature = "cuda")]
+                let proof =
+                    self.try_prove_chunk(&self.prepare_chunk_shaped(record.clone()), idx, false)?;
+                #[cfg(not(feature = "cuda"))]
+                let proof = self.try_prove_ctx(
+                    ctx_to_engine(build_ctx(&self.chips, record, self.bucket)),
+                    idx,
+                    record.public_values.chunk,
+                    false,
+                )?;
+                tracing::info!("chunk {idx}: MLE prove OK");
+                Ok(proof)
+            },
+        )?;
         Ok(RiscvProof {
             vk: Arc::new(self.vk.clone()),
             chunk_proofs,
@@ -2148,9 +2335,18 @@ fn verify_chunks_and_gcs(
     // The initial-memory term comes from the trusted argument, never from the bundle.
     let mut gcs_terms: Vec<SepticDigest<Kb>> = vec![initial_gcs];
     for (i, chunk_proof) in chunk_proofs.iter().enumerate() {
+        let t_verify = Instant::now();
         engine
             .verify(vk, chunk_proof)
             .map_err(|source| VerifyRiscvError::Chunk { chunk: i, source })?;
+        ledger::stage(
+            "prove.verify",
+            At::record(i as u64, None),
+            Lane::VERIFY,
+            t_verify,
+            Instant::now(),
+            || json!({ "ok": true, "kind": "bundle" }),
+        );
         gcs_terms.push(gcs_from_pvs(&chunk_proof.public_values[air_id::GLOBAL]));
         tracing::info!("chunk {i}: MLE verify OK");
     }
@@ -2337,18 +2533,18 @@ mod tests {
         .compile()
     }
 
-    /// Every field stated: `EmulatorOpts::default` reads `CHUNK_SIZE`, `CHUNK_BATCH_SIZE` and
-    /// `SPLIT_THRESHOLD`, so a `..Default::default()` here would leave these tests measuring the
+    /// Every field stated: `EmulatorOpts::default` reads `CHUNK_SIZE` and `CHUNK_BATCH_SIZE`,
+    /// so a `..Default::default()` here would leave these tests measuring the
     /// environment they are meant to be independent of.
     fn fixed_opts(chunk_size: u32) -> EmulatorOpts {
         EmulatorOpts {
             chunk_size,
             chunk_batch_size: 1,
-            split_opts: crate::emulator::opts::SplitOpts::new(chunk_size as usize >> 2),
             max_cycles: Some(1 << 32),
             cycle_tracker: false,
             cost_estimator: false,
             snapshot_main: SnapshotMainMode::Interpreter,
+            replay_workers: crate::emulator::opts::ReplayWorkers::Interpreter,
         }
     }
 
@@ -2388,6 +2584,14 @@ mod tests {
         let err = emulate_with_opts(fib_program(), &fib_stdin(10), opts)
             .expect_err("Aot must not be accepted");
         assert!(matches!(err, EmulateError::UnsupportedSnapshotMain(_)));
+
+        let opts = fixed_opts(1 << 22).with_replay_workers(ReplayWorkers::Aot);
+        let err = emulate_with_opts(fib_program(), &fib_stdin(10), opts)
+            .expect_err("AOT replay workers must not be accepted");
+        assert!(matches!(
+            err,
+            EmulateError::UnsupportedReplayWorkers(ReplayWorkers::Aot)
+        ));
     }
 
     /// An option this path *does* accept is honoured, not drained and dropped.
@@ -2459,6 +2663,96 @@ mod tests {
             whole.cycles, split.cycles,
             "chunking must not change cycles"
         );
+    }
+
+    /// Every CPU chunk of a split run reaches trace generation, with the shape chosen or not, and
+    /// across more records than one batch of slots holds.
+    #[test]
+    fn trace_records_reaches_every_cpu_chunk() {
+        let out = emulate_with_opts(fib_program(), &fib_stdin(10), fixed_opts(2048))
+            .expect("split fib emulation");
+        assert!(
+            out.chunks > 2,
+            "a run of {} chunk(s) fills no second batch of two slots",
+            out.chunks
+        );
+        let chips = RiscvChipType::<Kb>::all_chips();
+        for bucket in [false, true] {
+            let report = trace_records(&chips, &out.records, bucket, NonZeroUsize::new(2));
+            assert_eq!(report.records, out.records.len(), "bucket={bucket}");
+            assert_eq!(report.cpu_chunks, out.chunks as usize, "bucket={bucket}");
+            assert_eq!(
+                report.cpu_chunks_traced, report.cpu_chunks,
+                "bucket={bucket}: a CPU chunk skipped trace generation"
+            );
+            assert!(report.traces >= report.cpu_chunks, "bucket={bucket}");
+        }
+    }
+
+    /// With no CPU chip the CPU chunks reach no trace generation, and the report says so rather
+    /// than counting the chunks it was handed.
+    #[test]
+    fn trace_records_reports_no_cpu_chunk_traced_without_the_cpu_chip() {
+        let out = emulate_with_opts(fib_program(), &fib_stdin(10), fixed_opts(2048))
+            .expect("split fib emulation");
+        let chips: Vec<_> = RiscvChipType::<Kb>::all_chips()
+            .into_iter()
+            .filter(|chip| air_id_for(&chip.name()) != Some(air_id::CPU))
+            .collect();
+        let report = trace_records(&chips, &out.records, false, NonZeroUsize::new(2));
+        assert!(report.cpu_chunks > 0);
+        assert_eq!(report.cpu_chunks_traced, 0);
+    }
+
+    /// A job's slot names its record by its place in proving order, its CPU chunk by the CPU chunks
+    /// before it (a deferred record has none) and its lane by its place in its batch; results come
+    /// back in record order across batches. The stage ledger reads all three.
+    #[cfg(feature = "stage-ledger")]
+    #[test]
+    fn par_in_prove_slots_names_each_record_and_returns_them_in_order() {
+        let records: Vec<EmulationRecord> = [true, false, true, true, false]
+            .into_iter()
+            .map(|is_cpu_chunk| EmulationRecord {
+                is_cpu_chunk,
+                ..Default::default()
+            })
+            .collect();
+        let named =
+            par_in_prove_slots::<_, std::convert::Infallible>(&records, 2, |idx, record| {
+                let slot = ledger::current_prove_slot().expect("a job runs inside its slot");
+                assert_eq!(slot.record, idx as u64);
+                Ok((idx, slot.chunk, slot.slot, record.is_cpu_chunk))
+            })
+            .unwrap_or_else(|never| match never {});
+        assert_eq!(
+            named,
+            [
+                (0, Some(0), 0, true),
+                (1, None, 1, false),
+                (2, Some(1), 0, true),
+                (3, Some(2), 1, true),
+                (4, None, 0, false),
+            ]
+        );
+    }
+
+    /// A failed record ends the run at its batch: no later batch starts.
+    #[test]
+    fn par_in_prove_slots_starts_no_batch_after_a_failed_one() {
+        let records = vec![EmulationRecord::default(); 5];
+        let started = std::sync::Mutex::new(Vec::new());
+        let result = par_in_prove_slots::<(), usize>(&records, 2, |idx, _| {
+            started.lock().unwrap().push(idx);
+            if idx == 2 {
+                Err(idx)
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!(result, Err(2));
+        let started = started.into_inner().unwrap();
+        assert!(started.contains(&2), "the failing record never ran");
+        assert!(!started.contains(&4), "a batch after the failed one ran");
     }
 
     /// `CHUNK_SIZE` must not reach `emulate_with_opts`.

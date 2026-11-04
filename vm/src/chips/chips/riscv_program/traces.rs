@@ -7,10 +7,14 @@ use super::{
 };
 #[cfg(feature = "cuda")]
 use crate::{
-    chips::{trace::TraceData, utils::next_power_of_two},
+    chips::{
+        chips::riscv_cpu::traces::chunk_history_reader, trace::TraceData, utils::next_power_of_two,
+    },
     cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
-    instances::preparer::PreparedGpuEvents,
+    emulator::riscv::history_fill::HISTORY_LAYOUT,
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::chip::GpuChipBehavior,
+    mle::{machine::trace_oracle::history_launch, spans::device},
 };
 use crate::{
     compiler::{addr::Pc, riscv::program::Program},
@@ -29,15 +33,14 @@ use cudart::{
 };
 #[cfg(feature = "cuda")]
 use cudart_sys::*;
-use hashbrown::HashMap;
 use p3_field::PrimeField32;
 #[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 #[cfg(feature = "cuda")]
 use pico_gpu_api::{
-    cuda_riscv_program_generate_main_u64, cuda_riscv_program_generate_main_u64_packed,
     cuda_riscv_program_generate_preprocessed_u64,
+    history_cpu_memory_lt::cuda_riscv_program_generate_main_history,
 };
 use std::borrow::BorrowMut;
 #[cfg(feature = "cuda")]
@@ -150,22 +153,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        // Collect instruction counts in parallel using a thread-safe HashMap
-        let instruction_counts: HashMap<u64, usize> = input
-            .cpu_events
-            .as_slice()
-            .pico_iter()
-            .pico_fold(HashMap::new, |mut acc, event| {
-                let pc = event.pc;
-                *acc.entry(pc).or_insert(0) += 1;
-                acc
-            })
-            .pico_reduce(HashMap::new, |mut a, b| {
-                b.into_iter().for_each(|(pc, count)| {
-                    *a.entry(pc).or_insert(0) += count;
-                });
-                a
-            });
+        let instruction_counts = input.cpu_steps().pc_counts();
 
         // Generate rows in parallel
         let rows: Vec<[F; NUM_PROGRAM_MULT_COLS]> = input
@@ -281,81 +269,6 @@ impl<F: PrimeField32> GpuChipBehavior<F> for ProgramChip<F> {
         Some(TraceData::Gpu(self.preprocessed_width(), d_trace))
     }
 
-    fn gpu_generate_main(
-        &self,
-        device_id: usize,
-        input: &Self::Record,
-        _: &mut Self::Record,
-    ) -> TraceData<'_, F> {
-        let nb_rows = input.program.instructions.len();
-        let log_rows = input.shape_chip_size(&ProgramChip::<F>::default().name());
-        let padded_nb_rows = match log_rows {
-            Some(log_rows) => 1 << log_rows,
-            None => next_power_of_two(nb_rows, None),
-        };
-
-        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
-
-        let sync_mem_pool = get_global_mem_pool(device_id);
-        let mem_pool = &sync_mem_pool.0;
-
-        let trace_size = padded_nb_rows * NUM_PROGRAM_MULT_COLS;
-        let mut d_trace =
-            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
-                .unwrap();
-        unsafe {
-            let _ = cudaMemsetAsync(
-                d_trace.as_mut_ptr() as *mut _,
-                0,
-                trace_size * size_of::<KoalaBear>(),
-                stream.into(),
-            );
-        }
-
-        let events = &input.cpu_events;
-        let event_size = events.len();
-        if event_size > 0 {
-            use crate::chips::chips::riscv_cpu::event::CpuEvent;
-            let mut d_events = DevicePoolAllocation::<CpuEvent>::alloc_from_pool_async(
-                event_size, mem_pool, stream,
-            )
-            .unwrap();
-            unsafe {
-                let _ = cudaMemcpyAsync(
-                    d_events.as_mut_c_void_ptr(),
-                    events.as_ptr() as *const _,
-                    event_size * size_of::<CpuEvent>(),
-                    CudaMemoryCopyKind::HostToDevice,
-                    stream.into(),
-                );
-            }
-
-            unsafe {
-                cuda_riscv_program_generate_main_u64(
-                    NUM_PROGRAM_MULT_COLS,
-                    event_size,
-                    trace_size,
-                    input.program.pc_base,
-                    d_events.as_ptr() as *const _,
-                    d_trace.as_mut_ptr() as *mut _,
-                    stream.into(),
-                    nb_rows,
-                );
-            }
-        }
-
-        let sync_stream = get_global_stream_pool(device_id);
-        let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
-        let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
-
-        info!("[riscv-program-chip] generate_main on GPU");
-
-        TraceData::Gpu(NUM_PROGRAM_MULT_COLS, d_trace)
-    }
-
     fn is_active_for_extra_record(&self, _record: &PreparedGpuEvents) -> bool {
         true
     }
@@ -364,13 +277,16 @@ impl<F: PrimeField32> GpuChipBehavior<F> for ProgramChip<F> {
         &self,
         device_id: usize,
         input: &Self::Record,
-        prepared_gpu_events: &PreparedGpuEvents,
-        preallocated_gpu_memory: &mut crate::instances::preparer::PreallocatedGpuMemory,
+        _prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
     ) -> TraceData<'_, F> {
-        let event_size = prepared_gpu_events.event_counter.num_cpu_events;
+        // A deferred record carries no history and runs no instruction: every multiplicity is 0.
+        if preallocated_gpu_memory.d_history.is_some() {
+            return self.gpu_generate_from_history(device_id, input, preallocated_gpu_memory);
+        }
 
         let nb_rows = input.program.instructions.len();
-        let log_rows = input.shape_chip_size(&ProgramChip::<F>::default().name());
+        let log_rows = input.shape_chip_size(&self.name());
         let padded_nb_rows = match log_rows {
             Some(log_rows) => 1 << log_rows,
             None => next_power_of_two(nb_rows, None),
@@ -385,6 +301,7 @@ impl<F: PrimeField32> GpuChipBehavior<F> for ProgramChip<F> {
         let mut d_trace =
             DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
                 .unwrap();
+        let fill = device::start(stream);
         unsafe {
             let _ = cudaMemsetAsync(
                 d_trace.as_mut_ptr() as *mut _,
@@ -393,57 +310,79 @@ impl<F: PrimeField32> GpuChipBehavior<F> for ProgramChip<F> {
                 stream.into(),
             );
         }
-
-        if event_size > 0 {
-            let d_cpu_events_ptr = preallocated_gpu_memory
-                .d_cpu_events
-                .as_ref()
-                .unwrap()
-                .as_ptr() as *const _;
-
-            if prepared_gpu_events.packed.is_some() {
-                // MLE_PACKED_EVENTS: d_cpu_events holds the 80B packed stream.
-                unsafe {
-                    let err = cuda_riscv_program_generate_main_u64_packed(
-                        NUM_PROGRAM_MULT_COLS,
-                        event_size,
-                        trace_size,
-                        input.program.pc_base,
-                        d_cpu_events_ptr,
-                        d_trace.as_mut_ptr() as *mut _,
-                        stream.into(),
-                        nb_rows,
-                        crate::instances::preparer::PACKED_EVENT_FORMAT_V1,
-                    );
-                    assert_eq!(
-                        err.code, 0,
-                        "cuda_riscv_program_generate_main_u64_packed failed (packed format mismatch?)"
-                    );
-                }
-            } else {
-                unsafe {
-                    cuda_riscv_program_generate_main_u64(
-                        NUM_PROGRAM_MULT_COLS,
-                        event_size,
-                        trace_size,
-                        input.program.pc_base,
-                        d_cpu_events_ptr,
-                        d_trace.as_mut_ptr() as *mut _,
-                        stream.into(),
-                        nb_rows,
-                    );
-                }
-            }
-        }
+        device::filled(fill, stream);
 
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
+        device::wait(main_stream).unwrap();
 
-        info!("[riscv-program-chip] generate_extra_record_and_main on GPU");
+        info!("[riscv-program-chip] generate_extra_record_and_main on GPU, no instruction run");
+
+        TraceData::Gpu(NUM_PROGRAM_MULT_COLS, d_trace)
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> ProgramChip<F> {
+    /// The execution counts from the chunk's history on the device: one thread per step of the
+    /// fill adds one to its pc's row, so no CPU event is uploaded or read. The trace is the
+    /// program's rows.
+    fn gpu_generate_from_history(
+        &self,
+        device_id: usize,
+        input: &EmulationRecord,
+        preallocated_gpu_memory: &PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let nb_rows = input.program.instructions.len();
+        let log_rows = input.shape_chip_size(&self.name());
+        let padded_nb_rows = match log_rows {
+            Some(log_rows) => 1 << log_rows,
+            None => next_power_of_two(nb_rows, None),
+        };
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let trace_size = padded_nb_rows * NUM_PROGRAM_MULT_COLS;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+
+        let reader = chunk_history_reader(preallocated_gpu_memory, stream);
+        let args = reader.args();
+        let kernels = device::start(stream);
+        let err = unsafe {
+            cuda_riscv_program_generate_main_history(
+                std::ptr::from_ref(&args).cast(),
+                HISTORY_LAYOUT,
+                NUM_PROGRAM_MULT_COLS,
+                trace_size,
+                nb_rows,
+                d_trace.as_mut_ptr() as *mut _,
+                stream.into(),
+            )
+        };
+        assert_eq!(
+            err.code, 0,
+            "cuda_riscv_program_generate_main_history failed: {err}"
+        );
+        history_launch::note(&self.name());
+        drop(reader);
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        device::launched(kernels, stream);
+        device::wait(stream).unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        device::wait(stream).unwrap();
+        device::wait(main_stream).unwrap();
+
+        info!("[riscv-program-chip] generate_extra_record_and_main from the history on GPU");
 
         TraceData::Gpu(NUM_PROGRAM_MULT_COLS, d_trace)
     }

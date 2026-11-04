@@ -1,6 +1,8 @@
 #[cfg(feature = "cuda")]
 use super::ffi::FfiFp2AddSubEvent;
 use super::words_to_bytes_le_slice;
+#[cfg(feature = "cuda")]
+use crate::mle::spans::device;
 use crate::{
     chips::{
         chips::{
@@ -395,6 +397,7 @@ where
                 .unwrap();
 
         let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+        let kernels = device::start(stream);
         match P::FIELD_TYPE {
             FieldType::Bls381 => {
                 unsafe {
@@ -433,10 +436,11 @@ where
 
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
+        device::launched(kernels, stream);
+        device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
+        device::wait(stream).unwrap();
+        device::wait(main_stream).unwrap();
 
         TraceData::Gpu(num_fp2_addsub_cols::<P>(), d_trace)
     }
@@ -816,10 +820,10 @@ mod tests {
             .collect_vec();
         precompile_events.insert(syscall_id, events);
 
-        let mut record = EmulationRecord::default();
-        record.precompile_events = precompile_events.clone();
-
-        record
+        EmulationRecord {
+            precompile_events: precompile_events.clone(),
+            ..Default::default()
+        }
     }
 
     #[cfg(feature = "cuda")]

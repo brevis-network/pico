@@ -46,17 +46,10 @@ export RUST_LOG="${RUST_LOG:-warn,bench=info,distributed_vm::mle=info,mle_soundn
 export CHUNK_SIZE="${CHUNK_SIZE:-8388608}"
 export MLE_LOG_STACKED_HEIGHT="${MLE_LOG_STACKED_HEIGHT:-23}"
 export RS_STREAM_BLOCKS="${RS_STREAM_BLOCKS:-8}"
-export SPLIT_THRESHOLD="${SPLIT_THRESHOLD:-32768}"
 export CHUNK_BATCH_SIZE="${CHUNK_BATCH_SIZE:-1}"
-export MLE_EVENT_POOL_SIZE="${MLE_EVENT_POOL_SIZE:-64}"
-export MLE_PACKED_EVENTS="${MLE_PACKED_EVENTS:-1}"
-
-# ⚠️ DIFFERENCE 2: pinned EXPLICITLY, not left to follow MLE_EVENT_POOL_SIZE.
-# The slots are pre-pinned host memory at ~1.4 GB each, so the binary's own default of 256 is
-# ~358 GiB per process. A benchmark run that dies on that is an afternoon; a service that dies on
-# it is missed blocks and a liveness penalty, and it would die on the FIRST block after a config
-# change nobody connected to this knob.
-export MLE_PACKED_POOL_SIZE="${MLE_PACKED_POOL_SIZE:-16}"
+# MLE_EVENT_POOL_SIZE, the variable's former name, still sets the count; the default here must not
+# shadow it, as the two set to different counts refuse to start.
+export MLE_HISTORY_SLOTS="${MLE_HISTORY_SLOTS:-${MLE_EVENT_POOL_SIZE:-64}}"
 
 export MEMORY_POOL_SIZE="${MEMORY_POOL_SIZE:-140}"
 export MEMORY_RECYCLER_THREADS="${MEMORY_RECYCLER_THREADS:-4}"
@@ -64,6 +57,8 @@ export MLE_PREWARM="${MLE_PREWARM:-1}"
 export MLE_HEAP_PREWARM_GB="${MLE_HEAP_PREWARM_GB:-6}"
 export TCMALLOC_RELEASE_RATE="${TCMALLOC_RELEASE_RATE:-0}"
 export NUM_THREADS="${NUM_THREADS:-8}"
+# MLE_REPLAY_WORKERS is left unset, as in single_node_mle.sh: the replay workers run the
+# interpreter. MLE_REPLAY_WORKERS=aot puts them on the AOT-compiled guest.
 export RAYON_NUM_THREADS="${RAYON_NUM_THREADS:-32}"
 export PICO_GPU_MEM="${PICO_GPU_MEM:-5090}"
 export MEM_POOL_RESERVE_SIZE="${MEM_POOL_RESERVE_SIZE:-28000000000}"
@@ -80,7 +75,7 @@ export MLE_COMBINE_OVERLAP_KEYGEN="${MLE_COMBINE_OVERLAP_KEYGEN:-1}"
 # ── Service settings ────────────────────────────────────────────────────────────────────────────
 export MLE_ELF="${MLE_ELF:-reth}"
 
-# ⚠️ DIFFERENCE 3: forced, not defaulted. `--step riscv` and `--step convert` produce no root, so a
+# ⚠️ DIFFERENCE 2: forced, not defaulted. `--step riscv` and `--step convert` produce no root, so a
 # prover started on either would answer every GetProveResult with "no proof" forever while looking
 # perfectly healthy. There is no legitimate ethproofs run below combine, so this is not a knob.
 if [ -n "${MLE_STEP:-}" ] && [ "$MLE_STEP" != "combine" ]; then

@@ -24,10 +24,6 @@ fn chunk_size_defaults_to_the_stacked_height() {
     let opts = emulator_opts(1 << LOG_STACKED_HEIGHT);
     assert_eq!(opts.chunk_size, 1 << LOG_STACKED_HEIGHT);
     assert_eq!(opts.chunk_batch_size, 1);
-    assert_eq!(
-        opts.split_opts.deferred,
-        (1usize << LOG_STACKED_HEIGHT) >> 2
-    );
 }
 
 /// A chunk of `2^n` instructions needs a stacked height of at least `n`; the pair is rejected at

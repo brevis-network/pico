@@ -104,9 +104,7 @@ impl ChunkSplitConfig {
         // point, whose log2 is baked into the VK -- valid.
         let max_chunk_clk = chunk_size.saturating_mul(4);
         // A chunk shorter than 64 tails cannot spare one; only toy chunk sizes are that short.
-        // `CHUNK_COMMIT_TAIL_HOLD_OFF=1` (tests only) drops the hold, so a harness can cut the tail.
-        let hold_off = std::env::var("CHUNK_COMMIT_TAIL_HOLD_OFF").is_ok_and(|v| v == "1");
-        let (commit_tail_reserve, commit_tail_overrun) = if hold_off {
+        let (commit_tail_reserve, commit_tail_overrun) = if commit_tail_hold_off() {
             (0, 0)
         } else if max_chunk_clk >= 64 * Self::COMMIT_TAIL_RESERVE_CLK {
             (Self::COMMIT_TAIL_RESERVE_CLK, 0)
@@ -157,6 +155,12 @@ impl ChunkSplitConfig {
         });
         cfg
     }
+}
+
+/// `CHUNK_COMMIT_TAIL_HOLD_OFF=1` (tests only): drop the commit-tail hold, so a harness can cut the
+/// tail. Not cached: a test sets it around the one emulation it cuts.
+pub fn commit_tail_hold_off() -> bool {
+    std::env::var("CHUNK_COMMIT_TAIL_HOLD_OFF").is_ok_and(|v| v == "1")
 }
 
 /// `CHUNK_EVENT_LIMITS_OFF=1` (cached): remove the event arm from the split condition.

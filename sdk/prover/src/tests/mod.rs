@@ -4,6 +4,7 @@
 //! needs the payload a [`crate::Proof`] deliberately does not expose, and the environment contract
 //! is a claim about private fields.
 
+mod act4;
 #[cfg(feature = "aot")]
 mod aot;
 mod chain;
@@ -22,8 +23,10 @@ mod fixture;
 #[cfg(feature = "cuda")]
 mod gpu;
 mod options;
+mod pipeline;
 mod poseidon2;
 mod precompiles;
 mod program_id;
 mod scratch;
+mod standard_io;
 mod whitelist;

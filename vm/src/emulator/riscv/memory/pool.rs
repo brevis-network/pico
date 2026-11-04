@@ -24,8 +24,8 @@ pub fn memory_pool_size() -> usize {
 static POOL_SIZE_FLOOR: AtomicUsize = AtomicUsize::new(0);
 
 /// Raises the size an unset `MEMORY_POOL_SIZE` stands for to at least `needed`, while the pool is
-/// not yet built, so a run that names no size gets a pool it can finish on. A size someone set,
-/// or a pool already built, stays.
+/// not yet built, so a run that names no size gets a pool every worker can replay from at once. A
+/// size someone set, or a pool already built, stays.
 pub fn raise_pool_size_floor(needed: usize) {
     if Lazy::get(&GLOBAL_MEMORY_POOL).is_none() {
         POOL_SIZE_FLOOR.fetch_max(needed, Ordering::Relaxed);

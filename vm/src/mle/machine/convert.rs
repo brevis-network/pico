@@ -658,11 +658,11 @@ impl MissTiming {
 #[cfg(feature = "cuda")]
 static CONVERT_WHITELIST_MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
-/// The core ladder row the whitelist-mode warmup keygens: row 13 holds 406 of the 3,275 corpus
-/// core chunks (`MLE_CORE_LADDER`, the 80-block p99 corpus). Any row serves the warmup's
-/// purpose; this one is the likeliest cache hit.
+/// The core ladder row the whitelist-mode warmup keygens: row 3 holds 629 of the 4,256 corpus CPU
+/// chunks (`MLE_CORE_LADDER`). Any row serves the warmup's purpose; this one is the likeliest
+/// cache hit.
 #[cfg(feature = "cuda")]
-const WARMUP_CORE_CLASS: usize = 13;
+const WARMUP_CORE_CLASS: usize = 3;
 
 #[cfg(feature = "cuda")]
 fn convert_whitelist_mode() -> bool {

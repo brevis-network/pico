@@ -9,7 +9,6 @@ use crate::{
         recursion_memory::{constant::MemoryConstChip, variable::MemoryVarChip},
         select::SelectChip,
     },
-    compiler::recursion::program::RecursionProgram,
     instances::{chiptype::recursion_chiptype::RecursionChipType, compiler::shapes::ProofShape},
     machine::{chip::ChipBehavior, field::FieldSpecificPoseidon2Config},
     primitives::consts::EXTENSION_DEGREE,
@@ -17,10 +16,8 @@ use crate::{
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
-use p3_util::log2_ceil_usize;
 use serde::{Deserialize, Serialize};
 use std::{fmt, marker::PhantomData};
-use tracing::{debug, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct RiscvRecursionShape {
@@ -334,69 +331,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPos
                     .map(|map| map.into_iter().collect::<ProofShape>())
             })
             .multi_cartesian_product()
-    }
-
-    // Get the allowed shape with a minimal hamming distance from the current shape.
-    pub fn padding_shape(&self, program: &mut RecursionProgram<F>) {
-        let heights = RecursionChipType::<F>::chip_heights(program);
-        let mut min_distance = usize::MAX;
-        let mut closest_shape = None;
-        for shape in self.allowed_shapes.iter() {
-            let mut distance = 0;
-            let mut is_valid = true;
-            for (name, height) in heights.iter() {
-                let next_power_of_two = height.next_power_of_two();
-                let allowed_log_height = shape.get(name).unwrap();
-                let allowed_height: usize = 1 << allowed_log_height;
-                if next_power_of_two != allowed_height {
-                    distance += 1;
-                }
-                if next_power_of_two > allowed_height {
-                    is_valid = false;
-                }
-            }
-            if is_valid && distance < min_distance {
-                min_distance = distance;
-                closest_shape = Some(shape.clone());
-            }
-        }
-
-        if let Some(shape) = closest_shape {
-            let shape = RecursionPadShape { inner: shape };
-
-            for (chip_name, height) in heights.iter() {
-                if shape.inner.contains_key(chip_name) {
-                    debug!(
-                        "Chip {:<20}: {:<3} -> {:<3}",
-                        chip_name,
-                        log2_ceil_usize(*height),
-                        shape.inner[chip_name],
-                    );
-                } else {
-                    warn!(
-                        "Unexpected: Chip {} not found in shape, log size: {}",
-                        chip_name,
-                        log2_ceil_usize(*height)
-                    );
-                }
-            }
-
-            program.shape = Some(shape);
-        } else {
-            let mut heights_log_sizes = String::new();
-            for (chip_name, height) in heights.iter() {
-                heights_log_sizes.push_str(&format!(
-                    "Chip: {}, Log Size: {}\n",
-                    chip_name,
-                    log2_ceil_usize(*height)
-                ));
-            }
-
-            panic!(
-                "No shape found for heights. Heights log sizes:\n{}",
-                heights_log_sizes
-            );
-        }
     }
 }
 

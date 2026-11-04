@@ -1,10 +1,11 @@
 #[cfg(feature = "cuda")]
 use crate::{
-    chips::trace::TraceData,
-    cuda_adaptor::resource_pool::{
-        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    chips::{
+        chips::alu::add::traces::{chunk_history, split_trace_from_history},
+        trace::TraceData,
     },
-    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    emulator::riscv::history_fill::HISTORY_LAYOUT,
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::chip::GpuChipBehavior,
 };
 use crate::{
@@ -25,27 +26,16 @@ use crate::{
         riscv::{opcode::Opcode, program::Program},
         word::Word,
     },
-    emulator::riscv::record::EmulationRecord,
-    iter::{IndexedPicoIterator, PicoBridge, PicoIterator, PicoSliceMut},
+    emulator::riscv::record::{AluStream, EmulationRecord},
+    iter::{IndexedPicoIterator, PicoIterator, PicoSliceMut},
     machine::chip::ChipBehavior,
     primitives::consts::ADD_DATAPAR,
 };
 use core::borrow::BorrowMut;
-#[cfg(feature = "cuda")]
-use cudart::{
-    memory_pools::DevicePoolAllocation,
-    stream::{CudaStream, CudaStreamCreateFlags},
-};
 use p3_field::{Field, PrimeField32};
-#[cfg(feature = "cuda")]
-use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 #[cfg(feature = "cuda")]
-use pico_gpu_api::{
-    cuda_sub_generate_extra_record_and_main, cuda_sub_generate_extra_record_and_main_packed,
-};
-#[cfg(feature = "cuda")]
-use tracing::info;
+use pico_gpu_api::history_add_sub_divrem::cuda_sub_generate_extra_record_and_main_history;
 
 impl<F: PrimeField32> ChipBehavior<F> for SubChip<F> {
     type Record = EmulationRecord;
@@ -57,14 +47,10 @@ impl<F: PrimeField32> ChipBehavior<F> for SubChip<F> {
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        let events: Vec<&AluEvent> = input
-            .add_sub_events
-            .as_slice()
-            .iter()
-            .filter(|e| e.opcode == Opcode::SUB)
-            .collect();
+        let ops = input.alu_ops(AluStream::Sub);
+        let positions = ops.positions(Opcode::SUB);
 
-        let nrows = events.len().div_ceil(ADD_DATAPAR);
+        let nrows = positions.len().div_ceil(ADD_DATAPAR);
         let log2_nrows = input.shape_chip_size(&self.name());
         let padded_nrows = match log2_nrows {
             Some(log2_nrows) => 1 << log2_nrows,
@@ -72,40 +58,25 @@ impl<F: PrimeField32> ChipBehavior<F> for SubChip<F> {
         };
         let mut values = vec![F::ZERO; padded_nrows * NUM_SUB_COLS];
 
-        let populate_len = events.len() * NUM_SUB_VALUE_COLS;
+        let populate_len = positions.len() * NUM_SUB_VALUE_COLS;
         values[..populate_len]
             .pico_chunks_mut(NUM_SUB_VALUE_COLS)
-            .zip_eq(events)
-            .for_each(|(row, event)| {
+            .zip_eq(positions)
+            .for_each(|(row, index)| {
                 let cols: &mut SubValueCols<_> = row.borrow_mut();
-                self.event_to_row(event, cols, &mut vec![]);
+                self.event_to_row(&ops.get(index), cols, &mut vec![]);
             });
 
         RowMajorMatrix::new(values, NUM_SUB_COLS)
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
-        let events: Vec<&AluEvent> = input
-            .add_sub_events
-            .as_slice()
-            .iter()
-            .filter(|e| e.opcode == Opcode::SUB)
-            .collect();
-
-        let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
-
-        let blu_batches = events
-            .chunks(chunk_size)
-            .pico_bridge()
-            .flat_map(|chunk| {
-                let mut blu = vec![];
-                chunk.iter().for_each(|event| {
-                    let mut dummy = SubValueCols::default();
-                    self.event_to_row(event, &mut dummy, &mut blu);
-                });
-                blu
-            })
-            .collect();
+        let blu_batches = input.alu_ops(AluStream::Sub).par_flat_map(|event, blu| {
+            if event.opcode == Opcode::SUB {
+                let mut dummy = SubValueCols::default();
+                self.event_to_row(event, &mut dummy, blu);
+            }
+        });
 
         extra.add_byte_lookup_events(blu_batches);
     }
@@ -117,11 +88,7 @@ impl<F: PrimeField32> ChipBehavior<F> for SubChip<F> {
         if let Some(shape) = record.shape.as_ref() {
             return shape.included::<F, _>(self);
         }
-        record
-            .add_sub_events
-            .as_slice()
-            .iter()
-            .any(|e| e.opcode == Opcode::SUB)
+        record.alu_ops(AluStream::Sub).contains(Opcode::SUB)
     }
 
     fn local_only(&self) -> bool {
@@ -131,10 +98,6 @@ impl<F: PrimeField32> ChipBehavior<F> for SubChip<F> {
 
 #[cfg(feature = "cuda")]
 impl<F: PrimeField32> GpuChipBehavior<F> for SubChip<F> {
-    fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
-        counter.num_add_sub_events += record.add_sub_events.len();
-    }
-
     fn gpu_generate_extra_record_and_main(
         &self,
         device_id: usize,
@@ -142,70 +105,53 @@ impl<F: PrimeField32> GpuChipBehavior<F> for SubChip<F> {
         prepared_gpu_events: &PreparedGpuEvents,
         preallocated_gpu_memory: &mut PreallocatedGpuMemory,
     ) -> TraceData<'_, F> {
-        let event_size = prepared_gpu_events.event_counter.num_sub_events;
-
-        let nrows = event_size.div_ceil(ADD_DATAPAR);
-        let log2_nrows = input.shape_chip_size(&self.name());
-        let padded_nrows = match log2_nrows {
-            Some(log2_nrows) => 1 << log2_nrows,
-            None => next_power_of_two(nrows, None),
-        };
-
-        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
-
-        let sync_mem_pool = get_global_mem_pool(device_id);
-        let mem_pool = &sync_mem_pool.0;
-
-        let d_events = preallocated_gpu_memory.d_partitioned_sub_events.as_ref();
-        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
-
-        let trace_size = padded_nrows * NUM_SUB_COLS;
-        let mut d_trace =
-            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
-                .unwrap();
-
-        if prepared_gpu_events.packed.is_some() {
-            // MLE_PACKED_EVENTS: the event buffer holds packed entries.
-            unsafe {
-                let err = cuda_sub_generate_extra_record_and_main_packed(
-                    NUM_SUB_VALUE_COLS,
-                    event_size,
-                    trace_size,
-                    d_events.map_or(std::ptr::null(), |e| e.as_ptr() as *const _),
-                    d_trace.as_mut_ptr() as *mut _,
-                    d_byte_trace.as_mut_ptr() as *mut _,
-                    stream.into(),
-                    crate::instances::preparer::PACKED_EVENT_FORMAT_V1,
-                );
-                assert_eq!(err.code, 0, "cuda_sub_generate_extra_record_and_main_packed failed (packed format mismatch?)");
-            }
-        } else {
-            unsafe {
-                cuda_sub_generate_extra_record_and_main(
-                    NUM_SUB_VALUE_COLS,
-                    event_size,
-                    trace_size,
-                    d_events.map_or(std::ptr::null(), |e| e.as_ptr() as *const _),
-                    d_trace.as_mut_ptr() as *mut _,
-                    d_byte_trace.as_mut_ptr() as *mut _,
-                    stream.into(),
-                );
-            }
-        }
-
-        let sync_stream = get_global_stream_pool(device_id);
-        let main_stream = &sync_stream.0;
-        stream.synchronize().unwrap();
-        let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
-        main_stream.synchronize().unwrap();
-
-        info!("[sub-chip] generate_extra_record_and_main on GPU");
-        TraceData::Gpu(NUM_SUB_COLS, d_trace)
+        self.gpu_generate_from_history(
+            device_id,
+            input,
+            prepared_gpu_events,
+            preallocated_gpu_memory,
+        )
     }
 
     fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
         record.event_counter.num_add_sub_events > 0
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> SubChip<F> {
+    /// The trace from the chunk's history on the device: the sub list's SUB rows, split there
+    /// from its SUBW rows. The fill's descriptor counts them, which is the height the counter
+    /// the activity check read gave.
+    fn gpu_generate_from_history(
+        &self,
+        device_id: usize,
+        input: &EmulationRecord,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let rows = chunk_history(preallocated_gpu_memory).descriptor().sub_rows as usize;
+        split_trace_from_history(
+            device_id,
+            &self.name(),
+            input,
+            rows,
+            prepared_gpu_events.event_counter.num_sub_events,
+            NUM_SUB_COLS,
+            preallocated_gpu_memory,
+            None,
+            |args, trace_size, d_trace, d_byte_trace, stream| unsafe {
+                cuda_sub_generate_extra_record_and_main_history(
+                    args,
+                    HISTORY_LAYOUT,
+                    NUM_SUB_VALUE_COLS,
+                    trace_size,
+                    d_trace,
+                    d_byte_trace,
+                    stream.into(),
+                )
+            },
+        )
     }
 }
 

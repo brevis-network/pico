@@ -8,16 +8,22 @@ use crate::{
     cuda_adaptor::resource_pool::{
         mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
     },
-    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
+    emulator::riscv::{history::ExecutionHistory, history_fill::HISTORY_LAYOUT},
+    instances::preparer::{
+        DeviceHistory, HistoryReader, PreallocatedGpuMemory, PreparedGpuEvents, Readiness,
+    },
     machine::chip::GpuChipBehavior,
+    mle::{machine::trace_oracle::history_launch, spans::device},
 };
 use crate::{
     chips::{
         chips::{
-            alu::event::AluEvent,
-            byte::event::ByteRecordBehavior,
+            byte::event::{ByteLookupEvent, ByteRecordBehavior},
             riscv_cpu::event::{CpuEvent, CpuExtraEventIndices},
-            riscv_memory::{event::MemoryRecordEnum, read_write::columns::MemoryLiteCols},
+            riscv_memory::{
+                event::MemoryRecordEnum,
+                read_write::{columns::MemoryLiteCols, traces::timestamp_diff_lookups},
+            },
         },
         ffi::FfiOption,
     },
@@ -26,9 +32,12 @@ use crate::{
         riscv::{opcode::Opcode, program::Program},
         word::Word,
     },
-    emulator::riscv::{record::EmulationRecord, syscalls::SyscallCode},
+    emulator::riscv::{
+        record::{EmulationRecord, MemoryAccessRecord},
+        syscalls::SyscallCode,
+    },
     instances::compiler::shapes::riscv_shape::RiscvPadShape,
-    iter::{IntoPicoRefMutIterator, PicoBridge, PicoIterator, PicoSlice},
+    iter::{IntoPicoRefMutIterator, PicoBridge, PicoIterator},
     machine::{
         chip::ChipBehavior,
         estimator::{EventCapture, EventSizeCapture},
@@ -37,12 +46,11 @@ use crate::{
 #[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
-    slice::{CudaSlice, CudaSliceMut},
+    slice::CudaSliceMut,
     stream::{CudaStream, CudaStreamCreateFlags},
 };
 #[cfg(feature = "cuda")]
 use cudart_sys::*;
-use hashbrown::HashMap;
 use p3_air::BaseAir;
 #[cfg(feature = "cuda")]
 use p3_field::PrimeCharacteristicRing;
@@ -51,9 +59,8 @@ use p3_field::{Field, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 #[cfg(feature = "cuda")]
-use pico_gpu_api::{
-    cuda_cpu_generate_extra_record_and_main_u64,
-    cuda_cpu_generate_extra_record_and_main_u64_packed, cuda_cpu_pad_trace_u64,
+use pico_gpu_api::history_cpu_memory_lt::{
+    cuda_cpu_generate_extra_record_and_main_history, cuda_cpu_pad_trace_history,
 };
 use std::borrow::BorrowMut;
 #[cfg(feature = "cuda")]
@@ -81,10 +88,11 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        let n_real_rows = input.cpu_events.len();
+        let steps = input.cpu_steps();
+        let n_real_rows = steps.len();
         let mut values = vec![F::ZERO; n_real_rows * NUM_CPU_COLS];
 
-        let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
+        let chunk_size = std::cmp::max(n_real_rows / num_cpus::get(), 1);
         values
             .chunks_mut(chunk_size * NUM_CPU_COLS)
             .enumerate()
@@ -96,11 +104,7 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
                         let idx = i * chunk_size + j;
                         let cols: &mut CpuCols<F> = row.borrow_mut();
                         let mut byte_lookup_events = Vec::new();
-                        self.event_to_row(
-                            &input.cpu_events.as_slice()[idx],
-                            cols,
-                            &mut byte_lookup_events,
-                        );
+                        self.event_to_row(&steps.get(idx), cols, &mut byte_lookup_events);
                         // The chain's sink: the AIR defines `is_last` as `is_real - next.is_real`
                         // (`eval_row_chain`), so exactly the last real row carries it, and the
                         // public-value hand-off reads it.
@@ -120,77 +124,24 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
-        // Generate the trace rows for each event.
-        let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
-        let (alu_events, blu_events): (Vec<_>, Vec<_>) = input
-            .cpu_events
-            .as_slice()
-            .pico_chunks(chunk_size)
-            .map(|ops: &[CpuEvent]| {
-                let mut alu = HashMap::new();
-                // The range map stores range (u8) lookup event -> multiplicity.
-                let mut blu = vec![];
-                ops.iter().for_each(|op| {
-                    let mut row = [F::ZERO; NUM_CPU_COLS];
-                    let cols: &mut CpuCols<F> = row.as_mut_slice().borrow_mut();
-                    let alu_events = self.event_to_row(op, cols, &mut blu);
-                    alu_events.into_iter().for_each(|(key, value)| {
-                        alu.entry(key).or_insert(Vec::default()).extend(value);
-                    });
+        let blu_events =
+            input
+                .cpu_steps()
+                .par_record_runs(|records, blu: &mut Vec<ByteLookupEvent>| {
+                    Self::row_byte_lookups(records, blu);
                 });
-                (alu, blu)
-            })
-            .unzip();
-        for alu_events_chunk in alu_events {
-            extra.add_alu_events(alu_events_chunk);
-        }
         for blu_events_chunk in blu_events {
             extra.add_byte_lookup_events(blu_events_chunk);
         }
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
-        !record.cpu_events.is_empty()
+        !record.cpu_steps().is_empty()
     }
 }
 
 #[cfg(feature = "cuda")]
 impl<F: PrimeField32> GpuChipBehavior<F> for CpuChip<F> {
-    fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
-        counter.num_cpu_events += record.cpu_events.len();
-        if counter.num_cpu_events == 0 {
-            return;
-        }
-
-        let chunk_size = std::cmp::max(counter.num_cpu_events / num_cpus::get(), 1);
-        let cpu_counts: Vec<CpuExtraEventIndices> = record
-            .cpu_events
-            .as_slice()
-            .pico_chunks(chunk_size)
-            .flat_map_iter(|chunk| chunk.iter().map(|e| Self::count_cpu_event(e)))
-            .collect();
-        let (cpu_add, cpu_lt) = cpu_counts
-            .as_slice()
-            .pico_chunks(chunk_size)
-            .map(|chunk| {
-                chunk
-                    .iter()
-                    .fold((0, 0), |(a0, a1), c| (a0 + c.add, a1 + c.lt))
-            })
-            .pico_reduce(|| (0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1));
-        counter.num_add_sub_events += cpu_add;
-        counter.num_add_events += cpu_add;
-        counter.num_lt_events += cpu_lt;
-        let mut cpu_extra_event_indices = cpu_counts;
-        for i in 1..(cpu_extra_event_indices.len() - 1) {
-            cpu_extra_event_indices[i].add += cpu_extra_event_indices[i - 1].add;
-            cpu_extra_event_indices[i].lt += cpu_extra_event_indices[i - 1].lt;
-        }
-        cpu_extra_event_indices.insert(0, CpuExtraEventIndices { add: 0, lt: 0 });
-        cpu_extra_event_indices.pop();
-        counter.cpu_extra_event_indices = cpu_extra_event_indices;
-    }
-
     fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
         record.event_counter.num_cpu_events > 0
     }
@@ -202,8 +153,42 @@ impl<F: PrimeField32> GpuChipBehavior<F> for CpuChip<F> {
         prepared_gpu_events: &PreparedGpuEvents,
         preallocated_gpu_memory: &mut PreallocatedGpuMemory,
     ) -> TraceData<'_, F> {
-        let event_size = prepared_gpu_events.event_counter.num_cpu_events;
-        let n_real_rows = event_size;
+        let view = input
+            .history_view()
+            .expect("a CPU chunk's record carries its execution history");
+        self.gpu_generate_from_history(
+            device_id,
+            input,
+            view.history,
+            prepared_gpu_events,
+            preallocated_gpu_memory,
+        )
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl<F: PrimeField32> CpuChip<F> {
+    /// The trace from the chunk's history on the device, slice by slice: slice k's kernel waits for
+    /// slice k's copy alone, the step after it included, so it starts as that copy lands, and of
+    /// the rest of the fill reads only the descriptor and the exceptions. No event is uploaded and
+    /// no other chip's buffer is written: the less-than chip builds the branch comparisons from
+    /// the history's branch list. The step count sizes the trace; the counter the activity check
+    /// read must have counted the same steps.
+    fn gpu_generate_from_history(
+        &self,
+        device_id: usize,
+        input: &EmulationRecord,
+        history: &ExecutionHistory,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        use ordering_edge::{delay, kept, Edge};
+
+        let n_real_rows = history.steps.len();
+        assert_eq!(
+            prepared_gpu_events.event_counter.num_cpu_events, n_real_rows,
+            "the counter's CPU height is not the history's step count"
+        );
         let padded_nb_rows = if let Some(shape) = &input.shape {
             1 << shape.inner[&self.name()]
         } else if n_real_rows < 16 {
@@ -219,262 +204,311 @@ impl<F: PrimeField32> GpuChipBehavior<F> for CpuChip<F> {
         let stream2 = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
         let stream3 = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
 
+        // Zeroed whole before any kernel: which rows the slices fill and which the pad kernel pads
+        // is decided on the device, from the fill's step count.
         let trace_size = padded_nb_rows * NUM_CPU_COLS;
         let mut d_trace =
             DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream1)
                 .unwrap();
-        unsafe {
-            let _ = cudaMemsetAsync(
+        delay(Edge::ZeroFill, stream1);
+        let fill = device::start(stream1);
+        let code = unsafe {
+            cudaMemsetAsync(
                 d_trace.as_mut_ptr() as *mut std::ffi::c_void,
                 0,
-                (n_real_rows * NUM_CPU_COLS) * size_of::<KoalaBear>(),
+                trace_size * size_of::<KoalaBear>(),
                 stream1.into(),
-            );
-        }
-
-        let d_cpu_events = preallocated_gpu_memory.d_cpu_events.as_mut().unwrap();
-        // `None` when the record has no ADD/SUB events at all. No Cpu row synthesizes an ADD
-        // event (a JALR target is proven in-chip), so the Cpu kernel never writes this buffer;
-        // the base pointer and start index are handed over because the kernel ABI carries them.
-        let d_add_sub_events: *mut std::ffi::c_void = preallocated_gpu_memory
-            .d_add_sub_events
-            .as_mut()
-            .map_or(std::ptr::null_mut(), |b| b.as_mut_ptr() as *mut _);
-        // Absent when the chunk has no branch and no SLT/SLTU; the kernel writes this buffer only
-        // on branch rows, which force the count above zero, so a null base is never dereferenced.
-        let d_lt_events: *mut std::ffi::c_void = preallocated_gpu_memory
-            .d_lt_events
-            .as_mut()
-            .map_or(std::ptr::null_mut(), |b| b.as_mut_ptr() as *mut _);
-        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
-
-        let mut d_cpu_extra_event_indices =
-            DevicePoolAllocation::<CpuExtraEventIndices>::alloc_from_pool_async(
-                event_size, mem_pool, stream2,
             )
-            .unwrap();
+        };
+        assert_eq!(code, CudaError::Success, "zeroing the CPU trace failed");
+        device::filled(fill, stream1);
+        if kept(Edge::ZeroFill) {
+            device::wait(stream1).unwrap();
+        }
 
-        // MLE_PACKED_EVENTS: the extra-event indices ride the pinned staging (same bytes);
-        // the fat path keeps the pageable Vec upload.
-        let cpu_extra_indices_src: *const std::ffi::c_void =
-            match prepared_gpu_events.packed.as_deref() {
-                Some(pk) if pk.cpu_extra_indices().len() == event_size => {
-                    pk.cpu_extra_indices().as_ptr() as *const _
-                }
-                _ => prepared_gpu_events
-                    .event_counter
-                    .cpu_extra_event_indices
-                    .as_c_void_ptr(),
+        let d_byte_trace = preallocated_gpu_memory
+            .d_byte_trace
+            .as_mut()
+            .unwrap()
+            .as_mut_ptr();
+        let device_history = chunk_device_history(preallocated_gpu_memory);
+        let slices = device_history.slices();
+        let slice_steps = device_history.descriptor().cpu_slice_steps as usize;
+        let readers = [stream1, stream2].map(|stream| {
+            device_history
+                .reader(stream, Readiness::Descriptor)
+                .unwrap_or_else(|e| panic!("reading the chunk's device history: {e}"))
+        });
+        for stream in [stream1, stream2, stream3] {
+            delay(Edge::SinkWrite, stream);
+        }
+        for slice in 0..slices {
+            let (stream, reader) = if slice % 2 == 0 {
+                (stream1, &readers[0])
+            } else {
+                (stream2, &readers[1])
             };
-        unsafe {
-            let _ = cudaMemcpyAsync(
-                d_cpu_extra_event_indices.as_mut_c_void_ptr(),
-                cpu_extra_indices_src,
-                event_size * size_of::<CpuExtraEventIndices>(),
-                CudaMemoryCopyKind::HostToDevice,
-                stream2.into(),
-            );
-        }
-
-        stream1.synchronize().unwrap();
-        stream2.synchronize().unwrap();
-
-        if let Some(packed) = prepared_gpu_events.packed.as_deref() {
-            // MLE_PACKED_EVENTS: upload the 80B/event packed stream into the same device
-            // allocation (fat-typed, so capacity is ample) and run the packed kernel per
-            // slice. Bigger slices keep the per-copy overhead amortized at 80B/event.
-            use crate::instances::preparer::{CpuEventPacked, PACKED_EVENT_FORMAT_V1};
-            let src_all = packed.cpu_events();
+            if kept(Edge::SliceCopy) {
+                reader
+                    .wait_slice(slice)
+                    .unwrap_or_else(|e| panic!("waiting for CPU slice {slice}'s copy: {e}"));
+            }
+            let args = reader.args();
+            let kernel = device::start(stream);
+            let err = unsafe {
+                cuda_cpu_generate_extra_record_and_main_history(
+                    std::ptr::from_ref(&args).cast(),
+                    HISTORY_LAYOUT,
+                    slice as u32,
+                    slices as u32,
+                    slice_steps,
+                    NUM_CPU_COLS,
+                    trace_size,
+                    d_trace.as_mut_ptr() as *mut _,
+                    d_byte_trace as *mut _,
+                    stream.into(),
+                )
+            };
             assert_eq!(
-                src_all.len(),
-                event_size,
-                "packed cpu stream length mismatch"
+                err.code, 0,
+                "cuda_cpu_generate_extra_record_and_main_history failed on slice {slice}: {err}"
             );
-            const SLICE_SIZE_PACKED: usize = 1 << 18;
-            let num_slices = event_size.div_ceil(SLICE_SIZE_PACKED);
-
-            for slice_idx in 0..num_slices {
-                let slice_start = slice_idx * SLICE_SIZE_PACKED;
-                let slice_end = std::cmp::min(slice_start + SLICE_SIZE_PACKED, event_size);
-                let current_slice_size = slice_end - slice_start;
-
-                let stream = if slice_idx % 2 == 0 { stream1 } else { stream2 };
-
-                unsafe {
-                    let src_ptr = src_all.as_ptr().add(slice_start);
-                    let dst_ptr =
-                        (d_cpu_events.as_mut_ptr() as *mut CpuEventPacked).add(slice_start);
-
-                    let _ = cudaMemcpyAsync(
-                        dst_ptr as *mut _,
-                        src_ptr as *const _,
-                        current_slice_size * size_of::<CpuEventPacked>(),
-                        CudaMemoryCopyKind::HostToDevice,
-                        stream.into(),
-                    );
-
-                    let err = cuda_cpu_generate_extra_record_and_main_u64_packed(
-                        NUM_CPU_COLS,
-                        current_slice_size,
-                        (d_cpu_events.as_ptr() as *const CpuEventPacked).add(slice_start)
-                            as *const _,
-                        packed.chunk as usize,
-                        d_trace.as_mut_ptr().add(slice_start * NUM_CPU_COLS) as *mut _,
-                        stream.into(),
-                        d_cpu_extra_event_indices.as_ptr().add(slice_start) as *const _,
-                        d_byte_trace.as_mut_ptr() as *mut _,
-                        d_add_sub_events,
-                        prepared_gpu_events
-                            .event_counter
-                            .start_indices
-                            .cpu_extra_add_sub_start_index,
-                        d_lt_events,
-                        prepared_gpu_events
-                            .event_counter
-                            .start_indices
-                            .cpu_extra_lt_start_index,
-                        PACKED_EVENT_FORMAT_V1,
-                    );
-                    assert_eq!(
-                        err.code, 0,
-                        "cuda_cpu_generate_extra_record_and_main_u64_packed failed (packed format mismatch?)"
-                    );
-                }
-            }
-        } else {
-            // Upload CpuEvent directly to GPU in slices and launch kernel per slice.
-            // The CUDA kernel now accepts FfiCpuEventU64 (full CpuEvent) directly,
-            // eliminating the host-side CpuEvent→CpuEventSlim conversion overhead.
-            // d_cpu_events is also reused by MemoryReadWrite chip.
-            const SLICE_SIZE: usize = 1 << 16;
-            let num_slices = event_size.div_ceil(SLICE_SIZE);
-
-            for slice_idx in 0..num_slices {
-                let slice_start = slice_idx * SLICE_SIZE;
-                let slice_end = std::cmp::min(slice_start + SLICE_SIZE, event_size);
-                let current_slice_size = slice_end - slice_start;
-
-                let stream = if slice_idx % 2 == 0 { stream1 } else { stream2 };
-
-                unsafe {
-                    let src_ptr = CudaSlice::as_slice(&input.cpu_events)
-                        .as_ptr()
-                        .add(slice_start);
-                    let dst_ptr = d_cpu_events.as_mut_ptr().add(slice_start);
-
-                    let _ = cudaMemcpyAsync(
-                        dst_ptr as *mut _,
-                        src_ptr as *const _,
-                        current_slice_size * size_of::<CpuEvent>(),
-                        CudaMemoryCopyKind::HostToDevice,
-                        stream.into(),
-                    );
-
-                    cuda_cpu_generate_extra_record_and_main_u64(
-                        NUM_CPU_COLS,
-                        current_slice_size,
-                        d_cpu_events.as_ptr().add(slice_start) as *const _,
-                        d_trace.as_mut_ptr().add(slice_start * NUM_CPU_COLS) as *mut _,
-                        stream.into(),
-                        d_cpu_extra_event_indices.as_ptr().add(slice_start) as *const _,
-                        d_byte_trace.as_mut_ptr() as *mut _,
-                        d_add_sub_events,
-                        prepared_gpu_events
-                            .event_counter
-                            .start_indices
-                            .cpu_extra_add_sub_start_index,
-                        d_lt_events,
-                        prepared_gpu_events
-                            .event_counter
-                            .start_indices
-                            .cpu_extra_lt_start_index,
-                    );
-                }
-            }
+            history_launch::note(&self.name());
+            device::launched(kernel, stream);
         }
 
-        unsafe {
-            let _ = cuda_cpu_pad_trace_u64(
+        let pad_reader = device_history
+            .reader(stream3, Readiness::Descriptor)
+            .unwrap_or_else(|e| panic!("reading the chunk's device history: {e}"));
+        let args = pad_reader.args();
+        let pad = device::start(stream3);
+        let err = unsafe {
+            cuda_cpu_pad_trace_history(
+                std::ptr::from_ref(&args).cast(),
+                HISTORY_LAYOUT,
                 NUM_CPU_COLS,
-                n_real_rows,
-                padded_nb_rows,
+                trace_size,
                 d_trace.as_mut_ptr() as *mut _,
                 stream3.into(),
-            );
-        }
+            )
+        };
+        assert_eq!(err.code, 0, "cuda_cpu_pad_trace_history failed: {err}");
+        history_launch::note(&self.name());
+        device::launched(pad, stream3);
+        drop(pad_reader);
+        drop(readers);
 
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
-        stream1.synchronize().unwrap();
-        stream2.synchronize().unwrap();
-        stream3.synchronize().unwrap();
+        if kept(Edge::SinkWrite) {
+            device::wait(stream1).unwrap();
+            device::wait(stream2).unwrap();
+            device::wait(stream3).unwrap();
+        }
         let mut d_trace = d_trace.swap_stream(main_stream);
 
-        // `is_last` marks the chain's sink, and the kernel cannot: it is launched once per slice
-        // (2^16 fat, 2^18 packed), so a kernel-side "is this the last index" test would mark the
-        // last row of every slice and the `is_last` constraints would only fail at verification.
-        // Write the single cell from the host instead, after the padding kernel and the slice
-        // launches have been synchronised so nothing overwrites it. The trace is row-major here;
-        // the transpose happens later, outside trace generation.
-        debug_assert_eq!(
-            n_real_rows,
-            input.cpu_events.len(),
-            "the counted event total drives both the row count and the is_last offset"
-        );
-        // Declared outside the block so the source outlives the async copy: CUDA stages a
-        // pageable H2D source before returning, but a pinned one would not be safe here.
+        // The chain's sink, written from the host once every slice and the padding have run.
         let one = [KoalaBear::ONE];
         if n_real_rows > 0 {
             let offset = (n_real_rows - 1) * NUM_CPU_COLS + CPU_COL_MAP.is_last;
-            // The return code is dropped, as at every other copy site in this file. Worth knowing
-            // the failure mode: a failed write leaves `is_last` unset on the last real row, which
-            // the `eval_row_chain` constraints reject at verification rather than here.
-            unsafe {
-                let _ = cudaMemcpyAsync(
+            let code = unsafe {
+                cudaMemcpyAsync(
                     d_trace.as_mut_ptr().add(offset) as *mut std::ffi::c_void,
                     one.as_ptr() as *const std::ffi::c_void,
                     size_of::<KoalaBear>(),
                     CudaMemoryCopyKind::HostToDevice,
                     main_stream.into(),
-                );
-            }
+                )
+            };
+            assert_eq!(
+                code,
+                CudaError::Success,
+                "writing the CPU trace's last row failed"
+            );
         }
-        main_stream.synchronize().unwrap();
+        device::wait(main_stream).unwrap();
 
-        info!("[cpu-chip] generate_extra_record_and_main on GPU");
+        info!("[cpu-chip] generate_extra_record_and_main from the history on GPU");
 
         TraceData::Gpu(NUM_CPU_COLS, d_trace)
     }
 }
 
-impl<F> EventCapture for CpuChip<F> {
-    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
-        event_counter.num_cpu_events += record.cpu_events.len();
-        if event_counter.num_cpu_events == 0 {
-            return;
+/// The ordering edges the CPU chip's history trace rests on, for the tests that hold each one. A
+/// case delays one edge's producer for the whole process and, in its dropped arm, drops the edge,
+/// so that the trace comes out wrong, or the fill's error word catches the race, exactly when the
+/// edge is gone. Only a build with the `drop-ordering-edge` feature can arm a case; any other
+/// build keeps every edge and delays nothing.
+#[cfg(feature = "cuda")]
+pub mod ordering_edge {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Edge {
+        /// CPU slice k's copy, the step after it included, before slice k's kernel.
+        SliceCopy,
+        /// The CPU trace's zero-fill before the slice kernels and the pad kernel.
+        ZeroFill,
+        /// Every slice kernel and the pad kernel before the host writes the last row's `is_last`.
+        SinkWrite,
+        /// The fill's descriptor and its exceptions before any kernel that reads them.
+        Descriptor,
+        /// Both copy streams' slice copies before the fill's completion word.
+        SliceCopyJoin,
+        /// The upload's copies out of a pinned arena slot before the slot goes back to the arena,
+        /// whose next history overwrites it.
+        SlotFence,
+    }
+
+    #[cfg(feature = "drop-ordering-edge")]
+    pub use armed::{arm, delay, kept, withhold, SPIN_NANOS};
+
+    #[cfg(feature = "drop-ordering-edge")]
+    mod armed {
+        use super::Edge;
+        use cudart::{memory_pools::DevicePoolAllocation, slice::CudaSlice, stream::CudaStream};
+        use cudart_sys::{cudaMemcpyAsync, cudaMemsetAsync, CudaError, CudaMemoryCopyKind};
+        use pico_gpu_api::history_cpu_memory_lt::cuda_history_spin;
+        use std::{ffi::c_void, sync::OnceLock};
+
+        /// How long a delayed producer's stream is held: far longer than a consumer the edge no
+        /// longer orders takes to be enqueued and to run.
+        pub const SPIN_NANOS: u64 = 200_000_000;
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        struct Case {
+            edge: Edge,
+            dropped: bool,
         }
 
-        let chunk_size = std::cmp::max(event_counter.num_cpu_events / num_cpus::get(), 1);
-        let cpu_counts: Vec<(usize, usize)> = record
-            .cpu_events
-            .as_slice()
-            .pico_chunks(chunk_size)
-            .flat_map_iter(|chunk| {
-                chunk.iter().map(|e| {
-                    let c = Self::count_cpu_event(e);
-                    (c.add, c.lt)
-                })
+        static CASE: OnceLock<Case> = OnceLock::new();
+
+        /// From now on `edge`'s producer is delayed and, if `dropped`, `edge` no longer orders it
+        /// before its consumer. Once per process, before any trace generation.
+        ///
+        /// # Panics
+        ///
+        /// If another case was armed.
+        pub fn arm(edge: Edge, dropped: bool) {
+            let asked = Case { edge, dropped };
+            let armed = *CASE.get_or_init(|| asked);
+            assert_eq!(armed, asked, "one ordering case per process");
+        }
+
+        /// Whether `edge` orders its producer before its consumer.
+        #[must_use]
+        pub fn kept(edge: Edge) -> bool {
+            CASE.get()
+                .is_none_or(|case| case.edge != edge || !case.dropped)
+        }
+
+        /// Holds `stream` for [`SPIN_NANOS`] when the armed case delays `edge`'s producer, which
+        /// is enqueued on `stream` next.
+        pub fn delay(edge: Edge, stream: &CudaStream) {
+            if CASE.get().is_some_and(|case| case.edge == edge) {
+                let err = unsafe { cuda_history_spin(SPIN_NANOS, stream.into()) };
+                assert_eq!(err.code, 0, "cuda_history_spin failed: {err}");
+            }
+        }
+
+        /// When the armed case delays `edge`, takes back the `bytes` at `region` that `stream`
+        /// has just written and writes them again [`SPIN_NANOS`] later, all on the device: a
+        /// reader that does not wait for `stream` meanwhile reads poison. For a producer copied
+        /// from pageable memory, which [`delay`] cannot hold back: such a copy may hold the host
+        /// until its stream reaches it, so a spin before it would order it before every reader.
+        ///
+        /// # Safety
+        ///
+        /// `region` is `bytes` bytes of device memory that stay allocated until the work enqueued
+        /// on `stream` so far has run.
+        pub unsafe fn withhold(edge: Edge, region: *mut c_void, bytes: usize, stream: &CudaStream) {
+            if !CASE.get().is_some_and(|case| case.edge == edge) {
+                return;
+            }
+            let saved = DevicePoolAllocation::<u8>::alloc_async(bytes, stream)
+                .expect("a buffer for the withheld bytes");
+            let saved_at = saved.as_c_void_ptr().cast_mut();
+            let kind = CudaMemoryCopyKind::DeviceToDevice;
+            let codes = unsafe {
+                [
+                    cudaMemcpyAsync(saved_at, region, bytes, kind, stream.into()),
+                    cudaMemsetAsync(region, 0xff, bytes, stream.into()),
+                ]
+            };
+            delay(edge, stream);
+            let restored = unsafe { cudaMemcpyAsync(region, saved_at, bytes, kind, stream.into()) };
+            for code in codes.into_iter().chain([restored]) {
+                assert_eq!(code, CudaError::Success, "withholding a region");
+            }
+        }
+    }
+
+    /// Every edge orders its producer before its consumer.
+    #[cfg(not(feature = "drop-ordering-edge"))]
+    #[must_use]
+    #[inline]
+    pub const fn kept(_: Edge) -> bool {
+        true
+    }
+
+    /// No producer is delayed.
+    #[cfg(not(feature = "drop-ordering-edge"))]
+    #[inline]
+    pub const fn delay(_: Edge, _: &cudart::stream::CudaStream) {}
+
+    /// Nothing is withheld.
+    ///
+    /// # Safety
+    ///
+    /// None needed: nothing is read or written.
+    #[cfg(not(feature = "drop-ordering-edge"))]
+    #[inline]
+    pub unsafe fn withhold(
+        _: Edge,
+        _: *mut std::ffi::c_void,
+        _: usize,
+        _: &cudart::stream::CudaStream,
+    ) {
+    }
+}
+
+#[cfg(feature = "cuda")]
+/// The chunk's fill on the device, which every chip tracing the chunk from its history reads.
+pub(crate) fn chunk_device_history<'h, 'a>(
+    preallocated_gpu_memory: &'h PreallocatedGpuMemory<'a>,
+) -> &'h DeviceHistory<'a> {
+    preallocated_gpu_memory
+        .d_history
+        .as_ref()
+        .expect("a record traced from its history reached a chip without its device fill")
+}
+
+#[cfg(feature = "cuda")]
+/// The chunk's fill as the kernels on `stream` read it, whole. Making the reader makes `stream`
+/// wait for the whole fill; dropping it once the kernel is enqueued marks the end of `stream`'s
+/// reads, which the fill's error-word read-back and its free follow.
+pub(crate) fn chunk_history_reader<'h, 'a>(
+    preallocated_gpu_memory: &'h PreallocatedGpuMemory<'a>,
+    stream: &'h CudaStream,
+) -> HistoryReader<'h, 'a> {
+    chunk_device_history(preallocated_gpu_memory)
+        .reader(stream, Readiness::Complete)
+        .unwrap_or_else(|e| panic!("reading the chunk's device history: {e}"))
+}
+
+impl<F> EventCapture for CpuChip<F> {
+    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
+        let steps = record.cpu_steps();
+        event_counter.num_cpu_events += steps.len();
+        if steps.is_empty() {
+            return;
+        }
+        let (cpu_add, cpu_lt) = steps
+            .par_runs(|event, (add, lt): &mut (usize, usize)| {
+                let c = Self::count_cpu_event(event);
+                *add += c.add;
+                *lt += c.lt;
             })
-            .collect();
-        let (cpu_add, cpu_lt) = cpu_counts
-            .as_slice()
-            .pico_chunks(chunk_size)
-            .map(|chunk| {
-                chunk
-                    .iter()
-                    .fold((0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1))
-            })
-            .pico_reduce(|| (0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1));
+            .into_iter()
+            .fold((0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1));
         event_counter.num_add_sub_events += cpu_add;
         event_counter.num_lt_events += cpu_lt;
     }
@@ -482,13 +516,8 @@ impl<F> EventCapture for CpuChip<F> {
 
 impl<F> CpuChip<F> {
     #[inline(always)]
-    /// How many ALU events a CPU row contributes.
-    ///
-    /// This has to track the emitters exactly, not approximately. The GPU path sizes its event
-    /// buffers from this count and then has the kernel fill them, so an over-count leaves
-    /// uninitialized slots behind that read back as bogus ALU rows and unbalance the ALU bus.
-    /// (The CPU path builds the events directly, so it cannot notice the drift -- which is why
-    /// an over-count shows up only under GPU trace-gen.)
+    /// How many ALU events a CPU row contributes: the comparison the less-than chip proves for a
+    /// branch, and nothing else.
     fn count_cpu_event(event: &CpuEvent) -> CpuExtraEventIndices {
         let mut lt_events = 0;
 
@@ -501,9 +530,8 @@ impl<F> CpuChip<F> {
         // No ADD slot for any row. A JAL target is a field equation; a JALR target is proven
         // in-chip by four boolean carry expressions (`jump/constraints.rs`), so no Cpu row
         // synthesizes an Add event. No AUIPC arm either: since X12 the transpiler re-encodes
-        // `AUIPC rd, imm` as the two-immediate `ADD rd, imm, pc`, so that row's Add event comes
-        // from the emulator's generic ALU path (`record.add_sub_events`). The `add` field stays
-        // in the `repr(C)` struct (the kernels index the ADD/SUB buffer by it) and is always 0.
+        // `AUIPC rd, imm` as the two-immediate `ADD rd, imm, pc`, so that row's Add event is the
+        // history's own, on its add list. The `add` field is always 0.
 
         CpuExtraEventIndices {
             add: 0,
@@ -513,15 +541,27 @@ impl<F> CpuChip<F> {
 }
 
 impl<F: PrimeField32> CpuChip<F> {
+    /// The byte lookups [`Self::event_to_row`] raises, without the row: the timestamp limbs of
+    /// the `a` access and of the `b` and `c` register reads. They follow from the step's memory
+    /// records alone, so no event, and none of its operands, is built for them.
+    fn row_byte_lookups(records: &MemoryAccessRecord, blu_events: &mut impl ByteRecordBehavior) {
+        if let Some(record) = records.a {
+            timestamp_diff_lookups(record, blu_events);
+        }
+        for record in [records.b, records.c] {
+            if let Some(record @ MemoryRecordEnum::Read(_)) = record {
+                timestamp_diff_lookups(record, blu_events);
+            }
+        }
+    }
+
     /// Create a row from an event.
     fn event_to_row(
         &self,
         event: &CpuEvent,
         cols: &mut CpuCols<F>,
         blu_events: &mut impl ByteRecordBehavior,
-    ) -> HashMap<Opcode, Vec<AluEvent>> {
-        let mut new_alu_events = HashMap::new();
-
+    ) {
         // Populate the clk column.
         self.populate_chunk_clk(cols, event);
 
@@ -569,9 +609,10 @@ impl<F: PrimeField32> CpuChip<F> {
         };
         cols.num_extra_clk = num_extra_clk;
 
-        // The only ALU event a Cpu row synthesizes is the branch comparison. A JALR target is
-        // proven in-chip (`jump/constraints.rs`), so there is no `populate_jump`.
-        self.populate_branch(cols, event, &mut new_alu_events);
+        // The only ALU event a Cpu row synthesizes is the branch comparison, which `extra_record`
+        // raises. A JALR target is proven in-chip (`jump/constraints.rs`), so there is no
+        // `populate_jump`.
+        self.populate_branch(cols, event);
 
         // The syscall decode gadgets and their byte lookups moved to
         // the Ecall chip. The Cpu row only commits the halt flag, whose correctness on ecall
@@ -605,8 +646,6 @@ impl<F: PrimeField32> CpuChip<F> {
         } else {
             F::ZERO
         };
-
-        new_alu_events
     }
 
     fn pad_to_power_of_two(&self, shape: Option<&RiscvPadShape>, values: &mut Vec<F>) {
@@ -638,5 +677,98 @@ impl<F: PrimeField32> CpuChip<F> {
             padded_row[CPU_COL_MAP.opcode_selector.imm_b] = F::ONE;
             padded_row[CPU_COL_MAP.opcode_selector.imm_c] = F::ONE;
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        chips::tests::fib_records,
+        emulator::riscv::history_view::{in_compare_order, run_length},
+        mle::machine::riscv::Kb,
+    };
+    use p3_field::PrimeCharacteristicRing;
+
+    /// The byte lookups match the rows, and the history comparisons carry their branch bits.
+    #[test]
+    fn extra_record_raises_what_the_rows_raise() {
+        let records = fib_records();
+        let chip = CpuChip::<Kb>::default();
+        let mut compared = 0;
+        for record in records.iter().filter(|record| record.is_cpu_chunk) {
+            let mut harvested = EmulationRecord::default();
+            chip.extra_record(record, &mut harvested);
+
+            let mut from_rows = EmulationRecord::default();
+            let mut branches = Vec::new();
+            for (index, event) in record.cpu_steps().iter().enumerate() {
+                let mut row = [Kb::ZERO; NUM_CPU_COLS];
+                let cols: &mut CpuCols<Kb> = row.as_mut_slice().borrow_mut();
+                chip.event_to_row(&event, cols, &mut from_rows);
+                if event.instruction.is_branch_instruction() {
+                    let signed = matches!(event.instruction.opcode, Opcode::BLT | Opcode::BGE);
+                    branches.push((index, signed, (event.clk, cols.a_lt_b, cols.a_gt_b)));
+                }
+            }
+            assert_eq!(harvested.byte_lookups, from_rows.byte_lookups);
+            let run = run_length(record.cpu_steps().len());
+            let row_bits: Vec<_> = branches
+                .chunk_by(|left, right| left.0 / run == right.0 / run)
+                .flat_map(|group| in_compare_order(group, |branch| branch.1))
+                .map(|(_, _, bits)| bits)
+                .collect();
+
+            let ops = record.alu_ops(crate::emulator::riscv::record::AluStream::Lt);
+            let native = record.history.as_ref().unwrap().chip_steps.lt.len();
+            let compare_bits: Vec<_> = (native..ops.len())
+                .map(|index| ops.get(index))
+                .map(|compare| {
+                    assert!(compare.is_cmp);
+                    (
+                        compare.clk,
+                        Kb::from_u64(compare.a & 1),
+                        Kb::from_u64(compare.a >> 16),
+                    )
+                })
+                .collect();
+            assert_eq!(compare_bits, row_bits);
+            compared += row_bits.len();
+        }
+        assert!(compared > 0, "no branch in any chunk");
+    }
+
+    /// Step by step, the byte lookups read off a step's records are the ones its row raises, in
+    /// the same order, and the records are its event's.
+    #[test]
+    fn a_steps_byte_lookups_read_off_its_records_are_its_rows() {
+        let chip = CpuChip::<Kb>::default();
+        let mut steps_read = 0;
+        for record in fib_records().iter().filter(|record| record.is_cpu_chunk) {
+            let steps = record.cpu_steps();
+            for index in 0..steps.len() {
+                let (event, records) = (steps.get(index), steps.records(index));
+                assert_eq!(
+                    [records.a, records.b, records.c, records.memory]
+                        .map(FfiOption::<MemoryRecordEnum>::from),
+                    [
+                        event.a_record,
+                        event.b_record,
+                        event.c_record,
+                        event.memory_record
+                    ],
+                    "step {index}"
+                );
+                let mut from_records = Vec::<ByteLookupEvent>::new();
+                CpuChip::<Kb>::row_byte_lookups(&records, &mut from_records);
+                let mut from_row = Vec::<ByteLookupEvent>::new();
+                let mut row = [Kb::ZERO; NUM_CPU_COLS];
+                let cols: &mut CpuCols<Kb> = row.as_mut_slice().borrow_mut();
+                chip.event_to_row(&event, cols, &mut from_row);
+                assert_eq!(from_records, from_row, "step {index}");
+                steps_read += 1;
+            }
+        }
+        assert!(steps_read > 0, "no CPU step in any chunk");
     }
 }

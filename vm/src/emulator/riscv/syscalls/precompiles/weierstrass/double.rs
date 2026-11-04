@@ -3,20 +3,21 @@ use crate::{
     emulator::riscv::{
         event_types::RvValue,
         syscalls::{
+            host::{Precompile, SyscallHost},
             precompiles::{ec::event::create_ec_double_event, PrecompileEvent},
-            syscall_context::SyscallContext,
-            Syscall, SyscallCode,
+            SyscallCode,
         },
     },
 };
 use std::marker::PhantomData;
 
-pub(crate) struct WeierstrassDoubleAssignSyscall<E: EllipticCurve> {
+pub struct WeierstrassDoubleAssignSyscall<E: EllipticCurve> {
     _phantom: std::marker::PhantomData<E>,
 }
 
 impl<E: EllipticCurve> WeierstrassDoubleAssignSyscall<E> {
     /// Create a new instance of the [`WeierstrassDoubleAssignSyscall`].
+    #[allow(clippy::new_without_default)]
     pub const fn new() -> Self {
         Self {
             _phantom: PhantomData,
@@ -24,18 +25,16 @@ impl<E: EllipticCurve> WeierstrassDoubleAssignSyscall<E> {
     }
 }
 
-impl<E: EllipticCurve> Syscall for WeierstrassDoubleAssignSyscall<E> {
-    fn emulate(
+impl<E: EllipticCurve> Precompile for WeierstrassDoubleAssignSyscall<E> {
+    fn emulate<H: SyscallHost>(
         &self,
-        rt: &mut SyscallContext,
+        rt: &mut H,
         syscall_code: SyscallCode,
         arg1: RvValue,
         arg2: RvValue,
     ) -> Option<RvValue> {
-        let event = create_ec_double_event::<E>(rt, arg1, arg2);
-        let syscall_event = rt
-            .rt
-            .syscall_event(event.clk, syscall_code.syscall_id(), arg1, arg2);
+        let event = create_ec_double_event::<E, _>(rt, arg1, arg2);
+        let syscall_event = rt.syscall_event(event.clk, syscall_code.syscall_id(), arg1, arg2);
 
         match E::CURVE_TYPE {
             CurveType::Secp256k1 => {

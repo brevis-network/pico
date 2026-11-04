@@ -5,7 +5,7 @@ use std::{
     num::NonZeroUsize,
     panic::AssertUnwindSafe,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, PoisonError},
+    sync::Arc,
 };
 
 use pico_mle_core::{
@@ -16,6 +16,8 @@ use pico_mle_core::{
     p3_field::PrimeField32,
     AirRef, StarkEngine,
 };
+#[cfg(feature = "cuda")]
+use pico_vm::proverchain::riscv::default_pipeline_workers;
 use pico_vm::{
     compiler::{
         program::ProgramBehavior,
@@ -25,7 +27,7 @@ use pico_vm::{
         },
     },
     emulator::{
-        opts::{EmulatorOpts, SnapshotMainMode, SplitOpts},
+        opts::{EmulatorOpts, ReplayWorkers, SnapshotMainMode},
         riscv::{
             chunk_split::{event_limit_scale, event_limits_off, ChunkSplitConfig},
             record::EmulationRecord,
@@ -44,7 +46,7 @@ use pico_vm::{
         vk_map::{vk_identity, MleVkMap, VkMapError},
     },
     primitives::consts::MAX_LOG_NUMBER_OF_CHUNKS,
-    proverchain::riscv::{check_pipeline, default_pipeline_workers, max_pipeline_workers},
+    proverchain::riscv::{check_pipeline, max_pipeline_workers},
 };
 #[cfg(feature = "aot")]
 use {
@@ -75,6 +77,11 @@ const CHUNK_BATCH_SIZE: u32 = 1;
 /// Chunks proved at once. Stated rather than left to `PROVE_CONCURRENCY`, which the VM would
 /// otherwise consult; the value is the VM's own default.
 const DEFAULT_CONCURRENCY: NonZeroUsize = NonZeroUsize::new(4).unwrap();
+
+/// Most replay workers a build runs without being told how many. Each holds the snapshot memory of
+/// the batch it replays, so the default stops here rather than following the core count up on a
+/// large machine; [`ProverBuilder::emulation_workers`] raises it.
+pub(crate) const DEFAULT_MAX_EMULATION_WORKERS: usize = 16;
 
 /// Recursion keys a machine keeps between proves at natural heights. A layout there follows each
 /// chunk's per-AIR heights, so new inputs bring new keys and an unbounded cache grows with every
@@ -216,31 +223,16 @@ enum VkMapSource {
 /// run the snapshot pipeline with `workers` interpreters replaying its snapshot thread.
 #[derive(Clone, Copy, Debug)]
 enum EmulationPath {
-    /// One interpreter makes the records; the interpreter runs the pipeline's snapshot thread.
-    Interpreter { workers: NonZeroUsize },
-    /// The registered AOT program runs the pipeline's snapshot thread, records included.
-    /// The AOT runtime runs the pipeline's snapshot thread: the registered program's compiled
-    /// code, or in a `cuda` build without one, the runtime interpreting every block.
-    #[cfg(any(feature = "aot", feature = "cuda"))]
-    Aot { workers: NonZeroUsize },
-}
-
-impl EmulationPath {
-    fn workers(self) -> NonZeroUsize {
-        match self {
-            Self::Interpreter { workers } => workers,
-            #[cfg(any(feature = "aot", feature = "cuda"))]
-            Self::Aot { workers } => workers,
-        }
-    }
-
-    fn snapshot_main(self) -> SnapshotMainMode {
-        match self {
-            Self::Interpreter { .. } => SnapshotMainMode::Interpreter,
-            #[cfg(any(feature = "aot", feature = "cuda"))]
-            Self::Aot { .. } => SnapshotMainMode::Aot,
-        }
-    }
+    /// One interpreter, on the calling thread: [`ProverBuilder::serial_emulation`].
+    Serial,
+    /// The snapshot pipeline: a snapshot thread runs ahead, on the registered AOT program or an
+    /// interpreter as `snapshot_main` says, and `workers` replay its snapshots into the records,
+    /// on interpreters or on the AOT program as `replay_workers` says.
+    Pipeline {
+        workers: NonZeroUsize,
+        snapshot_main: SnapshotMainMode,
+        replay_workers: ReplayWorkers,
+    },
 }
 
 /// Options for a [`Prover`].
@@ -263,9 +255,12 @@ pub struct ProverBuilder {
     trusted_vk_root: Option<[u32; 8]>,
     #[cfg(feature = "aot")]
     aot: Option<&'static AotProgram>,
+    #[cfg(feature = "aot")]
+    aot_workers: bool,
     emulation_workers: Option<NonZeroUsize>,
+    serial_emulation: bool,
     #[cfg(feature = "cuda")]
-    gpu_event_pool_size: NonZeroUsize,
+    gpu_event_pool_size: Option<NonZeroUsize>,
     #[cfg(feature = "cuda")]
     interpreted_aot_runtime: bool,
 }
@@ -282,9 +277,12 @@ impl ProverBuilder {
             trusted_vk_root: None,
             #[cfg(feature = "aot")]
             aot: None,
+            #[cfg(feature = "aot")]
+            aot_workers: false,
             emulation_workers: None,
+            serial_emulation: false,
             #[cfg(feature = "cuda")]
-            gpu_event_pool_size: distributed_vm::mle::embed::DEFAULT_EVENT_POOL_SIZE,
+            gpu_event_pool_size: None,
             #[cfg(feature = "cuda")]
             interpreted_aot_runtime: true,
         }
@@ -297,6 +295,10 @@ impl ProverBuilder {
     }
 
     /// Instructions per emulation chunk. Defaults to `1 << log_stacked_height`.
+    ///
+    /// The snapshot pipeline gives every chunk a memory from its pool, gigabytes of address space,
+    /// and resets it before it is used again, so a chunk far below the default makes a long run
+    /// slow there; [`Self::serial_emulation`] keeps one memory for the whole run.
     ///
     /// Fixed for the life of the [`Prover`], not per `prove`: in a `cuda` build the pinned host
     /// buffers are sized from this once per process, so two provers in one process would otherwise
@@ -388,40 +390,50 @@ impl ProverBuilder {
         self
     }
 
-    /// Replay workers the snapshot pipeline runs beside its snapshot thread: the pipeline that
-    /// [`Self::execute`] always runs, that makes the records with [`Self::aot`], and that a `cuda`
-    /// build's GPU prove runs. Proving without [`Self::aot`] on the CPU interprets in one thread.
+    /// Replay the snapshot pipeline's chunks on [`Self::aot`]'s program too, rather than on
+    /// interpreters: the replay workers run the AOT core, which writes the records the interpreter
+    /// would. Needs `aot`; [`Self::build`] and [`Self::execute`] refuse it without.
+    #[cfg(feature = "aot")]
+    pub fn aot_workers(mut self) -> Self {
+        self.aot_workers = true;
+        self
+    }
+
+    /// Replay workers the snapshot pipeline runs beside its snapshot thread, with or without
+    /// `aot`. [`Self::serial_emulation`] has none, and is refused with this.
     ///
-    /// Defaults to this machine's core count for the records [`Self::aot`] makes, and otherwise,
-    /// the GPU prove included, to
-    /// [`default_pipeline_workers`](pico_vm::proverchain::riscv::default_pipeline_workers); the
-    /// most [`Self::build`] accepts is the core count, since the pipeline runs one replay worker
-    /// per core at most.
+    /// Defaults to this machine's core count, at most 16; a `cuda` build's GPU prove defaults to
+    /// [`default_pipeline_workers`](pico_vm::proverchain::riscv::default_pipeline_workers)
+    /// instead, beside the cards' preparers and provers. [`Self::build`] accepts no more than the
+    /// core count: the pipeline runs one replay worker per core at most.
     ///
-    /// With [`Self::aot`], or in a `cuda` build on the interpreted AOT runtime, a worker keeps an
-    /// emulator memory from a pool of `MEMORY_POOL_SIZE` between its batches, so the pool needs
-    /// one per worker plus the batch being cut: unset, it is raised to that, and [`Self::build`]
-    /// refuses a smaller one.
+    /// With `aot`, or in a `cuda` build on the interpreted AOT runtime, a worker holds an emulator
+    /// memory from a pool of `MEMORY_POOL_SIZE` while it replays. Unset, the pool is 16, raised
+    /// where that is fewer to one per worker plus the batch being cut, so every worker replays at
+    /// once; a smaller size caps how many do, and [`Self::build`] refuses only a pool that cannot
+    /// hold the batch being cut.
     pub fn emulation_workers(mut self, n: NonZeroUsize) -> Self {
         self.emulation_workers = Some(n);
         self
     }
 
-    /// Pinned host event buffers the GPU prove keeps, each one chunk's worth of CPU or ALU events;
-    /// they bound how far emulation runs ahead of the cards, and stay allocated once a GPU prove
-    /// has run. Defaults to [`distributed_vm::mle::embed::DEFAULT_EVENT_POOL_SIZE`];
-    /// `MLE_EVENT_POOL_SIZE` does not apply here. A size that cannot hold one chunk's replay, two
-    /// ALU buffers per segment, is refused when proving starts, without poisoning the process.
+    /// Records the GPU prove holds at once, each in a pinned host history slot of one chunk; they
+    /// bound how far emulation runs ahead of the cards. All are pinned on the first GPU prove and
+    /// stay pinned at that count, so a later prove asking for another count is refused. Defaults
+    /// to [`distributed_vm::mle::embed::default_event_pool_size`], sized to the host's memory;
+    /// `MLE_HISTORY_SLOTS` does not apply here. A size that cannot hold one chunk's replay
+    /// segments is refused when proving starts, without poisoning the process.
     #[cfg(feature = "cuda")]
     pub fn gpu_event_pool_size(mut self, n: NonZeroUsize) -> Self {
-        self.gpu_event_pool_size = n;
+        self.gpu_event_pool_size = Some(n);
         self
     }
 
     /// Whether, without [`Self::aot`], the snapshot thread is the AOT runtime interpreting every
     /// block (no compiled code, any ELF) rather than the VM's interpreter. Defaults to `true`:
     /// the runtime's interpreter and precompile backends emulate a reth block in about half the
-    /// time. It changes how records are made, not what is proved.
+    /// time. It changes how records are made, not what is proved. [`Self::serial_emulation`]
+    /// overrides it.
     ///
     /// The runtime, like an [`Self::aot`] program, is registered once per process, whichever
     /// comes first, by `build`, `execute` or `estimate_cost`: after a default builder, a builder
@@ -434,10 +446,20 @@ impl ProverBuilder {
         self
     }
 
+    /// Emulate on one interpreter, on the calling thread, instead of through the snapshot
+    /// pipeline. For a machine the pipeline's workers do not fit, and for comparing the two paths,
+    /// whose records are equal.
+    ///
+    /// Refused by [`Self::build`] and [`Self::execute`] together with [`Self::emulation_workers`]
+    /// or `aot`, which both need the pipeline.
+    pub fn serial_emulation(mut self) -> Self {
+        self.serial_emulation = true;
+        self
+    }
+
     /// Emulate without proving: no keygen, no whitelist. Chunks exactly as the built prover would.
     ///
-    /// Runs the snapshot pipeline (see [`Self::emulation_workers`]) and makes no witness: the
-    /// records it reads the counts from carry no CPU or ALU events and are dropped as they come.
+    /// On the snapshot pipeline, each record is dropped as soon as its counts are read.
     ///
     /// The whitelist options go unchecked: they bind proving only.
     pub fn execute(&self, stdin: Stdin) -> Result<Execution, ProveError> {
@@ -460,8 +482,9 @@ impl ProverBuilder {
 
     /// What an emulation of [`Self::execute`] or [`Self::emulate`] runs with.
     fn emulation_setup(&self) -> Result<(Arc<Program>, EmulatorOpts, EmulationPath), ProveError> {
-        let opts = emulator_opts(self.resolved_chunk_size()?);
-        let path = self.resolved_emulation()?;
+        let chunk_size = self.resolved_chunk_size()?;
+        let opts = emulator_opts(chunk_size);
+        let path = self.resolved_emulation(chunk_size)?;
         let program = compile(&self.elf)?;
         self.register_aot()?;
         // The tier latches on first read, so a whitelist builder that emulates before `build`
@@ -476,7 +499,7 @@ impl ProverBuilder {
     /// Keygen the RISC-V air set and check the options against each other.
     pub fn build(self) -> Result<Prover, ProveError> {
         let chunk_size = self.resolved_chunk_size()?;
-        let emulation = self.resolved_emulation()?;
+        let emulation = self.resolved_emulation(chunk_size)?;
 
         let vk_map = if self.verify_keys {
             if self.log_stacked_height != WHITELIST_LOG_STACKED_HEIGHT {
@@ -603,7 +626,9 @@ impl ProverBuilder {
             #[cfg(feature = "cuda")]
             elf: Arc::from(self.elf.as_slice()),
             #[cfg(feature = "cuda")]
-            gpu_event_pool_size: self.gpu_event_pool_size,
+            gpu_event_pool_size: self
+                .gpu_event_pool_size
+                .unwrap_or_else(distributed_vm::mle::embed::default_event_pool_size),
             // Beside the GPU's preparers and provers, not the AOT path's one per core.
             #[cfg(feature = "cuda")]
             gpu_emulation_workers: self
@@ -672,25 +697,82 @@ impl ProverBuilder {
     /// The emulator these options resolve to, with an AOT program checked against the ELF and the
     /// pipeline against this machine. Shared by [`Self::build`] and [`Self::execute`], so the two
     /// emulate alike; neither registers the program before its last fallible step.
-    fn resolved_emulation(&self) -> Result<EmulationPath, ProveError> {
-        // Checked here because the pipeline would refuse it only once a run had started.
+    fn resolved_emulation(&self, chunk_size: u32) -> Result<EmulationPath, ProveError> {
+        #[cfg(feature = "aot")]
+        if self.aot_workers && self.aot.is_none() {
+            return Err(ProveError::InconsistentOptions(
+                "aot_workers() was set without aot(program); the replay workers run the program \
+                 aot registers"
+                    .into(),
+            ));
+        }
+        if self.serial_emulation {
+            if let Some(workers) = self.emulation_workers {
+                return Err(ProveError::InconsistentOptions(format!(
+                    "emulation_workers({workers}) was set with serial_emulation(); the serial \
+                     path runs no replay workers"
+                )));
+            }
+            #[cfg(feature = "aot")]
+            if self.aot.is_some() {
+                return Err(ProveError::InconsistentOptions(
+                    "aot(program) was set with serial_emulation(); only the snapshot pipeline \
+                     runs AOT code"
+                        .into(),
+                ));
+            }
+            return Ok(EmulationPath::Serial);
+        }
+
+        #[cfg(feature = "aot")]
+        let compiled = self.aot.is_some();
+        #[cfg(not(feature = "aot"))]
+        let compiled = false;
+        // A `cuda` build without a compiled program puts the AOT runtime, interpreting every
+        // block, on the snapshot thread (see `interpreted_aot_runtime`).
+        #[cfg(feature = "cuda")]
+        let interpreted_runtime = self.interpreted_aot_runtime;
+        #[cfg(not(feature = "cuda"))]
+        let interpreted_runtime = false;
+        let snapshot_main = if compiled || interpreted_runtime {
+            SnapshotMainMode::Aot
+        } else {
+            SnapshotMainMode::Interpreter
+        };
+        #[cfg(feature = "aot")]
+        let replay_workers = if self.aot_workers {
+            ReplayWorkers::Aot
+        } else {
+            ReplayWorkers::Interpreter
+        };
+        #[cfg(not(feature = "aot"))]
+        let replay_workers = ReplayWorkers::Interpreter;
+
+        // Checked here because the pipeline would refuse it only once a prove had started.
         let cores = max_pipeline_workers();
-        if let Some(workers) = self.emulation_workers.filter(|w| w.get() > cores) {
+        let workers = self.emulation_workers.unwrap_or_else(|| {
+            NonZeroUsize::new(cores.min(DEFAULT_MAX_EMULATION_WORKERS)).unwrap_or(NonZeroUsize::MIN)
+        });
+        if workers.get() > cores {
             return Err(ProveError::InconsistentOptions(format!(
                 "emulation_workers({workers}) exceeds this machine's {cores} cores; the pipeline \
                  runs at most one replay worker per core"
             )));
         }
+        // The pipeline refuses the same, but only once a prove has started. The replay workers stay
+        // out of it: they need the program registered, which comes last, and `aot_workers` without
+        // `aot` is refused above.
+        check_pipeline(
+            workers,
+            &EmulatorOpts {
+                snapshot_main,
+                ..emulator_opts(chunk_size)
+            },
+        )
+        .map_err(|e| ProveError::InconsistentOptions(e.to_string()))?;
 
         #[cfg(feature = "aot")]
         if let Some(program) = self.aot {
-            let workers = self
-                .emulation_workers
-                .unwrap_or(NonZeroUsize::new(cores).unwrap_or(NonZeroUsize::MIN));
-            // The pipeline refuses the same, but only once a prove has started.
-            check_pipeline(workers, SnapshotMainMode::Aot)
-                .map_err(|e| ProveError::InconsistentOptions(e.to_string()))?;
-
             if program.is_stub() {
                 return Err(ProveError::AotNotGenerated);
             }
@@ -701,21 +783,12 @@ impl ProverBuilder {
                     elf,
                 });
             }
-            return Ok(EmulationPath::Aot { workers });
         }
-
-        let workers = self
-            .emulation_workers
-            .unwrap_or_else(default_pipeline_workers);
-        #[cfg(feature = "cuda")]
-        if self.interpreted_aot_runtime {
-            check_pipeline(workers, SnapshotMainMode::Aot)
-                .map_err(|e| ProveError::InconsistentOptions(e.to_string()))?;
-            return Ok(EmulationPath::Aot { workers });
-        }
-        check_pipeline(workers, SnapshotMainMode::Interpreter)
-            .map_err(|e| ProveError::InconsistentOptions(e.to_string()))?;
-        Ok(EmulationPath::Interpreter { workers })
+        Ok(EmulationPath::Pipeline {
+            workers,
+            snapshot_main,
+            replay_workers,
+        })
     }
 
     /// Registers the AOT program, or in a `cuda` build the interpreted runtime, for the process:
@@ -726,7 +799,7 @@ impl ProverBuilder {
             return pico_aot_runtime::register(program).map_err(ProveError::AotRegistration);
         }
         #[cfg(feature = "cuda")]
-        if self.interpreted_aot_runtime {
+        if self.interpreted_aot_runtime && !self.serial_emulation {
             pico_aot_runtime::register_interpreted().map_err(ProveError::AotRegistration)?;
         }
         Ok(())
@@ -747,11 +820,6 @@ fn compile(elf: &[u8]) -> Result<Arc<Program>, ProveError> {
         .compile())
 }
 
-/// The one emulation entry point, behind proving and both `execute`s, on either emulator.
-///
-/// Any abort the emulator still has on guest or caller input is returned as an error, and every
-/// record's digests are made final. The emulator is built inside the call and dropped with it, so
-/// nothing an unwind interrupted outlives it.
 /// Latch the visible cards' memory tier (`PICO_GPU_MEM` overrides) before any emulation reads
 /// the default.
 #[cfg(feature = "cuda")]
@@ -761,6 +829,11 @@ fn latch_gpu_memory_tier() -> Result<(), ProveError> {
         .map_err(ProveError::from_embed)
 }
 
+/// The one emulation entry point, behind proving and both `execute`s, on any [`EmulationPath`].
+///
+/// Any abort the emulator still has on guest or caller input is returned as an error, and every
+/// record's digests are made final. The emulator is built inside the call and dropped with it, so
+/// nothing an unwind interrupted outlives it.
 fn emulate_program(
     program: Arc<Program>,
     opts: EmulatorOpts,
@@ -770,13 +843,17 @@ fn emulate_program(
     check_stdin(&stdin)?;
     let stdin = stdin.into_emulator_stdin();
     let mut emulated = std::panic::catch_unwind(AssertUnwindSafe(|| match path {
-        EmulationPath::Interpreter { .. } => riscv::emulate_with_opts(program, &stdin, opts),
-        #[cfg(any(feature = "aot", feature = "cuda"))]
-        EmulationPath::Aot { workers } => riscv::emulate_with_pipeline(
+        EmulationPath::Serial => riscv::emulate_with_opts(program, &stdin, opts),
+        EmulationPath::Pipeline {
+            workers,
+            snapshot_main,
+            replay_workers,
+        } => riscv::emulate_with_pipeline(
             program,
             &stdin,
             EmulatorOpts {
-                snapshot_main: SnapshotMainMode::Aot,
+                snapshot_main,
+                replay_workers,
                 ..opts
             },
             workers,
@@ -801,37 +878,48 @@ fn emulate_program(
     })
 }
 
-/// [`emulate_program`]'s [`Execution`] from the snapshot pipeline, without the records: they are
-/// light-trace, and dropped once counted.
+/// [`emulate_program`]'s [`Execution`], without keeping the records: on the snapshot pipeline
+/// each is dropped as soon as its precompile calls are counted.
 fn execute_program(
     program: Arc<Program>,
     opts: EmulatorOpts,
     path: EmulationPath,
     stdin: Stdin,
 ) -> Result<Execution, ProveError> {
+    let EmulationPath::Pipeline {
+        workers,
+        snapshot_main,
+        replay_workers,
+    } = path
+    else {
+        return emulate_program(program, opts, path, stdin).map(|emulated| {
+            pico_vm::mle::ledger::drop_records(emulated.records);
+            emulated.execution
+        });
+    };
     check_stdin(&stdin)?;
     let stdin = stdin.into_emulator_stdin();
-    let calls = Mutex::new(BTreeMap::new());
     let opts = EmulatorOpts {
-        snapshot_main: path.snapshot_main(),
+        snapshot_main,
+        replay_workers,
         ..opts
     };
+    let mut calls = BTreeMap::new();
     let executed = std::panic::catch_unwind(AssertUnwindSafe(|| {
-        riscv::execute_with_pipeline(program, &stdin, opts, path.workers(), |record| {
-            count_precompile_calls(
-                &mut calls.lock().unwrap_or_else(PoisonError::into_inner),
-                record,
-            )
+        riscv::emulate_with_pipeline_streaming(program, &stdin, opts, workers, |record| {
+            count_precompile_calls(&mut calls, &record)
         })
     }))
     .map_err(|payload| ProveError::EmulationAborted(panic_message(&*payload)))?
     .map_err(ProveError::from_emulate)?;
+    // Ends the ledger run, as dropping a prove's records does.
+    pico_vm::mle::ledger::drop_records(Vec::new());
     Ok(Execution {
         committed_bytes: executed.committed_bytes,
         cycles: executed.cycles,
         chunks: executed.chunks,
         reports: executed.reports,
-        precompile_calls: calls.into_inner().unwrap_or_else(PoisonError::into_inner),
+        precompile_calls: calls,
     })
 }
 
@@ -943,19 +1031,19 @@ fn check_stdin(stdin: &Stdin) -> Result<(), ProveError> {
 
 /// Every emulator option stated, so no environment variable can decide one.
 ///
-/// `EmulatorOpts::default` reads `CHUNK_SIZE`, `CHUNK_BATCH_SIZE` and `SPLIT_THRESHOLD`, and
+/// `EmulatorOpts::default` reads `CHUNK_SIZE` and `CHUNK_BATCH_SIZE`, and
 /// `from_env_chunk_size` reads the first of them, so neither is a usable starting point here.
 pub(crate) fn emulator_opts(chunk_size: u32) -> EmulatorOpts {
     EmulatorOpts {
         chunk_size,
         chunk_batch_size: CHUNK_BATCH_SIZE,
-        split_opts: SplitOpts::new(chunk_size as usize >> 2),
         max_cycles: Some((chunk_size as u64) * (2 << MAX_LOG_NUMBER_OF_CHUNKS)),
         cycle_tracker: false,
         cost_estimator: false,
-        // `emulate_program` switches this to `Aot` on the AOT path only: `emulate_with_opts`
-        // refuses an AOT request rather than silently interpreting it.
+        // The pipeline path states its own in `emulate_program`; `emulate_with_opts` refuses an
+        // AOT request rather than silently interpreting it, so the serial path keeps this one.
         snapshot_main: SnapshotMainMode::Interpreter,
+        replay_workers: ReplayWorkers::Interpreter,
     }
 }
 
@@ -1062,10 +1150,38 @@ impl Prover {
             .map_err(|e| ProveError::Format(format!("cannot encode the VK bundle: {e}")))
     }
 
-    /// How many replay workers this prover's snapshot pipeline runs (see
-    /// [`ProverBuilder::emulation_workers`]).
-    pub fn emulation_workers(&self) -> NonZeroUsize {
-        self.emulation.workers()
+    /// How many replay workers the snapshot pipeline runs; `None` when this prover emulates
+    /// serially ([`ProverBuilder::serial_emulation`]).
+    pub fn emulation_workers(&self) -> Option<NonZeroUsize> {
+        match self.emulation {
+            EmulationPath::Serial => None,
+            EmulationPath::Pipeline { workers, .. } => Some(workers),
+        }
+    }
+
+    /// Whether the snapshot pipeline's snapshot thread runs the AOT program ([`ProverBuilder::aot`])
+    /// rather than an interpreter; `false` when this prover emulates serially.
+    pub fn emulates_with_aot(&self) -> bool {
+        matches!(
+            self.emulation,
+            EmulationPath::Pipeline {
+                snapshot_main: SnapshotMainMode::Aot,
+                ..
+            }
+        )
+    }
+
+    /// Whether the snapshot pipeline's replay workers run the AOT program
+    /// ([`ProverBuilder::aot_workers`]) rather than interpreters; `false` when this prover
+    /// emulates serially.
+    pub fn replays_with_aot(&self) -> bool {
+        matches!(
+            self.emulation,
+            EmulationPath::Pipeline {
+                replay_workers: ReplayWorkers::Aot,
+                ..
+            }
+        )
     }
 
     /// Emulate without proving. [`ProverBuilder::execute`] does the same without keygen.
@@ -1106,7 +1222,9 @@ impl Prover {
 
         let emulated = self.emulate(stdin)?;
         let committed = emulated.execution.committed_bytes;
-        self.prove_records(&emulated.records, committed, phase)
+        let proved = self.prove_records(&emulated.records, committed, phase);
+        pico_vm::mle::ledger::drop_records(emulated.records);
+        proved
     }
 
     /// Prove to [`Phase::Wrap`] for the on-chain verifier, and return the gnark inputs with the
@@ -1123,12 +1241,14 @@ impl Prover {
             return Err(ProveError::EvmRequiresWhitelist);
         };
         let emulated = self.emulate(stdin)?;
-        if !binding::commits(&emulated.records) {
-            return Err(ProveError::EvmNoCommittedDigest);
-        }
-        let committed = emulated.execution.committed_bytes;
-        let proof = self.prove_records(&emulated.records, committed, Phase::Wrap)?;
-        crate::EvmBundle::from_wrap_proof(proof, vk_root)
+        let proved = if binding::commits(&emulated.records) {
+            let committed = emulated.execution.committed_bytes;
+            self.prove_records(&emulated.records, committed, Phase::Wrap)
+        } else {
+            Err(ProveError::EvmNoCommittedDigest)
+        };
+        pico_vm::mle::ledger::drop_records(emulated.records);
+        crate::EvmBundle::from_wrap_proof(proved?, vk_root)
     }
 
     pub(crate) fn emulate(&self, stdin: Stdin) -> Result<Emulation, ProveError> {
@@ -1410,14 +1530,18 @@ impl Prover {
             elf: Arc::clone(&self.elf),
             whitelist: Arc::clone(vk_map),
             trusted_root: vk_map.root(),
-            // The GPU's deferred split, which its memory tiers are calibrated for; the chunk size,
-            // and so the program id, stay this prover's.
-            emulator_opts: EmulatorOpts {
-                split_opts: SplitOpts::new(
-                    pico_vm::primitives::consts::BENCH_MAX_DEFERRED_SPLIT_THRESHOLD,
-                ),
-                snapshot_main: self.emulation.snapshot_main(),
-                ..self.opts
+            // The chunk size, and so the program id, stay this prover's.
+            emulator_opts: match self.emulation {
+                EmulationPath::Pipeline {
+                    snapshot_main,
+                    replay_workers,
+                    ..
+                } => EmulatorOpts {
+                    snapshot_main,
+                    replay_workers,
+                    ..self.opts
+                },
+                EmulationPath::Serial => self.opts,
             },
             event_pool_size: self.gpu_event_pool_size,
             emulation_workers: self.gpu_emulation_workers,

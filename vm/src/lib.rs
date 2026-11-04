@@ -45,6 +45,15 @@ pub mod primitives;
 pub mod proverchain;
 pub mod thread;
 
+/// The contract between the code `pico-aot-codegen` generates and the `pico-aot-runtime` that runs
+/// it: the generator writes it into every program, and the runtime refuses a program carrying any
+/// other. Bump it whenever generated code has to change for the runtime to run it correctly.
+///
+/// Here because both crates take this one and neither takes the other: the generator taking the
+/// runtime would turn on `aot-emulator` in every build of the CLI, and the runtime taking the
+/// generator would compile `syn` into every generated crate.
+pub const AOT_CODEGEN_STAMP: u32 = 3;
+
 #[cfg(feature = "tcmalloc")]
 #[global_allocator]
 static GLOBAL: tcmalloc::TCMalloc = tcmalloc::TCMalloc;

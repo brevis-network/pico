@@ -25,10 +25,11 @@ impl Syscall for CommitSyscall {
         let public_values_digest_word = decode_u32_abi_word(arg2, "commit digest word");
         let rt = &mut ctx.rt;
 
-        rt.record.public_values.committed_value_digest[word_idx] = public_values_digest_word;
+        rt.sink.record_mut().public_values.committed_value_digest[word_idx] =
+            public_values_digest_word;
         // A commit tail in flight holds the chunk cut until it lands (see `should_split`).
         rt.chunk_split_state.commit_in_flight = commit_tail_in_flight(
-            &rt.record.public_values.committed_value_digest,
+            &rt.sink.record().public_values.committed_value_digest,
             rt.chunk_split_state.deferred_commits,
         );
 
