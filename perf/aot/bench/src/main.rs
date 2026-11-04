@@ -178,6 +178,8 @@ use pico_aot_runtime::{AotEmulatorCore, AotProgram};
 use pico_prover::{
     Phase, ProveError, Prover, ProverBuilder, Stdin, ENV_NO_LONGER_READ, ENV_READ_BY_PROVER,
 };
+#[cfg(feature = "cuda")]
+use pico_vm::instances::preparer::device_history::{plan::CPU_SLICE_STEPS, round_trip};
 use pico_vm::{
     chips::chips::riscv_memory::event::MemoryRecord,
     compiler::riscv::{
@@ -221,8 +223,6 @@ use pico_vm::{
     primitives::consts::MAX_LOG_NUMBER_OF_CHUNKS,
     proverchain::riscv::{max_pipeline_workers, RiscvChips},
 };
-#[cfg(feature = "cuda")]
-use pico_vm::instances::preparer::device_history::{plan::CPU_SLICE_STEPS, round_trip};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
