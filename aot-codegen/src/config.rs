@@ -24,6 +24,11 @@ pub struct AotConfig {
     /// Maximum instructions per block before forced split.
     /// Set to 0 to disable block splitting.
     pub max_block_instructions: u32,
+
+    /// Pure mode: blocks that only execute, on `pico_aot_pure::PureState`, with none of the
+    /// proving bookkeeping, in crates named apart from the default mode's. A
+    /// [`crate::RuntimeSpec::Entry`] then names `pico-aot-pure`.
+    pub pure: bool,
 }
 
 impl AotConfig {
@@ -35,6 +40,7 @@ impl AotConfig {
             target_chunk_count: None,
             max_chunk_count: constants::DEFAULT_MAX_CHUNK_COUNT,
             max_block_instructions: constants::DEFAULT_MAX_BLOCK_INSTRUCTIONS,
+            pure: false,
         }
     }
 
@@ -59,6 +65,12 @@ impl AotConfig {
     /// Set the maximum instructions per block before forced split.
     pub fn with_max_block_instructions(mut self, max_block_instructions: u32) -> Self {
         self.max_block_instructions = max_block_instructions;
+        self
+    }
+
+    /// Generate pure-mode crates.
+    pub fn with_pure(mut self, pure: bool) -> Self {
+        self.pure = pure;
         self
     }
 }

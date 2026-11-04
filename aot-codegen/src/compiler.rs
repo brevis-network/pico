@@ -26,6 +26,20 @@ use syn::visit_mut::VisitMut;
 /// runtime accepts as `AotProgram::CODEGEN_STAMP`.
 pub const CODEGEN_STAMP: u32 = pico_vm::AOT_CODEGEN_STAMP;
 
+/// A hash of this generator's source: a host that caches pure-mode libraries keys them by it, so
+/// a change to the generator rebuilds them.
+pub const GENERATOR_FINGERPRINT: &str = env!("PICO_AOT_CODEGEN_FINGERPRINT");
+
+/// The package name of the pure-mode dispatch crate generated from the ELF whose SHA-256 is
+/// `elf_sha256`. Named per ELF, so the crates of several guests can link into one binary.
+pub fn pure_dispatch_package(elf_sha256: &[u8; 32]) -> String {
+    format!("pico-aot-pure-dispatch-{}", &hex(elf_sha256)[..16])
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Information about a compiled basic block
 struct BlockInfo {
     pc: u64,
@@ -206,7 +220,11 @@ impl AotCompiler {
         let leaders = analyzer.analyze();
 
         // Phase 2: Generate all blocks
-        let blocks = self.generate_blocks(&leaders)?;
+        let blocks = if self.config.pure {
+            self.generate_blocks_pure(&leaders)
+        } else {
+            self.generate_blocks(&leaders)?
+        };
 
         if blocks.is_empty() {
             return Err("No blocks generated".to_string());
@@ -476,6 +494,60 @@ impl AotCompiler {
         Ok(blocks)
     }
 
+    /// [`Self::generate_blocks`] for pure mode: the same block boundaries, with code from
+    /// [`crate::pure_translator`] and no event accounting.
+    fn generate_blocks_pure(&self, leaders: &HashSet<u64>) -> Vec<BlockInfo> {
+        let block =
+            |pc: u64, insn_count: u32, code: proc_macro2::TokenStream, terminal: bool| BlockInfo {
+                pc,
+                name: format_ident!("block_0x{:08x}", pc),
+                insn_count,
+                mem_rw_events: 0,
+                non_register_global_lookup_base_max: 0,
+                reg_write_mask: 0,
+                global_lookup_base_max: 0,
+                code,
+                is_terminal: terminal,
+            };
+        let max_block_instructions = self.config.max_block_instructions;
+        let mut blocks = Vec::new();
+        // (start pc, instructions so far, code so far) of the block being built.
+        let mut open: Option<(u64, u32, proc_macro2::TokenStream)> = None;
+        let mut force_new_block = false;
+
+        for (idx, inst) in self.program.instructions.iter().enumerate() {
+            let pc = self.program.pc_base + ((idx as u64) * 4);
+            if leaders.contains(&pc) || force_new_block {
+                if let Some((start, count, mut code)) = open.take() {
+                    let next = format_ident!("block_0x{:08x}", pc);
+                    code.extend(quote! { Ok(crate::NextStep::Direct(#next)) });
+                    blocks.push(block(start, count, code, false));
+                }
+                open = Some((pc, 0, proc_macro2::TokenStream::new()));
+                force_new_block = false;
+            }
+            let Some((start, count, code)) = open.as_mut() else {
+                continue;
+            };
+            let (body, terminal) = crate::pure_translator::translate(pc, inst, leaders);
+            code.extend(body);
+            *count += 1;
+            if terminal {
+                let (start, count, code) = (*start, *count, std::mem::take(code));
+                blocks.push(block(start, count, code, true));
+                open = None;
+                force_new_block = true;
+            } else if max_block_instructions > 0 && *count >= max_block_instructions {
+                force_new_block = true;
+            }
+        }
+        if let Some((start, count, mut code)) = open {
+            code.extend(quote! { Ok(crate::NextStep::Halt) });
+            blocks.push(block(start, count, code, false));
+        }
+        blocks
+    }
+
     /// Partition blocks into chunks using CFG-aware segmentation
     fn partition_into_chunks(
         &self,
@@ -596,11 +668,11 @@ impl AotCompiler {
         fs::create_dir_all(&src_dir)
             .map_err(|e| format!("Failed to create chunk dir {}: {}", chunk.chunk_idx, e))?;
 
-        let crate_name = format!("pico-aot-chunk-{:03}", chunk.chunk_idx);
+        let crate_name = format!("{}-{:03}", self.chunk_crate_prefix(), chunk.chunk_idx);
         let cargo_toml = format!(
             "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n{}",
             crate_name,
-            runtime_dep_line(runtime, "../../../aot-runtime"),
+            self.dep_line(runtime, "../../../"),
         );
         fs::write(crate_dir.join("Cargo.toml"), cargo_toml).map_err(|e| {
             format!(
@@ -627,6 +699,41 @@ impl AotCompiler {
         // Analyze chunk and generate appropriate lookup strategy
         let (lookup_body, lookup_inline_attr, _strategy) =
             self.generate_chunk_lookup(&lookup_entries, pc_min, pc_max, n)?;
+
+        if self.config.pure {
+            let block_functions = chunk.blocks.iter().map(|block| {
+                let name = &block.name;
+                let insn_count = u64::from(block.insn_count);
+                let code = &block.code;
+                let inline_attr = self.get_inline_attr(block.insn_count);
+                quote! {
+                    #inline_attr
+                    pub fn #name(emu: &mut PureState) -> Result<crate::NextStep, Fault> {
+                        emu.insn_count += #insn_count;
+                        #code
+                    }
+                }
+            });
+            let chunk_code = quote! {
+                // AUTO-GENERATED by AOT compiler (pure mode) - Chunk
+                // DO NOT EDIT MANUALLY
+                #![allow(unused_braces, clippy::all)]
+                pub use pico_aot_pure::{BlockFn, PureState, Step as NextStep};
+                #[allow(unused_imports)]
+                use pico_aot_pure::{Fault, FAULT_BREAKPOINT, FAULT_ILLEGAL};
+
+                pub const PC_MIN: u64 = #pc_min;
+                pub const PC_MAX: u64 = #pc_max;
+
+                #lookup_inline_attr
+                pub fn lookup(pc: u64) -> Option<BlockFn> {
+                    #lookup_body
+                }
+
+                #(#block_functions)*
+            };
+            return self.write_chunk_file(chunk, chunk_code, &chunk_file);
+        }
 
         // Generate block functions with selective inlining
         let block_functions: Vec<_> = chunk
@@ -688,7 +795,17 @@ impl AotCompiler {
             #(#block_functions)*
         };
 
-        // Parse, then turn a direct jump to a block of another chunk into a dynamic one.
+        self.write_chunk_file(chunk, chunk_code, &chunk_file)
+    }
+
+    /// Parses a chunk's code, turns a direct jump to a block of another chunk into a dynamic one,
+    /// and writes it.
+    fn write_chunk_file(
+        &self,
+        chunk: &ChunkInfo,
+        chunk_code: proc_macro2::TokenStream,
+        chunk_file: &std::path::Path,
+    ) -> Result<(), String> {
         let mut syntax_tree = syn::parse2(chunk_code)
             .map_err(|e| format!("Parse error in chunk {}: {}", chunk.chunk_idx, e))?;
 
@@ -697,10 +814,36 @@ impl AotCompiler {
         rewriter.visit_file_mut(&mut syntax_tree);
 
         let formatted = prettyplease::unparse(&syntax_tree);
-        fs::write(&chunk_file, &formatted)
+        fs::write(chunk_file, &formatted)
             .map_err(|e| format!("Failed to write chunk {}: {}", chunk.chunk_idx, e))?;
 
         Ok(())
+    }
+
+    /// The runtime dependency line of a generated manifest `up` directories below the Pico root:
+    /// `pico-aot-runtime`, or in pure mode `pico-aot-pure`, which a [`RuntimeSpec::Entry`] then
+    /// names.
+    fn dep_line(&self, runtime: &RuntimeSpec, up: &str) -> String {
+        if !self.config.pure {
+            return runtime_dep_line(runtime, &format!("{up}aot-runtime"));
+        }
+        match runtime {
+            RuntimeSpec::InTree => format!("pico-aot-pure = {{ path = \"{up}aot-pure\" }}\n"),
+            RuntimeSpec::Entry(entry) => format!("pico-aot-pure = {{ {} }}\n", entry.trim()),
+        }
+    }
+
+    /// Chunk crates' package-name prefix; pure mode names them per ELF, apart from the default
+    /// mode's.
+    fn chunk_crate_prefix(&self) -> String {
+        if self.config.pure {
+            format!(
+                "pico-aot-pure-chunk-{}",
+                &hex(&self.program.elf_sha256)[..16]
+            )
+        } else {
+            "pico-aot-chunk".to_string()
+        }
     }
 
     /// Write a dispatch crate that links all chunk crates
@@ -718,17 +861,37 @@ impl AotCompiler {
             .iter()
             .map(|c| {
                 format!(
-                    "pico-aot-chunk-{:03} = {{ path = \"chunks/chunk_{:03}\" }}",
-                    c.chunk_idx, c.chunk_idx
+                    "{}-{:03} = {{ path = \"chunks/chunk_{:03}\" }}",
+                    self.chunk_crate_prefix(),
+                    c.chunk_idx,
+                    c.chunk_idx
                 )
             })
             .collect();
 
-        let cargo_toml = format!(
-            "[package]\nname = \"pico-aot-dispatch\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n{}{}\n\n[features]\nbigint-rug = [\"pico-aot-runtime/bigint-rug\"]\nmmap-memory = [\"pico-aot-runtime/mmap-memory\"]\n",
-            runtime_dep_line(runtime, "../aot-runtime"),
-            chunk_deps.join("\n")
+        let features = if self.config.pure {
+            // `entry` exports the program under `pico_aot_pure::ENTRY_SYMBOL`, for a dynamic
+            // library; a static build leaves it off, so two programs can link into one binary.
+            "entry = []\n"
+        } else {
+            "bigint-rug = [\"pico-aot-runtime/bigint-rug\"]\nmmap-memory = [\"pico-aot-runtime/mmap-memory\"]\n"
+        };
+        let mut cargo_toml = format!(
+            "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n{}{}\n\n[features]\n{}",
+            if self.config.pure {
+                pure_dispatch_package(&self.program.elf_sha256)
+            } else {
+                "pico-aot-dispatch".to_string()
+            },
+            self.dep_line(runtime, "../"),
+            chunk_deps.join("\n"),
+            features,
         );
+        if self.config.pure {
+            // Its own workspace: a host builds it wherever it caches it, inside another workspace
+            // or not.
+            cargo_toml.push_str("\n[workspace]\n");
+        }
         fs::write(output_dir.join("Cargo.toml"), cargo_toml)
             .map_err(|e| format!("Failed to write dispatch Cargo.toml: {}", e))?;
 
@@ -738,7 +901,11 @@ impl AotCompiler {
         let mut global_pc_max = 0u64;
 
         for c in chunks.iter() {
-            let chunk_crate = format_ident!("pico_aot_chunk_{:03}", c.chunk_idx);
+            let chunk_crate = format_ident!(
+                "{}_{:03}",
+                self.chunk_crate_prefix().replace('-', "_"),
+                c.chunk_idx
+            );
             let pc_min = c.pc_min;
             let pc_max = c.pc_max;
             chunk_descs.push(quote! {
@@ -867,8 +1034,73 @@ impl AotCompiler {
             }
         };
 
+        if self.config.pure {
+            let elf_sha256 = self.program.elf_sha256;
+            let elf_sha256_hex = hex(&elf_sha256);
+            let pure_doc = format!(
+                " The pure-mode program generated from the ELF with SHA-256 `{elf_sha256_hex}`."
+            );
+            let elf_sha256 = elf_sha256.iter();
+            let dispatch_code = quote! {
+                // AUTO-GENERATED by AOT compiler (pure mode) - Dispatch crate
+                // DO NOT EDIT MANUALLY
+                pub use pico_aot_pure::{PureProgram, PureState};
+                use pico_aot_pure::{BlockFn, ABI_VERSION};
+
+                #[doc = #pure_doc]
+                pub static PURE: PureProgram = PureProgram {
+                    abi_version: ABI_VERSION,
+                    source_fingerprint: pico_aot_pure::SOURCE_FINGERPRINT,
+                    elf_sha256: [#(#elf_sha256),*],
+                    run: run,
+                };
+
+                /// [`PureProgram::run`]: runs `state` from `pc` to the guest's halt.
+                ///
+                /// # Safety
+                ///
+                /// `state` is a valid, exclusive [`PureState`] whose memory and callbacks the
+                /// host set up.
+                unsafe extern "C" fn run(state: *mut PureState, pc: u64) -> u32 {
+                    pico_aot_pure::run(unsafe { &mut *state }, pc, lookup_block)
+                }
+
+                /// The program, under `pico_aot_pure::ENTRY_SYMBOL`, for a host loading this
+                /// crate as a dynamic library.
+                #[cfg(feature = "entry")]
+                #[no_mangle]
+                pub extern "C" fn pico_pure_program() -> *const PureProgram {
+                    &PURE
+                }
+
+                type ChunkLookupFn = fn(u64) -> Option<BlockFn>;
+
+                #[repr(C)]
+                struct ChunkDesc {
+                    pc_min: u64,
+                    pc_max: u64,
+                    lookup: ChunkLookupFn,
+                }
+
+                const CHUNKS: &[ChunkDesc] = &[
+                    #(#chunk_descs)*
+                ];
+
+                #page_hint_code
+
+                pub fn lookup_block(pc: u64) -> Option<BlockFn> {
+                    #lookup_block_body
+                }
+            };
+            let syntax_tree = syn::parse2(dispatch_code)
+                .map_err(|e| format!("Parse error in dispatch crate: {}", e))?;
+            let formatted = prettyplease::unparse(&syntax_tree);
+            return fs::write(src_dir.join("lib.rs"), formatted)
+                .map_err(|e| format!("Failed to write dispatch lib.rs: {}", e));
+        }
+
         let elf_sha256 = self.program.elf_sha256;
-        let elf_sha256_hex: String = elf_sha256.iter().map(|b| format!("{b:02x}")).collect();
+        let elf_sha256_hex = hex(&elf_sha256);
         let aot_doc = format!(
             " This crate's program: the code generated from the ELF with SHA-256 `{elf_sha256_hex}`."
         );

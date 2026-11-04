@@ -60,6 +60,10 @@ fn main() {
     if let Some(max_block_instructions) = max_block_instructions {
         config = config.with_max_block_instructions(max_block_instructions);
     }
+    // Pure mode: crates that only execute, on `pico_aot_pure::PureState`.
+    if env::var("PICO_AOT_PURE").is_ok_and(|v| v == "1") {
+        config = config.with_pure(true);
+    }
 
     pico_aot_codegen::AotCompiler::new(program_info, config)
         .compile()
