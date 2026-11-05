@@ -209,6 +209,29 @@ fn a_built_prover_executes_as_its_builder() {
     assert_eq!(from_prover, from_builder);
 }
 
+/// Bytes that are not an ELF fail the build the way they fail `execute`, before any cargo run.
+#[cfg(feature = "pure-build")]
+#[test]
+fn pure_build_refuses_a_bad_elf() {
+    use crate::{build_pure_library, PureBuildOptions};
+
+    let cache = super::fixture::scratch_dir("pure-bad-elf");
+    let built = build_pure_library(b"not an elf", &cache, &PureBuildOptions::default());
+    assert!(matches!(built, Err(ProveError::InvalidElf(_))), "{built:?}");
+    assert!(
+        matches!(
+            Prover::builder(b"not an elf").execute(Stdin::new()),
+            Err(ProveError::InvalidElf(_))
+        ),
+        "execute takes the same bytes as an invalid ELF"
+    );
+    assert_eq!(
+        std::fs::read_dir(&*cache).expect("cache").count(),
+        0,
+        "a failed build leaves nothing behind"
+    );
+}
+
 /// The static route: crates generated into another workspace for linking join that workspace, and
 /// export `PURE`. `cargo check` stands in for linking them into a host.
 #[cfg(feature = "pure-build")]

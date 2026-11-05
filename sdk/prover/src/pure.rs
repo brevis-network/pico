@@ -233,7 +233,7 @@ mod build {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use pico_aot_codegen::{
-        parse_elf, pure_dispatch_package, AotCompiler, AotConfig, RuntimeSpec,
+        pure_dispatch_package, try_parse_elf, AotCompiler, AotConfig, RuntimeSpec,
         GENERATOR_FINGERPRINT,
     };
     use pico_aot_pure::{ABI_VERSION, SOURCE_FINGERPRINT};
@@ -272,7 +272,9 @@ mod build {
     /// Generates `elf`'s pure-mode code and builds it into a dynamic library under `cache_dir`,
     /// keyed by the ELF's SHA-256, its decoded instructions, the pure ABI, the generator's and
     /// `pico-aot-pure`'s sources and the runtime entry; returns the library's path. A library
-    /// already there is returned as it is. A failed build leaves nothing behind.
+    /// already there is returned as it is. A failed build leaves nothing behind. Bytes that are not
+    /// an ELF return [`ProveError::InvalidElf`], as `execute` does; a failed generation or cargo run
+    /// returns [`ProveError::PureAotBuild`].
     ///
     /// Needs a Rust toolchain and cargo. A build goes to a scratch directory and is moved into
     /// place when it is done, so two processes may build the same key.
@@ -287,7 +289,7 @@ mod build {
         let sha = elf_sha256(elf);
         // The decoded program too: the generator reads the VM's decoding, which may change apart
         // from the generator.
-        let program = parse_elf(elf);
+        let program = try_parse_elf(elf).map_err(ProveError::InvalidElf)?;
         let decoded = fnv(format!(
             "{:?}{}{}",
             program.instructions, program.pc_base, program.pc_start
@@ -348,9 +350,21 @@ mod build {
             ProveError::PureAotBuild(format!("{what}: {e}"))
         };
         let crates = scratch.join("crates");
-        AotCompiler::new(program, AotConfig::new(crates.clone()).with_pure(true))
-            .compile_with(&RuntimeSpec::Entry(runtime))
-            .map_err(|e| fail("cannot generate the pure-mode crates", &e))?;
+        // The generator panics on an instruction it cannot translate; report that as a failed
+        // build, so the caller still clears the scratch directory.
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            AotCompiler::new(program, AotConfig::new(crates.clone()).with_pure(true))
+                .compile_with(&RuntimeSpec::Entry(runtime))
+        }))
+        .map_err(|panic| {
+            let message = panic
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| panic.downcast_ref::<&str>().copied())
+                .unwrap_or("no message");
+            fail("the code generator panicked", &message)
+        })?
+        .map_err(|e| fail("cannot generate the pure-mode crates", &e))?;
         // Its own workspace, so it builds wherever the cache is, inside another workspace or not.
         // Only here: crates generated into a workspace for static linking join that one.
         let manifest = crates.join("Cargo.toml");

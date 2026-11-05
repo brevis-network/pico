@@ -20,6 +20,6 @@ pub use compiler::{
     pure_dispatch_package, AotCompiler, RuntimeSpec, CODEGEN_STAMP, GENERATOR_FINGERPRINT,
 };
 pub use config::AotConfig;
-pub use elf_parser::parse_elf;
+pub use elf_parser::{parse_elf, try_parse_elf};
 pub use instruction_translator::InstructionTranslator;
 pub use types::{Instruction, Opcode, ProgramInfo};
