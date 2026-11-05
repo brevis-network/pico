@@ -1,5 +1,7 @@
 //! Pure `execute` against `execute_chunked`: the same committed bytes and cycles when the chunked
-//! emulation completes, and a failure of the same kind when it does not.
+//! emulation completes, and, for the guests here, a failure of the same kind when it does not. One
+//! failure pure execution cannot see is a `HINT_READ` into memory the guest wrote as zero; see
+//! `ProverBuilder::execute`.
 //!
 //! Without AOT code `execute` runs the stepping interpreter, which also runs the system calls and
 //! unconstrained regions in AOT mode; the guests here between them call every precompile family,

@@ -507,6 +507,11 @@ impl ProverBuilder {
     /// interpreter, with a warning. [`Self::execute_chunked`] emulates as proving does.
     ///
     /// A run past the cycle limit [`Self::execute_chunked`] applies fails the same way.
+    ///
+    /// A run that passes is not necessarily provable. Pure execution keeps plain memory, so it
+    /// cannot tell a dword the guest wrote as zero from one it never wrote: a `HINT_READ` into the
+    /// former passes here and fails [`Self::execute_chunked`] with `InvalidHintRead`. Only a guest
+    /// bug reads a hint into memory it already wrote.
     pub fn execute(&self, stdin: Stdin) -> Result<PureExecution, ProveError> {
         check_stdin(&stdin)?;
         let max_cycles = emulator_opts(self.resolved_chunk_size()?).max_cycles;
