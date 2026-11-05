@@ -261,9 +261,14 @@ mod build {
     pub struct PureBuildOptions {
         /// The `pico-aot-pure` the generated crates depend on, as the body of a Cargo dependency
         /// entry, e.g. `git = "https://github.com/brevis-network/pico", rev = "..."` or an
-        /// absolute `path = "..."`. `None` takes this build's own source, by path.
+        /// absolute `path = "..."`. `None` takes this build's own source, by a path fixed when
+        /// `pico-prover` was compiled, so it only works on a machine that has that checkout. A
+        /// host elsewhere, such as a container image, names the same `pico-aot-pure` version
+        /// here: a `rev` of the Pico commit it was built from, or a path to a copy of `aot-pure/`.
         pub runtime: Option<String>,
-        /// Pass `--offline` to cargo: every dependency must already be in its cache.
+        /// Pass `--offline` to cargo: every dependency must already be in its cache. For a host
+        /// without network access, fetch `runtime` once when the host is set up (for a `git`
+        /// entry, `cargo fetch` on any manifest that names it) and build offline after.
         pub offline: bool,
         /// The cargo to run; `cargo` on the `PATH` when `None`.
         pub cargo: Option<PathBuf>,
@@ -276,8 +281,11 @@ mod build {
     /// an ELF return [`ProveError::InvalidElf`], as `execute` does; a failed generation or cargo run
     /// returns [`ProveError::PureAotBuild`].
     ///
-    /// Needs a Rust toolchain and cargo. A build goes to a scratch directory and is moved into
-    /// place when it is done, so two processes may build the same key.
+    /// Needs a Rust toolchain and cargo where it runs; a host that ships neither cannot build
+    /// libraries, and `execute` then runs on the interpreter. Outside the Pico checkout
+    /// `pico-prover` was compiled from, set [`PureBuildOptions::runtime`]. A build goes to a
+    /// scratch directory and is moved into place when it is done, so two processes may build the
+    /// same key.
     pub fn build_pure_library(
         elf: &[u8],
         cache_dir: &Path,
