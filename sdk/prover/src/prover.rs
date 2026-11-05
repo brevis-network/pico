@@ -5,7 +5,7 @@ use std::{
     num::NonZeroUsize,
     panic::AssertUnwindSafe,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use pico_mle_core::{
@@ -266,6 +266,10 @@ pub struct ProverBuilder {
     #[cfg(feature = "cuda")]
     interpreted_aot_runtime: bool,
     pure: PureOptions,
+    /// The decoded ELF and its SHA-256, for [`Self::execute`]: a host keeps one builder and
+    /// executes many inputs, and a large ELF takes a noticeable share of each run to decode and
+    /// hash.
+    pure_program: OnceLock<(Arc<Program>, [u8; 32])>,
 }
 
 impl ProverBuilder {
@@ -289,6 +293,7 @@ impl ProverBuilder {
             #[cfg(feature = "cuda")]
             interpreted_aot_runtime: true,
             pure: PureOptions::default(),
+            pure_program: OnceLock::new(),
         }
     }
 
@@ -515,9 +520,14 @@ impl ProverBuilder {
     pub fn execute(&self, stdin: Stdin) -> Result<PureExecution, ProveError> {
         check_stdin(&stdin)?;
         let max_cycles = emulator_opts(self.checked_chunk_size()?).max_cycles;
-        let program = compile(&self.elf)?;
-        self.pure
-            .execute(program, elf_sha256(&self.elf), stdin, max_cycles)
+        let (program, sha) = match self.pure_program.get() {
+            Some(cached) => cached.clone(),
+            None => {
+                let parsed = (compile(&self.elf)?, elf_sha256(&self.elf));
+                self.pure_program.get_or_init(|| parsed).clone()
+            }
+        };
+        self.pure.execute(program, sha, stdin, max_cycles)
     }
 
     /// Emulate without proving: no keygen, no whitelist. Chunks exactly as the built prover would.
