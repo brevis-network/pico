@@ -11,7 +11,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     compiler::recursion::ir::Block,
     emulator::recursion::{emulator::*, public_values::RecursionPublicValues},
-    primitives::consts::{EXT_DOT_PRODUCT_DATAPAR, EXT_DOT_PRODUCT_GROUPS, HORNER_EVAL_DATAPAR},
+    primitives::consts::{
+        DIGEST_BLOCKS, DIGEST_SIZE, EXTENSION_DEGREE, EXT_DOT_PRODUCT_DATAPAR,
+        EXT_DOT_PRODUCT_GROUPS, HORNER_EVAL_DATAPAR, PACK_LANES, PERM_BLOCKS,
+    },
 };
 
 pub const WIDTH: usize = 16;
@@ -759,9 +762,9 @@ pub struct GkrSumcheckRoundEvent<F> {
 
 /// Instruction for ExtDotProductChip: extension-field dot product with running
 /// accumulator over PACKED base-field values.
-/// `val_addrs[g]` points at one packed block whose EXTENSION_DEGREE lanes hold
-/// EXTENSION_DEGREE base-field values; `mu_addrs[EXTENSION_DEGREE*g + k]` is the
-/// mu for lane k (padding lanes use the zero address so they contribute 0).
+/// `val_addrs[g]` points at one packed block whose first PACK_LANES lanes hold
+/// base-field values; `mu_addrs[PACK_LANES*g + k]` is the mu for lane k (padding
+/// lanes use the zero address so they contribute 0).
 /// Writes acc = sum_{g,k} val[g].lane_k * mu[g][k] to acc_addr. One instruction
 /// spans len(val_addrs)/EXT_DOT_PRODUCT_GROUPS trace rows (the accumulator is
 /// chained row-to-row), executing in one cycle.
@@ -780,7 +783,9 @@ pub struct ExtDotProductInstr<F> {
 #[repr(C)]
 pub struct ExtDotProductEvent<F> {
     pub mus: [Block<F>; EXT_DOT_PRODUCT_DATAPAR],
-    pub vals: [Block<F>; EXT_DOT_PRODUCT_GROUPS],
+    /// The `PACK_LANES` value lanes of each group's packed block (its padding lanes are the
+    /// constant zero on the bus and are not carried).
+    pub vals: [[F; PACK_LANES]; EXT_DOT_PRODUCT_GROUPS],
     pub acc: Block<F>,
 }
 
@@ -807,17 +812,17 @@ pub struct HornerEvalEvent<F> {
     pub acc: Block<F>,
 }
 
-/// Instruction for DigestSelectChip: bit-select of a full 8-lane digest.
-/// Reads bit, in1[8] (h0), in2[8] (h1); writes out[i] = bit ? in2[i] : in1[i]
-/// for all 8 lanes in one instruction/row.
+/// Instruction for DigestSelectChip: bit-select of a whole digest (`DIGEST_SIZE` felts held in
+/// `DIGEST_BLOCKS` packed blocks). Reads bit, in1 (h0), in2 (h1); writes
+/// out[i] = bit ? in2[i] : in1[i] for all `DIGEST_SIZE` felts in one instruction/row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(C)]
 pub struct DigestSelectInstr<F> {
     pub bit_addr: Address<F>,
-    pub in1_addrs: [Address<F>; 2],
-    pub in2_addrs: [Address<F>; 2],
-    pub out_addrs: [Address<F>; 2],
-    pub mults: [F; 2],
+    pub in1_addrs: [Address<F>; DIGEST_BLOCKS],
+    pub in2_addrs: [Address<F>; DIGEST_BLOCKS],
+    pub out_addrs: [Address<F>; DIGEST_BLOCKS],
+    pub mults: [F; DIGEST_BLOCKS],
 }
 
 /// Event for DigestSelectChip.
@@ -825,9 +830,9 @@ pub struct DigestSelectInstr<F> {
 #[repr(C)]
 pub struct DigestSelectEvent<F> {
     pub bit: F,
-    pub in1: [F; 8],
-    pub in2: [F; 8],
-    pub out: [F; 8],
+    pub in1: [F; DIGEST_SIZE],
+    pub in2: [F; DIGEST_SIZE],
+    pub out: [F; DIGEST_SIZE],
 }
 
 /// Instruction for BinaryFoldStepChip: one WHIR binary k-fold butterfly step.
@@ -861,13 +866,13 @@ pub struct BinaryFoldStepEvent<F> {
     pub out: Block<F>,
 }
 
-/// Instruction for PackBlockChip: packs 4 single base-field lanes into one Block.
-/// Reads in_addrs[i].val[0] for i in 0..4 and writes Block([l0, l1, l2, l3]) to
+/// Instruction for PackBlockChip: packs PACK_LANES single base-field lanes into one Block.
+/// Reads in_addrs[i].val[0] for i in 0..PACK_LANES and writes `Block::packed(lanes)` to
 /// out_addr in one instruction/row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(C)]
 pub struct PackBlockInstr<F> {
-    pub in_addrs: [Address<F>; 4],
+    pub in_addrs: [Address<F>; PACK_LANES],
     pub out_addr: Address<F>,
     pub mult: F,
 }
@@ -876,18 +881,18 @@ pub struct PackBlockInstr<F> {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(C)]
 pub struct PackBlockEvent<F> {
-    pub lanes: [F; 4],
+    pub lanes: [F; PACK_LANES],
 }
 
-/// Instruction for UnpackBlockChip: unpacks one Block into 4 single base-field
-/// lanes. Reads the Block at in_addr and writes val.0[i] to out_addrs[i] for
-/// i in 0..4 in one instruction/row.
+/// Instruction for UnpackBlockChip: unpacks one Block into its EXTENSION_DEGREE single
+/// base-field lanes. Reads the Block at in_addr and writes val.0[i] to out_addrs[i] for
+/// i in 0..EXTENSION_DEGREE in one instruction/row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(C)]
 pub struct UnpackBlockInstr<F> {
     pub in_addr: Address<F>,
-    pub out_addrs: [Address<F>; 4],
-    pub mults: [F; 4],
+    pub out_addrs: [Address<F>; EXTENSION_DEGREE],
+    pub mults: [F; EXTENSION_DEGREE],
 }
 
 /// Event for UnpackBlockChip.
@@ -898,14 +903,15 @@ pub struct UnpackBlockEvent<F> {
 }
 
 /// Instruction for Poseidon2PackedChip: a Poseidon2 permutation with packed
-/// (Block-valued) I/O. Reads 4 input Blocks (16 lanes), permutes, and writes the
-/// output back as 4 Blocks. Events reuse [`Poseidon2Event`].
+/// (Block-valued) I/O. Reads PERM_BLOCKS input Blocks (PACK_LANES lanes each, the
+/// permutation width), permutes, and writes the output back as PERM_BLOCKS Blocks.
+/// Events reuse [`Poseidon2Event`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(C)]
 pub struct Poseidon2PackedInstr<F> {
-    pub input_addrs: [Address<F>; 4],
-    pub output_addrs: [Address<F>; 4],
-    pub mults: [F; 4],
+    pub input_addrs: [Address<F>; PERM_BLOCKS],
+    pub output_addrs: [Address<F>; PERM_BLOCKS],
+    pub mults: [F; PERM_BLOCKS],
 }
 
 /// Instruction for MleOpenChip.

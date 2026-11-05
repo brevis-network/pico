@@ -113,11 +113,13 @@ pub struct EcallChipCols<T: Copy> {
     /// affine in current-row columns, and that product is degree 2.
     pub commit_mul: T,
 
-    /// `is_real × is_commit_deferred_proofs`, and the running count and `Σ 2^word_index` of such
-    /// rows up to this one. The last row's pair is the chunk's published tally.
+    /// `is_real × is_commit_deferred_proofs`.
     pub deferred_commit_mul: T,
-    pub deferred_commits: T,
-    pub deferred_commit_mask: T,
+    /// The running count and mask of the COMMIT and COMMIT_DEFERRED_PROOFS rows up to this one,
+    /// each adding `2^(8 + word_index)` (COMMIT) or `2^word_index` to the mask. The last row's
+    /// pair is the chunk's published tally.
+    pub commits: T,
+    pub commit_mask: T,
 
     /// The syscall-decode machinery.
     pub ecall: EcallCols<T>,

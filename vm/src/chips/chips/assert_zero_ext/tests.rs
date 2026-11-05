@@ -21,7 +21,7 @@ fn test_assert_zero_ext_trace_dimensions() {
 
     // The asserted value is zero (an honest row).
     let event = AssertZeroExtEvent {
-        val: Block([F::ZERO; 4]),
+        val: Block::from(F::ZERO),
     };
 
     let mut record = RecursionRecord::<F>::default();
@@ -90,6 +90,7 @@ mod gpu {
                     F::from_u32(i.wrapping_add(1)),
                     F::from_u32(i.wrapping_add(2)),
                     F::from_u32(i.wrapping_add(3)),
+                    F::from_u32(i.wrapping_add(4)),
                 ]),
             })
             .collect()

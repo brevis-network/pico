@@ -21,22 +21,24 @@ pub struct ProveCmd {
     #[clap(flatten)]
     prover: ProverArgs,
 
-    /// Where the proving chain stops. `riscv` and `combine` write `proof-<phase>.pico`, `wrap`
-    /// writes `wrap_constraints.json` and `wrap_groth16_witness.json`, and `convert` and `embed`
-    /// write nothing
+    /// Where the proving chain riscv → convert → combine → compress → embed → wrap stops. `riscv`,
+    /// `combine` and `compress` (the final compression layer, the proof that is handed out) write
+    /// `proof-<phase>.pico`, `wrap` writes `wrap_constraints.json` and
+    /// `wrap_groth16_witness.json`, and `convert` and `embed` write nothing. The default is
+    /// `combine`: the complete root, which a deferred-proof node verifies (`docs/deferred.md`)
     #[clap(long, value_enum, default_value_t = PhaseArg::Combine)]
     phase: PhaseArg,
 
     /// Directory the proof is written to. A `riscv` proof file verifies in any process that has the
-    /// ELF and proves at the same `--log-stacked-height` and mode; a `combine` one only when both
-    /// processes are in whitelist mode
+    /// ELF and proves at the same `--log-stacked-height` and mode; a `combine` or `compress` one
+    /// only when both processes are in whitelist mode
     #[clap(long, value_name = "DIR", default_value = "pico_out")]
     output: PathBuf,
 
-    /// Prove through wrap to a Groth16 proof for the on-chain verifier, with gnark from
-    /// $PICO_GNARK_BIN or $PICO_GNARK_IMAGE. The verifier accepts whitelist-mode proofs only, so
-    /// this needs `VK_VERIFICATION=true`, `MLE_VK_MAP` and `MLE_VK_ROOT`. Writes the wrap files,
-    /// `proof.data` and `inputs.json`
+    /// Prove through compress, embed and wrap to a Groth16 proof for the on-chain verifier, with
+    /// gnark from $PICO_GNARK_BIN or $PICO_GNARK_IMAGE. The verifier accepts whitelist-mode proofs
+    /// only, so this needs `VK_VERIFICATION=true`, `MLE_VK_MAP` and `MLE_VK_ROOT`. Writes the wrap
+    /// files, `proof.data` and `inputs.json`
     #[clap(long, conflicts_with = "phase")]
     evm: bool,
 
@@ -65,6 +67,7 @@ enum PhaseArg {
     Riscv,
     Convert,
     Combine,
+    Compress,
     #[cfg_attr(not(feature = "multi-field-transcript"), value(hide = true))]
     Embed,
     #[cfg_attr(not(feature = "multi-field-transcript"), value(hide = true))]
@@ -77,6 +80,7 @@ impl From<PhaseArg> for Phase {
             PhaseArg::Riscv => Phase::Riscv,
             PhaseArg::Convert => Phase::Convert,
             PhaseArg::Combine => Phase::Combine,
+            PhaseArg::Compress => Phase::Compress,
             PhaseArg::Embed => Phase::Embed,
             PhaseArg::Wrap => Phase::Wrap,
         }
@@ -103,14 +107,17 @@ impl ProveCmd {
             outside_whitelist_mode(phase);
         }
         let mut prover = options::build(builder)?;
-        if matches!(phase, Phase::Riscv | Phase::Combine | Phase::Wrap) {
+        if matches!(
+            phase,
+            Phase::Riscv | Phase::Combine | Phase::Compress | Phase::Wrap
+        ) {
             self.create_output()?;
         }
         let proof = prover.prove_to(self.guest.stdin(), phase)?;
 
         report(&proof, false);
         match phase {
-            Phase::Riscv | Phase::Combine => {
+            Phase::Riscv | Phase::Combine | Phase::Compress => {
                 let path = self.output.join(format!("proof-{phase}.pico"));
                 proof.write(&path)?;
                 report_written(&path)?;
@@ -275,6 +282,13 @@ fn outside_whitelist_mode(phase: Phase) {
             "warning: outside whitelist mode the wrap circuit pins no whitelist root, so no \
              deployed verifier accepts a proof of it; this output is for testing"
         ),
+        // As for a combine proof: the compress key is a whitelist leaf, so a whitelist-mode
+        // process verifies the file; outside whitelist mode only the process that wrote it can.
+        Phase::Compress => eprintln!(
+            "note: outside whitelist mode only the process that wrote a compress proof can verify \
+             it. `VK_VERIFICATION=true`, `MLE_VK_MAP` and `MLE_VK_ROOT`, at the default stacked \
+             height, make one that a process in whitelist mode under the same whitelist verifies"
+        ),
         Phase::Riscv | Phase::Convert | Phase::Embed => {}
     }
 }
@@ -285,13 +299,14 @@ fn report(proof: &Proof, groth16: bool) {
     // proof of that circuit is made outside this prover, by gnark under `--evm`.
     let reached = match (proof.phase(), groth16) {
         (Phase::Wrap, true) => {
-            "embed, built the wrap circuit and witness, and gnark proved and verified them to \
-             Groth16"
+            "compress and embed, built the wrap circuit and witness, and gnark proved and verified \
+             them to Groth16"
                 .into()
         }
         (Phase::Wrap, false) => {
-            "embed, and built the wrap circuit and witness (no Groth16 proof)".into()
+            "compress and embed, and built the wrap circuit and witness (no Groth16 proof)".into()
         }
+        (Phase::Embed, _) => "compress and embed".into(),
         (phase, _) => phase.to_string(),
     };
     // One chunk proof per emulation record; the deferred split adds records after the guest halts,

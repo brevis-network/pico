@@ -77,7 +77,7 @@ impl SoundnessCalculator {
     /// * `base_field_order` - Order `p` of the base field that `sample_bits` reduces. For KoalaBear:
     ///   `2^31 - 2^24 + 1`. Used to charge the `sample_bits` sampling bias (query bad-set argument
     ///   and proof-of-work).
-    /// * `challenge_field_bits` - Bits in the challenge field. For KoalaBear^4: ~123.95 bits.
+    /// * `challenge_field_bits` - Bits in the challenge field. For KoalaBear^5: ~154.94 bits.
     /// * `max_num_constraints_per_air` - Maximum constraints in any single AIR.
     /// * `num_airs` - Number of AIRs being batched.
     /// * `max_constraint_degree` - Maximum degree of any constraint polynomial.
@@ -482,8 +482,10 @@ impl SoundnessCalculator {
             )
             .log2_list_size;
             // In-domain γ batching (not protected by PoW; Merkle proofs are observed before γ).
-            // One out-of-domain sample per round, as in the WHIR paper; implementations that add more
-            // do so to gain security in the list-decoding regime, which the production presets do not use.
+            // One out-of-domain sample per round, as in the WHIR paper. Implementations that add
+            // more do so to gain security in the list-decoding regime; this one takes a single
+            // sample in every regime (compress and embed run list decoding at `m = 2`), and the
+            // calculator charges what it takes.
             const NUM_OOD_SAMPLES: usize = 1;
             let batch_size = round_config.num_queries + NUM_OOD_SAMPLES;
             debug_assert!(batch_size > 0);
@@ -652,7 +654,7 @@ impl SoundnessCalculator {
     /// with the heavy residues, but only `r` of those exist, so the worst-case single-query hit is
     ///   `(g·c + min(g, r))/p = α + min(α N, r)·(1 - α)/p`   (using `Nc = p - r`).
     /// For KoalaBear `r = 1` on every query domain of at most 24 bits (the production presets use
-    /// at most 21), so the penalty is ~`2^-31` per query (negligible).
+    /// at most 20), so the penalty is ~`2^-31` per query (negligible).
     fn whir_query_security_biased(
         proximity_regime: ProximityRegime,
         num_queries: usize,
@@ -1051,7 +1053,8 @@ mod tests {
     // ==========================================================================
     // Unit tests
     // ==========================================================================
-    const TARGET_SECURITY_BITS: usize = 100;
+    // A fixture for the unit tests below, not the production target.
+    const FIXTURE_TARGET_BITS: usize = 100;
 
     #[test]
     fn test_soundness_calculation() {
@@ -1091,7 +1094,7 @@ mod tests {
 
     #[test]
     fn test_whir_query_calculation() {
-        let queries = min_whir_queries(ProximityRegime::UniqueDecoding, TARGET_SECURITY_BITS, 1);
+        let queries = min_whir_queries(ProximityRegime::UniqueDecoding, FIXTURE_TARGET_BITS, 1);
         assert!(queries > 0);
     }
 
@@ -1105,7 +1108,7 @@ mod tests {
                 challenge_field_bits(),
                 0.0,
             ) + SoundnessCalculator::effective_pow_bits(logup.pow_bits, base_field_order());
-        assert!(security > TARGET_SECURITY_BITS as f64);
+        assert!(security > FIXTURE_TARGET_BITS as f64);
     }
 
     #[test]

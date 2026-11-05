@@ -71,7 +71,7 @@ impl<F: Any + PrimeCharacteristicRing> FieldSepticCurve for F {
     where
         F: Field,
     {
-        if same_field::<F, KoalaBear, 4>() {
+        if same_field::<F, KoalaBear>() {
             let mut n_iter = n;
             let mut n_power = n;
             for i in 1..30 {
@@ -91,7 +91,7 @@ impl<F: Any + PrimeCharacteristicRing> FieldSepticCurve for F {
     where
         F: Field,
     {
-        if same_field::<F, KoalaBear, 4>() {
+        if same_field::<F, KoalaBear>() {
             (point.x * point.x * F::from_u8(3) + F::TWO) / (point.y * F::TWO)
         } else {
             panic!("Unsupported field type");
@@ -103,7 +103,7 @@ impl<F: Any + PrimeCharacteristicRing> FieldSepticCurve for F {
 /// `SepticExtension<F>`. Only instantiated for the concrete base fields (the `Field` bound keeps
 /// the symbolic / packed aliases that `same_field` also accepts out).
 pub(super) const fn ext_generator<F: Field + 'static>() -> [F; 7] {
-    if same_field::<F, KoalaBear, 4>() {
+    if same_field::<F, KoalaBear>() {
         // KoalaBear exntesion generator
         [
             koalabear_five::<F>(),
@@ -130,7 +130,7 @@ pub(super) const fn ext_generator<F: Field + 'static>() -> [F; 7] {
 
 /// `5 ∈ F` for the KoalaBear branch of [`ext_generator`]. Plonky3 0.5 dropped the `FIVE`
 /// constant and `from_u32` is not `const`, so the value is built as a `KoalaBear` and re-typed.
-/// The exact-type check makes any other instantiation (the packed / binomial / symbolic aliases
+/// The exact-type check makes any other instantiation (the packed / quintic / symbolic aliases
 /// `same_field` accepts, or a stray field) a compile-time error instead of a silent misread.
 const fn koalabear_five<F: 'static>() -> F {
     assert!(
@@ -143,7 +143,7 @@ const fn koalabear_five<F: 'static>() -> F {
 }
 
 const fn top_bits<F: PrimeCharacteristicRing + 'static>() -> usize {
-    if same_field::<F, KoalaBear, 4>() {
+    if same_field::<F, KoalaBear>() {
         koalabear::TOP_BITS
     } else {
         dummy::TOP_BITS
@@ -151,7 +151,7 @@ const fn top_bits<F: PrimeCharacteristicRing + 'static>() -> usize {
 }
 
 const fn ext_coeffs<F: PrimeCharacteristicRing + 'static>() -> [u32; 7] {
-    if same_field::<F, KoalaBear, 4>() {
+    if same_field::<F, KoalaBear>() {
         koalabear::EXT_COEFFS
     } else {
         dummy::EXT_COEFFS
@@ -162,7 +162,7 @@ const fn ext_coeffs<F: PrimeCharacteristicRing + 'static>() -> [u32; 7] {
 /// the two tables cannot drift: a field is registered once, in both functions' `if` chains, and
 /// the signed table follows from its unsigned one.
 const fn ext_coeffs_signed<F: PrimeCharacteristicRing + 'static>() -> [i8; 7] {
-    if same_field::<F, KoalaBear, 4>() {
+    if same_field::<F, KoalaBear>() {
         to_signed(koalabear::EXT_COEFFS, KoalaBear::ORDER_U32)
     } else {
         // The dummy fallback has no field and no modulus; its coefficients are all zero, which is
@@ -193,7 +193,7 @@ const fn to_signed(coeffs: [u32; 7], p: u32) -> [i8; 7] {
 }
 
 const fn z_pow_p<F: PrimeCharacteristicRing + 'static>() -> [[u32; 7]; 7] {
-    if same_field::<F, KoalaBear, 4>() {
+    if same_field::<F, KoalaBear>() {
         koalabear::Z_POW_P
     } else {
         dummy::Z_POW_P
@@ -201,7 +201,7 @@ const fn z_pow_p<F: PrimeCharacteristicRing + 'static>() -> [[u32; 7]; 7] {
 }
 
 const fn z_pow_p2<F: PrimeCharacteristicRing + 'static>() -> [[u32; 7]; 7] {
-    if same_field::<F, KoalaBear, 4>() {
+    if same_field::<F, KoalaBear>() {
         koalabear::Z_POW_P2
     } else {
         dummy::Z_POW_P2
@@ -209,7 +209,7 @@ const fn z_pow_p2<F: PrimeCharacteristicRing + 'static>() -> [[u32; 7]; 7] {
 }
 
 const fn curve_witness_dummy_point_x<F: PrimeCharacteristicRing + 'static>() -> [u32; 7] {
-    if same_field::<F, KoalaBear, 4>() {
+    if same_field::<F, KoalaBear>() {
         koalabear::CURVE_WITNESS_DUMMY_POINT_X
     } else {
         dummy::CURVE_WITNESS_DUMMY_POINT_X
@@ -217,7 +217,7 @@ const fn curve_witness_dummy_point_x<F: PrimeCharacteristicRing + 'static>() -> 
 }
 
 const fn curve_witness_dummy_point_y<F: PrimeCharacteristicRing + 'static>() -> [u32; 7] {
-    if same_field::<F, KoalaBear, 4>() {
+    if same_field::<F, KoalaBear>() {
         koalabear::CURVE_WITNESS_DUMMY_POINT_Y
     } else {
         dummy::CURVE_WITNESS_DUMMY_POINT_Y
@@ -225,7 +225,7 @@ const fn curve_witness_dummy_point_y<F: PrimeCharacteristicRing + 'static>() -> 
 }
 
 const fn curve_cumulative_sum_start_x<F: PrimeCharacteristicRing + 'static>() -> [u32; 7] {
-    if same_field::<F, KoalaBear, 4>() {
+    if same_field::<F, KoalaBear>() {
         koalabear::CURVE_CUMULATIVE_SUM_START_X
     } else {
         dummy::CURVE_CUMULATIVE_SUM_START_X
@@ -233,7 +233,7 @@ const fn curve_cumulative_sum_start_x<F: PrimeCharacteristicRing + 'static>() ->
 }
 
 const fn curve_cumulative_sum_start_y<F: PrimeCharacteristicRing + 'static>() -> [u32; 7] {
-    if same_field::<F, KoalaBear, 4>() {
+    if same_field::<F, KoalaBear>() {
         koalabear::CURVE_CUMULATIVE_SUM_START_Y
     } else {
         dummy::CURVE_CUMULATIVE_SUM_START_Y
@@ -241,7 +241,7 @@ const fn curve_cumulative_sum_start_y<F: PrimeCharacteristicRing + 'static>() ->
 }
 
 const fn digest_sum_start_x<F: PrimeCharacteristicRing + 'static>() -> [u32; 7] {
-    if same_field::<F, KoalaBear, 4>() {
+    if same_field::<F, KoalaBear>() {
         koalabear::DIGEST_SUM_START_X
     } else {
         dummy::DIGEST_SUM_START_X
@@ -249,7 +249,7 @@ const fn digest_sum_start_x<F: PrimeCharacteristicRing + 'static>() -> [u32; 7] 
 }
 
 const fn digest_sum_start_y<F: PrimeCharacteristicRing + 'static>() -> [u32; 7] {
-    if same_field::<F, KoalaBear, 4>() {
+    if same_field::<F, KoalaBear>() {
         koalabear::DIGEST_SUM_START_Y
     } else {
         dummy::DIGEST_SUM_START_Y

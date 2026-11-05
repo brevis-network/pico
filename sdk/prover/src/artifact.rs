@@ -17,6 +17,7 @@
 //! |---|---|
 //! | [`Phase::Riscv`] | yes — the RISC-V key is a function of the program, and the verifier holds the program |
 //! | [`Phase::Combine`] | only against an independently pinned whitelist, or on the prover that produced it |
+//! | [`Phase::Compress`] | as `Combine`: only against an independently pinned whitelist (the compress key is a whitelist leaf), or on the prover that produced it |
 //! | [`Phase::Convert`], [`Phase::Embed`], [`Phase::Wrap`] | no, in any configuration — so they are not written |
 //!
 //! # The two version fields, and what each one covers
@@ -58,8 +59,8 @@ use crate::{
 
 const MAGIC: &[u8; 4] = b"PICO";
 
-/// The container's own version, independent of the proof codec's.
-pub const FORMAT_VERSION: u32 = 2;
+/// The container's own version, independent of the proof codec's. 3: the `Compress` payload.
+pub const FORMAT_VERSION: u32 = 3;
 
 /// Fixed prefix: magic, container version, proof-codec version, the stored key's lean pre-hash.
 const HEADER_LEN: usize = 4 + 4 + 4 + 32;
@@ -71,12 +72,13 @@ const HEADER_LEN: usize = 4 + 4 + 4 + 32;
 enum StoredPayload<K> {
     Riscv { vk: K, chunk_proofs: Vec<Vec<u8>> },
     Combine { vk: K, proof: Vec<u8> },
+    Compress { vk: K, proof: Vec<u8> },
 }
 
 impl<K> StoredPayload<K> {
     fn vk(&self) -> &K {
         match self {
-            Self::Riscv { vk, .. } | Self::Combine { vk, .. } => vk,
+            Self::Riscv { vk, .. } | Self::Combine { vk, .. } | Self::Compress { vk, .. } => vk,
         }
     }
 }
@@ -97,6 +99,7 @@ struct Body<K, B> {
 pub(crate) enum LoadedPayload {
     Riscv(RiscvProof),
     Combine(Box<ProofWithVk>),
+    Compress(Box<ProofWithVk>),
 }
 
 impl LoadedPayload {
@@ -104,6 +107,7 @@ impl LoadedPayload {
         match self {
             Self::Riscv(_) => Phase::Riscv,
             Self::Combine(_) => Phase::Combine,
+            Self::Compress(_) => Phase::Compress,
         }
     }
 }
@@ -230,6 +234,9 @@ impl ProofArtifact {
             StoredPayload::Combine { vk, proof } => {
                 LoadedPayload::Combine(Box::new((decode(&proof)?, std::sync::Arc::new(vk))))
             }
+            StoredPayload::Compress { vk, proof } => {
+                LoadedPayload::Compress(Box::new((decode(&proof)?, std::sync::Arc::new(vk))))
+            }
         };
 
         Ok(Self {
@@ -270,6 +277,10 @@ fn to_bytes(proof: &Proof) -> Result<Vec<u8>, ProveError> {
         Payload::Combine(root) => StoredPayload::Combine {
             vk: &*root.1,
             proof: encode_one(&root.0)?,
+        },
+        Payload::Compress(compress) => StoredPayload::Compress {
+            vk: &*compress.1,
+            proof: encode_one(&compress.0)?,
         },
         _ => {
             return Err(ProveError::UnverifiableInFreshProcess { phase: proof.phase });
@@ -345,7 +356,7 @@ mod tests {
         bytes.extend_from_slice(&[0u8; 32]);
         bytes.extend_from_slice(&0u64.to_le_bytes());
         bytes.extend_from_slice(&0u32.to_le_bytes());
-        let params = pico_mle_core::config::riscv_params_with_100_bits_security(22);
+        let params = pico_mle_core::config::riscv_params_with_128_bits_security(22);
         bytes.extend_from_slice(&bincode::serialize(&params).expect("encode the params"));
         bytes.extend_from_slice(&(1u64 << 60).to_le_bytes());
         assert!(matches!(

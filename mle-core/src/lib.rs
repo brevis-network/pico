@@ -48,12 +48,12 @@ pub use air::any_air::{get_air_name, AirRef, AnyAir, BaseAirWithPublicValues, Pa
 #[cfg(feature = "multi-field-transcript")]
 pub use config::multi_field_packing;
 pub use config::{
-    compress_params_with_100_bits_security, embed_params_with_100_bits_security, hasher,
-    recursion_params_with_100_bits_security, riscv_params_with_100_bits_security, soundness, Com,
+    compress_params_with_128_bits_security, embed_params_with_128_bits_security, hasher,
+    recursion_params_with_128_bits_security, riscv_params_with_128_bits_security, soundness, Com,
     ProximityRegime, StarkProtocolConfig, SystemParams, Val, WhirConfig, WhirParams,
-    WhirProximityStrategy, WhirRoundConfig, DEFAULT_COMPRESS_LOG_BLOWUP, DEFAULT_K_WHIR,
-    DEFAULT_RECURSION_LOG_BLOWUP, DEFAULT_RISCV_LOG_BLOWUP, DEFAULT_RISCV_L_SKIP,
-    DEFAULT_ROOT_LOG_BLOWUP, MAX_RISCV_LOG_STACKED_HEIGHT,
+    WhirProximityStrategy, WhirRoundConfig, DEFAULT_K_WHIR, DEFAULT_RECURSION_LOG_BLOWUP,
+    DEFAULT_RISCV_LOG_BLOWUP, DEFAULT_RISCV_L_SKIP, DEFAULT_ROOT_LOG_BLOWUP,
+    MAX_RISCV_LOG_STACKED_HEIGHT,
 };
 pub use engine::{ProverError, StarkEngine};
 pub use protocol::{codec, proof};

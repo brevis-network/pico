@@ -10,8 +10,9 @@ pub use columns::*;
 
 /// Extension-field dot product with a row-chained running accumulator.
 ///
-/// One ExtDotProduct instruction spans `len` trace rows (one per element) and
-/// binds acc_final = sum_i mu[i] * val[i]:
+/// One ExtDotProduct instruction spans `ceil(groups / EXT_DOT_PRODUCT_GROUPS)` trace
+/// rows (each row folds `EXT_DOT_PRODUCT_GROUPS` packed value blocks, `PACK_LANES`
+/// values each, against one mu per value) and binds acc_final = sum_i mu[i] * val[i]:
 ///   - the first row of a segment starts the accumulator: acc = mu * val;
 ///   - subsequent rows accumulate: acc = prev_acc + mu * val;
 ///   - the last row (is_end) writes acc to memory with the backfilled mult.

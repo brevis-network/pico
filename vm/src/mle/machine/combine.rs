@@ -76,7 +76,7 @@ pub struct CombineMachine {
 
 impl CombineMachine {
     /// Combine nodes prove under the same params as convert (uniform child-verify cost
-    /// across the tree); pass `recursion_params_with_100_bits_security()` and the trusted
+    /// across the tree); pass `recursion_params_with_128_bits_security()` and the trusted
     /// VM-layer exe identity (`RiscvVmVk::from_program_and_vk`).
     pub fn new(params: SystemParams, riscv_vm_vk: RiscvVmVk, vk_verification: bool) -> Self {
         Self {
@@ -512,7 +512,13 @@ impl CombineMachine {
             let d_pks = &d_pks;
             let proved: Vec<ProofWithVk> = node_inputs
                 .into_par_iter()
-                .map(|(tuples, pk_idx)| {
+                .enumerate()
+                .map(|(i, (tuples, pk_idx))| {
+                    // One span per combine node (see `convert_prove`); `level` is the tree layer,
+                    // `root` marks the last one.
+                    let _span =
+                        tracing::info_span!("combine_node_prove", level, i, root = is_root_layer)
+                            .entered();
                     let (_, _, program, _, vk) = &pks[pk_idx];
                     let (_, record) = setup_for_combine_with_program(
                         &tuples,
@@ -580,8 +586,8 @@ impl CombineMachine {
             .map_err(|e| eyre::eyre!("root combine proof failed STARK verify: {e:?}"))?;
 
         // (2)-(4) plus the whitelist root: the config-free public-value checks, shared with the
-        // embed layer (which re-proves this very root under the outer config and must accept it on
-        // exactly the same terms). See `recursion::root_check`.
+        // compress and embed layers (which pass this root's public values down unchanged and must
+        // accept them on exactly the same terms). See `recursion::root_check`.
         //
         // Whitelist mode also pins the ROOT's own VK as a whitelist member — the in-circuit checks
         // cover children only, so the outermost key is pinned here. That runs on `honest_root_vk`,
@@ -950,7 +956,7 @@ pub struct CombineNode {
 #[cfg(feature = "cuda")]
 impl GpuCombineMachine {
     /// Combine nodes prove under the same params as convert (uniform child-verify cost across the
-    /// tree): pass `recursion_params_with_100_bits_security()`.
+    /// tree): pass `recursion_params_with_128_bits_security()`.
     pub fn new(params: SystemParams, vk_verification: bool) -> Self {
         let cache_cap = std::env::var("MLE_COMBINE_PK_CACHE")
             .ok()
@@ -1335,7 +1341,8 @@ impl GpuCombineMachine {
             &self.chips,
             crate::mle::machine::riscv::bound_device(),
         );
-        // The CPU keygen's 100-bit gate; the GPU preparers cannot return an error, so it panics.
+        // The CPU keygen's soundness gate (`PRODUCTION_SECURITY_BITS`); the GPU preparers cannot
+        // return an error, so it panics.
         admit_production_vk("combine", "gpu", &vk).unwrap_or_else(|e| panic!("{e}"));
         let device_pk: GpuPk = Arc::new(device_pk);
         // Populate the JIT kernels for this key's AIRs. The kernel sources depend only on the AIR

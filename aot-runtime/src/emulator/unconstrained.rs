@@ -41,7 +41,7 @@ impl AotEmulatorCore {
             committed_value_digest: self.committed_value_digest,
             deferred_proofs_digest: self.deferred_proofs_digest,
             commit_in_flight: self.chunk_split_state.commit_in_flight,
-            deferred_commits: self.chunk_split_state.deferred_commits,
+            commits: self.chunk_split_state.commits,
         });
     }
 
@@ -79,7 +79,7 @@ impl AotEmulatorCore {
         self.deferred_proofs_digest = state.deferred_proofs_digest;
         // The digest rolls back, so the flag its writes raised rolls back with it.
         self.chunk_split_state.commit_in_flight = state.commit_in_flight;
-        self.chunk_split_state.deferred_commits = state.deferred_commits;
+        self.chunk_split_state.commits = state.commits;
 
         // Restore memory to pre-unconstrained state (consolidated value + metadata).
         // Use default record for uninitialized memory.

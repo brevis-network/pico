@@ -15,6 +15,9 @@
  * constants, and its test fails if they differ from these. Change both together.
  */
 
+/* 64-bit output: GNU ld built for several RISC-V targets, such as riscv-none-elf-ld, defaults to
+ * 32-bit and refuses the RV64 objects otherwise. */
+OUTPUT_FORMAT("elf64-littleriscv")
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 

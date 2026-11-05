@@ -23,8 +23,9 @@ pub(crate) type FieldSpecificPoseidon2PackedChip<F> = Poseidon2PackedChip<
 >;
 pub const POSEIDON2_PACKED_CHIPNAME: &str = "Poseidon2Packed";
 
-/// A Poseidon2 permutation chip with packed I/O: the 16-lane state is read from
-/// 4 memory Blocks (4 lanes each) and the output is written back as 4 Blocks.
+/// A Poseidon2 permutation chip with packed I/O: the `PERMUTATION_WIDTH` state is
+/// read from `PERM_BLOCKS` packed memory Blocks (`PACK_LANES` values each, lane
+/// `PACK_LANES..` pinned to zero on the bus) and written back the same way.
 /// One permutation per row (no DATAPAR packing).
 pub struct Poseidon2PackedChip<F, LinearLayers, Config: Poseidon2Config> {
     pub(crate) constants: RoundConstants<F, Config>,

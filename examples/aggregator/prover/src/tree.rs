@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use pico_mle_core::{config::recursion_params_with_100_bits_security, protocol::proof::Proof};
+use pico_mle_core::{config::recursion_params_with_128_bits_security, protocol::proof::Proof};
 use pico_vm::{
     mle::machine::{
         combine::CombineMachine,
@@ -28,14 +28,14 @@ pub fn build_tree(
         riscv_vk.clone(),
         vm_vk.clone(),
         riscv_proofs,
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         false,
     )?;
     convert.set_final_deferred_digest(deferred_digest);
     let mut children = prefix.to_vec();
     children.extend(convert.prove_with_vks(riscv_proofs)?);
     let mut combine = CombineMachine::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         vm_vk.clone(),
         false,
     );

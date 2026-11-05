@@ -7,10 +7,7 @@ use crate::{
 };
 use core::intrinsics::type_id;
 use hybrid_array::Array;
-use p3_field::{
-    extension::{BinomialExtensionField, BinomiallyExtendable},
-    Field,
-};
+use p3_field::{extension::QuinticTrinomialExtensionField, Field};
 use p3_koala_bear::{
     default_koalabear_poseidon2_16, GenericPoseidon2LinearLayersKoalaBear, KoalaBear,
     Poseidon2KoalaBear, KOALABEAR_POSEIDON2_RC_16_EXTERNAL_FINAL,
@@ -81,7 +78,7 @@ impl FieldSpecificPoseidon2Config for KoalaBear {
     }
 }
 
-/// Exact type equality (unlike [`same_field`], which also accepts a field's packed / binomial /
+/// Exact type equality (unlike [`same_field`], which also accepts a field's packed / quintic /
 /// symbolic aliases).
 pub const fn same_type<T: Any, U: Any>() -> bool {
     // NOTE: removing this unsafe is impossible so we have to allow the warning here
@@ -93,11 +90,7 @@ pub const fn same_type<T: Any, U: Any>() -> bool {
 
 // Check if the type T is a specified field F.
 // NOTE: This function could not work for trait types with `'static`.
-pub const fn same_field<
-    T: Any,
-    F: Field + BinomiallyExtendable<D> + std::cmp::PartialOrd,
-    const D: usize,
->() -> bool {
+pub const fn same_field<T: Any, F: Field + std::cmp::PartialOrd>() -> bool {
     // NOTE: removing this unsafe is impossible so we have to allow the warning here
     #[allow(unused_unsafe)]
     const {
@@ -106,11 +99,11 @@ pub const fn same_field<
 
             let field = type_id::<F>();
             let packing = type_id::<<F as Field>::Packing>();
-            let binomial = type_id::<BinomialExtensionField<F, D>>();
+            let quintic = type_id::<QuinticTrinomialExtensionField<F>>();
             // The MLE symbolic builder's expression type.
             let mle_expr = type_id::<SymbolicExpression<F>>();
 
-            typ == field || typ == packing || typ == binomial || typ == mle_expr
+            typ == field || typ == packing || typ == quintic || typ == mle_expr
         }
     }
 }

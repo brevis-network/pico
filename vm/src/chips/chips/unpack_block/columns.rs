@@ -1,6 +1,7 @@
 use crate::{
     chips::chips::recursion_memory::MemoryAccessCols,
     compiler::recursion::{ir::Block, types::Address},
+    primitives::consts::EXTENSION_DEGREE,
 };
 use pico_derive::AlignedBorrow;
 
@@ -14,7 +15,7 @@ pub const NUM_UNPACK_BLOCK_PREPROCESSED_COLS: usize =
 pub struct UnpackBlockPreprocessedCols<F: Copy> {
     pub is_real: F,
     pub in_addr: Address<F>,
-    pub out: [MemoryAccessCols<F>; 4],
+    pub out: [MemoryAccessCols<F>; EXTENSION_DEGREE],
 }
 
 /// Main columns: the unpacked Block value.

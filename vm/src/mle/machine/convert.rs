@@ -311,7 +311,12 @@ impl ConvertMachine {
     pub fn prove_with_vks(&self, riscv_proofs: &[Proof<Sc>]) -> eyre::Result<Vec<ProofWithVk>> {
         riscv_proofs
             .par_iter()
-            .map(|proof| {
+            .enumerate()
+            .map(|(i, proof)| {
+                // One span per convert proof (`RUST_LOGGER=forest` prints its duration with the
+                // prover's phase spans nested below); the proofs run concurrently under rayon, so a
+                // worker can interleave two of them.
+                let _span = tracing::info_span!("convert_prove", i).entered();
                 let t0 = std::time::Instant::now();
                 let (_, keygen_program, pk, vk) = self.find_pk(proof)?;
                 let d_pk = self.engine.device().transport_pk_to_device(pk);
@@ -1182,7 +1187,8 @@ impl GpuConvertMachine {
                 &self.chips,
                 crate::mle::machine::riscv::bound_device(),
             );
-            // The CPU keygen's 100-bit gate; the GPU preparers cannot return an error, so it panics.
+            // The CPU keygen's soundness gate (`PRODUCTION_SECURITY_BITS`); the GPU preparers cannot
+            // return an error, so it panics.
             admit_production_vk("convert", "gpu", &vk).unwrap_or_else(|e| panic!("{e}"));
             timing.keygen_call_us = t_keygen_call.elapsed().as_micros();
             // Populate the JIT kernels for this key's AIRs. The first shape nvrtc-compiles; later

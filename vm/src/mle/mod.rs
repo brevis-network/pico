@@ -19,7 +19,9 @@ pub mod spans;
 pub use pico_mle_core::proof;
 // Re-exported so drivers (distributed-vm) can configure the recursion provers without
 // depending on pico-mle-core directly.
-pub use pico_mle_core::config::recursion_params_with_100_bits_security;
+pub use pico_mle_core::config::{
+    compress_params_with_128_bits_security, recursion_params_with_128_bits_security,
+};
 // Re-exported for the same reason: `distributed-vm` enables the GPU backend only through
 // `pico-vm/cuda` and has no direct dependency on the crate, so the per-chunk
 // `MLE_BREAKDOWN` reporting in its worker loop reaches it as `pico_vm::mle::cuda_mle`.

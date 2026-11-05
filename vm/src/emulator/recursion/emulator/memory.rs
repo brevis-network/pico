@@ -1,6 +1,9 @@
 use crate::compiler::recursion::{ir::Block, types::Address};
 use p3_field::PrimeField64;
-use std::sync::Arc;
+use std::{
+    cell::{Cell, RefCell},
+    sync::Arc,
+};
 use vec_map::{Entry, VecMap};
 
 #[derive(Debug, Clone, Default)]
@@ -66,6 +69,18 @@ pub struct MemVecMap<F> {
     /// windows cannot overlap, but that is a property of code elsewhere; this records enough to
     /// check it after the join for the price of two comparisons per write.
     pub written: Option<(usize, usize)>,
+
+    /// The data-dependency depth of every address, set only while `Runtime::census` runs; one
+    /// predictable test per access otherwise.
+    pub depth: Option<DepthTrack>,
+}
+
+/// Each address's depth is one more than the deepest address its writing instruction read;
+/// `cur` is that maximum for the instruction running now, reset by `run_range`.
+#[derive(Debug, Default)]
+pub struct DepthTrack {
+    pub depth: RefCell<Vec<u32>>,
+    pub cur: Cell<u32>,
 }
 
 impl<F: PrimeField64> Memory<F> for MemVecMap<F> {
@@ -74,6 +89,7 @@ impl<F: PrimeField64> Memory<F> for MemVecMap<F> {
             map: VecMap::with_capacity(capacity),
             bases: [None, None],
             written: None,
+            depth: None,
         }
     }
 
@@ -83,6 +99,12 @@ impl<F: PrimeField64> Memory<F> for MemVecMap<F> {
         // operation, ~1 M per combine node, and a node's emulation sits on the combine tree's
         // serial carry chain. `bases` is consulted only when `map` misses, which on an unforked
         // run is never.
+        if let Some(t) = &self.depth {
+            let d = t.depth.borrow().get(index).copied().unwrap_or(0);
+            if d > t.cur.get() {
+                t.cur.set(d);
+            }
+        }
         if let Some(entry) = self.map.get(index) {
             return entry;
         }
@@ -106,6 +128,13 @@ impl<F: PrimeField64> Memory<F> for MemVecMap<F> {
                 Some((lo, hi)) => (lo.min(index), hi.max(index)),
                 None => (index, index),
             });
+        }
+        if let Some(t) = &self.depth {
+            let mut v = t.depth.borrow_mut();
+            if v.len() <= index {
+                v.resize(index + 1, 0);
+            }
+            v[index] = t.cur.get() + 1;
         }
         match self.map.entry(index) {
             Entry::Occupied(entry) => {

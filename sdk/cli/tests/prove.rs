@@ -326,6 +326,10 @@ fn what_a_phase_cannot_be_used_for_is_said_before_keygen() {
             Phase::Combine,
             Some("note: no other process can verify a combine proof"),
         ),
+        (
+            Phase::Compress,
+            Some("note: outside whitelist mode only the process that wrote a compress proof"),
+        ),
     ];
     if cfg!(feature = "multi-field-transcript") {
         cases.push((
@@ -672,8 +676,8 @@ fn execute_prints_the_precompile_calls_the_prover_counts() {
 
 /// The RISC-V file verifies from the ELF at the same height and mode. A combine file made outside
 /// whitelist mode is refused by name: the recursion key is not a function of the ELF, and this
-/// process keygen'd none. The program id printed is the one this process derives for the same ELF,
-/// height and mode.
+/// process keygen'd none; a compress file likewise. The program id printed is the one this
+/// process derives for the same ELF, height and mode.
 #[test]
 fn what_prove_writes_is_answered_for_in_a_fresh_process() {
     let dir = scratch_dir("prove");
@@ -683,7 +687,7 @@ fn what_prove_writes_is_answered_for_in_a_fresh_process() {
         .build()
         .expect("verifier");
 
-    for phase in [Phase::Riscv, Phase::Combine] {
+    for phase in [Phase::Riscv, Phase::Combine, Phase::Compress] {
         let (out, stdout, stderr) = run(cargo_pico(&[
             "prove",
             "--elf",
@@ -716,6 +720,18 @@ fn what_prove_writes_is_answered_for_in_a_fresh_process() {
         } else {
             assert!(note.is_none(), "{phase}: noted about combine:\n{stderr}");
         }
+        let compress_note = stderr
+            .find("note: outside whitelist mode only the process that wrote a compress proof");
+        if phase == Phase::Compress {
+            let noted_at = compress_note.expect("no note for a compress proof");
+            let keygen_done_at = stderr.find("prover: ").expect("the prover line");
+            assert!(noted_at < keygen_done_at, "noted after keygen:\n{stderr}");
+        } else {
+            assert!(
+                compress_note.is_none(),
+                "{phase}: noted about compress:\n{stderr}"
+            );
+        }
         assert_eq!(
             printed_program_id(&stdout),
             (
@@ -738,6 +754,9 @@ fn what_prove_writes_is_answered_for_in_a_fresh_process() {
             }
             (Phase::Combine, Err(ProveError::WhitelistRequired { phase })) => {
                 assert_eq!(phase, Phase::Combine);
+            }
+            (Phase::Compress, Err(ProveError::WhitelistRequired { phase })) => {
+                assert_eq!(phase, Phase::Compress);
             }
             (phase, result) => panic!("{phase}: unexpected {:?}", result.map(|_| ())),
         }

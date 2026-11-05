@@ -239,7 +239,9 @@ impl<SC: EncodableConfig> Encode for GkrLayerClaims<SC> {
 /// changes. It does _not_ correspond to the main protocol version (which may change more frequently).
 /// v4: `MultiStarkVerifyingKey0` gained `merged_preprocessed_commit` (merged-preprocessed
 /// keygen mode for the recursion machines).
-pub const CODEC_VERSION: u32 = 4;
+/// v5: extension-field values encode as five felts (KoalaBear^5) and the vk params moved
+/// to the 128-bit presets; the version enters the vk pre-hash and the constraint digests.
+pub const CODEC_VERSION: u32 = 5;
 
 /// Vk-blind upper bound on `num_commits` when decoding a [`WhirProof`]. Valid proofs have
 /// `num_commits ≤ w_stack` (≤ 4096 in use), so `2^16` never rejects one; it only caps a hostile

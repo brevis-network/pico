@@ -359,7 +359,7 @@ fn gcs_bind_reachable_rule_count() {
     // LogUp side; neither is reachable from the constraint roots, so the rule count below would
     // not notice a change in either.
     assert_eq!(constraints.max_constraint_degree(), 3);
-    assert_eq!(constraints.interactions.len(), 8);
+    assert_eq!(constraints.interactions.len(), 10);
     let dag: SymbolicConstraintsDag<F> = constraints.into();
-    assert_eq!(reachable_constraint_nodes(&dag.constraints), 836);
+    assert_eq!(reachable_constraint_nodes(&dag.constraints), 843);
 }

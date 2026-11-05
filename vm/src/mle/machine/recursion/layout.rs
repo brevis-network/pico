@@ -173,6 +173,46 @@ pub fn extract_recursion_vk_layout(
     extract_recursion_vk_layout_from_heights(vk, heights.as_deref())
 }
 
+/// The layout of a whitelist-mode compress proof under `compress_vk`, without proving one: the
+/// compress program pads every chip to the compress row (`MLE_RECURSION_COMPRESS_LOG_HEIGHTS`), so
+/// the proof's per-air heights are that row's, read through the recursion machine's chip order.
+/// Embed is keygen'd over this layout in whitelist mode; the tier probe, the soundness
+/// manifest and the artifact unit test (`vk_map.rs`) use it, and the end-to-end example holds it
+/// against a real compress proof's layout.
+///
+/// `compress_vk` must be keygen'd at the compress row (whitelist mode). Only its AIR count is
+/// checked: the tier probe's report-only mode passes a key keygen'd over a raised row on purpose,
+/// so the preprocessed heights are not held against the row here. A key from another row shows up
+/// as the artifact unit test's stale-embed-key failure.
+pub fn compress_proof_layout(compress_vk: &MultiStarkVerifyingKey<Sc>) -> RecursionVkLayout {
+    use crate::{
+        instances::chiptype::recursion_chiptype::RecursionChipType, machine::chip::ChipBehavior,
+        mle::machine::shape::MLE_RECURSION_COMPRESS_LOG_HEIGHTS,
+    };
+    let chips = RecursionChipType::<super::Kb>::mle_recursion_chips();
+    assert_eq!(
+        compress_vk.inner.per_air.len(),
+        chips.len(),
+        "compress_proof_layout: the key has {} AIRs, the recursion machine {} chips",
+        compress_vk.inner.per_air.len(),
+        chips.len()
+    );
+    let heights: Vec<Option<usize>> = chips
+        .iter()
+        .map(|chip| {
+            let name = ChipBehavior::<super::Kb>::name(chip);
+            Some(
+                MLE_RECURSION_COMPRESS_LOG_HEIGHTS
+                    .iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, h)| *h)
+                    .unwrap_or_else(|| panic!("chip `{name}` missing from the compress tier")),
+            )
+        })
+        .collect();
+    extract_recursion_vk_layout_from_heights(compress_vk, Some(&heights))
+}
+
 /// Layout from an explicit per-air (presence, log_height) vector: `Some(log)` = present at that
 /// height, `None` = absent; `None` for the whole vector = the worst-case all-present layout.
 ///

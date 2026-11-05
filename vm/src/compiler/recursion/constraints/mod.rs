@@ -80,6 +80,8 @@ impl<C: FieldGenericConfig + Debug> ConstraintCompiler<C> {
                     opcode: ConstraintOpcode::ImmF,
                     args: vec![vec![a.id()], vec![b.as_canonical_biguint().to_string()]],
                 }),
+                // One coefficient string per extension coefficient (`EXTENSION_DEGREE`), which
+                // the Go side reads as `koalabear.ExtDegree`.
                 DslIr::ImmE(a, b) => constraints.push(Constraint {
                     opcode: ConstraintOpcode::ImmE,
                     args: vec![
@@ -291,15 +293,15 @@ impl<C: FieldGenericConfig + Debug> ConstraintCompiler<C> {
                     });
                 }
                 DslIr::CircuitExt2Felt(a, b) => {
+                    // One limb argument per extension coefficient, then the ext, as the Go side's
+                    // `Ext2Felt` reads them.
                     constraints.push(Constraint {
                         opcode: ConstraintOpcode::Ext2Felt,
-                        args: vec![
-                            vec![a[0].id()],
-                            vec![a[1].id()],
-                            vec![a[2].id()],
-                            vec![a[3].id()],
-                            vec![b.id()],
-                        ],
+                        args: a
+                            .iter()
+                            .map(|x| vec![x.id()])
+                            .chain(std::iter::once(vec![b.id()]))
+                            .collect(),
                     });
                 }
                 DslIr::AssertEqV(a, b) => constraints.push(Constraint {
@@ -390,15 +392,13 @@ impl<C: FieldGenericConfig + Debug> ConstraintCompiler<C> {
                         ],
                     });
                 }
+                // The ext, then one limb per extension coefficient, as the Go side's
+                // `CircuitFelts2Ext` reads them.
                 DslIr::CircuitFelts2Ext(a, b) => constraints.push(Constraint {
                     opcode: ConstraintOpcode::CircuitFelts2Ext,
-                    args: vec![
-                        vec![b.id()],
-                        vec![a[0].id()],
-                        vec![a[1].id()],
-                        vec![a[2].id()],
-                        vec![a[3].id()],
-                    ],
+                    args: std::iter::once(vec![b.id()])
+                        .chain(a.iter().map(|x| vec![x.id()]))
+                        .collect(),
                 }),
                 // Ignore cycle tracker instruction.
                 // It currently serves as a marker for calculation at compile time.

@@ -24,7 +24,7 @@ use std::{
 use p3_field::PrimeCharacteristicRing;
 use pico_mle_core::{
     codec::{Decode, Encode},
-    config::riscv_params_with_100_bits_security,
+    config::riscv_params_with_128_bits_security,
     proof::Proof,
     StarkEngine,
 };
@@ -98,7 +98,7 @@ fn reject_forged_memory_witness(program: Arc<Program>, records: &[EmulationRecor
     }
     use Rows::{AllReal, FirstStep, InChunk, NonZero, Sentinel};
 
-    let engine: riscv::Engine = StarkEngine::new(riscv_params_with_100_bits_security(
+    let engine: riscv::Engine = StarkEngine::new(riscv_params_with_128_bits_security(
         riscv::log_stacked_height_from_env(),
     ));
     let airs = riscv::mle_riscv_air_refs(program, false);
@@ -595,7 +595,7 @@ fn reject_forged_memory_witness(program: Arc<Program>, records: &[EmulationRecor
 /// construction (`Cpu(fn(&mut CpuCols<F>) -> &mut F)`), and this forgery moves four fields across
 /// two rows in lockstep.
 fn reject_pc_limb_shift(program: Arc<Program>, records: &[EmulationRecord]) {
-    let engine: riscv::Engine = StarkEngine::new(riscv_params_with_100_bits_security(
+    let engine: riscv::Engine = StarkEngine::new(riscv_params_with_128_bits_security(
         riscv::log_stacked_height_from_env(),
     ));
     let airs = riscv::mle_riscv_air_refs(program, false);
@@ -733,7 +733,7 @@ fn reject_pc_limb_shift(program: Arc<Program>, records: &[EmulationRecord]) {
 /// whose tuple now carries a carry the table does not hold for this pc, and the memory bus, whose
 /// written value moved -- so the rejection must come from the LogUp check.
 fn reject_jump_return_carry_shift(program: Arc<Program>, records: &[EmulationRecord]) {
-    let engine: riscv::Engine = StarkEngine::new(riscv_params_with_100_bits_security(
+    let engine: riscv::Engine = StarkEngine::new(riscv_params_with_128_bits_security(
         riscv::log_stacked_height_from_env(),
     ));
     let airs = riscv::mle_riscv_air_refs(program, false);
@@ -821,7 +821,7 @@ fn reject_jump_return_carry_shift(program: Arc<Program>, records: &[EmulationRec
 /// fires. Rows whose `next_pc` goes to the public values instead (`is_last`) are skipped: there
 /// the rejection would come from the PV equality, which is not the mechanism under test.
 fn reject_jalr_lsb_slide(program: Arc<Program>, records: &[EmulationRecord]) {
-    let engine: riscv::Engine = StarkEngine::new(riscv_params_with_100_bits_security(
+    let engine: riscv::Engine = StarkEngine::new(riscv_params_with_128_bits_security(
         riscv::log_stacked_height_from_env(),
     ));
     let airs = riscv::mle_riscv_air_refs(program, false);
@@ -900,7 +900,7 @@ fn reject_jalr_lsb_slide(program: Arc<Program>, records: &[EmulationRecord]) {
 /// rather than the lookup. The table-driven `Cpu pc carry` arm above only asserts "rejected";
 /// this is the arm that shows the lookup alone does it.
 fn reject_pc_carry_off_table(program: Arc<Program>, records: &[EmulationRecord]) {
-    let engine: riscv::Engine = StarkEngine::new(riscv_params_with_100_bits_security(
+    let engine: riscv::Engine = StarkEngine::new(riscv_params_with_128_bits_security(
         riscv::log_stacked_height_from_env(),
     ));
     let airs = riscv::mle_riscv_air_refs(program, false);

@@ -7,13 +7,12 @@ use crate::{
         builder::{ChipBaseBuilder, ChipBuilder, RecursionBuilder},
         extension::BinomialExtension,
     },
-    primitives::consts::EXTENSION_DEGREE,
 };
 use p3_air::{Air, AirBuilder, WindowAccess};
-use p3_field::{extension::BinomiallyExtendable, Field};
+use p3_field::{extension::QuinticTrinomialExtendable, Field};
 use std::borrow::Borrow;
 
-impl<F: Field + BinomiallyExtendable<EXTENSION_DEGREE>, CB> Air<CB> for BatchFRIChip<F>
+impl<F: Field + QuinticTrinomialExtendable, CB> Air<CB> for BatchFRIChip<F>
 where
     CB: ChipBuilder<F>,
 {

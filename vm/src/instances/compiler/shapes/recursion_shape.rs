@@ -11,11 +11,10 @@ use crate::{
     },
     instances::{chiptype::recursion_chiptype::RecursionChipType, compiler::shapes::ProofShape},
     machine::{chip::ChipBehavior, field::FieldSpecificPoseidon2Config},
-    primitives::consts::EXTENSION_DEGREE,
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_field::{extension::BinomiallyExtendable, PrimeField32};
+use p3_field::{extension::QuinticTrinomialExtendable, PrimeField32};
 use serde::{Deserialize, Serialize};
 use std::{fmt, marker::PhantomData};
 
@@ -73,8 +72,8 @@ impl<F, A> fmt::Debug for RecursionShapeConfig<F, A> {
             .finish()
     }
 }
-impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config>
-    Default for RecursionShapeConfig<F, RecursionChipType<F>>
+impl<F: PrimeField32 + QuinticTrinomialExtendable + FieldSpecificPoseidon2Config> Default
+    for RecursionShapeConfig<F, RecursionChipType<F>>
 where
     RecursionChipType<F>: ChipBehavior<F>,
 {
@@ -316,7 +315,7 @@ where
     }
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config>
+impl<F: PrimeField32 + QuinticTrinomialExtendable + FieldSpecificPoseidon2Config>
     RecursionShapeConfig<F, RecursionChipType<F>>
 {
     pub fn get_all_shape_combinations(

@@ -16,7 +16,7 @@ use crate::{
         chip::{ChipBehavior, PreprocessedRows},
         utils::pad_to_power_of_two,
     },
-    primitives::consts::{EXT_DOT_PRODUCT_DATAPAR, EXT_DOT_PRODUCT_GROUPS},
+    primitives::consts::{EXT_DOT_PRODUCT_DATAPAR, EXT_DOT_PRODUCT_GROUPS, PACK_LANES},
 };
 #[cfg(feature = "cuda")]
 use crate::{
@@ -96,11 +96,10 @@ impl<F: PrimeField32> ChipBehavior<F> for ExtDotProductChip<F> {
                 }
             })
             .for_each(|instr: &ExtDotProductInstr<F>| {
+                // One mu per value lane: PACK_LANES per packed value block (the emulator
+                // asserts the same contract).
                 let n_groups = instr.val_addrs.len();
-                debug_assert_eq!(
-                    instr.mu_addrs.len(),
-                    n_groups * (EXT_DOT_PRODUCT_DATAPAR / EXT_DOT_PRODUCT_GROUPS)
-                );
+                debug_assert_eq!(instr.mu_addrs.len(), n_groups * PACK_LANES);
                 // The lowering pads the address vectors to a whole number of rows
                 // with zero-address (zero-value) groups.
                 debug_assert_eq!(n_groups % EXT_DOT_PRODUCT_GROUPS, 0);

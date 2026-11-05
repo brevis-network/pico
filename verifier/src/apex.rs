@@ -2,6 +2,11 @@
 //!
 //! The apex is the top of the recursion tree: the final check of a complete root proof.
 //!
+//! TODO(compress-apex): `pico-vm` keeps its own apex (`pico_vm::mle::machine::apex`), which also
+//! verifies the compress proof over the root, so the combine-root checks are in both. Move the
+//! compress verification here, so that ere can verify compress proofs, and have `pico-vm`
+//! re-export this apex.
+//!
 //! The caller supplies the proof WITH its vk, the trusted whitelist and the trusted exe identity.
 //! Trust comes from the whitelist: the supplied vk's identity must be a member, and the STARK
 //! verify then runs under that vk. The pre_hash in the identity is recomputed from the vk body

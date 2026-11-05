@@ -1,6 +1,7 @@
 //! Offline whitelist builder: one convert VK per RISC-V shape the whitelist admits, plus the
-//! combine node VKs (every ordered child pair over the convert rows and the combine tier) and the
-//! deferred node VK, into the per-config vk-map artifact (`mle_vk_map_kb.bin`, root included).
+//! combine node VKs (every ordered child pair over the convert rows and the combine tier), the
+//! deferred node VK and the compress node VK, into the per-config vk-map artifact
+//! (`mle_vk_map_kb.bin`, root included).
 //!
 //! No proving is needed for enumeration: under the shape config a proof's layout is a function
 //! of its shape alone, so each shape's convert layout is synthesized from the riscv vk and the
@@ -11,7 +12,7 @@
 //! and checkpointed by shape
 //! CONTENT (the sorted `name:height` list), so a stopped build resumes and a ladder edit that
 //! moves every index still reuses what was already keygen'd. Leaves are laid out in
-//! `mle_riscv_shapes()` order, then the combine VKs, then the deferred one.
+//! `mle_riscv_shapes()` order, then the combine VKs, then the deferred one, then the compress one.
 //!
 //! Self-validation, two layers:
 //!   (a) `MLE_VK_MAP_RETH_BLOCKS=<id,id,...>`: emulate those reth blocks and check that the shape
@@ -47,13 +48,14 @@
 //! A change to the shape tables, the riscv AIRs, the params or the recursion compiler is followed
 //! by a full rebuild from no checkpoint.
 //!
-//! Beside the artifact the builder writes `mle_vk_root.txt` (the config digest and the pinned
-//! root, `MLE_VK_MAP_ROOT_OUT`), the file that ships next to the bin. On resume the first
-//! checkpointed shape is keygen'd again and the checkpoint is refused when the identity differs:
-//! a probe of one shape, which catches a build of the convert programs that moved every key and
-//! not one that moved only shapes the probe is not in.
+//! Beside the artifact the builder writes `mle_vk_root.txt` (the leaf counts, the whitelist-mode
+//! riscv key's pre-hash, the config digest and the pinned root, `MLE_VK_MAP_ROOT_OUT`), the file
+//! that ships next to the bin; the artifact unit test holds its pre-hash line against the binary.
+//! On resume the first checkpointed shape is keygen'd again and the checkpoint is refused when the
+//! identity differs: a probe of one shape, which catches a build of the convert programs that moved
+//! every key and not one that moved only shapes the probe is not in.
 //!
-//! Every key the build admits scores at least 100 bits: each keygen is refused below that budget
+//! Every key the build admits scores at least 128 bits: each keygen is refused below that budget
 //! (`admit_production_vk`), the probe's included. A checkpointed identity is admitted without its
 //! key being scored again, because every convert key has the same recursion AIR set and preset,
 //! so the same shape and score; when the probe keygens one under this build's calculator and
@@ -73,7 +75,8 @@ use std::{
 
 use p3_field::PrimeField32;
 use pico_mle_core::{
-    config::recursion_params_with_100_bits_security, keygen::types::MultiStarkVerifyingKey,
+    config::{compress_params_with_128_bits_security, recursion_params_with_128_bits_security},
+    keygen::types::MultiStarkVerifyingKey,
     StarkEngine,
 };
 use pico_vm::{
@@ -83,22 +86,32 @@ use pico_vm::{
     },
     configs::stark_config::kb_poseidon2::KoalaBearPoseidon2,
     emulator::{riscv::record::EmulationRecord, stdin::EmulatorStdin},
-    instances::chiptype::riscv_chiptype::RiscvChipType,
-    machine::{chip::MetaChip, logger::setup_logger},
+    instances::chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
+    machine::{
+        chip::{ChipBehavior, MetaChip},
+        logger::setup_logger,
+    },
     mle::{
         compiler::recursion::RecursionVkLayout,
         machine::{
             combine::CombineMachine,
+            compress::CompressMachine,
             convert::ConvertMachine,
             deferred::DeferredMachine,
             exe::RiscvVmVk,
-            recursion::{extract_recursion_vk_layout, recursion_vk_layouts_equal, Engine},
+            recursion::{
+                extract_recursion_vk_layout, extract_recursion_vk_layout_from_heights,
+                recursion_vk_layouts_equal, Engine,
+            },
             riscv,
-            shape::{mle_natural_heights, mle_riscv_shapes, select_riscv_shape},
+            shape::{
+                mle_natural_heights, mle_riscv_shapes, select_riscv_shape,
+                MLE_RECURSION_COMBINE_LOG_HEIGHTS, MLE_RECURSION_CONVERT_LADDER,
+            },
             vk_map::{
                 checkpoint_line, parse_checkpoint_line, root_file_text, shape_content_key,
                 synthesized_convert_layout, vk_identity, whitelist_convert_vk, whitelist_riscv_vk,
-                MleVkMap, VkIdentity, VkMapArtifact,
+                MleVkMap, VkIdentity, VkMapArtifact, VkMapLeafCounts,
             },
         },
     },
@@ -163,9 +176,7 @@ fn write_root_file(
     path: &str,
     out: &str,
     artifact: &VkMapArtifact,
-    n_convert: usize,
-    n_combine: usize,
-    n_deferred: usize,
+    leaves: VkMapLeafCounts,
     riscv_vk: &MultiStarkVerifyingKey<riscv::Sc>,
 ) {
     let bin = Path::new(out)
@@ -173,15 +184,7 @@ fn write_root_file(
         .and_then(|s| s.to_str())
         .unwrap_or(out);
     let pre_hash = riscv_vk.pre_hash.map(|f| f.as_canonical_u32());
-    let text = root_file_text(
-        artifact,
-        bin,
-        n_convert,
-        n_combine,
-        n_deferred,
-        pre_hash,
-        &today_utc(),
-    );
+    let text = root_file_text(artifact, bin, leaves, pre_hash, &today_utc());
     fs::write(path, text).unwrap_or_else(|e| panic!("cannot write root file `{path}`: {e}"));
 }
 
@@ -240,7 +243,7 @@ fn main() {
     // and require its checkpointed identity. Entries for shapes this config does not enumerate
     // are left unused.
     if let Some(i) = (0..shapes.len()).find(|i| done.contains_key(&keys[*i])) {
-        let engine: Engine = StarkEngine::new(recursion_params_with_100_bits_security());
+        let engine: Engine = StarkEngine::new(recursion_params_with_128_bits_security());
         let (label, shape) = &shapes[i];
         let now = vk_identity(
             &whitelist_convert_vk(&engine, &riscv_vk, label, shape)
@@ -276,7 +279,7 @@ fn main() {
             let tx = tx.clone();
             let (next, todo, shapes, riscv_vk) = (&next, &todo, &shapes, &riscv_vk);
             scope.spawn(move || {
-                let engine: Engine = StarkEngine::new(recursion_params_with_100_bits_security());
+                let engine: Engine = StarkEngine::new(recursion_params_with_128_bits_security());
                 loop {
                     let k = next.fetch_add(1, Ordering::Relaxed);
                     let Some(&i) = todo.get(k) else { break };
@@ -331,12 +334,12 @@ fn main() {
     // ── Combine VKs: the 36 node shapes, each through CombineMachine's own tier check ──
     // Any convert vk bootstraps the per-row C child layouts; the B layout comes from the
     // [C_last, C_last] node.
-    let leaf_engine: Engine = StarkEngine::new(recursion_params_with_100_bits_security());
+    let leaf_engine: Engine = StarkEngine::new(recursion_params_with_128_bits_security());
     let convert_vk0 = whitelist_convert_vk(&leaf_engine, &riscv_vk, &shapes[0].0, &shapes[0].1)
         .unwrap_or_else(|e| panic!("{e}"));
     let vm_vk = RiscvVmVk::from_program_and_vk(&fib_program, &riscv_vk);
     let mut combine = CombineMachine::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         vm_vk.clone(),
         true,
     );
@@ -345,7 +348,11 @@ fn main() {
         .unwrap_or_else(|e| panic!("{e}"));
     identities.extend(combine_vks.iter().map(|v| vk_identity(v)));
     // ── The deferred node VK: one, over the combine-tier child every sub-proof root is ──
-    let mut deferred = DeferredMachine::new(recursion_params_with_100_bits_security(), vm_vk, true);
+    let mut deferred = DeferredMachine::new(
+        recursion_params_with_128_bits_security(),
+        vm_vk.clone(),
+        true,
+    );
     let combine_tier = combine
         .combine_tier_child_layout(&convert_vk0)
         .unwrap_or_else(|e| panic!("{e}"));
@@ -353,11 +360,73 @@ fn main() {
         .preregister(&combine_tier)
         .unwrap_or_else(|e| panic!("{e}"));
     identities.push(vk_identity(&deferred_vk));
+    // ── The complete-root node VKs extract to ONE combine-tier layout: the fact the compress
+    // leaf rests on (in whitelist mode a root has one layout, so compress has one key) ──
+    {
+        let recursion_chips = RecursionChipType::<riscv::Kb>::mle_recursion_chips();
+        let b_heights: Vec<Option<usize>> = recursion_chips
+            .iter()
+            .map(|chip| {
+                let name = ChipBehavior::<riscv::Kb>::name(chip);
+                Some(
+                    MLE_RECURSION_COMBINE_LOG_HEIGHTS
+                        .iter()
+                        .find(|(n, _)| *n == name)
+                        .map(|(_, h)| *h)
+                        .unwrap_or_else(|| panic!("chip `{name}` missing from the combine tier")),
+                )
+            })
+            .collect();
+        // `preregister_standard_shapes` order: the non-root pairs, the root pairs, the
+        // single-child roots; the roots are the last `kinds² + kinds`.
+        let kinds = MLE_RECURSION_CONVERT_LADDER.len() + 1;
+        let roots = &combine_vks[kinds * kinds..];
+        assert_eq!(roots.len(), kinds * kinds + kinds);
+        let layouts: Vec<RecursionVkLayout> = roots
+            .iter()
+            .map(|vk| extract_recursion_vk_layout_from_heights(vk, Some(&b_heights)))
+            .collect();
+        for (i, layout) in layouts.iter().enumerate() {
+            assert!(
+                recursion_vk_layouts_equal(&layouts[0], layout),
+                "complete-root node {i} extracts to another combine-tier layout than node 0: the \
+                 compress leaf assumes one root layout"
+            );
+        }
+        assert!(
+            recursion_vk_layouts_equal(&layouts[0], &combine_tier),
+            "the complete-root layouts differ from the combine-tier child layout the deferred and \
+             compress nodes are keygen'd over"
+        );
+        info!(
+            "complete-root node VKs: {} extract to one combine-tier layout",
+            roots.len()
+        );
+    }
+    // ── The compress node VK: one, over that same combine-tier child ──
+    let mut compress = CompressMachine::new(compress_params_with_128_bits_security(), vm_vk, true);
+    let compress_vk = compress
+        .preregister(&combine_tier)
+        .unwrap_or_else(|e| panic!("{e}"));
+    identities.push(vk_identity(&compress_vk));
+    let leaves = VkMapLeafCounts {
+        convert: shapes.len(),
+        combine: combine_vks.len(),
+        deferred: 1,
+        compress: 1,
+    };
+    assert_eq!(
+        identities.len(),
+        leaves.total(),
+        "the leaves pushed and the counts the root file names disagree"
+    );
     info!(
-        "leaves: {} convert + {} combine + 1 deferred = {}",
-        shapes.len(),
-        combine_vks.len(),
-        identities.len()
+        "leaves: {} convert + {} combine + {} deferred + {} compress = {}",
+        leaves.convert,
+        leaves.combine,
+        leaves.deferred,
+        leaves.compress,
+        leaves.total()
     );
 
     let map = MleVkMap::build(identities);
@@ -384,15 +453,7 @@ fn main() {
             .join(" ")
     );
     let root_out = env("MLE_VK_MAP_ROOT_OUT", &root_file_beside(&out));
-    write_root_file(
-        &root_out,
-        &out,
-        &artifact,
-        shapes.len(),
-        combine_vks.len(),
-        1,
-        &riscv_vk,
-    );
+    write_root_file(&root_out, &out, &artifact, leaves, &riscv_vk);
     info!("root file written: `{root_out}`");
 
     // The artifact is on disk by now. What follows only checks it, so a failure here (an input
@@ -492,7 +553,7 @@ fn main() {
             bundle.vk.clone(),
             real_vm_vk,
             &bundle.chunk_proofs,
-            recursion_params_with_100_bits_security(),
+            recursion_params_with_128_bits_security(),
             true,
         )
         .expect("convert machine");

@@ -160,7 +160,7 @@ pub struct UnconstrainedState {
     pub(crate) committed_value_digest: [u32; PV_DIGEST_NUM_WORDS],
     pub(crate) deferred_proofs_digest: [u32; DIGEST_SIZE],
     pub(crate) commit_in_flight: bool,
-    pub(crate) deferred_commits: u32,
+    pub(crate) commits: u32,
 }
 
 impl AotEmulatorCore {

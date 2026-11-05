@@ -1,4 +1,7 @@
-use crate::{compiler::recursion::types::Address, primitives::consts::PACK_BLOCK_DATAPAR};
+use crate::{
+    compiler::recursion::types::Address,
+    primitives::consts::{PACK_BLOCK_DATAPAR, PACK_LANES},
+};
 use pico_derive::AlignedBorrow;
 
 pub const NUM_PACK_BLOCK_COLS: usize = core::mem::size_of::<PackBlockCols<u8>>();
@@ -10,7 +13,7 @@ pub const NUM_PACK_BLOCK_PREPROCESSED_COLS: usize =
 #[repr(C)]
 pub struct PackBlockPreprocessedValueCols<F: Copy> {
     pub is_real: F,
-    pub in_addrs: [Address<F>; 4],
+    pub in_addrs: [Address<F>; PACK_LANES],
     pub out_addr: Address<F>,
     pub mult: F,
 }
@@ -26,5 +29,5 @@ pub struct PackBlockPreprocessedCols<F: Copy> {
 #[derive(AlignedBorrow, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct PackBlockCols<F: Copy> {
-    pub values: [[F; 4]; PACK_BLOCK_DATAPAR],
+    pub values: [[F; PACK_LANES]; PACK_BLOCK_DATAPAR],
 }

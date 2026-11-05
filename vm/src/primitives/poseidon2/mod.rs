@@ -15,7 +15,7 @@ impl<F: Any + PrimeCharacteristicRing> FieldPoseidon2 for F {
 }
 
 const fn field_sbox_degree<F: Any + PrimeCharacteristicRing>() -> usize {
-    if same_field::<F, KoalaBear, 4>() {
+    if same_field::<F, KoalaBear>() {
         koalabear::FIELD_SBOX_DEGREE
     } else {
         panic!("Unsupported field type");

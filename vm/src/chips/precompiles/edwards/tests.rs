@@ -58,13 +58,13 @@ use crate::{
 };
 use num::BigUint;
 use p3_air::{Air, RowWindow};
-use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing};
+use p3_field::{extension::QuinticTrinomialExtensionField, PrimeCharacteristicRing};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::{borrow::BorrowMut, collections::BTreeMap, sync::Arc};
 
 type F = KoalaBear;
-type EF = BinomialExtensionField<KoalaBear, 4>;
+type EF = QuinticTrinomialExtensionField<KoalaBear>;
 type AddChip = EdAddAssignChip<F, Ed25519>;
 type DecompressChip = EdDecompressChip<F, Ed25519Parameters>;
 

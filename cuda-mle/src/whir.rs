@@ -125,14 +125,14 @@ where
 
     // Base-field limbs per extension element.
     let d_ef = <FK::ValExt as BasedVectorSpace<FK::Val>>::DIMENSION;
-    // `whir_algebraic_batch_traces_kernel` writes its result back as a hard-coded 4 base-field
-    // limbs per row (`for (int i = 0; i < 4; i++)` in cuda/src/whir.cu) while everything on this
-    // side sizes buffers by `d_ef`. Both live fields have D == 4, so the two agree today; a third
-    // field with a different extension degree would silently write the wrong number of limbs, so
-    // pin the assumption where it is introduced rather than let it corrupt a buffer.
+    // `whir_algebraic_batch_traces_kernel` writes its result back as FpExt::D base-field limbs
+    // per row (`for (int i = 0; i < FpExt::D; i++)` in pico-gpu `src/prover/whir.cu`), and FpExt
+    // is KoalaBear^5 there, while everything on this side sizes buffers by `d_ef`. A mismatch
+    // would silently write the wrong number of limbs, so pin the agreement where it is
+    // introduced rather than let it corrupt a buffer.
     assert_eq!(
-        d_ef, 4,
-        "whir_algebraic_batch_traces_kernel hard-codes 4 base-field limbs per row; \
+        d_ef, 5,
+        "whir_algebraic_batch_traces_kernel writes 5 base-field limbs per row (KoalaBear^5); \
          extension degree {d_ef} needs the kernel updated in lockstep"
     );
     let mut ple_buf = DeviceBuffer::<FK::Val>::with_capacity(stacked_rows * d_ef);

@@ -28,7 +28,7 @@ use eyre::{ensure, eyre, WrapErr};
 use fibonacci_lib::{fibonacci, PublicValuesStruct};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use pico_mle_core::{
-    config::recursion_params_with_100_bits_security, keygen::types::MultiStarkVerifyingKey,
+    config::recursion_params_with_128_bits_security, keygen::types::MultiStarkVerifyingKey,
     protocol::proof::Proof,
 };
 use pico_vm::{
@@ -149,7 +149,7 @@ fn prove() -> eyre::Result<()> {
     // One node per claim, in the order the guest claimed them. A node publishes the identity of
     // the MAIN program, so the machine is keyed to the aggregator, not to fibonacci.
     let mut deferred = DeferredMachine::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         agg.vm_vk.clone(),
         false,
     );

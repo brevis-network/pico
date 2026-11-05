@@ -338,7 +338,7 @@ mod tests {
         mle::machine::riscv::{share_mle_gpu_pool, MLE_GPU_DEVICE},
     };
     use p3_field::PrimeCharacteristicRing;
-    use pico_mle_core::config::recursion_params_with_100_bits_security;
+    use pico_mle_core::config::recursion_params_with_128_bits_security;
 
     /// The pool alone: these tests replay no RISC-V program, and bounding the records held at once
     /// would bound the emulator tests sharing the binary.
@@ -369,7 +369,7 @@ mod tests {
 
     fn assert_keygen_parity(program: &Arc<RecursionProgram<Kb>>) {
         ensure_gpu_pools();
-        let engine = GpuEngineKb::new(recursion_params_with_100_bits_security());
+        let engine = GpuEngineKb::new(recursion_params_with_128_bits_security());
         let chips = RecursionChipType::<Kb>::mle_recursion_chips();
         // With the cross-check on, the host also commits and the GPU==CPU digest assert fires
         // inside if the device commit diverges.

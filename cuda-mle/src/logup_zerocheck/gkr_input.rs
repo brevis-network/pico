@@ -113,6 +113,9 @@ pub fn log_gkr_input_evals<
     // fill-tail: number of leaves actually written by the interaction kernels;
     // only [used_leaves, total_leaves) needs zeroing.
     used_leaves: usize,
+    // Allocate only the `used_leaves` real leaves and leave the padding to the virtual GKR tree
+    // (`fractional::use_virtual_padding`) instead of materialising `total_leaves`.
+    virtual_padding: bool,
 ) -> Result<(DeviceBuffer<Frac<FK::ValExt>>, FK::ValExt), InteractionGpuError> {
     if trace_interactions.iter().all(|meta| meta.is_none()) {
         return Ok((DeviceBuffer::new(), alpha_logup));
@@ -122,12 +125,24 @@ pub fn log_gkr_input_evals<
     // reuse the multi-GiB leaves region across proves (a fresh allocation triggers
     // ~7-8 ms of allocator defragmentation stalls per prove). Checked back in by
     // fractional_sumcheck_gpu.
-    let leaves = super::buf_cache_checkout::<Frac<FK::ValExt>>("gkr_leaves", total_leaves);
+    debug_assert!(used_leaves <= total_leaves);
+    // A virtual buffer is rounded up to a 1/64 of the logical length, so that the cached region,
+    // which is reused only when its recorded length suffices, is not reallocated whenever the next
+    // prove has a few more real leaves.
+    let alloc_len = if virtual_padding {
+        let granule = (total_leaves / 64).max(1);
+        used_leaves.next_multiple_of(granule).min(total_leaves)
+    } else {
+        total_leaves
+    };
+    let leaves = super::buf_cache_checkout::<Frac<FK::ValExt>>("gkr_leaves", alloc_len);
     // The interaction kernels fully write `[0, used_leaves)` (the stacked interaction slices are
     // contiguous from row 0; short traces are filled via vertical repeat) — only the pow2 padding
-    // tail needs zeroing (8.6 GiB memset → ~1.5 GiB).
-    debug_assert!(used_leaves <= total_leaves);
-    leaves.fill_zero_suffix(used_leaves)?;
+    // tail needs zeroing (8.6 GiB memset → ~1.5 GiB). A virtual buffer has no padding: the tree
+    // never reads past `used_leaves`.
+    if !virtual_padding && used_leaves < alloc_len {
+        leaves.fill_zero_suffix(used_leaves)?;
+    }
     if std::env::var("STEP_PROF").is_ok() {
         let _ = crate::runtime::stream::current_stream_sync();
         tracing::info!(

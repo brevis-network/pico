@@ -2,13 +2,13 @@ use crate::{
     configs::config::StarkGenericConfig, machine::field::FieldSpecificPoseidon2Config,
     primitives::PicoPoseidon2KoalaBear,
 };
-use p3_field::extension::BinomialExtensionField;
+use p3_field::extension::QuinticTrinomialExtensionField;
 use p3_koala_bear::KoalaBear;
 use serde::Serialize;
 
 pub type SC_Val = KoalaBear;
 pub type SC_Perm = PicoPoseidon2KoalaBear;
-pub type SC_Challenge = BinomialExtensionField<SC_Val, 4>;
+pub type SC_Challenge = QuinticTrinomialExtensionField<SC_Val>;
 
 /// Field-level config tag for KoalaBear + Poseidon2. The FRI PCS / challenger plumbing that used
 /// to live here was removed with the FRI proving path (tag `legacy-fri-last`).

@@ -21,7 +21,7 @@ pub struct UnconstrainedState {
     pub(crate) register_diff: HashMap<u8, Option<RuntimeRegisterRecord>>,
     pub(crate) prev_mode: EmulatorMode,
     pub(crate) commit_in_flight: bool,
-    pub(crate) deferred_commits: u32,
+    pub(crate) commits: u32,
 }
 
 impl UnconstrainedState {
@@ -42,7 +42,7 @@ impl UnconstrainedState {
             memory_diff: HashMap::default(),
             register_diff: HashMap::default(),
             commit_in_flight: rt.chunk_split_state.commit_in_flight,
-            deferred_commits: rt.chunk_split_state.deferred_commits,
+            commits: rt.chunk_split_state.commits,
             prev_mode,
         }
     }

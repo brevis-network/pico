@@ -37,7 +37,10 @@ use cudart_sys::*;
 #[cfg(feature = "cuda")]
 use log::info;
 use p3_air::BaseAir;
-use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
+use p3_field::{
+    extension::{trinomial_quintic_mul, QuinticTrinomialExtendable},
+    Field, PrimeField32,
+};
 #[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
@@ -65,9 +68,7 @@ impl<F> BaseAir<F> for HornerEvalChip<F> {
     }
 }
 
-impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F>
-    for HornerEvalChip<F>
-{
+impl<F: PrimeField32 + Field + QuinticTrinomialExtendable> ChipBehavior<F> for HornerEvalChip<F> {
     type Record = RecursionRecord<F>;
     type Program = RecursionProgram<F>;
 
@@ -129,16 +130,13 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        // EF multiplication over [F; 4] (same helper as univariate_fold tracegen).
-        let w = <F as BinomiallyExtendable<EXTENSION_DEGREE>>::W;
-        let ef_mul = |a: [F; 4], b: [F; 4]| -> [F; 4] {
-            [
-                a[0] * b[0] + w * (a[1] * b[3] + a[2] * b[2] + a[3] * b[1]),
-                a[0] * b[1] + a[1] * b[0] + w * (a[2] * b[3] + a[3] * b[2]),
-                a[0] * b[2] + a[1] * b[1] + a[2] * b[0] + w * a[3] * b[3],
-                a[0] * b[3] + a[1] * b[2] + a[2] * b[1] + a[3] * b[0],
-            ]
-        };
+        // EF multiplication over [F; EXTENSION_DEGREE] (KoalaBear^5, Plonky3's trinomial product).
+        let ef_mul =
+            |a: [F; EXTENSION_DEGREE], b: [F; EXTENSION_DEGREE]| -> [F; EXTENSION_DEGREE] {
+                let mut out = [F::ZERO; EXTENSION_DEGREE];
+                trinomial_quintic_mul(&a, &b, &mut out);
+                out
+            };
 
         let rows = input
             .horner_eval_events
@@ -172,7 +170,7 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
 }
 
 #[cfg(feature = "cuda")]
-impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> GpuChipBehavior<F>
+impl<F: PrimeField32 + Field + QuinticTrinomialExtendable> GpuChipBehavior<F>
     for HornerEvalChip<F>
 {
     fn gpu_generate_preprocessed(
@@ -299,10 +297,6 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> GpuChipBe
             None => nb_rows.next_power_of_two(),
         };
 
-        // Binomial extension constant W, passed as its canonical u32 (rebuilt by the FFI wrapper);
-        // matches the CPU `ef_mul` computing x^2/x^3/x^4.
-        let w = <F as BinomiallyExtendable<EXTENSION_DEGREE>>::W.as_canonical_u32();
-
         let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
 
         let sync_mem_pool = get_global_mem_pool(device_id);
@@ -341,7 +335,6 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> GpuChipBe
                     event_size,
                     d_trace.as_mut_ptr() as *mut _,
                     NUM_HORNER_EVAL_COLS,
-                    w,
                     stream.into(),
                 );
             }

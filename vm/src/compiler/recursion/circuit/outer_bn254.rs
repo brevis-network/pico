@@ -39,7 +39,9 @@ use crate::{
     compiler::recursion::ir::{Builder, DslIr, Ext, Felt, Var},
     configs::{config::FieldGenericConfig, field_config::KoalaBearBn254},
     mle::config::koala_bear_bn254_poseidon2::EMBED_FELTS_PER_BN254,
-    primitives::consts::{MULTI_FIELD_CHALLENGER_RATE, MULTI_FIELD_CHALLENGER_WIDTH},
+    primitives::consts::{
+        EXTENSION_DEGREE, MULTI_FIELD_CHALLENGER_RATE, MULTI_FIELD_CHALLENGER_WIDTH,
+    },
 };
 
 type FC = KoalaBearBn254;
@@ -257,23 +259,21 @@ impl OuterTranscript {
         self.sample_buf.pop().expect("SAMPLES_PER_ELEM > 0")
     }
 
-    /// Observe an extension element as its four base limbs (matches
+    /// Observe an extension element as its EXTENSION_DEGREE base limbs (matches
     /// `FiatShamirTranscript::observe_ext`).
     pub fn observe_ext(&mut self, builder: &mut Builder<FC>, value: EmbedExt) {
-        let limbs: [Felt<F>; 4] = core::array::from_fn(|_| builder.uninit());
+        let limbs: [Felt<F>; EXTENSION_DEGREE] = core::array::from_fn(|_| builder.uninit());
         builder.push_op(DslIr::CircuitExt2Felt(limbs, value));
         for f in limbs {
             self.observe(builder, f);
         }
     }
 
-    /// Four samples packed as the extension limbs (matches `FiatShamirTranscript::sample_ext`).
+    /// EXTENSION_DEGREE samples packed as the extension limbs (matches
+    /// `FiatShamirTranscript::sample_ext`).
     pub fn sample_ext(&mut self, builder: &mut Builder<FC>) -> EmbedExt {
-        let a = self.sample(builder);
-        let b = self.sample(builder);
-        let c = self.sample(builder);
-        let d = self.sample(builder);
-        builder.felts2ext(&[a, b, c, d])
+        let limbs: [Felt<F>; EXTENSION_DEGREE] = core::array::from_fn(|_| self.sample(builder));
+        builder.felts2ext(&limbs)
     }
 
     /// Low `nb_bits` of one sample (matches `FiatShamirTranscript::sample_bits`).

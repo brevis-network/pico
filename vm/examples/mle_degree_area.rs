@@ -24,7 +24,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use p3_matrix::Matrix;
-use pico_mle_core::{config::riscv_params_with_100_bits_security, StarkEngine};
+use pico_mle_core::{config::riscv_params_with_128_bits_security, StarkEngine};
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
@@ -52,7 +52,7 @@ fn main() {
 
     // Degrees come from the VK (per-AIR `max_constraint_degree`); they are chip properties, so any
     // ELF gives the same numbers.
-    let engine: Engine = StarkEngine::new(riscv_params_with_100_bits_security(23));
+    let engine: Engine = StarkEngine::new(riscv_params_with_128_bits_security(23));
     let airs = riscv::mle_riscv_air_refs(program.clone(), true);
     let (_, vk) = engine.keygen_with_app_prep(&airs, riscv::RISCV_APP_PREP_AIR_IDS);
     let global = vk.inner.max_constraint_degree();

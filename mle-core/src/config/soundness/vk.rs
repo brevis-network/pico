@@ -216,8 +216,9 @@ mod tests {
     use super::*;
     use crate::{
         config::{
+            compress_params_with_128_bits_security, embed_params_with_128_bits_security,
             koala_bear_poseidon2::{DuplexSponge, KoalaBearPoseidon2Config},
-            recursion_params_with_100_bits_security, riscv_params_with_100_bits_security,
+            recursion_params_with_128_bits_security, riscv_params_with_128_bits_security,
             soundness::{base_field_order, challenge_field_bits},
         },
         engine::koala_bear_poseidon2::KoalaBearPoseidon2RefEngine,
@@ -319,7 +320,8 @@ mod tests {
         let msg = err.to_string();
         assert!(
             msg.starts_with(&format!(
-                "fixture verifying key scores {bits:.2} bits, below the 100-bit production budget"
+                "fixture verifying key scores {bits:.2} bits, below the {}-bit production budget",
+                PRODUCTION_SECURITY_BITS as usize
             )),
             "{msg}"
         );
@@ -328,25 +330,29 @@ mod tests {
             "{msg}"
         );
 
-        let production = keygen(recursion_params_with_100_bits_security());
+        let production = keygen(recursion_params_with_128_bits_security());
         let s = admit_production_vk("fixture", "cpu", &production).unwrap();
         assert!(s.total_bits >= PRODUCTION_SECURITY_BITS);
     }
 
     /// No component scores lower at any admissible GKR depth than at depth 0, on the production
-    /// presets and over the whole range the field bound admits.
+    /// presets (unique decoding and list decoding alike) and over the whole range the field bound
+    /// admits.
     #[test]
     fn worst_case_depth_is_zero() {
         let presets = [
-            riscv_params_with_100_bits_security(23),
-            recursion_params_with_100_bits_security(),
+            riscv_params_with_128_bits_security(23),
+            recursion_params_with_128_bits_security(),
+            compress_params_with_128_bits_security(),
+            embed_params_with_128_bits_security(),
         ];
-        // (max_constraints_per_air, num_airs, num_trace_columns): assumed bounds and measured shapes.
+        // (max_constraints_per_air, num_airs, num_trace_columns): assumed bounds and measured shapes
+        // (riscv and the recursion machines on KoalaBear^5).
         let shapes = [
             (5000, 100, 40_000),
-            (3188, 50, 32_211),
+            (2989, 50, 32_057),
             (1000, 50, 2000),
-            (148, 21, 1277),
+            (170, 21, 1409),
         ];
         for params in &presets {
             let field_bound = 31 - params.l_skip; // ceil(log2 p) - l_skip

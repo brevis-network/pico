@@ -106,6 +106,13 @@ impl AotEmulatorCore {
                 &self.chunk_split_config,
             )
     }
+
+    /// Adds a block's rows on one per-instruction chip (`chunk_split::LEAF_*`); the generated
+    /// code tallies them per block at compile time.
+    #[inline(always)]
+    pub fn add_leaf_rows(&mut self, chip: usize, rows: u32) {
+        self.chunk_split_state.add_leaf_rows(chip, rows);
+    }
 }
 
 #[cfg(test)]
@@ -136,6 +143,7 @@ mod tests {
             event_fast_threshold: 3,
             commit_tail_reserve: 0,
             commit_tail_overrun: 0,
+            leaf_cap: 0,
         };
         emu
     }

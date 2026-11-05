@@ -40,9 +40,10 @@ pico-gpu checkout, pass a `[patch]` on the command line instead of editing `Carg
 - `instances`: the RISC-V and recursion chip-type lists, and the IR and circuit builder that
   recursion programs are written in.
 - `machine`: machine-generic building blocks (chips, lookups, witnesses, emulation reports).
-- `mle`: the MLE machines of every phase (`riscv`, `convert`, `combine`, `embed`, `wrap`), the
-  recursion compiler for them, shape selection, and the verifying-key whitelist (`mle/machine/vk_map.rs`,
-  shipped artifact in `mle/shape_vk_bins/`).
+- `mle`: the MLE machines of every phase (`riscv`, `convert`, `combine`, `compress`, `embed`,
+  `wrap`, in that order: embed re-proves the compress proof), the recursion compiler for them,
+  shape selection, and the verifying-key whitelist (`mle/machine/vk_map.rs`, shipped artifact in
+  `mle/shape_vk_bins/`).
 - `configs`: field and STARK configurations.
 - `primitives`: constants and types shared across the crate.
 - `proverchain`: the snapshot-based RISC-V emulation pipeline.

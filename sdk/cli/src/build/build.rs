@@ -68,6 +68,7 @@ pub fn build_program(args: &BuildArgs, program_dir: Option<PathBuf>) -> Result<P
     execute_command(build_command)?;
     println!("Build directory: {:?}", build_dir.display());
     println!("Found binary file: {:?}", binary_file.display());
+    super::memory_functions::check_memory_functions(&binary_file)?;
 
     let output_dir = program_dir.join(&args.output_directory);
     println!("Copying binary file to {:?}", output_dir);

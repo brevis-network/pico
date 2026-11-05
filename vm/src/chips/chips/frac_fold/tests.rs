@@ -7,6 +7,7 @@ use crate::{
     },
     emulator::recursion::emulator::RecursionRecord,
     machine::chip::ChipBehavior,
+    primitives::consts::EXTENSION_DEGREE,
 };
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
@@ -15,7 +16,7 @@ use p3_matrix::Matrix;
 type F = KoalaBear;
 
 fn make_block(v0: u32) -> Block<F> {
-    Block([F::from_u32(v0), F::ZERO, F::ZERO, F::ZERO])
+    Block::from(F::from_u32(v0))
 }
 
 #[test]
@@ -104,13 +105,14 @@ fn test_frac_fold_trace_values() {
     let trace = chip.generate_main(&record, &mut output);
 
     let row = trace.row_slice(0).unwrap();
-    // Columns: [p1(4), q1(4), p2(4), q2(4), out_p(4), out_q(4)]
+    // Columns: [p1, q1, p2, q2, out_p, out_q], each a Block of E = EXTENSION_DEGREE lanes
+    const E: usize = EXTENSION_DEGREE;
     assert_eq!(row[0], F::from_u32(3)); // p1[0]
-    assert_eq!(row[4], F::from_u32(7)); // q1[0]
-    assert_eq!(row[8], F::from_u32(5)); // p2[0]
-    assert_eq!(row[12], F::from_u32(2)); // q2[0]
-    assert_eq!(row[16], F::from_u32(41)); // out_p[0]
-    assert_eq!(row[20], F::from_u32(14)); // out_q[0]
+    assert_eq!(row[E], F::from_u32(7)); // q1[0]
+    assert_eq!(row[2 * E], F::from_u32(5)); // p2[0]
+    assert_eq!(row[3 * E], F::from_u32(2)); // q2[0]
+    assert_eq!(row[4 * E], F::from_u32(41)); // out_p[0]
+    assert_eq!(row[5 * E], F::from_u32(14)); // out_q[0]
 }
 
 /// GPU trace-gen must be element-wise identical to the CPU path, including padding rows.
@@ -140,6 +142,7 @@ mod gpu {
             F::from_u32(base.wrapping_add(1)),
             F::from_u32(base.wrapping_add(2)),
             F::from_u32(base.wrapping_add(3)),
+            F::from_u32(base.wrapping_add(4)),
         ])
     }
 

@@ -10,10 +10,10 @@ use crate::{
     primitives::consts::EXTENSION_DEGREE,
 };
 use p3_air::{Air, AirBuilder, WindowAccess};
-use p3_field::{extension::BinomiallyExtendable, Field};
+use p3_field::{extension::QuinticTrinomialExtendable, Field};
 use std::borrow::Borrow;
 
-impl<F: Field + BinomiallyExtendable<EXTENSION_DEGREE>, CB> Air<CB> for BinaryFoldStepChip<F>
+impl<F: Field + QuinticTrinomialExtendable, CB> Air<CB> for BinaryFoldStepChip<F>
 where
     CB: ChipBuilder<F>,
 {

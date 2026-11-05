@@ -13,15 +13,14 @@ mod tests {
         stream::device_synchronize,
     };
     use mle_core::prover::fractional_sumcheck_gkr::Frac;
-    use p3_field::{
-        extension::BinomialExtensionField, BasedVectorSpace, Field, PrimeCharacteristicRing,
-        PrimeField32,
-    };
+    use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField32};
     use p3_koala_bear::KoalaBear;
     use test_case::test_case;
 
     type KbF = KoalaBear;
-    type KbEF = BinomialExtensionField<KoalaBear, 4>;
+    /// The challenge extension the kernels are built for. Follows `mle_core`'s `EF` rather than
+    /// naming a degree, so these tests check whatever field the build proves over.
+    type KbEF = EF;
     type KbFrac = Frac<KbEF>;
 
     use crate::prelude::EF;
@@ -29,13 +28,39 @@ mod tests {
     fn kbf(v: u32) -> KbF {
         KbF::from_u32(v)
     }
+    /// An extension element from its four lowest coefficients; any higher coefficient is zero.
+    ///
+    /// The fallback arm is deliberately zero. It used to repeat `d`, which was harmless at degree
+    /// 4 and silently turns `kbef(0, 0, 0, 1)` = X³ into X³ + X⁴ at degree 5. Use [`kbef_full`]
+    /// where every coefficient should be exercised.
     fn kbef(a: u32, b: u32, c: u32, d: u32) -> KbEF {
         KbEF::from_basis_coefficients_fn(|i| match i {
             0 => kbf(a),
             1 => kbf(b),
             2 => kbf(c),
-            _ => kbf(d),
+            3 => kbf(d),
+            _ => kbf(0),
         })
+    }
+
+    /// An extension element with every coefficient set, for differential tests that should
+    /// exercise the whole representation -- in particular the top coefficient, where a reduction
+    /// bug shows first.
+    fn kbef_full(coeffs: impl Fn(usize) -> u32) -> KbEF {
+        KbEF::from_basis_coefficients_fn(|i| kbf(coeffs(i)))
+    }
+
+    /// An extension element from raw Montgomery limbs, one per coefficient, without canonical
+    /// conversion. Built per limb so it compiles at any degree; the length must match.
+    fn kbef_raw(limbs: &[u32]) -> KbEF {
+        assert_eq!(limbs.len(), <KbEF as BasedVectorSpace<KbF>>::DIMENSION);
+        KbEF::from_basis_coefficients_fn(|i| unsafe { transmute::<u32, KbF>(limbs[i]) })
+    }
+
+    /// X^k as an extension element, for reduction-identity tests.
+    fn kb_x_pow(k: usize) -> KbEF {
+        let x = KbEF::from_basis_coefficients_fn(|i| if i == 1 { kbf(1) } else { kbf(0) });
+        (0..k).fold(KbEF::ONE, |acc, _| acc * x)
     }
     fn kbfrac(p: KbEF, q: KbEF) -> KbFrac {
         Frac { p, q }
@@ -150,26 +175,42 @@ mod tests {
         println!("PASS: frac_add_full_ef");
     }
 
-    /// BETA test: x^4 = 3 in KB^4.
+    /// Reduction identities: every `X^i * X^j` with `i, j < D`, against the CPU field.
+    ///
+    /// Degree-generic on purpose. At degree 4 the products that cross the boundary exercise
+    /// `X^4 = 3`; at degree 5 they exercise `X^5 = 1 - X^2` and its consequences up to `X^8`, which
+    /// is exactly where a hand-written trinomial reduction goes wrong. The all-ones and all-`p-1`
+    /// elements mix every cross term at once.
     #[test]
-    fn test_ef_mul_beta() {
-        let pairs = [
-            (kbef(0, 1, 0, 0), kbef(0, 0, 0, 1)), // x * x^3 = 3
-            (kbef(0, 0, 1, 0), kbef(0, 0, 1, 0)), // x^2 * x^2 = 3
-            (kbef(0, 0, 0, 1), kbef(0, 0, 0, 1)), // x^3 * x^3 = 3x^2
-            (kbef(1, 1, 1, 1), kbef(1, 1, 1, 1)),
-        ];
-        for (i, (b, d)) in pairs.iter().enumerate() {
-            let cpu_bd = *b * *d;
-            let got = gpu_frac_add_2(kbfrac(KbEF::ZERO, *b), kbfrac(KbEF::ZERO, *d));
+    fn test_ef_mul_reduction_identities() {
+        let d = <KbEF as BasedVectorSpace<KbF>>::DIMENSION;
+        let p = <KbF as PrimeField32>::ORDER_U32;
+        let mut pairs: Vec<(String, KbEF, KbEF)> = Vec::new();
+        for i in 0..d {
+            for j in 0..d {
+                pairs.push((format!("X^{i} * X^{j}"), kb_x_pow(i), kb_x_pow(j)));
+            }
+        }
+        pairs.push(("ones * ones".into(), kbef_full(|_| 1), kbef_full(|_| 1)));
+        pairs.push((
+            "(p-1) * (p-1)".into(),
+            kbef_full(|_| p - 1),
+            kbef_full(|_| p - 1),
+        ));
+        for (label, b, c) in &pairs {
+            let cpu = *b * *c;
+            let got = gpu_frac_add_2(kbfrac(KbEF::ZERO, *b), kbfrac(KbEF::ZERO, *c));
             assert!(
-                ef_eq(&got.q, &cpu_bd),
-                "ef_mul_beta[{i}]:\n  gpu={:?}\n  cpu={:?}",
+                ef_eq(&got.q, &cpu),
+                "{label}:\n  gpu={:?}\n  cpu={:?}",
                 got.q,
-                cpu_bd
+                cpu
             );
         }
-        println!("PASS: test_ef_mul_beta");
+        println!(
+            "PASS: test_ef_mul_reduction_identities ({} pairs, D = {d})",
+            pairs.len()
+        );
     }
 
     /// Stress test: N×N frac_add.
@@ -186,6 +227,17 @@ mod tests {
             kbef(p - 1, p - 1, p - 1, p - 1),
             kbef(0x69000000, 0x46000000, 0x60000000, 0x6b000000),
             kbef(0x05000000, 0x01000000, 0x7e000000, 0x3f000000),
+            // Every coefficient set, so the top one (and the reduction it feeds) is exercised at
+            // whatever degree the build uses; the four-coefficient values above leave it zero.
+            kbef_full(|i| 0x1234_5678u32.wrapping_mul(i as u32 + 1) % p),
+            kbef_full(|i| p - 1 - i as u32),
+            kbef_full(|i| {
+                if i + 1 == <KbEF as BasedVectorSpace<KbF>>::DIMENSION {
+                    1
+                } else {
+                    0
+                }
+            }),
         ];
         let n = vals.len();
         let mut fail = 0;
@@ -883,7 +935,7 @@ mod tests {
     /// points where the grid gains a block. Oracle: independent host fold.
     #[test]
     fn test_eval_poly_ext_at_point_kb_matches_cpu() {
-        use crate::prelude::F;
+        use crate::prelude::{D_EF, F};
 
         for &len in &[
             1usize,
@@ -898,8 +950,9 @@ mod tests {
             1 << 20,
         ] {
             // Deterministic pseudo-random base coeffs, column-major: base[j * len + i] is the
-            // j-th base coordinate of extension coefficient i.
-            let base: Vec<KbF> = (0..4 * len)
+            // j-th base coordinate of extension coefficient i, so there are D_EF * len of them.
+            // (This was `4 * len`, which at degree 5 read past the end below.)
+            let base: Vec<KbF> = (0..D_EF * len)
                 .map(|i| {
                     kbf((i as u32)
                         .wrapping_mul(0x9E37_79B9)
@@ -907,7 +960,10 @@ mod tests {
                         >> 4)
                 })
                 .collect();
-            let x = kbef(0x69000000, 0x46000000, 0x38000000, 0x5a000000);
+            // Every coefficient of the evaluation point set, so Horner multiplies through the
+            // whole representation, top coefficient included.
+            let x =
+                kbef_full(|j| [0x69000000, 0x46000000, 0x38000000, 0x5a000000, 0x21000000][j % 5]);
 
             // Independent CPU oracle: Horner over the assembled KbEF coefficients.
             let mut expected = KbEF::ZERO;
@@ -1023,6 +1079,76 @@ mod tests {
         println!("GPU multi-row hash: {:?}", gpu_hash);
         println!("CPU multi-row hash: {:?}", cpu_hash);
         assert_eq!(gpu_hash, cpu_hash, "GPU KB Merkle multi-row hash ≠ CPU!");
+    }
+
+    /// Row-hash leaves at widths either side of the sponge rate (8), against the CPU hasher.
+    ///
+    /// The Poseidon2 leaf kernel's rate-8 alignment needed checking for 5-felt extension elements,
+    /// since 5 does not divide 8. Leaf preimages are base-field rows
+    /// (WHIR transposes its EF codeword to `d_ef` base columns), so the question is whether rows
+    /// of 5, 10, 20 felts -- one, two, four quintic elements -- hash as the CPU does, with
+    /// `2^k` rows per leaf. Widths are explicit, so this checks degree 5's shapes on any build.
+    #[test]
+    fn test_kb_row_hash_widths_across_rate_boundary() {
+        use mle_core::{
+            config::koala_bear_poseidon2::{Digest as KbDigest, DuplexSponge as KbDuplexSponge},
+            engine::koala_bear_poseidon2::KoalaBearPoseidon2RefEngine,
+            hasher::MerkleHasher,
+            test_utils::test_system_params_small,
+            StarkEngine, StarkProtocolConfig,
+        };
+
+        use crate::cuda::merkle_tree_kb::kb_poseidon2_compressing_row_hashes;
+
+        let params = test_system_params_small(0, 8, 3);
+        let cpu_engine = KoalaBearPoseidon2RefEngine::<KbDuplexSponge>::new(params);
+        let hasher = cpu_engine.config().hasher();
+        let value =
+            |row: usize, col: usize| kbf(((row * 1009 + col * 7919 + 13) % 0x7f00_0000) as u32);
+
+        let mut cases = 0;
+        for width in [1usize, 4, 5, 7, 8, 9, 10, 13, 15, 16, 20] {
+            for query_stride in [1usize, 3] {
+                for log_rows in 0..=3usize {
+                    let height = query_stride << log_rows;
+                    let col_major: Vec<KbF> = (0..width)
+                        .flat_map(|c| (0..height).map(move |r| value(r, c)))
+                        .collect();
+                    let d_in: DeviceBuffer<KbF> = col_major.to_device().unwrap();
+                    let mut d_out: DeviceBuffer<KbDigest> =
+                        DeviceBuffer::with_capacity(query_stride);
+                    unsafe {
+                        kb_poseidon2_compressing_row_hashes(
+                            &mut d_out,
+                            &d_in,
+                            width,
+                            query_stride,
+                            log_rows,
+                        )
+                        .unwrap();
+                    }
+                    device_synchronize().unwrap();
+                    let gpu = d_out.to_host().unwrap();
+
+                    for (s, got) in gpu.iter().enumerate() {
+                        let rows: Vec<KbDigest> = (0..1usize << log_rows)
+                            .map(|t| {
+                                let r = s + t * query_stride;
+                                let row: Vec<KbF> = (0..width).map(|c| value(r, c)).collect();
+                                hasher.hash_slice(&row)
+                            })
+                            .collect();
+                        let want = hasher.tree_compress(rows);
+                        assert_eq!(
+                            *got, want,
+                            "width={width} query_stride={query_stride} log_rows={log_rows} leaf={s}"
+                        );
+                    }
+                    cases += 1;
+                }
+            }
+        }
+        println!("PASS: row-hash leaves at {cases} width / stride / rows-per-leaf shapes");
     }
 
     /// Test GPU compress_layer (Merkle internal node) vs CPU compress.
@@ -2553,17 +2679,22 @@ mod tests {
     fn test_kb_revert_pos97_raw() {
         use p3_field::Field;
 
+        // These are raw limbs captured from a degree-4 run, pinning a degree-4 kernel bug. They
+        // have no meaning in another extension field, so the regression is exact at degree 4 and
+        // skipped -- loudly -- at any other.
+        let d = <KbEF as BasedVectorSpace<KbF>>::DIMENSION;
+        if d != 4 {
+            eprintln!("SKIP test_kb_revert_pos97_raw: raw KoalaBear^4 regression inputs, D = {d}");
+            return;
+        }
+
         use crate::cuda::logup_zerocheck_kb::frac_build_tree_layer_kb;
 
         // Raw Montgomery limbs [p0,p1,p2,p3] / [q0,q1,q2,q3] from REVERT_VERIFY pos=97.
-        let lhs_p: KbEF =
-            unsafe { std::mem::transmute([472618184u32, 269099326, 563115096, 332220818]) };
-        let lhs_q: KbEF =
-            unsafe { std::mem::transmute([1687543697u32, 1605507836, 210083737, 1711283370]) };
-        let rhs_p: KbEF =
-            unsafe { std::mem::transmute([935829560u32, 572489651, 1547586897, 46496679]) };
-        let rhs_q: KbEF =
-            unsafe { std::mem::transmute([645618738u32, 2130129774, 985239812, 1973918561]) };
+        let lhs_p: KbEF = kbef_raw(&[472618184, 269099326, 563115096, 332220818]);
+        let lhs_q: KbEF = kbef_raw(&[1687543697, 1605507836, 210083737, 1711283370]);
+        let rhs_p: KbEF = kbef_raw(&[935829560, 572489651, 1547586897, 46496679]);
+        let rhs_q: KbEF = kbef_raw(&[645618738, 2130129774, 985239812, 1973918561]);
 
         let lhs = kbfrac(lhs_p, lhs_q);
         let rhs = kbfrac(rhs_p, rhs_q);
@@ -2573,8 +2704,7 @@ mod tests {
         let gt_q0 = lhs_q * rinv;
         let gt_p0 = (lhs_p - gt_q0 * rhs_p) * rinv;
         // sanity: this is the value REVERT_VERIFY reported as CPU
-        let cpu_q0_expected: KbEF =
-            unsafe { std::mem::transmute([1927670865u32, 1972859424, 1813003609, 1353536263]) };
+        let cpu_q0_expected: KbEF = kbef_raw(&[1927670865, 1972859424, 1813003609, 1353536263]);
         eprintln!(
             "p3 gt_q0 == REVERT_VERIFY CPU q0? {}",
             gt_q0 == cpu_q0_expected
@@ -2589,8 +2719,7 @@ mod tests {
         device_synchronize().unwrap();
         let recovered = d.to_host().unwrap()[0];
 
-        let gpu_fused_q0: KbEF =
-            unsafe { std::mem::transmute([1257436452u32, 203941406, 837806828, 941554189]) };
+        let gpu_fused_q0: KbEF = kbef_raw(&[1257436452, 203941406, 837806828, 941554189]);
         eprintln!("p3 gt:           p0={:?} q0={:?}", gt_p0, gt_q0);
         eprintln!("standalone GPU:  p0={:?} q0={:?}", recovered.p, recovered.q);
         eprintln!("fused GPU (bad): q0={:?}", gpu_fused_q0);

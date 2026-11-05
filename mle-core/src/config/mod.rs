@@ -3,7 +3,7 @@ use p3_koala_bear::KoalaBear;
 
 use crate::{
     config::{
-        log_up_params::log_up_security_params_koala_bear_100_bits, soundness::SoundnessCalculator,
+        log_up_params::log_up_security_params_koala_bear_128_bits, soundness::SoundnessCalculator,
     },
     interaction::LogUpSecurityParameters,
 };
@@ -21,7 +21,7 @@ pub mod multi_field_packing;
 /// Round-by-round soundness calculator (`SoundnessCalculator`) for the MLE proof system.
 pub mod soundness;
 
-/// STARK config where the base field is KoalaBear, extension field is KoalaBear^4, and the hasher
+/// STARK config where the base field is KoalaBear, extension field is KoalaBear^5, and the hasher
 /// is `Poseidon2<KoalaBear>`.
 pub mod koala_bear_poseidon2;
 pub mod log_up_params;
@@ -29,13 +29,13 @@ pub mod log_up_params;
 // ==========================================================================
 // Production configurations
 // ==========================================================================
-// These configurations target 100-bits of proven round-by-round (RBR) security with KoalaBear as
-// the base field and KoalaBear^4 as the extension field.
+// These configurations target 128 bits of proven round-by-round (RBR) security with KoalaBear as
+// the base field and KoalaBear^5 as the extension field.
 
 const WHIR_MAX_LOG_FINAL_POLY_LEN: usize = 10;
-const SECURITY_BITS_TARGET: usize = 100;
+const SECURITY_BITS_TARGET: usize = 128;
 
-/// LogUp grinding sufficient for 100-bit security, accounting for the PCS list-size union bound of
+/// LogUp grinding sufficient for 128-bit security, accounting for the PCS list-size union bound of
 /// the initial WHIR proximity regime (`log2_pcs_list_size` is 0 for unique decoding).
 ///
 /// The list size depends only on the *initial* WHIR round's proximity regime, rate, and degree, so
@@ -48,15 +48,30 @@ fn log_up_params_for_whir(
     log_blowup: usize,
     w_stack: usize,
 ) -> LogUpSecurityParameters {
-    let log2_pcs_list_size = SoundnessCalculator::whir_proximity_gap_security(
+    log_up_security_params_koala_bear_128_bits(initial_round_log2_list_size(
+        proximity,
+        log_stacked_height,
+        log_blowup,
+        w_stack,
+    ))
+}
+
+/// `log2(L_PCS)` of the initial WHIR round: the list-size charge `log_up_params_for_whir` passes
+/// on; zero under unique decoding.
+fn initial_round_log2_list_size(
+    proximity: WhirProximityStrategy,
+    log_stacked_height: usize,
+    log_blowup: usize,
+    w_stack: usize,
+) -> f64 {
+    SoundnessCalculator::whir_proximity_gap_security(
         proximity.initial_round(),
         soundness::challenge_field_bits::<koala_bear_poseidon2::KoalaBearPoseidon2Config>(),
         log_stacked_height,
         log_blowup,
         w_stack,
     )
-    .log2_list_size;
-    log_up_security_params_koala_bear_100_bits(log2_pcs_list_size)
+    .log2_list_size
 }
 
 pub const DEFAULT_RISCV_L_SKIP: usize = 4;
@@ -81,9 +96,9 @@ pub const RISCV_MAX_CONSTRAINT_DEGREE: usize = 3;
 /// `BinaryFoldStepChip` carry degree-4 constraints.
 pub const RECURSION_MAX_CONSTRAINT_DEGREE: usize = 4;
 
-/// Returns `SystemParams` targeting 100 bits of proven RBR security for the riscv machine.
+/// Returns `SystemParams` targeting 128 bits of proven RBR security for the riscv machine.
 ///
-/// # Assumptions for 100-bit security
+/// # Assumptions for 128-bit security
 /// - **Max trace height**: `log_stacked_height` ≤ [`MAX_RISCV_LOG_STACKED_HEIGHT`] (23): with
 ///   `log_blowup = 1` the RS domain is `2^(log_stacked_height + 1)`, and KoalaBear's two-adicity
 ///   is 24.
@@ -97,16 +112,16 @@ pub const RECURSION_MAX_CONSTRAINT_DEGREE: usize = 4;
 /// Checked by `tests/soundness.rs` at every height this preset admits, at these bounds and at the
 /// measured shape of the riscv machine.
 ///
-/// Panics with the [`ParamsError`] that [`try_riscv_params_with_100_bits_security`] returns.
-pub fn riscv_params_with_100_bits_security(log_stacked_height: usize) -> SystemParams {
-    try_riscv_params_with_100_bits_security(log_stacked_height)
+/// Panics with the [`ParamsError`] that [`try_riscv_params_with_128_bits_security`] returns.
+pub fn riscv_params_with_128_bits_security(log_stacked_height: usize) -> SystemParams {
+    try_riscv_params_with_128_bits_security(log_stacked_height)
         .unwrap_or_else(|err| panic!("{err}"))
 }
 
-/// [`riscv_params_with_100_bits_security`], refusing a height above
+/// [`riscv_params_with_128_bits_security`], refusing a height above
 /// [`MAX_RISCV_LOG_STACKED_HEIGHT`], or one at or below `WHIR_MAX_LOG_FINAL_POLY_LEN` (10), which
 /// leaves no WHIR round. The way to vet a riscv height: it makes every check the preset makes.
-pub fn try_riscv_params_with_100_bits_security(
+pub fn try_riscv_params_with_128_bits_security(
     log_stacked_height: usize,
 ) -> Result<SystemParams, ParamsError> {
     check_rs_domain::<KoalaBear>(log_stacked_height, DEFAULT_RISCV_LOG_BLOWUP)?;
@@ -145,57 +160,66 @@ fn check_whir_round(log_stacked_height: usize) -> Result<(), ParamsError> {
     Ok(())
 }
 
-/// Default `log_blowup` for the compress layer (higher than app to reduce WHIR query count).
-pub const DEFAULT_COMPRESS_LOG_BLOWUP: usize = 2;
-
-/// Returns `SystemParams` for the compress layer targeting 100 bits of proven RBR security.
+/// Returns `SystemParams` for the compress layer targeting 128 bits of proven RBR security.
 ///
-/// Uses `log_blowup=2` (vs `riscv_params` which uses 1) to reduce WHIR query count while
-/// maintaining the same security level. Re-proves a single combine proof into a smaller proof.
-/// The RS domain is `2^(log_stacked_height + 2)`, so KoalaBear holds heights up to 22.
+/// The compress layer is the final compression layer: a complete combine root re-proved 1:1 by the
+/// recursion chip set under the inner KoalaBear-Poseidon2 config, into the one proof that is
+/// handed out (the ≤ 300 KiB basis), which embed re-proves for the on-chain path. Its parameters
+/// are the embed preset's, value for value, and the two are separate functions, since they are
+/// tuned for different costs — compress for proof size, embed for the Groth16 circuit's cost per
+/// WHIR query. Keeping embed's values equal to these is a choice (the wrap circuit over them is
+/// 7,243,820 R1CS, 13.6% under 2^23), not a necessity: `compress_and_embed_params_agree_today` in
+/// `tests/soundness.rs` pins it while it holds.
 ///
-/// Panics with the [`ParamsError`] that [`try_compress_params_with_100_bits_security`] returns.
-pub fn compress_params_with_100_bits_security(log_stacked_height: usize) -> SystemParams {
-    try_compress_params_with_100_bits_security(log_stacked_height)
-        .unwrap_or_else(|err| panic!("{err}"))
-}
-
-/// [`compress_params_with_100_bits_security`], refusing a height whose RS domain KoalaBear cannot
-/// hold, or one that leaves no WHIR round.
-pub fn try_compress_params_with_100_bits_security(
-    log_stacked_height: usize,
-) -> Result<SystemParams, ParamsError> {
-    check_rs_domain::<KoalaBear>(log_stacked_height, DEFAULT_COMPRESS_LOG_BLOWUP)?;
-    check_whir_round(log_stacked_height)?;
-    admit_koala_bear(SystemParams::try_new(
-        DEFAULT_COMPRESS_LOG_BLOWUP,
+/// # Assumptions for 128-bit security
+/// Those of [`embed_params_with_128_bits_security`]: height ≤ 2^20, ≤ 1,000 constraints and ≤ 100
+/// interactions per AIR, ≤ 21 AIRs, ≤ 2,000 columns, `w_stack` 64. Measured: 21 AIRs / 170
+/// constraints / 34 interactions / 1409 columns, 128.05 bits. In dev mode (whitelist off) the
+/// heights are the program's natural heights over the root it is given, so the size follows the
+/// input: stacked width 20 + 5 (main + preprocessed) = 25 and 299,179 bytes = 292.17 KiB with
+/// `--step compress` on reth 18884864 (and on reth 24600825 when the layer was introduced);
+/// fib-10's smaller root gives 15 + 5 = 20 and 278,279 bytes. In whitelist mode the heights are the
+/// compress tier row's (`MLE_RECURSION_COMPRESS_LOG_HEIGHTS`), the program's natural heights over
+/// the one combine-tier root layout, the largest a root takes, so every proof has the largest
+/// dev-mode shape: stacked width 20 + 5 = 25 against `w_stack` 64, 299,179 bytes, 128.05 bits,
+/// measured under a self-built whitelist on fib-10 and reth 18884864 / 24600825 and under the
+/// shipped artifact. (Before compress had its own row, it padded to the embed row of the time:
+/// stacked width 52, 403.85 KiB. The row decides the whitelist-mode size.)
+///
+/// Config: `l_skip=4, n_stack=16, log_blowup=4`, `ListDecoding { m: 2 }`, fold PoW 16, μ PoW 18,
+/// queries [65, 34, 24]; the reasoning behind each value is in the embed preset's doc.
+pub fn compress_params_with_128_bits_security() -> SystemParams {
+    const COMPRESS_PROXIMITY: WhirProximityStrategy = WhirProximityStrategy::ListDecoding { m: 2 };
+    admit_koala_bear(SystemParams::new(
+        DEFAULT_ROOT_LOG_BLOWUP,
         DEFAULT_RISCV_L_SKIP,
-        log_stacked_height - DEFAULT_RISCV_L_SKIP,
-        2048,
+        16, // n_stack → log_stacked_height 20
+        64, // w_stack (measured compress stacked width 25: whitelist mode, the dev-mode maximum)
         WHIR_MAX_LOG_FINAL_POLY_LEN,
-        5,  // folding pow
-        15, // mu pow
-        WhirProximityStrategy::UniqueDecoding,
+        16, // folding pow
+        18, // mu pow
+        COMPRESS_PROXIMITY,
         SECURITY_BITS_TARGET,
         log_up_params_for_whir(
-            WhirProximityStrategy::UniqueDecoding,
-            log_stacked_height,
-            DEFAULT_COMPRESS_LOG_BLOWUP,
-            2048,
+            COMPRESS_PROXIMITY,
+            DEFAULT_RISCV_L_SKIP + 16,
+            DEFAULT_ROOT_LOG_BLOWUP,
+            64,
         ),
         RECURSION_MAX_CONSTRAINT_DEGREE,
-    )?)
+    ))
+    .unwrap_or_else(|err| panic!("{err}"))
 }
 
-/// Returns `SystemParams` for the embed layer targeting 100 bits of proven RBR security.
+/// Returns `SystemParams` for the embed layer targeting 128 bits of proven RBR security.
 ///
-/// The embed layer re-proves a complete recursion root under the outer (BN254-hashed) config so an
+/// The embed layer re-proves the compress proof under the outer (BN254-hashed) config so an
 /// on-chain gnark circuit can verify it with native BN254 permutations. Only the hash and the
 /// transcript change there, so these are ordinary KoalaBear STARK parameters; what makes them their
 /// own preset is that the *verifier* is a Groth16 circuit, and every WHIR query it checks costs
 /// R1CS constraints.
 ///
-/// # Assumptions for 100-bit security
+/// # Assumptions for 128-bit security
 /// - **Max trace height**: ≤ 2^20 (= `l_skip + n_stack`)
 /// - **Max constraints per AIR**: ≤ 1,000
 /// - **Num AIRs**: ≤ 21 (the recursion chip set)
@@ -205,36 +229,50 @@ pub fn try_compress_params_with_100_bits_security(
 ///
 /// Config: `l_skip=4, n_stack=16, log_blowup=4` — the RS domain is `4+16+4 = 24`, exactly
 /// KoalaBear's two-adicity, so this is the largest blowup (hence the fewest WHIR queries) the field
-/// allows at this stacked height. Measured over a real combine root: tallest chip 2^16 (16×
-/// headroom) and stacked `Σw = 17` against `w_stack = 64` (3.8×).
+/// allows at this stacked height. Measured in dev mode over the compress proof of fib-10:
+/// tallest chip 2^16 (16× headroom) and stacked width 8 + 3 (main + preprocessed) = 11 against
+/// `w_stack = 64`, proof 239,319 bytes = 233.71 KiB; in whitelist mode the heights are the embed
+/// tier row's (`MLE_RECURSION_EMBED_LOG_HEIGHTS`), the natural heights of the embed program over
+/// the compress proof's layout, measured by the tier probe: tallest chip 2^16 (ExtAlu);
+/// `--step wrap` (through embed) under the shipped artifact measured the same on fib-10 and reth
+/// 18884864: stacked width 11, 239,319 bytes. (When embed re-proved the combine root, it had the
+/// compress proof's shape: stacked width 25 and 299,179 bytes in whitelist mode.)
 ///
-/// # Why ListDecoding { m: 1 }
+/// # Why ListDecoding { m: 2 }
 ///
-/// The list-decoding regime cuts the WHIR query count from 250 (UniqueDecoding) to 104, and the
-/// wrap circuit's permutation count with it. The [`soundness`] calculator charges the list size in
-/// the fold error, uses the *next* round's list size for the OOD/shift terms and charges `L_PCS` as
-/// a penalty rather than a bonus, so its verdict is a soundness claim in this regime too.
+/// List decoding cuts the WHIR query count against unique decoding, and the wrap circuit's
+/// permutation count with it. At the 128-bit target over KoalaBear^5 `m = 2`
+/// solves to [65, 34, 24] queries at `l_skip=4, n_stack=16, log_blowup=4`, fold PoW 16, μ PoW 18;
+/// `m = 1` needs more queries ([77, 38, 25]); `m ≥ 3` would need fewer still, but its fold term
+/// falls below the target at fold PoW 16 (`m = 3`: 126.49 bits), so `m = 2` is the largest list
+/// size this shape admits. The [`soundness`] calculator charges the list size in the fold
+/// error, uses the *next* round's list size for the OOD/shift terms and charges `L_PCS` as a
+/// penalty rather than a bonus, so its verdict is a soundness claim in this regime too.
 ///
-/// Measured with this calculator at the assumptions above: `log2(L_PCS) = 2.585`,
-/// LogUp grinding derived to 18 bits, total **100.38 bits**, binding term LogUp (WHIR is at
-/// 100.66: query/shift 100.66, OOD 100.78, fold 101.61). `m = 2` at this shape reaches only 97.93
-/// and is therefore not usable. See `embed_preset_meets_100_bits_at_assumed_bounds` in
+/// Scored with this calculator at the assumptions above: LogUp grinding at the wired 18-bit floor
+/// (the derivation needs 16 bits at this list size, see `log_up_params.rs`), LogUp 130.63 bits,
+/// total **128.05 bits**, binding term WHIR query / shift (128.05; proximity gaps and fold 128.92,
+/// OOD 130.30, μ batching 130.94). See
+/// `embed_preset_meets_128_bits_at_assumed_bounds` and `embed_components_are_pinned` in
 /// `tests/soundness.rs`.
 ///
-/// Reducing `n_stack` to buy a shorter WHIR schedule is a false economy and was measured: it raises
-/// the stacked width, and the initial WHIR round opens `2^k` rows of `Σw` felts per query, so the
-/// leaf hashing grows faster than the query count falls (`n=16/blowup=4` → ~5.7k circuit
-/// permutations; `n=14/blowup=6/w=128` → ~8.3k despite 163 queries instead of 250).
-pub fn embed_params_with_100_bits_security() -> SystemParams {
-    const EMBED_PROXIMITY: WhirProximityStrategy = WhirProximityStrategy::ListDecoding { m: 1 };
+/// Reducing `n_stack` to buy a shorter WHIR schedule was measured to be a false economy, on the
+/// program over a combine root (when embed re-proved the root; worth measuring again over the
+/// smaller program): it
+/// raises the stacked width, and the initial WHIR round opens `2^k` rows of `Σw` felts per query,
+/// so the leaf hashing grows faster than the query count falls (100-bit unique-decoding figures:
+/// `n=16/blowup=4` → ~5.7k circuit permutations, `n=14/blowup=6/w=128` → ~8.3k despite 163 queries
+/// instead of 250).
+pub fn embed_params_with_128_bits_security() -> SystemParams {
+    const EMBED_PROXIMITY: WhirProximityStrategy = WhirProximityStrategy::ListDecoding { m: 2 };
     admit_koala_bear(SystemParams::new(
         DEFAULT_ROOT_LOG_BLOWUP,
         DEFAULT_RISCV_L_SKIP,
         16, // n_stack → log_stacked_height 20
-        64, // w_stack (measured embed Σw = 17)
+        64, // w_stack (measured embed stacked width 11 over the compress proof)
         WHIR_MAX_LOG_FINAL_POLY_LEN,
-        16, // folding pow (LD{m:1} retune)
-        18, // mu pow (LD{m:1} retune)
+        16, // folding pow
+        18, // mu pow
         EMBED_PROXIMITY,
         SECURITY_BITS_TARGET,
         log_up_params_for_whir(
@@ -248,10 +286,10 @@ pub fn embed_params_with_100_bits_security() -> SystemParams {
     .unwrap_or_else(|err| panic!("{err}"))
 }
 
-/// Returns `SystemParams` targeting 100 bits of proven RBR security for the recursion machines
-/// (convert and combine, and the CPU-side root verification).
+/// Returns `SystemParams` targeting 128 bits of proven RBR security for the recursion machines
+/// (convert, combine and deferred, and the CPU-side root verification).
 ///
-/// # Assumptions for 100-bit security
+/// # Assumptions for 128-bit security
 /// - **Max trace height**: ≤ 2^21
 /// - **Max constraints per AIR**: ≤ 1,000
 /// - **Num AIRs**: ≤ 50
@@ -263,9 +301,9 @@ pub fn embed_params_with_100_bits_security() -> SystemParams {
 ///
 /// Config: `l_skip=4, n_stack=17, log_blowup=2`.
 ///
-/// Checked by `tests/soundness.rs` at these bounds and at the measured shape of the convert and
-/// combine machines.
-pub fn recursion_params_with_100_bits_security() -> SystemParams {
+/// Checked by `tests/soundness.rs` at these bounds and at the measured shape of the convert,
+/// combine and deferred machines.
+pub fn recursion_params_with_128_bits_security() -> SystemParams {
     const L_SKIP: usize = 4;
     const N_STACK: usize = 17;
     const W_STACK: usize = 2048;
@@ -307,8 +345,8 @@ pub fn base_field_order() -> f64 {
     soundness::base_field_order::<koala_bear_poseidon2::KoalaBearPoseidon2Config>()
 }
 
-/// Number of bits in the challenge field `KoalaBear^4` for the production config (`4 · log2 p`,
-/// about 123.95).
+/// Number of bits in the challenge field `KoalaBear^5` for the production config (`5 · log2 p`,
+/// about 154.94).
 pub fn challenge_field_bits() -> f64 {
     soundness::challenge_field_bits::<koala_bear_poseidon2::KoalaBearPoseidon2Config>()
 }
@@ -335,24 +373,49 @@ mod tests {
         }
         for log_stacked_height in WHIR_MAX_LOG_FINAL_POLY_LEN + 1..=MAX_RISCV_LOG_STACKED_HEIGHT {
             expect(
-                &riscv_params_with_100_bits_security(log_stacked_height).logup,
+                &riscv_params_with_128_bits_security(log_stacked_height).logup,
                 &format!("riscv @ log_stacked_height {log_stacked_height}"),
             );
         }
         expect(
-            &recursion_params_with_100_bits_security().logup,
+            &recursion_params_with_128_bits_security().logup,
             "recursion",
         );
     }
 
-    /// The helper has to charge the initial round's list size, which the wired presets cannot
-    /// show: they are all unique decoding, where it is zero. Under list decoding the derivation
-    /// rises above the floor, and this shape lands on the same value under both BCHKS25 degree
-    /// bounds.
+    /// The helper has to charge the initial round's list size, which
+    /// `wired_presets_keep_their_log_up_parameters` cannot show: riscv and recursion are unique
+    /// decoding, where it is zero, and at the 128-bit target over KoalaBear^5 the floor
+    /// (`MIN_KOALA_BEAR_LOGUP_POW_BITS`) covers every wired preset. So the charge is read off the
+    /// pre-floor requirement: list decoding at this shape needs more grinding than unique
+    /// decoding, and the wired value is that requirement floored.
     #[test]
     fn log_up_params_for_whir_charges_the_initial_round_list_size() {
-        let params =
-            log_up_params_for_whir(WhirProximityStrategy::ListDecoding { m: 4 }, 20, 4, 64);
-        assert_eq!(params.pow_bits, 20);
+        use log_up_params::{required_log_up_pow_bits, MIN_KOALA_BEAR_LOGUP_POW_BITS};
+        let (h, blowup, w) = (20, 4, 64);
+        let ud_list =
+            initial_round_log2_list_size(WhirProximityStrategy::UniqueDecoding, h, blowup, w);
+        let ld_list = initial_round_log2_list_size(
+            WhirProximityStrategy::ListDecoding { m: 4 },
+            h,
+            blowup,
+            w,
+        );
+        assert_eq!(ud_list, 0.0);
+        assert!(ld_list > 0.0);
+        let (ud_needed, ld_needed) = (
+            required_log_up_pow_bits(ud_list),
+            required_log_up_pow_bits(ld_list),
+        );
+        assert_eq!(ud_needed, 13);
+        assert!(ld_needed > ud_needed, "list size {ld_list} is not charged");
+        if cfg!(not(feature = "soundness-bchks25-optimized")) {
+            assert!((ld_list - 4.17).abs() < 0.01, "{ld_list}");
+            assert_eq!(ld_needed, 17);
+        }
+        let ud = log_up_params_for_whir(WhirProximityStrategy::UniqueDecoding, h, blowup, w);
+        let ld = log_up_params_for_whir(WhirProximityStrategy::ListDecoding { m: 4 }, h, blowup, w);
+        assert_eq!(ud.pow_bits, ud_needed.max(MIN_KOALA_BEAR_LOGUP_POW_BITS));
+        assert_eq!(ld.pow_bits, ld_needed.max(MIN_KOALA_BEAR_LOGUP_POW_BITS));
     }
 }

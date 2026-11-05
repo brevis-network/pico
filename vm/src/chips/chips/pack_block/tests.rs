@@ -7,7 +7,7 @@ use crate::{
     },
     emulator::recursion::emulator::RecursionRecord,
     machine::chip::ChipBehavior,
-    primitives::consts::PACK_BLOCK_DATAPAR,
+    primitives::consts::{PACK_BLOCK_DATAPAR, PACK_LANES},
 };
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
@@ -33,7 +33,7 @@ fn test_pack_block_trace_values() {
     assert_eq!(trace.width(), super::columns::NUM_PACK_BLOCK_COLS);
     let row0 = trace.row_slice(0).unwrap();
     assert_eq!(row0[0], F::ZERO); // group 0 lane 0 = 0
-    assert_eq!(row0[4 + 1], F::from_u32(11)); // group 1 lane 1
+    assert_eq!(row0[PACK_LANES + 1], F::from_u32(11)); // group 1 lane 1
     let row1 = trace.row_slice(1).unwrap();
     assert_eq!(row1[0], F::from_u32(10 * PACK_BLOCK_DATAPAR as u32));
 }
@@ -63,13 +63,14 @@ fn test_pack_block_preprocessed_groups() {
         preprocessed.width(),
         super::columns::NUM_PACK_BLOCK_PREPROCESSED_COLS
     );
-    // Group layout: [is_real, in_addrs[4], out_addr, mult] = 7 cols per group.
+    // Group layout: [is_real, in_addrs[PACK_LANES], out_addr, mult] = PACK_LANES + 3 cols.
+    const G: usize = PACK_LANES + 3;
     let row0 = preprocessed.row_slice(0).unwrap();
     assert_eq!(row0[0], F::ONE); // group 0 is_real
-    assert_eq!(row0[7], F::ONE); // group 1 is_real
+    assert_eq!(row0[G], F::ONE); // group 1 is_real
     let row1 = preprocessed.row_slice(1).unwrap();
     assert_eq!(row1[0], F::ONE); // leftover group is_real
-    assert_eq!(row1[7], F::ZERO); // empty group
+    assert_eq!(row1[G], F::ZERO); // empty group
 }
 
 /// GPU trace-gen must be element-wise identical to the CPU path, including datapar packing and

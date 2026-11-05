@@ -60,6 +60,15 @@ jobs:
       - name: MLE end to end (fib, combine)
         run: |
           RUST_LOG=info cargo run --release -p pico-vm --example test_mle_e2e -- --elf fib --n 10 --field kb --step combine
+      - name: MLE end to end (fib, compress), then its file in a fresh process
+        run: |
+          # The final compression layer: the root re-proved at the compress preset, and its dump
+          # verified by a second process that re-derives the program from the ELF (the second
+          # command ignores `--step`). `--step embed / wrap` go on from the compress proof; no step
+          # here runs them, and the wrap job's `pico-prover` evm test is what proves embed over a
+          # compress proof in CI.
+          MLE_DUMP_COMPRESS=compress.dump RUST_LOG=info cargo run --release -p pico-vm --example test_mle_e2e -- --elf fib --n 10 --field kb --step compress
+          MLE_VERIFY_COMPRESS=compress.dump RUST_LOG=info cargo run --release -p pico-vm --example test_mle_e2e -- --elf fib --n 10 --field kb --step compress
       - name: MLE deferred node (fib)
         run: |
           # Proves one deferred-verifier node over a complete root and checks both what it
@@ -143,7 +152,8 @@ jobs:
         run: |
           # The shipped vk map is a per-config artifact. Its digest and leaf count must be this
           # binary's, and the keys this binary derives (the riscv vk, one convert VK per shape
-          # family, a combine node, the deferred node) must be members: a change to the shape
+          # family, a combine node, the deferred node, the compress node) must be members, and
+          # the embed key it derives must be the soundness manifest's: a change to the shape
           # tables, the params or the recursion compiler that leaves the artifact stale fails
           # here, not at a prover's first lookup; an AIR change is caught by the constraint
           # parity step above.
@@ -377,7 +387,7 @@ jobs:
           # No other job builds the feature: `ProverBuilder::aot` proving and verifying fib through
           # the AOT pipeline, what it refuses, and the errors it shares with the interpreter; and
           # `cargo pico`'s `--aot` plumbing against a stand-in cargo. One test at a time: the proof
-          # peaks near 8 GB.
+          # peaks near 10 GB.
           cargo test --release -p pico-prover --features aot -- --test-threads=1 tests::aot::
           cargo test --release -p pico-cli --features aot --lib --test aot
           # The pipeline's refusal tests have an AOT snapshot thread arm that only this build

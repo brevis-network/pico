@@ -29,19 +29,24 @@
 //! verify step and no way to hold an unverified [`Proof`]: bytes sitting beside a proof are not
 //! proof-authenticated output, and this API does not let them look like it.
 //!
-//! [`Prover::prove_to`] stops at any [`Phase`]. `Prover::prove_evm` proves to [`Phase::Wrap`] in
-//! whitelist mode only, and returns an `EvmBundle`: the gnark inputs and the wrap circuit's two
-//! public inputs. [`Prover::execute`] emulates without proving, and returns an [`Execution`] whose
-//! bytes are explicitly *not* authenticated. [`ProverBuilder::execute`] does the same without
-//! keygen. [`ProverBuilder::estimate_cost`] emulates and reports the trace rows proving would fill,
-//! per RISC-V AIR.
+//! [`Prover::prove_to`] stops at any [`Phase`] of the chain riscv → convert → combine → compress →
+//! embed → wrap. [`Phase::Compress`] is the final compression layer: the root re-proved at the
+//! compress preset into the ≤ 300 KiB proof that is handed out; embed and wrap go on from it.
+//! `prove` stops at [`Phase::Combine`]: the complete root, which a deferred-proof node verifies
+//! (`docs/deferred.md`). `Prover::prove_evm` proves to [`Phase::Wrap`] in whitelist mode only, and
+//! returns an `EvmBundle`: the gnark inputs and the wrap circuit's two public inputs.
+//! [`Prover::execute`] emulates without proving, and returns an [`Execution`] whose bytes are
+//! explicitly *not* authenticated. [`ProverBuilder::execute`] does the same without keygen.
+//! [`ProverBuilder::estimate_cost`] emulates and reports the trace rows proving would fill, per
+//! RISC-V AIR.
 //!
 //! # Verifying outside this crate
 //!
 //! In whitelist mode ([`ProverBuilder::shipped_whitelist`] needs no files), [`Prover::vk_bundle`]
 //! and [`Proof::export_v3`] give the bytes `pico_verifier::verify(bundle, envelope, committed)`
 //! takes, on stable Rust and without this crate. Under a whitelist other than the shipped one,
-//! `pico_verifier::verify_with_root` takes its root.
+//! `pico_verifier::verify_with_root` takes its root. `pico_verifier` verifies the combine root; a
+//! compress proof verifies only in this crate for now (`TODO(compress-apex)`).
 //!
 //! # Persisting a proof
 //!
@@ -51,7 +56,8 @@
 //! implementation: a RISC-V verifying key is a function of the program, so a verifier holding the
 //! ELF can derive it, while a recursion circuit's shape is not, so a verifier has nothing to derive
 //! an honest key from and needs an authenticated whitelist. [`Prover::verify_artifact`] documents
-//! what each phase is bound to.
+//! what each phase is bound to. A compress file is answered for like a combine root: against the
+//! pinned whitelist (its key is a whitelist leaf) or by the prover that produced it.
 //!
 //! # What the options decide, and what they do not
 //!
@@ -73,7 +79,8 @@
 //! | `MLE_FORCE_CATCH_ALL` | whitelist-mode shape selection | **yes, and it changes the proof**: every chunk takes the catch-all shape |
 //! | `RECURSION_EARLY_EXIT_TS` | recursion emulation | **yes, and it breaks proving**: it truncates the recursion run, and a value that does not parse aborts |
 //! | `MLE_WITNESS_HASH`, `MLE_TRANSCRIPT_PROF`, `MLE_WALKER_XCHECK` | recursion witness generation | **yes**, and deliberately |
-//! | `MLE_REC_PARALLEL_CHILDREN` | recursion node interpretation | **yes**, and deliberately |
+//! | `MLE_REC_PARALLEL_CHILDREN`, `MLE_REC_WAVEFRONT` | recursion node interpretation | **yes**, and deliberately |
+//! | `N11_TAMPER_PACKED_LANE` | recursion witness generation | **yes, and it breaks proving**: a negative-test hook; `1` corrupts the padding lane of the packed opened-row blocks, so the first recursion proof fails in its prover |
 //! | `MEMORY_POOL_SIZE` | the snapshot pipeline's memory pool | **yes**: the pool holds this many emulator memories. With `ProverBuilder::aot`, or the `cuda` feature's interpreted AOT runtime, a replay worker holds one while it replays: unset, the pool is 16, raised where that is fewer to one per worker plus one per segment of the batch being cut, so every worker replays at once, and a smaller value caps the replay workers running at once. `0`, or fewer than the segments of one batch, is refused by `build` and `execute`, unless they emulate with `ProverBuilder::serial_emulation` |
 //! | `MEMORY_POOL_EAGER`, `MEMORY_POOL_LOW_WATER`, `MEMORY_RECYCLER_THREADS` | the snapshot pipeline's memory pool | **yes**: how the pool is filled and recycled. A setting that leaves the pool empty, or `MEMORY_RECYCLER_THREADS=0`, which never returns a memory to it, is refused by `build` and `execute`, unless they emulate with `ProverBuilder::serial_emulation` |
 //! | `MLE_SPLIT_REPLAY`, `MLE_SPLIT_CHUNKS`, `NUM_THREADS`, `PROVER_COUNT` | the AOT snapshot thread | **yes, with the `aot` or `cuda` feature**: whether the replay of the leading chunks is cut into segments, which the workers fold back into one record per chunk. `NUM_THREADS` and `PROVER_COUNT` cut only together, and neither sets the worker count. A cut into more segments than the pool holds is refused by `build` and `execute`, and one into more than the GPU prove's history slots hold by the prove, up front |
@@ -81,17 +88,19 @@
 //! | `MLE_LEDGER`, `MLE_LEDGER_DIGESTS`, `MLE_SPANS` | the snapshot pipeline and the RISC-V prover | with the `stage-ledger` feature, as instruments only: a JSON line per stage of every chunk, the per-chip trace digests in it, and a CSV of what each pipeline thread was doing when; a process records one run at a time, and none changes a record or a proof |
 //! | `MLE_SHAPE_MARGIN`, `CHUNK_SPLIT_DEBUG`, `DEBUG_MEMORY_EVENTS`, `DEBUG_LOCAL_MEMORY` | logging | yes, as diagnostics only |
 //!
-//! The six proof-changing variables are experiment or test knobs; leave them unset. A caller that
-//! sets one of the four not refused gets proofs another process with the same options would not
-//! produce.
+//! The seven proof-changing variables are experiment or test knobs; leave them unset. A caller
+//! that sets one of the five not refused gets proofs another process with the same options would
+//! not produce.
 //! `CHUNK_EVENT_LIMITS_OFF`, `CHUNK_EVENT_LIMIT_SCALE` and `DEFERRED_TAIL_MERGE` are read once per
 //! process, the other three on every use. The snapshot pipeline's variables take effect once per
 //! process, on its first run.
 //!
-//! The witness and interpretation rows are four process-global diagnostics and controls, each
+//! The witness and interpretation rows are six process-global diagnostics and controls, each
 //! resolved once per process on first use — the VM lists them as one table, `witness_flags`. Three
 //! are measurement knobs, default off; `MLE_REC_PARALLEL_CHILDREN` interprets a combine node's two
-//! children concurrently, and defaults **on**. None of these is a builder option, and none can be:
+//! children concurrently and `MLE_REC_WAVEFRONT` batches a recursion emulation's Poseidon2
+//! permutations by a per-program plan, both default **on**; `N11_TAMPER_PACKED_LANE` is a negative-test hook,
+//! default off. None of these is a builder option, and none can be:
 //! by the time a `Prover` exists they may already be resolved, so a setter would be a promise this
 //! crate could not keep.
 //!
@@ -196,6 +205,14 @@ pub const ENV_READ_BY_PROVER: &[(&str, &str)] = &[
     (
         "MLE_REC_PARALLEL_CHILDREN",
         "selects how recursion nodes are interpreted",
+    ),
+    (
+        "MLE_REC_WAVEFRONT",
+        "selects how recursion nodes are interpreted",
+    ),
+    (
+        "N11_TAMPER_PACKED_LANE",
+        "corrupts the recursion witness and breaks proving: a negative-test hook",
     ),
     (
         "MEMORY_POOL_SIZE",

@@ -1,5 +1,10 @@
 use super::memory::VALUES_SIZE;
-use crate::primitives::consts::{CHUNK_CLK_START, DIGEST_SIZE};
+use crate::{
+    compiler::riscv::opcode::Opcode,
+    primitives::consts::{
+        CHUNK_CLK_START, DIGEST_SIZE, LOCAL_MEMORY_DATAPAR, RISCV_POSEIDON2_DATAPAR,
+    },
+};
 
 /// Number of u64 words needed to cover the full VALUES_SIZE address space as a dword bitmap.
 const BITMAP_WORDS: usize = ((VALUES_SIZE >> 3) + 63) >> 6;
@@ -18,6 +23,29 @@ pub struct ChunkSplitConfig {
     /// Clk past the ceiling a half-written digest may spend instead, on a chunk too short to
     /// reserve room below it.
     pub commit_tail_overrun: u32,
+    /// Most LogUp-GKR leaves a chunk may grow to (`CHUNK_LEAF_CAP`); 0 turns the cap off. See
+    /// [`leaf_estimate`].
+    pub leaf_cap: u64,
+}
+
+/// Default [`ChunkSplitConfig::leaf_cap`]: 1.5 * 2^28 leaves, which at 40 B a KB5 leaf bounds the
+/// GKR input buffer at 15 GiB. The cap is on the estimate, which runs 7-40% over the real count
+/// (median 21%) on the p99 reth corpus: its largest chunk estimates at 1.248 * 2^28 for a real
+/// 1.118, so a 1.25 cap would cut ordinary blocks. Without a cap the leaf count follows the
+/// instruction mix: a chunk that is mostly divisions (121 interactions a DivRem row) reaches
+/// 4.5 * 2^28.
+pub const DEFAULT_LEAF_CAP: u64 = 3 << 27;
+
+/// `CHUNK_LEAF_CAP` (cached): the leaf cap in leaves, 0 for none; unset or unparseable →
+/// [`DEFAULT_LEAF_CAP`].
+pub fn leaf_cap() -> u64 {
+    static CAP: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *CAP.get_or_init(|| {
+        std::env::var("CHUNK_LEAF_CAP")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(DEFAULT_LEAF_CAP)
+    })
 }
 
 /// Experiment knob (`CHUNK_EVENT_LIMIT_SCALE`, default 1.0 = behavior unchanged): scales the
@@ -63,6 +91,7 @@ impl ChunkSplitConfig {
             event_fast_threshold: usize::MAX.saturating_sub(Self::FAST_PATH_EVENT_MARGIN),
             commit_tail_reserve: 0,
             commit_tail_overrun: 0,
+            leaf_cap: 0,
         }
     }
 
@@ -135,6 +164,7 @@ impl ChunkSplitConfig {
             event_fast_threshold: memory_rw_threshold.saturating_sub(Self::FAST_PATH_EVENT_MARGIN),
             commit_tail_reserve,
             commit_tail_overrun,
+            leaf_cap: leaf_cap(),
         };
         // One-shot effective-config snapshot so every bench log records the split conditions
         // it actually ran with (debug reference for OOM/chunk-count attribution).
@@ -143,7 +173,7 @@ impl ChunkSplitConfig {
             tracing::info!(
                 "[chunk-split] config: chunk_size={} clk_threshold={} memory_rw_threshold={} \
                  global_lookup_base_threshold={} event_limits_off={} commit_tail_reserve={} \
-                 commit_tail_overrun={}",
+                 commit_tail_overrun={} leaf_cap={}",
                 cfg.chunk_size,
                 cfg.clk_threshold,
                 cfg.memory_rw_threshold,
@@ -151,6 +181,7 @@ impl ChunkSplitConfig {
                 event_limits_off(),
                 cfg.commit_tail_reserve,
                 cfg.commit_tail_overrun,
+                cfg.leaf_cap,
             );
         });
         cfg
@@ -201,22 +232,137 @@ pub fn maybe_debug_split_snapshot(
             && state.num_global_lookup_base >= cfg.global_lookup_base_threshold)
             || (state.num_memory_read_write_events >= cfg.memory_rw_threshold
                 && state.num_global_lookup_base > cfg.global_lookup_base_threshold));
-    let reason = match (clk_hit, events_hit) {
-        (true, true) => "clk+events",
-        (true, false) => "clk",
-        (false, true) => "events",
-        (false, false) => "none?", // unreachable if called at a split point
+    let leaf_hit = !hold && !state.leaf_room(LEAF_STEP_GROWTH, cfg);
+    let reason = match (clk_hit, events_hit, leaf_hit) {
+        (_, _, true) => "leaf",
+        (true, true, false) => "clk+events",
+        (true, false, false) => "clk",
+        (false, true, false) => "events",
+        (false, false, false) => "none?", // unreachable if called at a split point
     };
     tracing::info!(
         "[chunk-split] chunk={chunk_idx} reason={reason} clk={clk} (cut {cut_line}, max \
          {max_chunk_clk}) commit_in_flight={} mem_rw={} (thr {}) lookups_base={} (thr {}) \
-         global_clk={global_clk}",
+         leaves={} (cap {}) global_clk={global_clk}",
         state.commit_in_flight,
         state.num_memory_read_write_events,
         cfg.memory_rw_threshold,
         state.num_global_lookup_base,
         cfg.global_lookup_base_threshold,
+        state.leaf_estimate(),
+        cfg.leaf_cap,
     );
+}
+
+// ============================================================================
+// LogUp-GKR leaf estimate
+// ============================================================================
+//
+// A chunk's GKR input holds one leaf per interaction per row: the sum over its AIRs of
+// interactions times rows, the rows lifted to a power of two and to at least 2^l_skip
+// (`total_interactions` in `cuda-mle`'s `logup_zerocheck`, which sizes the leaf buffer by it).
+// The clk limit bounds instructions, not leaves, and an instruction costs anywhere from the 17
+// leaves of a Cpu row alone to 148 for a signed division, so the leaf count is a split condition
+// of its own. The estimate never under-counts: every chip is charged as present, derived rows
+// are charged at their most, and global lookups at two per base entry.
+
+/// The chips an instruction adds rows to one at a time, as indices into
+/// [`ChunkSplitState::leaf_rows`].
+pub const LEAF_CPU: usize = 0;
+pub const LEAF_ADD: usize = 1;
+pub const LEAF_SUB: usize = 2;
+pub const LEAF_ADDW: usize = 3;
+pub const LEAF_SUBW: usize = 4;
+pub const LEAF_MUL: usize = 5;
+pub const LEAF_DIVREM: usize = 6;
+pub const LEAF_LT: usize = 7;
+pub const LEAF_SLL: usize = 8;
+pub const LEAF_SR: usize = 9;
+pub const LEAF_BITWISE: usize = 10;
+pub const LEAF_ECALL: usize = 11;
+pub const LEAF_INSN_CHIPS: usize = 12;
+
+/// Interactions per row of the chips above, in index order. A change to one of these AIRs is a
+/// change here; `leaf_interaction_counts_match_the_airs` fails until it is made.
+pub const LEAF_INSN_INTERACTIONS: [u64; LEAF_INSN_CHIPS] =
+    [17, 5, 5, 4, 4, 36, 121, 4, 11, 13, 9, 14];
+/// Interactions per row of the chips the memory and lookup counters size.
+pub const LEAF_MEMORY_RW_INTERACTIONS: u64 = 10;
+pub const LEAF_MEMORY_LOCAL_INTERACTIONS: u64 = 44;
+pub const LEAF_GLOBAL_INTERACTIONS: u64 = 10;
+pub const LEAF_POSEIDON2_INTERACTIONS: u64 = 4;
+pub const LEAF_SYSCALL_INTERACTIONS: u64 = 4;
+/// The preprocessed tables, charged as a constant: Program (one interaction, one row an
+/// instruction, up to 2^21 rows) and Byte (ten interactions, 2^17 rows).
+const LEAF_FIXED_ALLOWANCE: u64 = (1 << 21) + 10 * (1 << 17);
+/// Rows below 2^l_skip (l_skip = 4) are lifted to it.
+const LEAF_MIN_ROWS: u64 = 16;
+/// Growth one instruction can add to a chip: its own four rows, four memory events and two
+/// lookups for each of four new addresses. A split check that keeps this much room cuts before
+/// the next instruction crosses the cap — all but a syscall touching more memory, which can
+/// overrun it by that syscall. AOT blocks are checked against their own growth on entry.
+pub const LEAF_STEP_GROWTH: u64 = 64;
+
+/// The rows one instruction adds to the per-instruction chips besides its Cpu row: the ALU row
+/// it dispatches, and the rows trace generation derives from it (`count_extra_records`) — a
+/// branch's Lt comparison, and an Add row for each negative divisor or remainder of a signed
+/// division, charged here as two, the most it can be. An ALU op into x0 dispatches nothing; it
+/// is charged anyway.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InsnLeaf {
+    pub chip: Option<usize>,
+    pub extra_add: u32,
+    pub extra_lt: u32,
+}
+
+pub const fn insn_leaf(opcode: Opcode) -> InsnLeaf {
+    use Opcode::*;
+    let (chip, extra_add, extra_lt) = match opcode {
+        ADD | AUIPC => (Some(LEAF_ADD), 0, 0),
+        SUB => (Some(LEAF_SUB), 0, 0),
+        ADDW => (Some(LEAF_ADDW), 0, 0),
+        SUBW => (Some(LEAF_SUBW), 0, 0),
+        XOR | OR | AND => (Some(LEAF_BITWISE), 0, 0),
+        SLL | SLLW => (Some(LEAF_SLL), 0, 0),
+        SRL | SRA | SRLW | SRAW => (Some(LEAF_SR), 0, 0),
+        SLT | SLTU => (Some(LEAF_LT), 0, 0),
+        MUL | MULH | MULHU | MULHSU | MULW => (Some(LEAF_MUL), 0, 0),
+        DIV | REM | DIVW | REMW => (Some(LEAF_DIVREM), 2, 0),
+        DIVU | REMU | DIVUW | REMUW => (Some(LEAF_DIVREM), 0, 0),
+        BEQ | BNE | BLT | BGE | BLTU | BGEU => (None, 0, 1),
+        ECALL => (Some(LEAF_ECALL), 0, 0),
+        LB | LH | LW | LBU | LHU | LWU | LD | SB | SH | SW | SD | JAL | JALR | EBREAK | UNIMP => {
+            (None, 0, 0)
+        }
+    };
+    InsnLeaf {
+        chip,
+        extra_add,
+        extra_lt,
+    }
+}
+
+/// Adds one instruction's rows to `rows` and returns how many it added.
+#[inline(always)]
+pub fn add_insn_leaf_rows(rows: &mut [u32; LEAF_INSN_CHIPS], opcode: Opcode) -> u32 {
+    let leaf = insn_leaf(opcode);
+    rows[LEAF_CPU] += 1;
+    rows[LEAF_ADD] += leaf.extra_add;
+    rows[LEAF_LT] += leaf.extra_lt;
+    let mut added = 1 + leaf.extra_add + leaf.extra_lt;
+    if let Some(chip) = leaf.chip {
+        rows[chip] += 1;
+        added += 1;
+    }
+    added
+}
+
+/// Rows as the GKR input counts them: a power of two, at least 2^l_skip. An absent chip is
+/// charged the minimum too; that is a few thousand leaves in all, and keeps the estimate
+/// monotone in the counts.
+#[inline(always)]
+fn lifted_rows(rows: u64) -> u64 {
+    rows.next_power_of_two().max(LEAF_MIN_ROWS)
 }
 
 // ============================================================================
@@ -367,35 +513,39 @@ pub struct ChunkSplitState {
     reg_write_mask: u32,
     unique_reg_writes: usize,
     syscall_depth: u32,
-    /// The record's committed or deferred digest has some words written and some not: the guest
-    /// is mid-way through its COMMIT ecalls. Set by the COMMIT handlers after every word they
+    /// The chunk has run some but not all of a digest's COMMIT (or COMMIT_DEFERRED_PROOFS)
+    /// ecalls: the guest is mid-way through them. Set by the COMMIT handlers after every word they
     /// write, cleared when the chunk closes; `should_split` holds the cut while it is set.
     pub commit_in_flight: bool,
-    /// COMMIT_DEFERRED_PROOFS ecalls run in this chunk. Counted rather than read off the digest,
-    /// which stays all zero for a guest that defers nothing.
-    pub deferred_commits: u32,
+    /// COMMIT and COMMIT_DEFERRED_PROOFS ecalls run in this chunk. Counted rather than read off
+    /// the digests, whose words may be zero (all of them, for a guest that defers nothing).
+    pub commits: u32,
+    /// Rows of the per-instruction chips (`LEAF_*`) in this chunk.
+    pub leaf_rows: [u32; LEAF_INSN_CHIPS],
+    /// At least the rows any one chip has gained since `leaf_allowance` was last set: every
+    /// counter feeds it the most rows its event adds to a single chip.
+    leaf_growth: std::cell::Cell<u64>,
+    /// Growth the leaf cap still admits, as of the last estimate; spent, the estimate is redone.
+    /// Starts at 0, so a fresh chunk estimates on its first check.
+    leaf_allowance: std::cell::Cell<u64>,
 }
 
 #[inline(always)]
 pub fn should_check_fast(clk: u32, state: &ChunkSplitState, cfg: &ChunkSplitConfig) -> bool {
-    clk >= cfg.clk_fast_threshold || state.num_memory_read_write_events >= cfg.event_fast_threshold
+    clk >= cfg.clk_fast_threshold
+        || state.num_memory_read_write_events >= cfg.event_fast_threshold
+        || (cfg.leaf_cap != 0
+            && state.leaf_growth.get() + LEAF_STEP_GROWTH > state.leaf_allowance.get())
 }
 
-/// A digest with some words written and some still zero: the guest is between two ecalls of a
-/// `COMMIT` (or `COMMIT_DEFERRED_PROOFS`) sequence. All-zero (nothing committed) and fully
-/// written digests are not partial.
-#[inline(always)]
-pub fn digest_partial(digest: &[u32]) -> bool {
-    digest.iter().any(|&w| w != 0) && digest.contains(&0)
-}
-
-/// Whether the commit tail is mid-way: the committed digest is half-written, or the chunk has run
-/// some but not all of the deferred digest's words. The recursion only takes a deferred digest
-/// from a chunk that ran all of them, so a cut inside that run leaves an honest execution
+/// Whether the commit tail is mid-way: the chunk has run some but not all of the eight words of a
+/// digest. The guest commits the output digest and then the deferred one, eight words each, so
+/// that is a count that is not a multiple of eight. The recursion takes each digest only from a
+/// chunk that ran all eight of its words, so a cut inside a run leaves an honest execution
 /// unprovable.
 #[inline(always)]
-pub fn commit_tail_in_flight(committed: &[u32], deferred_commits: u32) -> bool {
-    digest_partial(committed) || (deferred_commits > 0 && (deferred_commits as usize) < DIGEST_SIZE)
+pub fn commit_tail_in_flight(commits: u32) -> bool {
+    !(commits as usize).is_multiple_of(DIGEST_SIZE)
 }
 
 /// Whether the cut is being held for a commit tail in flight. With neither a reserve nor an
@@ -436,7 +586,7 @@ pub fn should_split(
             tracing::warn!(
                 "[chunk-split] closing a chunk at clk {clk} with its commit tail in flight: it \
                  outran the {} clk the hold may spend, and the recursion will reject the split \
-                 (a partial committed digest at combine, a partial deferred run at convert)",
+                 (a partial run of either digest at convert)",
                 cfg.commit_tail_reserve.max(cfg.commit_tail_overrun)
             );
         }
@@ -446,8 +596,11 @@ pub fn should_split(
         && state.num_global_lookup_base >= cfg.global_lookup_base_threshold)
         || (state.num_memory_read_write_events >= cfg.memory_rw_threshold
             && state.num_global_lookup_base > cfg.global_lookup_base_threshold);
+    // Checked after a step, the cap has to hold for the next one too: the estimate can jump by
+    // a whole chip's leaves when its rows pass a power of two.
+    let over_leaf_cap = !state.leaf_room(LEAF_STEP_GROWTH, cfg);
 
-    is_max_chunk_size || over_event_limit
+    is_max_chunk_size || over_event_limit || over_leaf_cap
 }
 
 #[inline(always)]
@@ -463,6 +616,15 @@ pub fn can_fit_block(
     let cost = insn_count.saturating_mul(4);
     let remaining = cfg.clk_threshold.saturating_sub(clk);
     if cost > remaining {
+        return false;
+    }
+
+    // The most rows the block can add to one chip: per instruction its Cpu and ALU rows and up
+    // to three derived ones, each memory event, and two global lookups per new base entry.
+    let leaf_growth = 5 * u64::from(insn_count)
+        + mem_rw_exact as u64
+        + 2 * (non_register_global_lookup_base_max as u64 + u64::from(reg_write_mask.count_ones()));
+    if !state.leaf_room(leaf_growth, cfg) {
         return false;
     }
 
@@ -499,6 +661,7 @@ impl ChunkSplitState {
                 self.reg_write_mask |= bit;
                 self.unique_reg_writes += 1;
                 self.num_global_lookup_base += 1;
+                self.grow_leaves(2);
             }
             return;
         }
@@ -511,6 +674,7 @@ impl ChunkSplitState {
         if self.memory_access_addrs.insert_dword_index(dword_index) {
             self.unique_memory_addrs += 1;
             self.num_global_lookup_base += 1;
+            self.grow_leaves(2);
         }
     }
 
@@ -523,17 +687,131 @@ impl ChunkSplitState {
     pub fn record_syscall_event(&mut self) {
         self.num_syscall_events += 1;
         self.num_global_lookup_base += 1;
+        self.grow_leaves(2);
     }
 
     #[inline(always)]
     pub fn add_syscall_memory_events(&mut self, count: usize) {
         self.num_syscall_memory_events += count;
         self.num_global_lookup_base += count;
+        self.grow_leaves(2 * count as u64);
     }
 
     #[inline(always)]
     pub fn add_memory_rw_events(&mut self, count: usize) {
         self.num_memory_read_write_events += count;
+        self.grow_leaves(count as u64);
+    }
+
+    /// Counts one executed instruction's rows on the per-instruction chips.
+    #[inline(always)]
+    pub fn count_insn(&mut self, opcode: Opcode) {
+        let added = add_insn_leaf_rows(&mut self.leaf_rows, opcode);
+        self.grow_leaves(u64::from(added));
+    }
+
+    /// Adds `rows` rows to the per-instruction chip `chip`: a straight-line block's count,
+    /// tallied when it was compiled.
+    #[inline(always)]
+    pub fn add_leaf_rows(&mut self, chip: usize, rows: u32) {
+        self.leaf_rows[chip] += rows;
+        self.grow_leaves(u64::from(rows));
+    }
+
+    #[inline(always)]
+    fn grow_leaves(&mut self, rows: u64) {
+        let growth = self.leaf_growth.get_mut();
+        *growth += rows;
+    }
+
+    /// The chunk's leaves were every chip `growth` rows taller, Cpu at most `max_cpu_rows` and
+    /// MemoryReadWrite at most `max_memory_rw`.
+    fn leaf_estimate_after(&self, growth: u64, max_cpu_rows: u64, max_memory_rw: u64) -> u64 {
+        let mut leaves = LEAF_FIXED_ALLOWANCE;
+        for (chip, (&rows, &interactions)) in self
+            .leaf_rows
+            .iter()
+            .zip(LEAF_INSN_INTERACTIONS.iter())
+            .enumerate()
+        {
+            let rows = u64::from(rows);
+            let grown = if chip == LEAF_CPU {
+                (rows + growth).min(max_cpu_rows.max(rows))
+            } else {
+                rows + growth
+            };
+            leaves += interactions * lifted_rows(grown);
+        }
+        let memory_rw = self.num_memory_read_write_events as u64;
+        let local = (self.unique_address_count() + self.num_syscall_memory_events) as u64;
+        let global = self.num_global_lookup_events() as u64;
+        leaves += LEAF_MEMORY_RW_INTERACTIONS
+            * lifted_rows((memory_rw + growth).min(max_memory_rw.max(memory_rw)));
+        leaves += LEAF_MEMORY_LOCAL_INTERACTIONS
+            * lifted_rows(local.div_ceil(LOCAL_MEMORY_DATAPAR as u64) + growth);
+        leaves += LEAF_GLOBAL_INTERACTIONS * lifted_rows(global + growth);
+        leaves += LEAF_POSEIDON2_INTERACTIONS
+            * lifted_rows(global.div_ceil(RISCV_POSEIDON2_DATAPAR as u64) + growth);
+        leaves += LEAF_SYSCALL_INTERACTIONS * lifted_rows(self.num_syscall_events as u64 + growth);
+        leaves
+    }
+
+    /// The chunk's LogUp-GKR leaves as the rows stand: never fewer than the prover will count.
+    pub fn leaf_estimate(&self) -> u64 {
+        self.leaf_estimate_after(0, u64::MAX, u64::MAX)
+    }
+
+    /// Whether the leaf cap leaves room for every chip to grow `growth` more rows. Cheap while
+    /// the allowance of the last estimate lasts; once it is spent the estimate is redone.
+    #[inline(always)]
+    pub fn leaf_room(&self, growth: u64, cfg: &ChunkSplitConfig) -> bool {
+        if cfg.leaf_cap == 0 || self.leaf_growth.get() + growth <= self.leaf_allowance.get() {
+            return true;
+        }
+        self.refresh_leaf_allowance(cfg) && growth <= self.leaf_allowance.get()
+    }
+
+    /// Re-estimates, and sets the allowance to the most growth (the same for every chip) under
+    /// which the estimate stays within the cap. False if it is over the cap already.
+    #[cold]
+    fn refresh_leaf_allowance(&self, cfg: &ChunkSplitConfig) -> bool {
+        // The clk ceiling stops Cpu below its next power of two; without this every chunk's
+        // last stretch would look one Cpu doubling away from the cap.
+        let max_cpu_rows = u64::from(cfg.max_chunk_clk() + cfg.commit_tail_overrun) / 4;
+        // Likewise the event arm: once the global lookups are past their threshold it cuts as
+        // the memory events reach theirs, and MemoryReadWrite never takes its next doubling.
+        let max_memory_rw = match self
+            .num_global_lookup_base
+            .cmp(&cfg.global_lookup_base_threshold)
+        {
+            std::cmp::Ordering::Greater => cfg.memory_rw_threshold as u64,
+            std::cmp::Ordering::Equal => cfg.memory_rw_threshold as u64 + 1,
+            std::cmp::Ordering::Less => u64::MAX,
+        };
+        let fits = |growth: u64| {
+            self.leaf_estimate_after(growth, max_cpu_rows, max_memory_rw) <= cfg.leaf_cap
+        };
+        self.leaf_growth.set(0);
+        if !fits(0) {
+            self.leaf_allowance.set(0);
+            return false;
+        }
+        // The estimate only grows with `growth`: bisect for the last value that fits.
+        let (mut lo, mut hi) = (0u64, 1u64 << 26);
+        if fits(hi) {
+            lo = hi;
+        } else {
+            while hi - lo > 1 {
+                let mid = lo + (hi - lo) / 2;
+                if fits(mid) {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+        }
+        self.leaf_allowance.set(lo);
+        true
     }
 
     #[inline(always)]
@@ -587,16 +865,23 @@ impl ChunkSplitState {
         self.unique_reg_writes = 0;
         self.syscall_depth = 0;
         self.commit_in_flight = false;
-        self.deferred_commits = 0;
+        self.commits = 0;
         self.memory_access_addrs.clear();
+        self.leaf_rows = [0; LEAF_INSN_CHIPS];
+        self.leaf_growth.set(0);
+        self.leaf_allowance.set(0);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        can_fit_block, commit_tail_in_flight, digest_partial, should_check_fast, should_split,
-        ChunkSplitConfig, ChunkSplitState, CHUNK_CLK_START,
+        add_insn_leaf_rows, can_fit_block, commit_tail_in_flight, should_check_fast, should_split,
+        ChunkSplitConfig, ChunkSplitState, Opcode, CHUNK_CLK_START, LEAF_ADD, LEAF_ADDW,
+        LEAF_BITWISE, LEAF_CPU, LEAF_DIVREM, LEAF_ECALL, LEAF_GLOBAL_INTERACTIONS, LEAF_INSN_CHIPS,
+        LEAF_INSN_INTERACTIONS, LEAF_LT, LEAF_MEMORY_LOCAL_INTERACTIONS,
+        LEAF_MEMORY_RW_INTERACTIONS, LEAF_MUL, LEAF_POSEIDON2_INTERACTIONS, LEAF_SLL, LEAF_SR,
+        LEAF_SUB, LEAF_SUBW, LEAF_SYSCALL_INTERACTIONS,
     };
     use crate::{
         chips::chips::riscv_memory::event::MemoryAccessPosition,
@@ -688,6 +973,7 @@ mod tests {
             event_fast_threshold: 3,
             commit_tail_reserve: 0,
             commit_tail_overrun: 0,
+            leaf_cap: 0,
         };
         let mut state = ChunkSplitState::default();
 
@@ -717,6 +1003,7 @@ mod tests {
             event_fast_threshold: 3,
             commit_tail_reserve: 0,
             commit_tail_overrun: 0,
+            leaf_cap: 0,
         };
         let state = ChunkSplitState {
             num_memory_read_write_events: 3,
@@ -739,6 +1026,7 @@ mod tests {
             event_fast_threshold: 3,
             commit_tail_reserve: 0,
             commit_tail_overrun: 0,
+            leaf_cap: 0,
         };
         let mut state = ChunkSplitState {
             num_memory_read_write_events: 3,
@@ -761,6 +1049,7 @@ mod tests {
             event_fast_threshold: 3,
             commit_tail_reserve: 0,
             commit_tail_overrun: 0,
+            leaf_cap: 0,
         };
         let mut state = ChunkSplitState::default();
         assert!(!should_check_fast(128, &state, &cfg));
@@ -829,28 +1118,17 @@ mod tests {
             event_fast_threshold: 3,
             commit_tail_reserve,
             commit_tail_overrun: 0,
+            leaf_cap: 0,
         }
     }
 
     #[test]
-    fn digest_partial_means_some_words_written_some_not() {
-        assert!(!digest_partial(&[0u32; 8]));
-        assert!(!digest_partial(&[1u32; 8]));
-        assert!(digest_partial(&[1u32, 2, 3, 0, 0, 0, 0, 0]));
-        assert!(digest_partial(&[0u32, 0, 0, 0, 0, 0, 0, 9]));
-    }
-
-    #[test]
-    fn the_deferred_run_is_in_flight_by_count_whatever_its_words() {
-        let whole = [1u32; 8];
-        // A guest that defers nothing commits eight zero words: only the count shows the run.
-        assert!(!commit_tail_in_flight(&whole, 0));
-        for n in 1..8 {
-            assert!(commit_tail_in_flight(&whole, n), "after {n} deferred words");
+    fn a_commit_run_is_in_flight_until_its_eighth_word() {
+        // Eight output words, then eight deferred words: in flight inside either run, not before,
+        // between or after them.
+        for n in 0..=16 {
+            assert_eq!(commit_tail_in_flight(n), n % 8 != 0, "after {n} words");
         }
-        assert!(!commit_tail_in_flight(&whole, 8));
-        // The committed digest still holds the cut on its own.
-        assert!(commit_tail_in_flight(&[1u32, 0, 0, 0, 0, 0, 0, 0], 0));
     }
 
     #[test]
@@ -891,12 +1169,12 @@ mod tests {
     fn clear_drops_the_in_flight_flag() {
         let mut state = ChunkSplitState {
             commit_in_flight: true,
-            deferred_commits: 5,
+            commits: 5,
             ..Default::default()
         };
         state.clear();
         assert!(!state.commit_in_flight);
-        assert_eq!(state.deferred_commits, 0);
+        assert_eq!(state.commits, 0);
     }
 
     #[test]
@@ -912,6 +1190,162 @@ mod tests {
         state.commit_in_flight = true;
         assert!(!should_split(287, 0, &state, &cfg));
         assert!(should_split(288, 0, &state, &cfg));
+    }
+
+    fn leaf_cfg(leaf_cap: u64) -> ChunkSplitConfig {
+        ChunkSplitConfig {
+            leaf_cap,
+            ..ChunkSplitConfig::disabled(0)
+        }
+    }
+
+    #[test]
+    fn a_signed_division_charges_divrem_and_two_adds_and_a_branch_one_lt() {
+        let mut rows = [0u32; LEAF_INSN_CHIPS];
+        assert_eq!(add_insn_leaf_rows(&mut rows, Opcode::DIVW), 4);
+        assert_eq!(add_insn_leaf_rows(&mut rows, Opcode::DIVU), 2);
+        assert_eq!(add_insn_leaf_rows(&mut rows, Opcode::BNE), 2);
+        assert_eq!(add_insn_leaf_rows(&mut rows, Opcode::LD), 1);
+        assert_eq!(rows[LEAF_CPU], 4);
+        assert_eq!(rows[LEAF_DIVREM], 2);
+        assert_eq!(rows[LEAF_ADD], 2);
+        assert_eq!(rows[LEAF_LT], 1);
+    }
+
+    #[test]
+    fn the_estimate_lifts_rows_to_powers_of_two() {
+        let mut state = ChunkSplitState::default();
+        let empty = state.leaf_estimate();
+        // 17 divisions: DivRem goes from the 16-row floor to 32 rows.
+        for _ in 0..17 {
+            state.count_insn(Opcode::DIVU);
+        }
+        let grown = state.leaf_estimate();
+        let cpu = LEAF_INSN_INTERACTIONS[LEAF_CPU] * (32 - 16);
+        let divrem = LEAF_INSN_INTERACTIONS[LEAF_DIVREM] * (32 - 16);
+        assert_eq!(grown - empty, cpu + divrem);
+    }
+
+    #[test]
+    fn the_leaf_cap_splits_before_a_step_could_cross_it() {
+        let mut state = ChunkSplitState::default();
+        let cap = state.leaf_estimate() + LEAF_INSN_INTERACTIONS[LEAF_DIVREM] * (1 << 20);
+        let cfg = leaf_cfg(cap);
+        assert!(!should_split(0, 0, &state, &cfg));
+        // Divisions until DivRem's next doubling would no longer fit under the cap.
+        let mut split_at = None;
+        for n in 0..(1u32 << 21) {
+            if should_split(0, 0, &state, &cfg) {
+                split_at = Some(n);
+                break;
+            }
+            state.count_insn(Opcode::DIVU);
+        }
+        let n = split_at.expect("the cap never split the chunk");
+        assert!(
+            state.leaf_estimate() <= cap,
+            "split only after the cap was crossed"
+        );
+        assert!(n > 1 << 18, "split far too early, after {n} divisions");
+        // Off, the same state never splits on leaves.
+        assert!(!should_split(0, 0, &state, &leaf_cfg(0)));
+    }
+
+    /// The event arm stops MemoryReadWrite at its threshold once the lookups are past theirs, so
+    /// the leaf arm must not cut ahead of it for a doubling that cannot happen.
+    #[test]
+    fn the_leaf_cap_leaves_memory_rw_to_the_event_arm() {
+        let threshold = 1usize << 12;
+        let state = |num_global_lookup_base| ChunkSplitState {
+            num_memory_read_write_events: threshold - 8,
+            num_global_lookup_base,
+            ..Default::default()
+        };
+        // Room for everything but MemoryReadWrite's next doubling.
+        let cap = state(2).leaf_estimate() + LEAF_MEMORY_RW_INTERACTIONS * (threshold as u64) / 2;
+        let cfg = ChunkSplitConfig {
+            memory_rw_threshold: threshold,
+            global_lookup_base_threshold: 1,
+            ..leaf_cfg(cap)
+        };
+        assert!(!should_split(0, 0, &state(2), &cfg));
+        // Lookups not past their threshold: nothing stops the doubling, and the cap cuts first.
+        let cfg = ChunkSplitConfig {
+            global_lookup_base_threshold: 4,
+            ..cfg
+        };
+        assert!(should_split(0, 0, &state(2), &cfg));
+    }
+
+    #[test]
+    fn can_fit_block_refuses_a_block_the_leaf_cap_cannot_take() {
+        let state = ChunkSplitState::default();
+        let cfg = leaf_cfg(state.leaf_estimate() + 1_000);
+        assert!(can_fit_block(0, 1, 0, 0, 0, &state, &cfg));
+        assert!(!can_fit_block(0, 1 << 16, 0, 0, 0, &state, &cfg));
+    }
+
+    #[test]
+    fn clear_resets_the_leaf_rows() {
+        let mut state = ChunkSplitState::default();
+        let empty = state.leaf_estimate();
+        state.count_insn(Opcode::MUL);
+        state.add_leaf_rows(LEAF_DIVREM, 1000);
+        state.clear();
+        assert_eq!(state.leaf_estimate(), empty);
+    }
+
+    /// The interaction counts the estimate charges are the AIRs' own.
+    #[test]
+    fn leaf_interaction_counts_match_the_airs() {
+        use crate::{
+            instances::chiptype::riscv_chiptype::RiscvChipType, machine::chip::ChipBehavior,
+            primitives::consts::MAX_NUM_PVS,
+        };
+        use p3_air::BaseAir;
+        use p3_koala_bear::KoalaBear;
+        use pico_mle_core::{
+            air::symbolic::get_symbolic_builder_with_public_values, keygen::types::TraceWidth,
+        };
+
+        let expected: [(&str, u64); LEAF_INSN_CHIPS + 5] = [
+            ("Cpu", LEAF_INSN_INTERACTIONS[LEAF_CPU]),
+            ("Add", LEAF_INSN_INTERACTIONS[LEAF_ADD]),
+            ("Sub", LEAF_INSN_INTERACTIONS[LEAF_SUB]),
+            ("Addw", LEAF_INSN_INTERACTIONS[LEAF_ADDW]),
+            ("Subw", LEAF_INSN_INTERACTIONS[LEAF_SUBW]),
+            ("Mul", LEAF_INSN_INTERACTIONS[LEAF_MUL]),
+            ("DivRem", LEAF_INSN_INTERACTIONS[LEAF_DIVREM]),
+            ("LessThan", LEAF_INSN_INTERACTIONS[LEAF_LT]),
+            ("ShiftLeft", LEAF_INSN_INTERACTIONS[LEAF_SLL]),
+            ("ShiftRight", LEAF_INSN_INTERACTIONS[LEAF_SR]),
+            ("Bitwise", LEAF_INSN_INTERACTIONS[LEAF_BITWISE]),
+            ("Ecall", LEAF_INSN_INTERACTIONS[LEAF_ECALL]),
+            ("MemoryReadWrite", LEAF_MEMORY_RW_INTERACTIONS),
+            ("MemoryLocal", LEAF_MEMORY_LOCAL_INTERACTIONS),
+            ("Global", LEAF_GLOBAL_INTERACTIONS),
+            ("RiscvKoalaBearPoseidon2", LEAF_POSEIDON2_INTERACTIONS),
+            ("SyscallRiscv", LEAF_SYSCALL_INTERACTIONS),
+        ];
+        let chips = RiscvChipType::<KoalaBear>::all_chips();
+        for (name, interactions) in expected {
+            let chip = chips
+                .iter()
+                .find(|chip| chip.name() == name)
+                .unwrap_or_else(|| panic!("no RISC-V chip named {name}"));
+            let width = TraceWidth {
+                preprocessed: None,
+                cached_mains: vec![],
+                common_main: BaseAir::<KoalaBear>::width(chip),
+            };
+            let builder =
+                get_symbolic_builder_with_public_values::<KoalaBear, _>(chip, &width, MAX_NUM_PVS);
+            assert_eq!(
+                builder.constraints().interactions.len() as u64,
+                interactions,
+                "{name}"
+            );
+        }
     }
 
     #[test]

@@ -11,12 +11,47 @@
 //! minimum over the components, so a divergence confined to a component that is not binding
 //! passes.
 
-use pico_mle_core::config::{
-    koala_bear_poseidon2::KoalaBearPoseidon2Config,
-    log_up_params::log_up_security_params_koala_bear_100_bits,
-    soundness::{base_field_order, challenge_field_bits, SoundnessCalculator},
-    SystemParams, WhirProximityStrategy,
+use p3_field::PrimeField32;
+use p3_koala_bear::KoalaBear;
+use pico_mle_core::{
+    config::{
+        koala_bear_poseidon2::KoalaBearPoseidon2Config,
+        soundness::{base_field_order, SoundnessCalculator},
+        SystemParams, WhirProximityStrategy,
+    },
+    interaction::LogUpSecurityParameters,
 };
+
+/// The reference values were produced over `KoalaBear^4`, the production challenge field until
+/// the 128-bit parameters moved it to `KoalaBear^5`. The gate pins the calculator,
+/// not the production field, so the field width stays explicit here: `4 · log2(2^31 - 2^24 + 1)`.
+fn reference_challenge_field_bits() -> f64 {
+    4.0 * 2_130_706_433_f64.log2()
+}
+/// The LogUp grinding derivation the reference values were produced with: the 100-bit target the
+/// presets had then, with the 18-bit floor `log_up_params.rs` still keeps.
+const REFERENCE_LOGUP_TARGET_BITS: f64 = 100.0;
+const REFERENCE_LOGUP_POW_FLOOR: usize = 18;
+
+fn reference_log_up_params(log2_pcs_list_size: f64) -> LogUpSecurityParameters {
+    let max_interaction_count = KoalaBear::ORDER_U32;
+    let log_max_message_length = 7;
+    let security_without_pow = SoundnessCalculator::logup_soundness(
+        max_interaction_count,
+        log_max_message_length,
+        reference_challenge_field_bits(),
+        log2_pcs_list_size,
+    );
+    let pow_bits = ((REFERENCE_LOGUP_TARGET_BITS - security_without_pow)
+        .ceil()
+        .max(0.0) as usize)
+        .max(REFERENCE_LOGUP_POW_FLOOR);
+    LogUpSecurityParameters {
+        max_interaction_count,
+        log_max_message_length,
+        pow_bits,
+    }
+}
 
 const L_SKIP: usize = 4;
 const N_STACK: usize = 16;
@@ -35,13 +70,13 @@ fn shape(
 ) -> SystemParams {
     let log2_list = SoundnessCalculator::whir_proximity_gap_security(
         proximity.initial_round(),
-        challenge_field_bits::<KoalaBearPoseidon2Config>(),
+        reference_challenge_field_bits(),
         L_SKIP + N_STACK,
         LOG_BLOWUP,
         W_STACK,
     )
     .log2_list_size;
-    let mut logup = log_up_security_params_koala_bear_100_bits(log2_list);
+    let mut logup = reference_log_up_params(log2_list);
     if let Some(p) = logup_pow {
         logup.pow_bits = p;
     }
@@ -64,7 +99,7 @@ fn run(label: &str, params: &SystemParams, expected: f64) {
     let s = SoundnessCalculator::calculate(
         params,
         base_field_order::<KoalaBearPoseidon2Config>(),
-        challenge_field_bits::<KoalaBearPoseidon2Config>(),
+        reference_challenge_field_bits(),
         1_000, // max_num_constraints_per_air
         21,    // num_airs
         params.max_constraint_degree,
@@ -119,7 +154,7 @@ fn run(label: &str, params: &SystemParams, expected: f64) {
 fn differential_ground_truth_table() {
     println!(
         "challenge_field_bits = {:.6}  base_field_order = {:.0}",
-        challenge_field_bits::<KoalaBearPoseidon2Config>(),
+        reference_challenge_field_bits(),
         base_field_order::<KoalaBearPoseidon2Config>()
     );
 
@@ -134,17 +169,17 @@ fn differential_ground_truth_table() {
     ] {
         let l2 = SoundnessCalculator::whir_proximity_gap_security(
             prox.initial_round(),
-            challenge_field_bits::<KoalaBearPoseidon2Config>(),
+            reference_challenge_field_bits(),
             L_SKIP + N_STACK,
             LOG_BLOWUP,
             W_STACK,
         )
         .log2_list_size;
-        let p = log_up_security_params_koala_bear_100_bits(l2);
+        let p = reference_log_up_params(l2);
         let pre = SoundnessCalculator::logup_soundness(
             p.max_interaction_count,
             p.log_max_message_length,
-            challenge_field_bits::<KoalaBearPoseidon2Config>(),
+            reference_challenge_field_bits(),
             l2,
         );
         println!(
