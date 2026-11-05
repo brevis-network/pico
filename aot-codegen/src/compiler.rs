@@ -65,7 +65,7 @@ pub enum RuntimeSpec {
     #[default]
     InTree,
     /// The body of the dependency entry, written verbatim into every generated manifest, e.g.
-    /// `git = "https://github.com/brevis-network/pico", tag = "v3.1.0"`. A `path` here must be
+    /// `git = "https://github.com/brevis-network/pico", tag = "v3.1.1"`. A `path` here must be
     /// absolute: the chunk crates sit two directories below the dispatch crate.
     Entry(String),
 }

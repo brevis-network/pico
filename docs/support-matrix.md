@@ -1,9 +1,9 @@
 # Pico support matrix
 
-For release `v3.1.0`, where one tree builds the CPU prover (the default) and the GPU prover (the
+For release `v3.1.1`, where one tree builds the CPU prover (the default) and the GPU prover (the
 `cuda` feature). What is not listed is not supported.
 
-| area | `v3.1.0` |
+| area | `v3.1.1` |
 |---|---|
 | Host platform | CPU build: `x86_64-unknown-linux-gnu` and macOS, no CUDA needed. GPU build (`cuda` feature): `x86_64-unknown-linux-gnu` with the CUDA Toolkit. Other hosts: not supported |
 | CUDA | Toolkit to build (`nvcc`): CI builds with 12.3, the GPU runs used 12.8, and pico-gpu is also tested with 13 on an RTX 5090. Only the `cuda` feature needs it. `CUDA_ARCH` picks the SM targets; without it the build asks `nvidia-smi`, and builds for sm_89 and sm_120 when no GPU is visible. An NVIDIA GPU to run a `cuda` build, which exits at start without one; the memory thresholds are calibrated on 32 GB cards (RTX 5090), with a 24 GB tier through `PICO_GPU_MEM`. The CUDA kernels are [pico-gpu](https://github.com/brevis-network/pico-gpu), licensed under MIT or Apache-2.0 (code derived from third-party projects keeps its original license) |
