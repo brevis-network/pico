@@ -1,8 +1,7 @@
 # Pico support matrix
 
 For release `v3.1.0`, where one tree builds the CPU prover (the default) and the GPU prover (the
-`cuda` feature). The preview release `v3.1.0-gpu.1` proves 3.0's proof system with 3.0's
-parameters (see its release notes). What is not listed is not supported.
+`cuda` feature). What is not listed is not supported.
 
 | area | `v3.1.0` |
 |---|---|
