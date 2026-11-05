@@ -514,7 +514,7 @@ impl ProverBuilder {
     /// bug reads a hint into memory it already wrote.
     pub fn execute(&self, stdin: Stdin) -> Result<PureExecution, ProveError> {
         check_stdin(&stdin)?;
-        let max_cycles = emulator_opts(self.resolved_chunk_size()?).max_cycles;
+        let max_cycles = emulator_opts(self.checked_chunk_size()?).max_cycles;
         let program = compile(&self.elf)?;
         self.pure
             .execute(program, elf_sha256(&self.elf), stdin, max_cycles)
@@ -706,6 +706,35 @@ impl ProverBuilder {
     /// clock, with the chunk-split variables that would void the height check refused. Shared by
     /// [`Self::build`] and [`Self::execute_chunked`], so the two cannot chunk differently.
     pub(crate) fn resolved_chunk_size(&self) -> Result<u32, ProveError> {
+        let chunk_size = self.checked_chunk_size()?;
+
+        // The height check holds only with the memory-event limit on at scale 1. Without it,
+        // whether a chunk's memory events outgrow the stacked height depends on the guest's data,
+        // so it cannot be checked here and would fail mid-proof. Read through the VM's own readers,
+        // which resolve each variable once per process, so what is refused is what the emulator
+        // uses.
+        if event_limits_off() {
+            return Err(ProveError::InconsistentOptions(format!(
+                "CHUNK_EVENT_LIMITS_OFF=1 removes the memory-event limit on a chunk, so its memory \
+                 events can outgrow 2^{} and fail proving; unset it",
+                self.log_stacked_height
+            )));
+        }
+        let scale = event_limit_scale();
+        if scale > 1.0 {
+            return Err(ProveError::InconsistentOptions(format!(
+                "CHUNK_EVENT_LIMIT_SCALE={scale} raises the memory-event limit on a chunk, so its \
+                 memory events can outgrow 2^{} and fail proving; unset it",
+                self.log_stacked_height
+            )));
+        }
+        Ok(chunk_size)
+    }
+
+    /// The chunk size checked against the stacked height and the chunk clock, without the
+    /// chunk-split variables: pure [`Self::execute`] chunks nothing and only takes its cycle limit
+    /// from it.
+    fn checked_chunk_size(&self) -> Result<u32, ProveError> {
         try_riscv_params_with_100_bits_security(self.log_stacked_height).map_err(|err| {
             ProveError::InconsistentOptions(format!(
                 "log_stacked_height {} is not a height the backend can prove (maximum \
@@ -733,26 +762,6 @@ impl ProverBuilder {
             return Err(ProveError::InconsistentOptions(format!(
                 "chunk_size {chunk_size} exceeds 2^{}: a chunk of 2^n instructions needs a \
                  stacked height of at least n",
-                self.log_stacked_height
-            )));
-        }
-
-        // The check above holds only with the memory-event limit on at scale 1. Without it, whether
-        // a chunk's memory events outgrow the stacked height depends on the guest's data, so it
-        // cannot be checked here and would fail mid-proof. Read through the VM's own readers, which
-        // resolve each variable once per process, so what is refused is what the emulator uses.
-        if event_limits_off() {
-            return Err(ProveError::InconsistentOptions(format!(
-                "CHUNK_EVENT_LIMITS_OFF=1 removes the memory-event limit on a chunk, so its memory \
-                 events can outgrow 2^{} and fail proving; unset it",
-                self.log_stacked_height
-            )));
-        }
-        let scale = event_limit_scale();
-        if scale > 1.0 {
-            return Err(ProveError::InconsistentOptions(format!(
-                "CHUNK_EVENT_LIMIT_SCALE={scale} raises the memory-event limit on a chunk, so its \
-                 memory events can outgrow 2^{} and fail proving; unset it",
                 self.log_stacked_height
             )));
         }

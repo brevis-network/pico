@@ -123,8 +123,8 @@ fn the_prover_always_gives_its_machine_a_concurrency() {
     );
 }
 
-/// `name=value` in a child, where `build` and `execute` must both refuse it by name or, when
-/// `refused` is false, `build` must succeed.
+/// `name=value` in a child, where `build` and `execute_chunked` must both refuse it by name while
+/// pure `execute` runs or, when `refused` is false, `build` must succeed.
 fn event_limit_probe(test_name: &str, name: &str, value: &str, refused: bool) {
     let marker = format!("[env] {name}={value} checked");
     if is_child() {
@@ -137,8 +137,12 @@ fn event_limit_probe(test_name: &str, name: &str, value: &str, refused: bool) {
             assert!(is_named(&err), "build: got {err}");
             let err = small_builder()
                 .execute_chunked(Stdin::from(&N))
-                .expect_err("execute must refuse a loosened event limit");
-            assert!(is_named(&err), "execute: got {err}");
+                .expect_err("execute_chunked must refuse a loosened event limit");
+            assert!(is_named(&err), "execute_chunked: got {err}");
+            // Pure execution chunks nothing, so the variable does not concern it.
+            small_builder()
+                .execute(Stdin::from(&N))
+                .expect("pure execute must not refuse a chunk-split variable");
         } else {
             small_builder()
                 .build()
