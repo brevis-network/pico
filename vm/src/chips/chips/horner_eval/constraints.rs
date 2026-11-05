@@ -7,10 +7,10 @@ use crate::{
         builder::{ChipBaseBuilder, ChipBuilder, RecursionBuilder},
         extension::BinomialExtension,
     },
-    primitives::consts::EXTENSION_DEGREE,
+    primitives::consts::{EXTENSION_DEGREE, HORNER_EVAL_DATAPAR},
 };
 use p3_air::{Air, AirBuilder, WindowAccess};
-use p3_field::{extension::BinomiallyExtendable, Field};
+use p3_field::{extension::QuinticTrinomialExtendable, Field};
 use std::borrow::Borrow;
 
 /// Row contribution: c0*x^3 + c1*x^2 + c2*x + c3 (coefficients in evaluation order).
@@ -18,7 +18,7 @@ fn row_fold<F, CB>(
     cols: &HornerEvalCols<CB::Var>,
 ) -> BinomialExtension<F, CB::Expr, EXTENSION_DEGREE>
 where
-    F: Field + BinomiallyExtendable<EXTENSION_DEGREE>,
+    F: Field + QuinticTrinomialExtendable,
     CB: ChipBuilder<F>,
 {
     let x = cols.x.as_extension::<F, CB>();
@@ -30,7 +30,7 @@ where
         + cols.coeffs[3].as_extension::<F, CB>()
 }
 
-impl<F: Field + BinomiallyExtendable<EXTENSION_DEGREE>, CB> Air<CB> for HornerEvalChip<F>
+impl<F: Field + QuinticTrinomialExtendable, CB> Air<CB> for HornerEvalChip<F>
 where
     CB: ChipBuilder<F>,
 {
@@ -45,7 +45,7 @@ where
         let prepr_local: &HornerEvalPreprocessedCols<CB::Var> = (*prepr_local).borrow();
 
         // Memory reads: the coefficients on every real row, x only on segment start.
-        for j in 0..4 {
+        for j in 0..HORNER_EVAL_DATAPAR {
             builder.looked_block(
                 prepr_local.coeff_addrs[j],
                 local.coeffs[j],

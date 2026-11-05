@@ -43,7 +43,35 @@ pub const MAX_NUM_PVS: usize = RECURSION_NUM_PVS;
 For Extensions
  */
 
-pub const EXTENSION_DEGREE: usize = 4;
+/// Coefficients of the recursion circuit's extension field: KoalaBear^5 (`X^5 + X^2 - 1`, Plonky3's
+/// `QuinticTrinomialExtensionField`). A recursion-memory `Block` holds this many lanes.
+pub const EXTENSION_DEGREE: usize = 5;
+
+/// Lanes of a `Block` used when it packs base-field values (digests, permutation states, opened
+/// rows): the first `PACK_LANES`, every remaining lane is the constant zero. Chips that produce a
+/// packed block write it as `Block::packed(..)` (`looking_packed`), and every hinted packed block
+/// has at least one consumer that reads it the same way (`looked_packed`: Poseidon2Packed,
+/// DigestSelect, ExtDotProduct), so a hinted block whose lane `PACK_LANES..` is not zero fails
+/// the memory bus. The one consumer that reads all `EXTENSION_DEGREE` lanes as they are is
+/// UnpackBlock, which only forwards them: on the packing path its outputs past `PACK_LANES` are
+/// never read (multiplicity backfilled to zero), so it neither pins nor uses the padding lanes.
+pub const PACK_LANES: usize = 4;
+/// Packed blocks a digest occupies (2 for the Poseidon2-16 digest of 8 felts).
+pub const DIGEST_BLOCKS: usize = DIGEST_SIZE / PACK_LANES;
+/// Packed blocks a Poseidon2 permutation state occupies (4 for the width-16 permutation).
+pub const PERM_BLOCKS: usize = PERMUTATION_WIDTH / PACK_LANES;
+const _: () = assert!(
+    PACK_LANES <= EXTENSION_DEGREE,
+    "a packed block fits in a Block"
+);
+const _: () = assert!(
+    DIGEST_SIZE.is_multiple_of(PACK_LANES),
+    "a digest packs into whole blocks"
+);
+const _: () = assert!(
+    PERMUTATION_WIDTH.is_multiple_of(PACK_LANES),
+    "a permutation state packs into whole blocks"
+);
 
 /*
 For digests
@@ -207,9 +235,13 @@ pub const SELECT_DATAPAR: usize = 2;
 /// Elements per ExtDotProduct trace row (MLE recursion precompile).
 pub const EXT_DOT_PRODUCT_DATAPAR: usize = 8;
 /// Packed value groups per ExtDotProduct trace row: each group reads ONE packed
-/// value block (EXTENSION_DEGREE base values in its lanes) and EXTENSION_DEGREE
-/// mu values, contributing `sum_k val.lane_k * mu_k` to the accumulator.
-pub const EXT_DOT_PRODUCT_GROUPS: usize = EXT_DOT_PRODUCT_DATAPAR / EXTENSION_DEGREE;
+/// value block (PACK_LANES base values in its lanes) and PACK_LANES mu values,
+/// contributing `sum_k val.lane_k * mu_k` to the accumulator.
+pub const EXT_DOT_PRODUCT_GROUPS: usize = EXT_DOT_PRODUCT_DATAPAR / PACK_LANES;
+const _: () = assert!(
+    EXT_DOT_PRODUCT_DATAPAR.is_multiple_of(PACK_LANES),
+    "an ExtDotProduct row holds whole packed groups"
+);
 /// Coefficients per HornerEval trace row (MLE recursion precompile).
 pub const HORNER_EVAL_DATAPAR: usize = 4;
 /// Pack operations per PackBlock trace row (MLE recursion precompile).

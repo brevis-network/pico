@@ -65,7 +65,7 @@
 use std::{panic, sync::Arc};
 
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
-use pico_mle_core::config::recursion_params_with_100_bits_security;
+use pico_mle_core::config::recursion_params_with_128_bits_security;
 use pico_vm::{
     compiler::riscv::{
         compiler::{Compiler, SourceType},
@@ -154,7 +154,7 @@ fn main() {
     let sub_root = baseline.expect("a matched baseline has a root");
 
     let mut deferred = DeferredMachine::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         vm_vk.clone(),
         false,
     );
@@ -216,7 +216,7 @@ fn main() {
 
     // The node publishes the MAIN program's identity, so it is keyed to the aggregator.
     let mut agg_deferred = DeferredMachine::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         agg_vm_vk.clone(),
         false,
     );
@@ -266,14 +266,14 @@ fn main() {
             agg_riscv_vk.clone(),
             agg_vm_vk.clone(),
             &agg_proofs,
-            recursion_params_with_100_bits_security(),
+            recursion_params_with_128_bits_security(),
             false,
         )?;
         convert.set_final_deferred_digest(agg_chain_end);
         let mut children = agg_nodes[..1].to_vec();
         children.extend(convert.prove_with_vks(&agg_proofs)?);
         let mut combine = CombineMachine::new(
-            recursion_params_with_100_bits_security(),
+            recursion_params_with_128_bits_security(),
             agg_vm_vk.clone(),
             false,
         );
@@ -320,7 +320,7 @@ fn main() {
     );
     let one_vm_vk = RiscvVmVk::from_program_and_vk(&agg_program, &one_riscv_vk);
     let mut one_deferred = DeferredMachine::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         one_vm_vk.clone(),
         false,
     );
@@ -360,7 +360,7 @@ fn main() {
                 [("nested", false, false), ("nested-control", true, true)]
             {
                 let mut nested = DeferredMachine::new(
-                    recursion_params_with_100_bits_security(),
+                    recursion_params_with_128_bits_security(),
                     agg_vm_vk.clone(),
                     false,
                 );

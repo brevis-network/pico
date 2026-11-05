@@ -69,6 +69,7 @@ use watch::SpawnWatched;
 use pico_vm::mle::machine::{
     apex::MleApexVerifier,
     combine::CombineMachine,
+    compress::{CompressMachine, GpuCompressMachine},
     convert::GpuConvertMachine,
     exe::RiscvVmVk,
     vk_map::{pinned_root_from_env, MleVkMap},
@@ -146,9 +147,12 @@ pub struct BlockOutcome {
     /// measures from the gRPC boundary because that is the span a verifier can hold us to.
     pub e2e_wall: Duration,
     /// Host-side root acceptance, which follows the `e2e=` window rather than sitting inside it.
+    /// Near zero when the root is left to the compress proof (`--step compress` without
+    /// `MLE_VERIFY`).
     pub root_accept: Duration,
-    /// `None` without `--step combine` (there is no root), and on an MLE secondary (the root is
-    /// proved and accepted on the primary by construction).
+    /// `None` when `--step` stops before combine (there is no root), when the root is left to the
+    /// compress proof (`--step compress` without `MLE_VERIFY`; see the export below), and on an MLE
+    /// secondary (the root is proved and accepted on the primary by construction).
     pub root: Option<RootProofExport>,
     /// The bytes the guest committed, from the emulation. Bound to a proof only by the root's
     /// `committed_value_digest`, which a verifier checks.
@@ -1762,6 +1766,11 @@ pub fn run_step(
         Step::Combine => run_pipeline(cfg, true, true, iteration, job),
         #[cfg(not(feature = "cuda"))]
         Step::Combine => panic!("--step combine requires the `cuda` feature"),
+        // The combine pipeline; `run_pipeline` reads the compress stage off `cfg.step`.
+        #[cfg(feature = "cuda")]
+        Step::Compress => run_pipeline(cfg, true, true, iteration, job),
+        #[cfg(not(feature = "cuda"))]
+        Step::Compress => panic!("--step compress requires the `cuda` feature"),
     }
 }
 
@@ -1801,7 +1810,7 @@ fn root_early_keygen_enabled() -> bool {
 #[cfg(feature = "cuda")]
 fn acceptance_machine(vm_vk: RiscvVmVk, vk_map: Option<&Arc<MleVkMap>>) -> CombineMachine {
     let mut machine = CombineMachine::new(
-        pico_vm::mle::recursion_params_with_100_bits_security(),
+        pico_vm::mle::recursion_params_with_128_bits_security(),
         vm_vk,
         vk_map.is_some(),
     );
@@ -1914,15 +1923,22 @@ struct Resident {
     vk_map: Option<Arc<MleVkMap>>,
     /// The standalone apex verifier, in whitelist mode with a combine stage: built once, against
     /// the deployment's pinned root (`MLE_VK_ROOT`, else the artifact's own), and reused for every
-    /// block's root.
+    /// block: on the root when it is accepted here, and on the compress proof.
     #[cfg(feature = "cuda")]
     apex: Option<Arc<MleApexVerifier>>,
+    /// `--step compress`: the GPU prover, on card 0 after the tree, and the CPU machine that
+    /// accepts its proof (it keygens per root layout, hence the mutex).
+    #[cfg(feature = "cuda")]
+    compress: Option<(
+        Arc<GpuCompressMachine>,
+        Arc<std::sync::Mutex<CompressMachine>>,
+    )>,
     /// Reported once, in `setup.csv`. A resident process pays it on block 1 and never again, so
     /// carrying it in the per-block table would describe a cost that is not there.
     keygen_wall: Duration,
     /// The shape these machines were built for. A second block asking for a different one is a
     /// caller bug: the machines are per-card and the lane count decides the spawn count.
-    shape: (usize, bool, bool),
+    shape: (usize, bool, bool, bool),
 }
 
 /// What the resident machines were built from. A block whose key differs gets new machines: the
@@ -1990,6 +2006,12 @@ fn run_pipeline(
     assert!(
         with_convert || !with_combine,
         "with_combine implies with_convert"
+    );
+    // The compress stage runs after the tree, on the root, so it needs the combine pipeline.
+    let with_compress = cfg.step == Step::Compress;
+    assert!(
+        with_combine || !with_compress,
+        "with_compress implies with_combine"
     );
     watch::reset();
     // Scheduling mode. This used to be an unconditional `set_var("USECASE", "local_single_node")`
@@ -2059,6 +2081,9 @@ fn run_pipeline(
     vram_probe("enter", iteration.unwrap_or(0), prover_count);
 
     let t_total = Instant::now();
+    // Host-side verification of the intermediate proofs: riscv chunks, converts, combine nodes,
+    // and the root when compress follows. The final proof (the root under `--step combine`, the
+    // compress proof under `--step compress`) is accepted either way.
     let verify = env_flag("MLE_VERIFY");
     // Negative-test hook: tamper one cross-chunk pass-through cell so `Σ gcs != 0`.
     let corrupt_memory = env_flag("CORRUPT_MEMORY");
@@ -2248,7 +2273,7 @@ fn run_pipeline(
                 let mut machine = GpuConvertMachine::new(
                     Arc::clone(&riscv_vk),
                     riscv_vm_vk.clone(),
-                    pico_vm::mle::recursion_params_with_100_bits_security(),
+                    pico_vm::mle::recursion_params_with_128_bits_security(),
                     vk_on,
                 );
                 if let Some(map) = &vk_map {
@@ -2287,7 +2312,7 @@ fn run_pipeline(
                         |e| panic!("binding the main thread to card {k} failed: {e:?}"),
                     );
                     let mut machine = pico_vm::mle::machine::combine::GpuCombineMachine::new(
-                        pico_vm::mle::recursion_params_with_100_bits_security(),
+                        pico_vm::mle::recursion_params_with_128_bits_security(),
                         vk_on,
                     );
                     if let Some(map) = &vk_map {
@@ -2307,11 +2332,30 @@ fn run_pipeline(
                     None => pinned_root_from_env().unwrap_or_else(|| map.root()),
                 };
                 Some(Arc::new(MleApexVerifier::new(
-                    pico_vm::mle::recursion_params_with_100_bits_security(),
+                    pico_vm::mle::recursion_params_with_128_bits_security(),
+                    pico_vm::mle::compress_params_with_128_bits_security(),
                     Arc::clone(map),
                     vm_vk.clone(),
                     trusted_root,
                 )))
+            }
+            _ => None,
+        };
+        // Compress machines: one, on card 0, which the main thread proves it on once every lane
+        // has joined. Construction binds the card for the same reason the combine loop does.
+        #[cfg(feature = "cuda")]
+        let compress = match &riscv_vm_vk {
+            Some(vm_vk) if with_compress => {
+                pico_vm::mle::cuda_mle::runtime::context::set_device(0)
+                    .expect("binding the main thread to card 0 failed");
+                let params = pico_vm::mle::compress_params_with_128_bits_security;
+                let mut gpu = GpuCompressMachine::new(params(), vk_on);
+                let mut cpu = CompressMachine::new(params(), vm_vk.clone(), vk_on);
+                if let Some(map) = &vk_map {
+                    gpu.set_vk_map(Arc::clone(map));
+                    cpu.set_vk_map(Arc::clone(map));
+                }
+                Some((Arc::new(gpu), Arc::new(std::sync::Mutex::new(cpu))))
             }
             _ => None,
         };
@@ -2328,15 +2372,17 @@ fn run_pipeline(
             vk_map,
             #[cfg(feature = "cuda")]
             apex,
+            #[cfg(feature = "cuda")]
+            compress,
             keygen_wall,
-            shape: (prover_count, with_convert, with_combine),
+            shape: (prover_count, with_convert, with_combine, with_compress),
         }
     });
     // A second block asking for a different shape would silently prove against machines built for
     // the first one — wrong card count, or a convert stage that was never constructed.
     assert_eq!(
         resident.shape,
-        (prover_count, with_convert, with_combine),
+        (prover_count, with_convert, with_combine, with_compress),
         "resident machines were built for a different shape; one process serves one shape"
     );
     // Rebound with the names the pipeline below already uses, so the proving window is untouched
@@ -2353,6 +2399,8 @@ fn run_pipeline(
     let vk_map = resident.vk_map.clone();
     #[cfg(feature = "cuda")]
     let apex = resident.apex.clone();
+    #[cfg(feature = "cuda")]
+    let compress = resident.compress.clone();
     let keygen_wall = resident.keygen_wall;
     // Per-block shape statistics, by snapshot-and-difference rather than by reset.
     //
@@ -2386,17 +2434,21 @@ fn run_pipeline(
     let root_slot: Arc<std::sync::Mutex<Option<RootRecord>>> =
         Arc::new(std::sync::Mutex::new(None));
     // Per block, like the root slot: a keygen a failed block leaves behind is never handed to the
-    // next one. The secondary never prepares the final node, so it has none to start.
+    // next one. The secondary never prepares the final node, so it has none to start, and a root
+    // left to the compress proof is not accepted here (see `accept_root`), so it needs no keygen.
     #[cfg(feature = "cuda")]
-    let early_root =
-        (with_combine && !is_mle_secondary() && root_early_keygen_enabled()).then(|| {
-            EarlyRootKeygen::new(
-                riscv_vm_vk
-                    .clone()
-                    .expect("combine implies convert, which builds the exe identity"),
-                vk_map.clone(),
-            )
-        });
+    let early_root = (with_combine
+        && !is_mle_secondary()
+        && root_early_keygen_enabled()
+        && (verify || compress.is_none()))
+    .then(|| {
+        EarlyRootKeygen::new(
+            riscv_vm_vk
+                .clone()
+                .expect("combine implies convert, which builds the exe identity"),
+            vk_map.clone(),
+        )
+    });
     // Combine node timing. Kept OUT of `prove_nanos` / `prove_count` on purpose: those two are the
     // riscv chunk figures the `chunks=` / `sum(prove)` bench fields report, and mixing combine into
     // them would break comparability with the riscv/convert baselines.
@@ -3616,71 +3668,83 @@ fn run_pipeline(
         let nodes = combine_count.load(Ordering::SeqCst);
         let combine_total = Duration::from_nanos(combine_nanos.load(Ordering::SeqCst));
 
+        // With a compress stage and `MLE_VERIFY` off, the root is an intermediate proof like the
+        // nodes under it and is left to the compress proof: the compress circuit verifies the root
+        // (in whitelist mode re-checking the root key's membership), and the compress acceptance
+        // below checks the public values the root passed on. Skipping the root's CPU keygen and
+        // verify here lets compress start right after the tree. What dev mode gives up: a parent
+        // circuit takes its child's key as witnessed, so nothing then checks the root against an
+        // honestly keygen'd key, the check that catches a GPU root program built with the wrong
+        // parameters; `MLE_VERIFY=1` keeps it.
+        let accept_root = verify || compress.is_none();
         let t_verify = Instant::now();
-        let early = early_root.as_ref().and_then(EarlyRootKeygen::take);
-        let keygen_here = early.is_none();
-        let mut cpu_combine = match early {
-            // A keygen that panicked panics here, as it would have inside acceptance.
-            Some(handle) => match handle.join() {
-                Ok(machine) => machine,
-                Err(panic) => std::panic::resume_unwind(panic),
-            },
-            None => acceptance_machine(
-                riscv_vm_vk
-                    .clone()
-                    .expect("combine implies convert, which builds the exe identity"),
-                vk_map.as_ref(),
-            ),
-        };
-        let waited = t_verify.elapsed();
-        if keygen_here {
-            info!("MLE root keygen: start (in acceptance)");
-        }
-        let shapes_before = cpu_combine.num_distinct_shapes();
-        cpu_combine
-            .register_shape(&root.child_layouts, /* is_complete = */ true)
-            .unwrap_or_else(|e| panic!("{e}"));
-        if keygen_here {
-            info!(
-                "MLE root keygen: done in {:.3}s (in acceptance)",
-                (t_verify.elapsed() - waited).as_secs_f64()
+        if accept_root {
+            let early = early_root.as_ref().and_then(EarlyRootKeygen::take);
+            let keygen_here = early.is_none();
+            let mut cpu_combine = match early {
+                // A keygen that panicked panics here, as it would have inside acceptance.
+                Some(handle) => match handle.join() {
+                    Ok(machine) => machine,
+                    Err(panic) => std::panic::resume_unwind(panic),
+                },
+                None => acceptance_machine(
+                    riscv_vm_vk
+                        .clone()
+                        .expect("combine implies convert, which builds the exe identity"),
+                    vk_map.as_ref(),
+                ),
+            };
+            let waited = t_verify.elapsed();
+            if keygen_here {
+                info!("MLE root keygen: start (in acceptance)");
+            }
+            let shapes_before = cpu_combine.num_distinct_shapes();
+            cpu_combine
+                .register_shape(&root.child_layouts, /* is_complete = */ true)
+                .unwrap_or_else(|e| panic!("{e}"));
+            if keygen_here {
+                info!(
+                    "MLE root keygen: done in {:.3}s (in acceptance)",
+                    (t_verify.elapsed() - waited).as_secs_f64()
+                );
+            }
+            // `verify` takes the honest key from any complete shape the machine holds; an early
+            // machine keygen'd from other layouts than the root's would show up here as a second one.
+            assert_eq!(
+                cpu_combine.num_distinct_shapes(),
+                1,
+                "root acceptance's machine holds a shape besides this root's"
             );
-        }
-        // `verify` takes the honest key from any complete shape the machine holds; an early
-        // machine keygen'd from other layouts than the root's would show up here as a second one.
-        assert_eq!(
-            cpu_combine.num_distinct_shapes(),
-            1,
-            "root acceptance's machine holds a shape besides this root's"
-        );
-        let how = match (keygen_here, &early_root) {
-            (false, _) => format!(
-                "keygen'd under the root's prove, {:.3}s waited for it",
-                waited.as_secs_f64()
-            ),
-            (true, None) => "keygen'd here (MLE_ROOT_EARLY_KEYGEN=0)".to_string(),
-            (true, Some(_)) => "keygen'd here: no early keygen was started".to_string(),
-        };
-        info!(
-            "MLE root acceptance: root-shape keygens={} in acceptance | {how}",
-            cpu_combine.num_distinct_shapes() - shapes_before,
-        );
-        cpu_combine
-            .verify(&root.proof)
-            .expect("combine ROOT proof failed host-side acceptance");
-        // Whitelist mode: the standalone apex re-accepts the root from artifacts only, against
-        // the deployment's pinned root (`MLE_VK_ROOT`, else the artifact's own).
-        if let Some(apex) = &apex {
-            apex.verify(&root.proof)
-                .expect("standalone apex verify failed");
-            info!("standalone apex verify ✓");
+            let how = match (keygen_here, &early_root) {
+                (false, _) => format!(
+                    "keygen'd under the root's prove, {:.3}s waited for it",
+                    waited.as_secs_f64()
+                ),
+                (true, None) => "keygen'd here (MLE_ROOT_EARLY_KEYGEN=0)".to_string(),
+                (true, Some(_)) => "keygen'd here: no early keygen was started".to_string(),
+            };
+            info!(
+                "MLE root acceptance: root-shape keygens={} in acceptance | {how}",
+                cpu_combine.num_distinct_shapes() - shapes_before,
+            );
+            cpu_combine
+                .verify(&root.proof)
+                .expect("combine ROOT proof failed host-side acceptance");
+            // Whitelist mode: the standalone apex re-accepts the root from artifacts only, against
+            // the deployment's pinned root (`MLE_VK_ROOT`, else the artifact's own).
+            if let Some(apex) = &apex {
+                apex.verify(&root.proof)
+                    .expect("standalone apex verify failed");
+                info!("standalone apex verify ✓");
+            }
         }
         // Asserted before the success line so a miscount cannot be preceded by a ✓.
         //
         // Per-machine under two-machine, for the same reason as the count above: the tree is one
         // tree but its nodes are shared out, so this machine proving fewer than `chunk_count - 1`
-        // is the expected case, not a miscount. The root it just accepted is the whole tree's root
-        // regardless — that is what `verify` above checks.
+        // is the expected case, not a miscount. The root is the whole tree's root regardless —
+        // that is what its acceptance checks, here or, when it is left to the compress proof, in
+        // the compress circuit.
         if mle_two_machine_requested() {
             assert!(
                 nodes < chunk_count,
@@ -3695,9 +3759,14 @@ fn run_pipeline(
                 chunk_count - 1
             );
         }
+        let root_note = if accept_root {
+            "root proved + verified ✓"
+        } else {
+            "root proved (acceptance left to the compress proof; set MLE_VERIFY=1 to run it here)"
+        };
         info!(
-            "MLE combine complete: {nodes} node(s), root proved + verified ✓ \
-             (n-1 expected for {chunk_count} chunks) | sum(combine)={:.3}s | verify={:.3}s",
+            "MLE combine complete: {nodes} node(s) (n-1 expected for {chunk_count} chunks), \
+             {root_note} | sum(combine)={:.3}s | verify={:.3}s",
             combine_total.as_secs_f64(),
             t_verify.elapsed().as_secs_f64(),
         );
@@ -3708,34 +3777,39 @@ fn run_pipeline(
 
         // Package the root for whoever has to verify it elsewhere. Built here rather than at the
         // end of the function because `root` is moved-from by then, and built only on this side of
-        // `verify` above so that what we hand out is what we ourselves accepted.
+        // `verify` above so that what we hand out is what we ourselves accepted. A root left to the
+        // compress proof was not accepted here, so it is not exported; nothing is lost, as its two
+        // consumers, ethproofs and `pico-prover`'s GPU entry (`embed`), run the combine step (the
+        // ethproofs launcher refuses any other step).
         // Whitelist mode ships the root's vk with the proof (see `RootProofExport::root_vk`).
-        let root_vk = vk_map
-            .as_ref()
-            .map(|_| bincode::serialize(&*root.proof.1))
-            .transpose();
-        match (
-            pico_vm::mle::machine::recursion::proof_wire_bytes(&root.proof.0),
-            root_vk,
-        ) {
-            (Ok(bytes), Ok(root_vk)) => {
-                root_export = Some(RootProofExport {
-                    proof: bytes,
-                    child_layouts: root.child_layouts.clone(),
-                    riscv_vk_digest: riscv_vm_vk
-                        .as_ref()
-                        .expect("combine implies convert, which builds the exe identity")
-                        .digest_hex(),
-                    root_vk,
-                });
-            }
-            // A run that has already produced a verified root must not die because the export
-            // failed; the caller sees `root: None` and reports the block as unproved.
-            (Err(e), _) => {
-                tracing::warn!("MLE combine root: wire encode failed, not exported: {e:?}")
-            }
-            (_, Err(e)) => {
-                tracing::warn!("MLE combine root: vk encode failed, not exported: {e:?}")
+        if accept_root {
+            let root_vk = vk_map
+                .as_ref()
+                .map(|_| bincode::serialize(&*root.proof.1))
+                .transpose();
+            match (
+                pico_vm::mle::machine::recursion::proof_wire_bytes(&root.proof.0),
+                root_vk,
+            ) {
+                (Ok(bytes), Ok(root_vk)) => {
+                    root_export = Some(RootProofExport {
+                        proof: bytes,
+                        child_layouts: root.child_layouts.clone(),
+                        riscv_vk_digest: riscv_vm_vk
+                            .as_ref()
+                            .expect("combine implies convert, which builds the exe identity")
+                            .digest_hex(),
+                        root_vk,
+                    });
+                }
+                // A run that has already produced a verified root must not die because the export
+                // failed; the caller sees `root: None` and reports the block as unproved.
+                (Err(e), _) => {
+                    tracing::warn!("MLE combine root: wire encode failed, not exported: {e:?}")
+                }
+                (_, Err(e)) => {
+                    tracing::warn!("MLE combine root: vk encode failed, not exported: {e:?}")
+                }
             }
         }
 
@@ -3776,10 +3850,58 @@ fn run_pipeline(
             shape_nodes, nodes,
             "every node either keygens a shape or hits a cached one"
         );
-        // The whole block, not just `verify`: the root shape's CPU keygen inside `register_shape`, the
-        // slot take and the two summary lines are on the same thread and outside the window just as
-        // much. `t_verify` stays what the `verify=` field has always meant.
+        // The whole block, not just `verify`: when the root is accepted here, the root shape's CPU
+        // keygen inside `register_shape`, the slot take and the two summary lines are on the same
+        // thread and outside the window just as much. `t_verify` stays what the `verify=` field has
+        // always meant.
         root_accept = t_accept.elapsed();
+
+        // `--step compress`: re-prove the root at the compress preset on card 0 (the main thread's
+        // card; every lane has joined), then accept the compress proof on the CPU machine, which
+        // keygens the layout's key itself rather than trusting the prover's, and in whitelist mode
+        // on the standalone apex. It is the final proof, so it is accepted whatever `MLE_VERIFY`
+        // says. Reported on its own line, outside `e2e=` and `root-accept=`: the headline's fields
+        // are parsed by position. `e2e-compress=` runs from the start of `e2e=` to the compress
+        // proof: `e2e=`, then `root-accept=`, then the compress prove, without its acceptance.
+        if let Some((gpu_compress, cpu_compress)) = &compress {
+            let t_compress = Instant::now();
+            let proved = gpu_compress
+                .prove(&root.proof)
+                .expect("compress prove failed");
+            let e2e_compress = t_e2e.elapsed();
+            let t_compress_verify = Instant::now();
+            let mut cpu_compress = cpu_compress
+                .lock()
+                .expect("compress machine mutex poisoned");
+            cpu_compress
+                .preregister(&proved.root_layout)
+                .unwrap_or_else(|e| panic!("{e}"));
+            cpu_compress
+                .verify(&proved.proof)
+                .expect("compress proof failed host-side acceptance");
+            // Whitelist mode: the standalone apex. `CompressMachine::verify` leaves the compress
+            // key's membership to it (the whitelist's last leaf). A member key is a
+            // whitelisted compress circuit, which re-checks the root's key under the whitelist root
+            // `vk_root`; the apex then pins `vk_root` to the trusted root.
+            if let Some(apex) = &apex {
+                apex.verify_compress(&proved.proof)
+                    .expect("standalone apex verify of the compress proof failed");
+                info!("standalone apex verify (compress) ✓");
+            }
+            info!(
+                target: "bench",
+                "MLE compress: proved + verified ✓ | total={:.3}s | keygen={:.3}s setup={:.3}s \
+                 tracegen={:.3}s prove={:.3}s | verify={:.3}s | e2e-compress={:.3}s",
+                t_compress.elapsed().as_secs_f64(),
+                proved.keygen_ms as f64 / 1000.0,
+                proved.setup_ms as f64 / 1000.0,
+                proved.tracegen_ms as f64 / 1000.0,
+                proved.prove_ms as f64 / 1000.0,
+                t_compress_verify.elapsed().as_secs_f64(),
+                e2e_compress.as_secs_f64(),
+            );
+            pico_vm::mle::machine::recursion::log_proof_size("MLE compress", &proved.proof.0);
+        }
     }
 
     // --- Benchmark report (throughput + end-to-end). ---

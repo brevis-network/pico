@@ -53,7 +53,7 @@ pub struct Args {
     pub n: u32,
 
     // Step to exit the test.
-    // all | riscv | convert | combine | embed | wrap
+    // all | riscv | convert | combine | compress | embed | wrap
     #[clap(long, default_value = "all")]
     pub step: String,
 

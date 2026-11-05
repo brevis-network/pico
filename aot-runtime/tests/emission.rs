@@ -319,7 +319,7 @@ fn core_state(emu: &AotEmulatorCore) -> String {
             split.num_memory_read_write_events,
             split.num_global_lookup_base,
             split.commit_in_flight,
-            split.deferred_commits,
+            split.commits,
         ),
         emu.pc,
         emu.clk,

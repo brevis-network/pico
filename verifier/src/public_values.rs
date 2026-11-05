@@ -64,7 +64,7 @@ pub fn recursion_public_values(pv_sets: &[Vec<Kb>]) -> Result<&[Kb], VerifyError
 ///    checks propagate it to every node.
 /// 4. The PV digest recomputes from the hashed prefix.
 ///
-/// `label` names the layer in error messages ("root", "embed"). `pvs` must be
+/// `label` names the layer in error messages ("root", "compress", "embed"). `pvs` must be
 /// [`RECURSION_NUM_PVS`] long (see [`recursion_public_values`]).
 pub fn check_complete_root_public_values(
     label: &str,

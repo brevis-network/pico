@@ -21,7 +21,7 @@ fn test_mle_open_trace_dimensions() {
 
     let event = MleOpenEvent {
         col_ref: (1u32 << 16) | 3, // air_id=1, col_id=3
-        opening_value: Block([F::from_u32(42), F::ZERO, F::ZERO, F::ZERO]),
+        opening_value: Block::from(F::from_u32(42)),
     };
 
     let mut record = RecursionRecord::<F>::default();
@@ -91,6 +91,7 @@ mod gpu {
                     F::from_u32(i.wrapping_add(1)),
                     F::from_u32(i.wrapping_add(2)),
                     F::from_u32(i.wrapping_add(3)),
+                    F::from_u32(i.wrapping_add(4)),
                 ]),
             })
             .collect()

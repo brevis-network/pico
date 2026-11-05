@@ -4,10 +4,11 @@ The whitelist is the artifact `VK_VERIFICATION=true` proves under. It is a per-c
 deliverable: when the code that determines a recursion verifying key changes, the artifact is
 rebuilt in full. There is one procedure, no partial update. This page is that procedure.
 
-The procedure runs on the CPU prover's tree. The GPU prover's tree copies the artifact while the
-two trees' AIRs agree and builds its own while they do not (see "The CPU and GPU trees" below).
-The GPU tree's CI does not run the artifact unit test, so where this page says CI checks
-something, it means the CPU tree's CI.
+The procedure runs on the CPU build: keygen needs no GPU. One tree builds the CPU and the GPU
+prover over the same AIRs, shape tables, recursion compiler and params, so both keygen the same keys
+and ship the same artifact ("Verifying on a GPU host" below). Where this page says CI checks
+something, it is the jobs in `test-vm.yml` and `test-prover.yml`; the artifact unit test runs in
+`CPU · VK whitelist and VM pins`.
 
 ## What ships
 
@@ -15,8 +16,8 @@ Two files in `vm/src/mle/shape_vk_bins/`, committed together and read together:
 
 | file | holds | read by |
 |---|---|---|
-| `mle_vk_map_kb.bin` | the whitelist: the `(pre_hash, merged_preprocessed_commit)` identity of every admitted convert VK (one per riscv shape the shape config enumerates), of every combine node VK and of the deferred node VK, in leaf order, plus the shape config digest and the Merkle root | `MleVkMap::load` (`MLE_VK_MAP`); every combine and deferred witness looks its children up in it |
-| `mle_vk_root.txt` | the same digest and root as text, the `MLE_VK_ROOT="..."` line being the constant a deployment pins | operators (`MLE_VK_ROOT`), the SDK's whitelist tests, the artifact unit test |
+| `mle_vk_map_kb.bin` | the whitelist: the `(pre_hash, merged_preprocessed_commit)` identity of every admitted convert VK (one per riscv shape the shape config enumerates), of every combine node VK, of the deferred node VK and of the compress node VK, in leaf order, plus the shape config digest and the Merkle root | `MleVkMap::load` (`MLE_VK_MAP`); every combine and deferred witness looks its children up in it, every embed witness looks the compress key up in it, and the SDK apex looks a compress proof's key up in it |
+| `mle_vk_root.txt` | the leaf counts, the whitelist-mode riscv key's pre-hash, and the same digest and root as text; the `MLE_VK_ROOT="..."` line is the constant a deployment pins, the `pre_hash is [...]` line is held against the binary by the artifact unit test | operators (`MLE_VK_ROOT`), the SDK's whitelist tests, the artifact unit test |
 
 The bin is self-contained for membership proofs: the tree is rebuilt from the leaves on load,
 `path(index)` gives the sibling path. The root file is what makes the bin trusted: `MleVkMap::load`
@@ -33,16 +34,20 @@ Any of these, on the branch the artifact ships from:
 
 | change | what moves | caught before a proving run by |
 |---|---|---|
-| a shape table (`MLE_CORE_LADDER`, `MLE_RISCV_MAIN_LOG_HEIGHTS`, the precompile or memory enumeration, `MLE_RISCV_PROGRAM_LOG_HEIGHT`), a recursion tier table (`MLE_RECURSION_CONVERT_LADDER`, combine, embed), `MLE_VK_MERKLE_DEPTH` | the config digest, the leaf set, the root | the digest check in `MleVkMap::load`, the artifact unit test |
+| a shape table (`MLE_CORE_LADDER`, `MLE_RISCV_MAIN_LOG_HEIGHTS`, the precompile or memory enumeration, `MLE_RISCV_PROGRAM_LOG_HEIGHT`), a recursion tier table (`MLE_RECURSION_CONVERT_LADDER`, combine, compress), `MLE_VK_MERKLE_DEPTH` | the config digest, the leaf set, the root | the digest check in `MleVkMap::load`, the artifact unit test |
 | an AIR's columns, constraints or interactions | the convert VKs of every shape that AIR is present in: a precompile AIR moves its kind's shapes, `Cpu` or `Ecall` the core rows, `MemoryInitialize` the memory shapes | the constraint parity test (`riscv_constraint_parity`), and the artifact unit test through the shape it probes for that family |
-| an AIR added or removed, `DEFAULT_LOG_STACKED_HEIGHT`, the riscv or recursion params, the recursion compiler or lowering, the combine or deferred circuit | every convert VK and/or every combine node VK and/or the deferred node VK | the artifact unit test |
+| an AIR added or removed, `DEFAULT_LOG_STACKED_HEIGHT`, the riscv, recursion or compress params, the recursion compiler or lowering, the combine, deferred or compress circuit | every convert VK and/or every combine node VK and/or the deferred node VK and/or the compress node VK | the artifact unit test |
+| the embed row (`MLE_RECURSION_EMBED_LOG_HEIGHTS`) or the embed params | no rebuild: neither the digest nor a leaf nor the root. The embed key moves: regenerate the soundness manifest, and redo the wrap circuit, its Groth16 setup and the on-chain verifier, which bake the key in (the gnark setup and `contracts/test/dev`, as `contracts/README.md` does them) | the artifact unit test, which keygens embed over the compress proof's synthesized layout and holds it against the manifest |
 
-The digest covers only the first line of the table. The others move keys without moving the
+The digest covers only the first line of the table. The next two move keys without moving the
 digest, which is why the artifact unit test (`the_shipped_artifact_matches_this_binary`, run by
-the CPU tree's CI) keygens, from the binary under test, the riscv vk, one convert VK per shape family (the first
-core row, the first memory shape, the first shape of each precompile kind), one combine node and
-the deferred node, and requires them to be members. When that test or the parity test fails after a change, rebuild;
-there is no way to patch the file.
+CI) keygens, from the binary under test, one convert VK per shape family (the first
+core row, the first memory shape, the first shape of each precompile kind), one combine node, the
+deferred node and the compress node, and requires each of them to be a member; the riscv vk it
+keygens is held against the root file's pre-hash line and the manifest instead. The embed line moves
+no leaf at all; the same test keygens embed over the compress proof's synthesized layout and
+requires the soundness manifest's embed identity. When that test or the parity test fails after a
+change to one of the first three lines, rebuild; there is no way to patch the file.
 
 Do not classify the change to save keygen time. The full build is about an hour and a half on
 eight workers; the classification is where mistakes are made (a checkpoint reused across a
@@ -75,8 +80,8 @@ cuts.
 
 1. Start from the latest commit of the branch the artifact ships from, on a clean tree:
    `git fetch origin && git switch -c <branch> origin/<that branch>` (a local ref can be far
-   behind), and note `git rev-parse HEAD` beside the build log. The CPU tree builds the artifact;
-   the section on the two trees says when the GPU tree builds its own.
+   behind), and note `git rev-parse HEAD` beside the build log. Build on the CPU build; the GPU
+   build ships the same files.
 2. Remove any checkpoint from an earlier build: `rm -f mle_vk_map.ckpt` (or whatever
    `MLE_VK_MAP_CKPT` names). The builder refuses a checkpoint written by another build of the
    convert programs, but a full rebuild starts from none.
@@ -111,7 +116,9 @@ cuts.
    Keep these lines from the log, as printed, with the change that triggered the rebuild:
    - `whitelist riscv shapes: N (0 checkpointed, N to keygen, 8 workers)`: a full build starts
      from 0;
-   - `leaves: N convert + M combine + 1 deferred = T`;
+   - `complete-root node VKs: 20 extract to one combine-tier layout` (the premise of the one
+     compress leaf);
+   - `leaves: N convert + M combine + 1 deferred + 1 compress = T`;
    - `  config digest = [...]` and `  root          = [...]   (MLE_VK_ROOT="...")`;
    - `(a) ✓ ... chunk(s) over 4 block(s)` and `(b) ✓ fib-10: ...`;
    - the last line, ``validations passed; artifact `...` ``.
@@ -158,33 +165,28 @@ cuts.
    now records that commit and no dirty file, and commit the manifest. Open the PR; CI runs the
    artifact test and the soundness manifest's tests against the new files.
 
-## The CPU and GPU trees
+## Verifying on a GPU host
 
-Two trees keygen identical keys exactly when the code that determines them (the riscv AIRs,
-the shape tables, the recursion compiler and params) is identical, so:
+The CPU and the GPU prover keygen identical keys because the code that determines them (the riscv
+AIRs, the shape tables, the recursion compiler and params) is the same code in both builds. The
+change that moved the keys and its artifact travel together. Verify a rebuild on a GPU host before
+merging, with the single-node pipeline: first fib, then one reth block whose witness is in
+`perf/bench_data/rv64/`:
 
-- while it is, mirror the code change to the GPU tree first, then copy the same two files from
-  the CPU tree unchanged;
-- while it is not (the GPU tree carries riscv AIR changes the CPU tree does not have yet), build
-  the artifact on the GPU tree with the procedure above, and go back to copying once the trees
-  agree again;
-- never let the trees ship different artifacts for the same code, or the same artifact for
-  different code: the change that moved the keys and its artifact travel together;
-- verify on a GPU host before merging, with the single-node pipeline: first fib, then one reth
-  block whose witness is in `perf/bench_data/rv64/`:
+```bash
+VK_VERIFICATION=true MLE_VK_MAP=vm/src/mle/shape_vk_bins/mle_vk_map_kb.bin \
+MLE_VK_ROOT="<the root file's MLE_VK_ROOT>" MLE_VERIFY=1 \
+MLE_ELF=fib MLE_N=10 ./single_node_mle.sh
+MLE_ELF=reth MLE_N=<block> ... ./single_node_mle.sh
+```
 
-  ```bash
-  VK_VERIFICATION=true MLE_VK_MAP=vm/src/mle/shape_vk_bins/mle_vk_map_kb.bin \
-  MLE_VK_ROOT="<the root file's MLE_VK_ROOT>" MLE_VERIFY=1 \
-  MLE_ELF=fib MLE_N=10 ./single_node_mle.sh
-  MLE_ELF=reth MLE_N=<block> ... ./single_node_mle.sh
-  ```
-
-  The run passes when the log carries `MLE convert complete: all N convert proof(s) proved +
-  verified` and `standalone apex verify` with their check marks: the GPU riscv, convert and
-  combine machines proved under the shipped root and the apex accepted it. The GPU tree's CI runs
-  no whitelist test, so run the artifact unit test by hand as well
-  (`cargo test --release -p pico-vm --lib mle::machine::vk_map`); no CI runs a GPU proof.
+The run passes when the log carries `MLE convert complete: all N convert proof(s) proved +
+verified` and `standalone apex verify` with their check marks: the GPU riscv, convert and
+combine machines proved under the shipped root and the apex accepted it. To check the compress
+key as well (the whitelist's last leaf), add `MLE_STEP=compress` to the reth command; the log then
+also carries `standalone apex verify (compress)` with its check mark: the compress key is a
+whitelist member and the apex accepted the compress proof. CI runs the artifact unit test but no
+GPU proof.
 
 ## When a proof fails under the whitelist
 
@@ -194,7 +196,7 @@ Two places, two meanings:
   MLE shape holds this chunk"): a chunk's natural heights exceed even the catch-all row for some
   air. The guest or workload needs a taller catch-all or a wider enumeration; that is a shape
   table change, followed by a rebuild.
-- **At a key check** (the SDK's `KeyNotWhitelisted` at Convert or Combine, or a panic "child VK
+- **At a key check** (the SDK's `KeyNotWhitelisted` at Convert, Combine or Compress, or a panic "child VK
   not in the whitelist (vk map)" at the parent of a convert leaf or combine node whose key the
   prover derived): the chunk's shape was selected, but the key the prover derived is not in the
   map: the artifact is stale for this binary (the unit test should have said so; rebuild). An
@@ -213,10 +215,14 @@ baked into the membership circuit) and the root, so it is a rebuild like any oth
 
 ## Downstream of the root
 
-The wrap circuit bakes the root in as a constant. A new root therefore means a new wrap circuit,
-a new Groth16 setup and a new on-chain verifier. The artifact PR does not do this; it is a
-release step, and the root file's `MLE_VK_ROOT` line is its input. The soundness manifest records
-the root the test keys in `contracts/test/dev` were set up under, beside the shipped root.
+The wrap circuit bakes the root in as a constant. A new root therefore means a new wrap circuit, a
+new Groth16 setup and a new on-chain verifier. The wrap circuit bakes the embed key in too, so a
+change that moves the embed key (the embed row or params, the compress row or params, or the embed
+circuit) means a new wrap circuit, Groth16 setup and on-chain verifier, with the root unchanged
+unless the change also moves a leaf. Neither is done by the PR that makes the change: it is a
+release step, whose inputs are the root file's `MLE_VK_ROOT` line and the soundness manifest's embed
+key. The soundness manifest records the root the test keys in `contracts/test/dev` were set up
+under, beside the shipped root.
 
 ## Refitting the ladder
 
@@ -224,7 +230,9 @@ Changing the core ladder (`MLE_CORE_LADDER`) is a shape table change and goes th
 procedure above. The fitting itself needs a corpus of natural heights taken with the probe
 (`SHAPE_PROBE_NATURAL=1`) on the same emulator chunk-cut rules the prover will run with: a corpus
 probed before a change to the chunk split lands chunks on neighbouring rows. The fitting and
-accounting tools are not part of this repository.
+accounting tools are not part of this repository. That is the riscv core ladder; the recursion tier tables (the convert
+ladder and the combine, embed and compress rows) are re-measured by `docs/tier-tables.md`, which
+ends in this procedure, or, for the embed row alone, in a soundness-manifest regeneration.
 
 ## Checkpoints
 
@@ -235,7 +243,7 @@ shape again and refuses the file if the identity differs. That is a safety net f
 build of the same code, not a way to reuse keys across a code change: a rebuild starts from no
 checkpoint.
 
-Every key the builder admits scores at least 100 bits (`docs/soundness/README.md`): each keygen
+Every key the builder admits scores at least 128 bits (`docs/soundness/README.md`): each keygen
 below that is refused, the probe's included. A resumed shape is not scored again, and need not be:
 every convert key has the same recursion AIR set and preset, so the same shape and score, and the
 probe has just been admitted under this build's calculator.

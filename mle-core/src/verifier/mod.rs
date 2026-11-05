@@ -573,7 +573,11 @@ mod tests {
         // catch — changes this. Update GOLDEN only alongside an intentional protocol change.
         // The first observed value is the vk pre-hash, so the fingerprint (not the count) also
         // moves whenever the pre-hash preimage definition changes (`compute_vk_pre_hash`).
-        const GOLDEN: (usize, u64) = (574, 13_775_646_401_442_936_072);
+        // Over KoalaBear^5 every extension observation is five felts, and the vk pre-hash is a
+        // function of the field and of `CODEC_VERSION` (v5 since the move to KoalaBear^5). The
+        // stream holds 133 extension values and 42 base felts: 42 + 133 · 5 = 707 observations (42
+        // + 133 · 4 = 574 over KoalaBear^4).
+        const GOLDEN: (usize, u64) = (707, 17_761_216_587_174_366_289);
         assert_eq!(
             transcript_signature(&verifier_log),
             GOLDEN,

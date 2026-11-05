@@ -1,13 +1,15 @@
 //! MLE/WHIR-backend end-to-end recursion proving from a real ELF.
 //!
 //! Runs the proving pipeline up to the requested `--step`:
-//!   riscv   → prove + verify each RISCV chunk
-//!   convert → wrap each RISCV proof in a recursion (Convert) proof and verify it
-//!   combine → tree-reduce the convert proofs to one complete root proof and verify it
-//!   embed   → re-prove that root under the outer BN254-Poseidon2 config and verify it
-//!   wrap    → embed, then emit the gnark circuit + witness for it, and the verifier's inputs
-//!             (both require the default `multi-field-transcript` feature)
-//! (compress arrives in a later phase.)
+//!   riscv    → prove + verify each RISCV chunk
+//!   convert  → wrap each RISCV proof in a recursion (Convert) proof and verify it
+//!   combine  → tree-reduce the convert proofs to one complete root proof and verify it
+//!   compress → re-prove that root under the inner config at the compress preset and verify it:
+//!              the final compression layer, the proof that is handed out
+//!   embed    → compress, then re-prove the compress proof under the outer BN254-Poseidon2 config
+//!              and verify it
+//!   wrap     → embed, then emit the gnark circuit + witness for it, and the verifier's inputs
+//!              (both require the default `multi-field-transcript` feature)
 //!
 //! Usage:
 //!   cargo run --release -p pico-vm --example test_mle_e2e -- --elf fib --n 10 --field kb --step combine
@@ -22,6 +24,10 @@
 //!   MLE_VERIFY_ROOT=<path> verify such a dump and exit — no emulation, no proving, and `--step`
 //!                          is ignored. The program identity is re-derived from the ELF given on
 //!                          the command line, so pass the same one the dump was made from.
+//!   MLE_DUMP_COMPRESS=<path> / MLE_VERIFY_COMPRESS=<path>  the same pair for the compress proof
+//!                          (`--step compress / embed / wrap`): the dump carries the proof, its VK
+//!                          and the root's layout; the verifier re-keygens compress for that
+//!                          layout and compares (`--step` is ignored, as with MLE_VERIFY_ROOT).
 //!
 //! Negative-test hooks (env vars; each run MUST fail — a zero exit is a fail-open bug):
 //!   N1_INCOMPLETE=1   combine a strict prefix of the chunks under a complete root
@@ -45,15 +51,60 @@
 //!   N8_FORGED_MEMBERSHIP=1 corrupt every whitelist Merkle path, entries + root intact —
 //!                     witness generation succeeds, so the IN-CIRCUIT membership constraint
 //!                     itself must reject (root STARK verify fails)
+//!   N11_TAMPER_PACKED_LANE=1 set the padding lane (lane PACK_LANES of a `Block::packed`) of the
+//!                     first packed opened-row block of every WHIR round-0 (query, commit) pair
+//!                     to one, in every recursion witness (`recursion/witness.rs`); the packed
+//!                     consumers read that lane as the constant zero, so the memory bus cannot
+//!                     balance — the FIRST proof built on such a witness, a convert proof,
+//!                     MUST FAIL in its prover with `LogupZerocheck(NonZeroRootSum)`
 //!   N10_UNLISTED_SHAPE=1 remove this run's own convert VKs from the whitelist and re-root it,
 //!                     so the shapes the chunks select are not members — the host-side lookup
 //!                     fails closed at combine witness generation, before any recursion proof
+//!   N12_TAMPER_COMPRESS=1 (with --step compress / embed / wrap) corrupt one opened value of the
+//!                     compress proof after proving; the compress verify MUST reject it (the
+//!                     reason is logged), and under the whitelist artifact so must the apex's
+//!                     `verify_compress`
+//!   N13_COMPRESS_INCOMPLETE=1 (with --step compress) hand the first chunk's convert proof to
+//!                     the compress machine in place of the complete root: the compress program
+//!                     is built with `is_complete = true`, so a non-final child (flag_complete 0,
+//!                     next_pc ≠ 0) MUST FAIL — in a release build witness generation goes
+//!                     through and the STARK verify rejects (`SumClaimMismatch`, measured); with
+//!                     debug assertions the recursion runtime's `AssertZeroExt` is expected to
+//!                     panic first. Needs >= 2 chunks (fib with a large --n)
+//!   N14_TAMPER_EMBED_CHILD=1 (with --step embed / wrap) corrupt one opened value of the compress
+//!                     proof after it verified, then hand it to embed: embed's prove or verify
+//!                     MUST reject it (in a release build witness generation goes through and the
+//!                     embed STARK verify rejects; with debug assertions `AssertZeroExt` is
+//!                     expected to panic first)
+//!   N15_TAMPER_EMBED=1 (with --step embed / wrap) corrupt one opened value of the embed proof
+//!                     after proving; the embed verify MUST reject it
+//!   N16_FORGED_EMBED_MEMBERSHIP=1 (with --step embed / wrap; forces whitelist mode) hand embed a
+//!                     whitelist whose paths are corrupted, entries + root intact: witness
+//!                     generation succeeds, so embed's IN-CIRCUIT membership check of the compress
+//!                     key must reject (the embed proof's STARK verify fails, measured in a
+//!                     release build); an error at prove time means the in-circuit check was not
+//!                     reached and is logged as not exercised, with a zero exit (a failed host-side
+//!                     whitelist lookup panics in witness generation instead)
+//!   N17_EMBED_GETS_ROOT=1 (with --step embed / wrap) hand the combine root to embed in place of
+//!                     the compress proof: embed's child guard MUST refuse it with an error before
+//!                     keygen, not at the tier assertion when padding to the embed row; an error
+//!                     from anything else is logged as the guard not having run, with a zero exit
+//!   N14–N17 are armed by `=1` and act only under `--step embed / wrap` in a build with the
+//!   `multi-field-transcript` feature; anywhere else a run that sets one logs that it was not
+//!   exercised and exits zero (an unexercised hook is no pass). Without the feature,
+//!   `--step embed / wrap` stop before proving.
 
 use p3_field::PrimeCharacteristicRing;
 use pico_mle_core::{
-    config::{recursion_params_with_100_bits_security, riscv_params_with_100_bits_security},
+    codec::{Decode, Encode},
+    config::{
+        compress_params_with_128_bits_security, recursion_params_with_128_bits_security,
+        riscv_params_with_128_bits_security,
+    },
     StarkEngine,
 };
+#[cfg(feature = "cuda")]
+use pico_vm::mle::machine::compress::GpuCompressMachine;
 use pico_vm::{
     compiler::{
         program::ProgramBehavior,
@@ -63,6 +114,7 @@ use pico_vm::{
     machine::{logger::setup_logger, septic::SepticDigest},
     mle::machine::{
         combine::CombineMachine,
+        compress::CompressMachine,
         convert::ConvertMachine,
         exe::RiscvVmVk,
         recursion::Kb,
@@ -118,12 +170,12 @@ fn main() {
         // Rebuilt at the dump's operating point, not this run's: the shape has to be the one the
         // proof was made against.
         let engine: riscv::Engine =
-            StarkEngine::new(riscv_params_with_100_bits_security(dumped_height));
+            StarkEngine::new(riscv_params_with_128_bits_security(dumped_height));
         let airs = riscv::mle_riscv_air_refs(program.clone(), dumped_whitelist);
         let (_, riscv_vk) = engine.keygen_with_app_prep(&airs, riscv::RISCV_APP_PREP_AIR_IDS);
         let trusted = RiscvVmVk::from_program_and_vk(&program, &riscv_vk);
         let mut combine = CombineMachine::new(
-            recursion_params_with_100_bits_security(),
+            recursion_params_with_128_bits_security(),
             trusted,
             dumped_whitelist,
         );
@@ -150,6 +202,85 @@ fn main() {
             "cross-build root verify ✓ ({path}, height {dumped_height}, whitelist {dumped_whitelist})"
         );
         return;
+    }
+    // Same gate for the compress proof: the dump carries the root's layout, which is what the
+    // compress key is a function of, and the verifying side re-keygens compress for it.
+    if let Ok(path) = std::env::var("MLE_VERIFY_COMPRESS") {
+        let bytes = std::fs::read(&path).expect("compress dump read");
+        #[allow(clippy::type_complexity)]
+        let (proof_bytes, compress_vk, root_layout, dumped_height, dumped_whitelist): (
+            Vec<u8>,
+            pico_mle_core::keygen::types::MultiStarkVerifyingKey<riscv::Sc>,
+            pico_vm::mle::compiler::recursion::RecursionVkLayout,
+            usize,
+            bool,
+        ) = bincode::deserialize(&bytes).expect("compress dump decode");
+        let proof =
+            pico_mle_core::protocol::proof::Proof::<riscv::Sc>::decode_from_bytes(&proof_bytes)
+                .expect("compress proof decode");
+        assert!(
+            !dumped_whitelist,
+            "this compress proof was made with the whitelist on; cross-build checking only covers \
+             VK_VERIFICATION=false"
+        );
+        let engine: riscv::Engine =
+            StarkEngine::new(riscv_params_with_128_bits_security(dumped_height));
+        let airs = riscv::mle_riscv_air_refs(program.clone(), dumped_whitelist);
+        let (_, riscv_vk) = engine.keygen_with_app_prep(&airs, riscv::RISCV_APP_PREP_AIR_IDS);
+        let trusted = RiscvVmVk::from_program_and_vk(&program, &riscv_vk);
+        let mut compress = CompressMachine::new(
+            compress_params_with_128_bits_security(),
+            trusted,
+            dumped_whitelist,
+        );
+        compress
+            .preregister(&root_layout)
+            .unwrap_or_else(|e| panic!("{e}"));
+        let honest = compress
+            .honest_compress_vk(&compress_vk)
+            .expect("no honestly keygen'd compress shape matches the dumped vk");
+        if bincode::serialize(honest).expect("honest vk encode")
+            != bincode::serialize(&compress_vk).expect("dumped vk encode")
+        {
+            panic!(
+                "the dumped compress vk differs from the one this build keygens for the same root \
+                 layout"
+            );
+        }
+        compress
+            .verify(&(proof, std::sync::Arc::new(compress_vk)))
+            .expect("cross-build compress verify failed");
+        info!(
+            "cross-build compress verify ✓ ({path}, height {dumped_height}, whitelist \
+             {dumped_whitelist})"
+        );
+        return;
+    }
+
+    // The embed hooks act only where embed runs: `--step embed / wrap`, in a build with the outer
+    // BN254 config. Anywhere else a run that sets one says so before proving anything and exits
+    // zero, since a hook that is never reached must not read as "the tamper was caught" to an
+    // exit-code harness. Without the outer config an embed / wrap step stops here too, before the
+    // riscv proof rather than after compress.
+    let armed: Vec<&str> = EMBED_HOOKS.into_iter().filter(|h| hook(h)).collect();
+    let embed_runs =
+        cfg!(feature = "multi-field-transcript") && matches!(args.step.as_str(), "embed" | "wrap");
+    if !armed.is_empty() && !embed_runs {
+        info!(
+            "{}: not exercised — needs `--step embed / wrap` and the multi-field-transcript \
+             feature (zero exit: an unexercised hook is no pass)",
+            armed.join(" + ")
+        );
+        return;
+    }
+    #[cfg(not(feature = "multi-field-transcript"))]
+    {
+        assert!(
+            !matches!(args.step.as_str(), "embed" | "wrap"),
+            "`--step {}` needs the outer BN254 config: rebuild without --no-default-features, or \
+             with --features multi-field-transcript",
+            args.step
+        );
     }
 
     // Only reached once this run is going to prove. The GPU prover allocates from the shared pico
@@ -187,12 +318,13 @@ fn main() {
     let whitelist_hook = std::env::var("N7_BAD_VK_ROOT").is_ok()
         || std::env::var("N8_FORGED_MEMBERSHIP").is_ok()
         || std::env::var("N9_WRONG_PINNED_ROOT").is_ok()
-        || std::env::var("N10_UNLISTED_SHAPE").is_ok();
+        || std::env::var("N10_UNLISTED_SHAPE").is_ok()
+        || hook("N16_FORGED_EMBED_MEMBERSHIP");
     let requested = std::env::var("VK_VERIFICATION").map(|v| v.eq_ignore_ascii_case("true"));
     let vk_verification = requested.clone().unwrap_or(false) || whitelist_hook;
     if whitelist_hook && requested == Ok(false) {
-        tracing::warn!(
-            "VK_VERIFICATION=false overridden: N7/N8 only mean anything with the whitelist"
+        info!(
+            "VK_VERIFICATION=false overridden: N7–N10 and N16 only mean anything with the whitelist"
         );
     }
     // Log the resolved mode, as the FRI stack does — the two differ in what they cover, and a run
@@ -283,7 +415,7 @@ fn main() {
         riscv_vk,
         prover_vm_vk,
         &riscv_proofs,
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         vk_verification,
     )
     .expect("convert machine build failed");
@@ -294,7 +426,7 @@ fn main() {
     // therefore constructed here, before the convert proofs.
     let trusted_vm_vk_for_apex = trusted_vm_vk.clone();
     let mut combine = CombineMachine::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         trusted_vm_vk,
         vk_verification,
     );
@@ -322,6 +454,23 @@ fn main() {
                 .map(|entry| vk_identity(&entry.3))
                 .collect();
             ids.extend(combine_vks.iter().map(|v| vk_identity(v)));
+            // The compress key, over the combine-tier child every complete root takes in
+            // whitelist mode: embed checks it in-circuit, so a self-map run that goes on to
+            // embed needs it, as the shipped whitelist has it (its last leaf). This couples every
+            // self-map run to the compress row, `--step convert / combine` included: one more
+            // keygen (`prove_compress_node` keygens again on its own machine), and a stale compress
+            // row stops the run here at the tier assertion.
+            let combine_tier = combine
+                .combine_tier_child_layout(&convert.pks[0].3)
+                .unwrap_or_else(|e| panic!("{e}"));
+            let compress_vk = CompressMachine::new(
+                compress_params_with_128_bits_security(),
+                trusted_vm_vk_for_apex.clone(),
+                true,
+            )
+            .preregister(&combine_tier)
+            .unwrap_or_else(|e| panic!("{e}"));
+            ids.push(vk_identity(&compress_vk));
             let map = std::sync::Arc::new(MleVkMap::build(ids));
             info!(
                 "vk map: self, {} entries, root = {:?}",
@@ -361,6 +510,16 @@ fn main() {
     } else {
         None
     };
+    // Negative-test hook N11_TAMPER_PACKED_LANE: read by the recursion witness builder
+    // (`recursion/witness.rs`), which corrupts the padding lane of packed opened-row blocks;
+    // the first convert prove below MUST FAIL. Logged here, before the failure, at info level
+    // (the forest logger prints only INFO events).
+    if std::env::var("N11_TAMPER_PACKED_LANE").is_ok_and(|v| v == "1") {
+        tracing::info!(
+            "N11_TAMPER_PACKED_LANE: a packed block's padding lane is non-zero — the convert \
+             prove MUST FAIL"
+        );
+    }
     let t_prove_all = std::time::Instant::now();
     let convert_proofs = convert
         .prove_with_vks(&riscv_proofs)
@@ -392,6 +551,34 @@ fn main() {
     // but note the FIRST unsatisfiable assertion is next_pc == 0 (the prefix's last chunk is
     // non-final). This proves the completeness block is WIRED, but does not isolate the GCS
     // closure; use N6_BAD_GCS_WITNESS for that.
+    // Negative-test hook N13_COMPRESS_INCOMPLETE: a non-final chunk's convert proof in place of the
+    // complete root. The compress program's completeness block is armed (`is_complete = true`), so
+    // this MUST FAIL: in a release build witness generation goes through and the STARK verify
+    // rejects (`SumClaimMismatch`, measured); with debug assertions the runtime's `AssertZeroExt`
+    // is expected to panic first. A zero exit here is the fail-open signal (see the head).
+    if std::env::var("N13_COMPRESS_INCOMPLETE").is_ok_and(|v| v == "1") {
+        assert!(
+            convert_proofs.len() >= 2,
+            "N13_COMPRESS_INCOMPLETE needs >= 2 chunks (use --elf fib with a large --n)"
+        );
+        info!(
+            "N13_COMPRESS_INCOMPLETE: handing the first chunk's convert proof to compress — this \
+             run MUST FAIL"
+        );
+        let child = convert_proofs[0].clone();
+        let _ = run_compress_step(
+            child,
+            trusted_vm_vk_for_apex,
+            vk_verification,
+            vk_map,
+            log_stacked_height,
+        );
+        info!(
+            "N13_COMPRESS_INCOMPLETE: compress accepted a non-final convert proof — FAIL-OPEN \
+             (zero exit)"
+        );
+        return;
+    }
     let mut children = convert_proofs;
     if std::env::var("N1_INCOMPLETE").is_ok() {
         assert!(
@@ -450,7 +637,8 @@ fn main() {
             trusted_root[0] += pico_vm::mle::machine::riscv::Kb::ONE;
         }
         let apex = pico_vm::mle::machine::apex::MleApexVerifier::new(
-            recursion_params_with_100_bits_security(),
+            recursion_params_with_128_bits_security(),
+            compress_params_with_128_bits_security(),
             std::sync::Arc::clone(map),
             trusted_vm_vk_for_apex.clone(),
             trusted_root,
@@ -499,15 +687,38 @@ fn main() {
         return;
     }
 
-    // ── embed: re-prove the complete root under the outer BN254-hashed config ────────────────
+    // ── compress: re-prove the complete root under the inner config at the compress preset ───
     //
-    // The step the on-chain path needs: same program family as the root it wraps, but its Merkle
-    // paths and transcript are BN254-native, so a gnark circuit can verify them with `Permute`
-    // opcodes instead of a few hundred emulated Poseidon2-KoalaBear permutations per hash.
-    if args.step == "embed" || args.step == "wrap" {
+    // The final compression layer: the proof that is handed out, 123 WHIR queries at
+    // log_blowup 4 in place of the root's 383 at log_blowup 2. `--step embed / wrap` go on from it.
+    if matches!(args.step.as_str(), "compress" | "embed" | "wrap") {
+        // Negative-test hook N17_EMBED_GETS_ROOT (with --step embed / wrap, checked at the start):
+        // the combine root handed to embed in place of the compress proof; embed's child guard MUST
+        // refuse it.
+        if hook("N17_EMBED_GETS_ROOT") {
+            n17_embed_gets_root(root, trusted_vm_vk_for_apex, vk_verification, vk_map);
+            return;
+        }
+        let compress_proof = run_compress_step(
+            root,
+            trusted_vm_vk_for_apex.clone(),
+            vk_verification,
+            vk_map.clone(),
+            log_stacked_height,
+        );
+        if args.step == "compress" {
+            return;
+        }
+
+        // ── embed: re-prove the compress proof under the outer BN254-hashed config ───────────
+        //
+        // The step the on-chain path needs: same program family as the compress proof it wraps,
+        // but its Merkle paths and transcript are BN254-native, so a gnark circuit can verify them
+        // with `Permute` opcodes instead of a few hundred emulated Poseidon2-KoalaBear permutations
+        // per hash.
         let emit_wrap = args.step == "wrap";
         run_embed_step(
-            root,
+            compress_proof,
             trusted_vm_vk_for_apex,
             vk_verification,
             vk_map,
@@ -516,40 +727,411 @@ fn main() {
         return;
     }
 
-    // compress: later phase.
     info!(
         "step `{}` not yet implemented on the MLE backend",
         args.step
     );
 }
 
-/// Re-prove the complete root under the outer BN254-Poseidon2 config, verify it, and report its
-/// size; with `wrap_committed`, also build the wrap circuit for it. Only compiled with the feature
-/// that brings the outer config into existence.
+/// A negative-test hook is armed by `<NAME>=1`.
+fn hook(name: &str) -> bool {
+    std::env::var(name).is_ok_and(|v| v == "1")
+}
+
+/// The hooks that act only where embed runs (`--step embed / wrap`, `multi-field-transcript`).
+const EMBED_HOOKS: [&str; 4] = [
+    "N14_TAMPER_EMBED_CHILD",
+    "N15_TAMPER_EMBED",
+    "N16_FORGED_EMBED_MEMBERSHIP",
+    "N17_EMBED_GETS_ROOT",
+];
+
+/// Prove the compress node over `root` and return the machine, the proof (not yet verified), the
+/// root's layout and the prove time. The compress key is keygen'd first, so the prove time excludes
+/// keygen, except on a `cuda` build: there the GPU prover keygens its own device key inside
+/// the prove, so `prove_ms` includes that keygen and its warm-up (`gpu_compress_timing` breaks it
+/// down). Under the GLOBAL artifact (`MLE_VK_MAP`) the key must be a whitelist member, the last
+/// leaf: asserted before proving, as the SDK refuses it.
+fn prove_compress_node(
+    root: pico_vm::mle::machine::convert::ProofWithVk,
+    trusted_vm_vk: RiscvVmVk,
+    vk_verification: bool,
+    vk_map: &Option<std::sync::Arc<MleVkMap>>,
+) -> (
+    CompressMachine,
+    pico_vm::mle::machine::compress::CompressProofWithVk,
+    pico_vm::mle::compiler::recursion::RecursionVkLayout,
+    u128,
+) {
+    let mut compress = CompressMachine::new(
+        compress_params_with_128_bits_security(),
+        trusted_vm_vk,
+        vk_verification,
+    );
+    if let Some(map) = vk_map {
+        compress.set_vk_map(map.clone());
+    }
+    // The root's layout is what the compress key is a function of; a dump carries it because the
+    // verifying side has no root to derive it from.
+    let root_layout =
+        pico_vm::mle::machine::recursion::extract_recursion_vk_layout(&root.1, Some(&root.0));
+    let t_keygen = std::time::Instant::now();
+    let vk = compress.preregister(&root_layout).expect("compress keygen");
+    info!("Compress: keygen_ms={}", t_keygen.elapsed().as_millis());
+    if let Some(map) = vk_map
+        .as_ref()
+        .filter(|_| std::env::var("MLE_VK_MAP").is_ok())
+    {
+        let index = map.find(&vk_identity(&vk)).expect(
+            "the compress key is not a whitelist member: the artifact predates this binary's \
+             compress machinery",
+        );
+        info!(
+            "compress key is whitelist leaf {index} of {}",
+            map.entries.len()
+        );
+    }
+    let t_prove = std::time::Instant::now();
+    // GPU build: the production prover (`GpuCompressMachine`, device keygen + trace-gen) proves,
+    // and the CPU machine keygens the same layout's key and accepts — as combine's root is.
+    #[cfg(feature = "cuda")]
+    let proof = {
+        let mut gpu =
+            GpuCompressMachine::new(compress_params_with_128_bits_security(), vk_verification);
+        if let Some(map) = vk_map {
+            gpu.set_vk_map(map.clone());
+        }
+        let proved = gpu.prove(&root).expect("gpu compress prove failed");
+        compress
+            .preregister(&proved.root_layout)
+            .unwrap_or_else(|e| panic!("{e}"));
+        proved.proof
+    };
+    #[cfg(not(feature = "cuda"))]
+    let proof = compress.prove(root).expect("compress prove failed");
+    (compress, proof, root_layout, t_prove.elapsed().as_millis())
+}
+
+/// Prove the compress node over the complete root (`prove_compress_node`), verify it, report its
+/// size and stacked width, and serve the hooks of this step: `MLE_DUMP_COMPRESS`,
+/// `N12_TAMPER_COMPRESS`. Returns the verified compress proof, which `--step embed / wrap` hand on
+/// to embed.
+fn run_compress_step(
+    root: pico_vm::mle::machine::convert::ProofWithVk,
+    trusted_vm_vk: RiscvVmVk,
+    vk_verification: bool,
+    vk_map: Option<std::sync::Arc<MleVkMap>>,
+    log_stacked_height: usize,
+) -> pico_vm::mle::machine::compress::CompressProofWithVk {
+    let tamper = std::env::var("N12_TAMPER_COMPRESS").is_ok_and(|v| v == "1");
+    let (compress, mut compress_proof, root_layout, prove_ms) =
+        prove_compress_node(root, trusted_vm_vk.clone(), vk_verification, &vk_map);
+    if tamper {
+        info!(
+            "N12_TAMPER_COMPRESS: corrupting one opened value of the compress proof — verify MUST \
+             FAIL"
+        );
+        compress_proof.0.whir_proof.initial_round_opened_rows[0][0][0][0] += Kb::ONE;
+        // A zero exit is the fail-open signal of this example's negative tests (see the head), so
+        // an accepted tamper logs FAIL-OPEN (at info, which the forest logger prints) and exits 0;
+        // the rejection panics, as required.
+        let mut fail_open = false;
+        match compress.verify(&compress_proof) {
+            Err(e) => info!("N12_TAMPER_COMPRESS: compress verify rejected ✓: {e:#}"),
+            Ok(()) => {
+                info!(
+                    "N12_TAMPER_COMPRESS: compress verify ACCEPTED the tampered proof — FAIL-OPEN"
+                );
+                fail_open = true;
+            }
+        }
+        // The same tamper through the apex, the verifier a consumer runs.
+        if let Some(apex) = compress_apex(&vk_map, &trusted_vm_vk) {
+            match apex.verify_compress(&compress_proof) {
+                Err(e) => info!("N12_TAMPER_COMPRESS: apex verify_compress rejected ✓: {e:#}"),
+                Ok(()) => {
+                    info!(
+                        "N12_TAMPER_COMPRESS: apex verify_compress ACCEPTED the tampered proof — \
+                         FAIL-OPEN"
+                    );
+                    fail_open = true;
+                }
+            }
+        }
+        if fail_open {
+            std::process::exit(0);
+        }
+        panic!("N12_TAMPER_COMPRESS: rejected as required — this run MUST FAIL");
+    }
+
+    let t_verify = std::time::Instant::now();
+    compress
+        .verify(&compress_proof)
+        .expect("compress verify failed");
+    info!(
+        "Compress: proved + verified under the inner config ({} shape(s)) ✓ \
+         prove_ms={prove_ms} verify_ms={}",
+        compress.num_distinct_shapes(),
+        t_verify.elapsed().as_millis(),
+    );
+    pico_vm::mle::machine::recursion::log_proof_size("Compress:", &compress_proof.0);
+    // Standalone apex (as for the root above): the compress key authenticated by membership, then
+    // the six checks under the compress engine.
+    if let Some(apex) = compress_apex(&vk_map, &trusted_vm_vk) {
+        apex.verify_compress(&compress_proof)
+            .expect("standalone apex verify of the compress proof failed");
+        info!("standalone apex verify (compress) ✓");
+    }
+
+    if let Ok(path) = std::env::var("MLE_DUMP_COMPRESS") {
+        let blob = (
+            compress_proof
+                .0
+                .encode_to_vec()
+                .expect("compress proof encode"),
+            &*compress_proof.1,
+            &root_layout,
+            log_stacked_height,
+            vk_verification,
+        );
+        std::fs::write(
+            &path,
+            bincode::serialize(&blob).expect("compress dump encode"),
+        )
+        .expect("compress dump write");
+        info!("compress proof dumped to {path}");
+    }
+    compress_proof
+}
+
+/// The apex a consumer verifies a compress proof with, under the GLOBAL whitelist artifact
+/// (`MLE_VK_MAP`, pinned by `MLE_VK_ROOT`): the deployment's case, and the only one wired up. A
+/// self-map run holds the compress leaf too (added where its map is built) and could run it as the
+/// root's apex does, pinning its own root; it does not, so this is `None` there and the machine's
+/// verify is the only check.
+fn compress_apex(
+    vk_map: &Option<std::sync::Arc<MleVkMap>>,
+    trusted_vm_vk: &RiscvVmVk,
+) -> Option<pico_vm::mle::machine::apex::MleApexVerifier> {
+    let map = vk_map
+        .as_ref()
+        .filter(|_| std::env::var("MLE_VK_MAP").is_ok())?;
+    let trusted_root =
+        pico_vm::mle::machine::vk_map::pinned_root_from_env().unwrap_or_else(|| map.root());
+    Some(pico_vm::mle::machine::apex::MleApexVerifier::new(
+        recursion_params_with_128_bits_security(),
+        compress_params_with_128_bits_security(),
+        map.clone(),
+        trusted_vm_vk.clone(),
+        trusted_root,
+    ))
+}
+
+/// The stacked width of every commit the WHIR initial round opens, and their sum, for a proof of
+/// any config (the inner config's proofs get this line from `log_proof_size`).
+#[cfg(feature = "multi-field-transcript")]
+fn log_stacked_widths<SC: pico_mle_core::StarkProtocolConfig>(
+    label: &str,
+    proof: &pico_mle_core::proof::Proof<SC>,
+) {
+    let widths: Vec<usize> = proof
+        .whir_proof
+        .initial_round_opened_rows
+        .iter()
+        .map(|rows| {
+            rows.first()
+                .and_then(|q| q.first())
+                .map(|r| r.len())
+                .unwrap_or(0)
+        })
+        .collect();
+    info!(
+        "{label} stacked widths per commit = {widths:?}, total stacked width = {}",
+        widths.iter().sum::<usize>()
+    );
+}
+
+/// An embed machine at the embed preset, holding `vk_map` when there is one.
+#[cfg(feature = "multi-field-transcript")]
+fn embed_machine(
+    trusted_vm_vk: RiscvVmVk,
+    vk_verification: bool,
+    vk_map: Option<std::sync::Arc<MleVkMap>>,
+) -> pico_vm::mle::machine::embed::EmbedMachine {
+    let mut embed = pico_vm::mle::machine::embed::EmbedMachine::new(
+        pico_mle_core::config::embed_params_with_128_bits_security(),
+        trusted_vm_vk,
+        vk_verification,
+    );
+    if let Some(map) = vk_map {
+        embed.set_vk_map(map);
+    }
+    embed
+}
+
+/// N17_EMBED_GETS_ROOT: the combine root handed to embed in place of the compress proof. Embed's
+/// child guard MUST refuse it with an error before keygen; that rejection panics, as this example's
+/// negative tests do. An accepted root logs FAIL-OPEN and returns, and so does an error that is not
+/// the guard's (the guard did not run): both are a zero exit, the failure signal here.
+#[cfg(feature = "multi-field-transcript")]
+fn n17_embed_gets_root(
+    root: pico_vm::mle::machine::convert::ProofWithVk,
+    trusted_vm_vk: RiscvVmVk,
+    vk_verification: bool,
+    vk_map: Option<std::sync::Arc<MleVkMap>>,
+) {
+    info!(
+        "N17_EMBED_GETS_ROOT: handing the combine root to embed — this run MUST FAIL (child guard)"
+    );
+    let mut embed = embed_machine(trusted_vm_vk, vk_verification, vk_map);
+    match embed.prove(root) {
+        Err(e) if format!("{e:#}").contains("embed expects a compress proof as its child") => {
+            info!("N17_EMBED_GETS_ROOT: embed's child guard refused the root ✓: {e:#}");
+            panic!("N17_EMBED_GETS_ROOT: rejected as required — this run MUST FAIL");
+        }
+        Err(e) => info!(
+            "N17_EMBED_GETS_ROOT: embed refused the root, but not by its child guard — the guard \
+             did not run (zero exit): {e:#}"
+        ),
+        Ok(_) => {
+            info!("N17_EMBED_GETS_ROOT: embed accepted the combine root — FAIL-OPEN (zero exit)")
+        }
+    }
+}
+
+#[cfg(not(feature = "multi-field-transcript"))]
+fn n17_embed_gets_root(
+    _root: pico_vm::mle::machine::convert::ProofWithVk,
+    _trusted_vm_vk: RiscvVmVk,
+    _vk_verification: bool,
+    _vk_map: Option<std::sync::Arc<MleVkMap>>,
+) {
+    unreachable!("main returns before proving when an embed hook is set without embed");
+}
+
+/// Re-prove the compress proof under the outer BN254-Poseidon2 config, verify it, report its size,
+/// and serve the hooks of this step: `N14_TAMPER_EMBED_CHILD`, `N15_TAMPER_EMBED`,
+/// `N16_FORGED_EMBED_MEMBERSHIP`, `WRAP_TAMPER`; with `wrap_committed`, also build the wrap circuit
+/// for it and write the verifier's inputs. The embed key is keygen'd first, so the prove time
+/// excludes keygen. Only compiled with the feature that brings the outer config into existence.
 #[cfg(feature = "multi-field-transcript")]
 fn run_embed_step(
-    root: pico_vm::mle::machine::convert::ProofWithVk,
+    mut compress: pico_vm::mle::machine::compress::CompressProofWithVk,
     trusted_vm_vk: RiscvVmVk,
     vk_verification: bool,
     vk_map: Option<std::sync::Arc<MleVkMap>>,
     wrap_committed: Option<&[u8]>,
 ) {
     use pico_mle_core::codec::Encode;
-    use pico_vm::mle::machine::embed::EmbedMachine;
+    use pico_vm::mle::machine::recursion::{
+        compress_proof_layout, extract_recursion_vk_layout, recursion_vk_layouts_equal,
+    };
 
-    let mut embed = EmbedMachine::new(
-        pico_mle_core::config::embed_params_with_100_bits_security(),
-        trusted_vm_vk,
-        vk_verification,
+    let tamper_child = hook("N14_TAMPER_EMBED_CHILD");
+    let tamper_embed = hook("N15_TAMPER_EMBED");
+    let forged = hook("N16_FORGED_EMBED_MEMBERSHIP");
+    // The armed hooks, named in the rejection and FAIL-OPEN lines.
+    let armed = [
+        ("N14_TAMPER_EMBED_CHILD", tamper_child),
+        ("N15_TAMPER_EMBED", tamper_embed),
+        ("N16_FORGED_EMBED_MEMBERSHIP", forged),
+    ]
+    .into_iter()
+    .filter_map(|(name, on)| on.then_some(name))
+    .collect::<Vec<_>>()
+    .join(" + ");
+    let negative = !armed.is_empty();
+    let embed_map = if forged {
+        let map = vk_map
+            .as_ref()
+            .expect("N16 forces whitelist mode, so there is a whitelist");
+        info!(
+            "N16_FORGED_EMBED_MEMBERSHIP: corrupting the whitelist paths embed witnesses — MUST \
+             FAIL (embed's in-circuit membership check)"
+        );
+        let mut bad = (**map).clone();
+        bad.corrupt_paths_for_testing();
+        Some(std::sync::Arc::new(bad))
+    } else {
+        vk_map.clone()
+    };
+    let mut embed = embed_machine(trusted_vm_vk, vk_verification, embed_map);
+    // The child layout embed is keyed to. In whitelist mode the compress proof is padded to the
+    // compress row, so its layout must be the one the tier probe and the soundness manifest
+    // synthesize; in dev mode compress runs at natural heights and only the widths are logged.
+    let layout = extract_recursion_vk_layout(&compress.1, Some(&compress.0));
+    info!(
+        "Embed: child stacked widths per commit = {:?}, total = {}",
+        layout.stacking_widths,
+        layout.stacking_widths.iter().sum::<usize>()
     );
-    if let Some(map) = &vk_map {
-        embed.set_vk_map(map.clone());
+    if vk_verification {
+        assert!(
+            recursion_vk_layouts_equal(&layout, &compress_proof_layout(&compress.1)),
+            "the compress proof's layout is not the one compress_proof_layout synthesizes from the \
+             compress row"
+        );
+        info!("Embed: child layout = compress_proof_layout ✓");
+    }
+    let t_keygen = std::time::Instant::now();
+    let embed_vk = embed.preregister(&layout).expect("embed keygen failed");
+    let pre_hash: Vec<String> = embed_vk.pre_hash.iter().map(|x| x.to_string()).collect();
+    let merged: Option<Vec<String>> = embed_vk
+        .inner
+        .merged_preprocessed_commit
+        .map(|c| c.iter().map(|x| x.to_string()).collect());
+    info!(
+        "Embed: keygen_ms={} key vk_pre_hash={pre_hash:?} merged_preprocessed_commit={merged:?}",
+        t_keygen.elapsed().as_millis()
+    );
+    if tamper_child {
+        info!(
+            "N14_TAMPER_EMBED_CHILD: corrupting one opened value of the compress proof — embed \
+             MUST reject it"
+        );
+        compress.0.whir_proof.initial_round_opened_rows[0][0][0][0] += Kb::ONE;
     }
     let t_prove = std::time::Instant::now();
-    let embed_proof = embed.prove(root).expect("embed prove failed");
+    // Only N14 tampers with embed's input, so only N14 may be refused at prove time. Under N15 or
+    // N16 a prove error means the run never reached the check the hook tests (N15 tampers after
+    // proving, N16 must be refused in-circuit): not exercised, a zero exit, as for N17's
+    // unexpected refusals. A failed host-side whitelist lookup panics in witness generation.
+    let mut embed_proof = match embed.prove(compress) {
+        Ok(p) => p,
+        Err(e) if tamper_child => {
+            info!("N14_TAMPER_EMBED_CHILD: embed prove rejected the tampered child ✓: {e:#}");
+            panic!("N14_TAMPER_EMBED_CHILD: rejected as required — this run MUST FAIL");
+        }
+        Err(e) if negative => {
+            info!(
+                "{armed}: embed prove failed before the check this hook tests — not exercised \
+                 (zero exit): {e:#}"
+            );
+            return;
+        }
+        Err(e) => panic!("embed prove failed: {e:#}"),
+    };
     let prove_ms = t_prove.elapsed().as_millis();
+    if tamper_embed {
+        info!(
+            "N15_TAMPER_EMBED: corrupting one opened value of the embed proof — embed verify MUST \
+             reject it"
+        );
+        embed_proof.0.whir_proof.initial_round_opened_rows[0][0][0][0] += Kb::ONE;
+    }
     let t_verify = std::time::Instant::now();
-    embed.verify(&embed_proof).expect("embed verify failed");
+    match embed.verify(&embed_proof) {
+        Err(e) if negative => {
+            info!("{armed}: embed verify rejected ✓: {e:#}");
+            panic!("{armed}: rejected as required — this run MUST FAIL");
+        }
+        Err(e) => panic!("embed verify failed: {e:#}"),
+        Ok(()) if negative => {
+            info!("{armed}: embed ACCEPTED — FAIL-OPEN (zero exit)");
+            return;
+        }
+        Ok(()) => {}
+    }
     info!(
         "Embed: proved + verified under the outer BN254 config ({} shape(s)) ✓ \
          prove_ms={prove_ms} verify_ms={}",
@@ -566,6 +1148,7 @@ fn run_embed_step(
         embed_bytes,
         embed_bytes as f64 / 1024.0
     );
+    log_stacked_widths("Embed:", &embed_proof.0);
     fn sz<T: serde::Serialize>(v: &T) -> usize {
         postcard::to_allocvec(v).map(|b| b.len()).unwrap_or(0)
     }
@@ -728,19 +1311,11 @@ fn run_embed_step(
 
 #[cfg(not(feature = "multi-field-transcript"))]
 fn run_embed_step(
-    _root: pico_vm::mle::machine::convert::ProofWithVk,
+    _compress: pico_vm::mle::machine::compress::CompressProofWithVk,
     _trusted_vm_vk: RiscvVmVk,
     _vk_verification: bool,
     _vk_map: Option<std::sync::Arc<MleVkMap>>,
-    wrap_committed: Option<&[u8]>,
+    _wrap_committed: Option<&[u8]>,
 ) {
-    panic!(
-        "`--step {}` needs the outer BN254 config: rebuild without --no-default-features, or \
-         with --features multi-field-transcript",
-        if wrap_committed.is_some() {
-            "wrap"
-        } else {
-            "embed"
-        }
-    );
+    unreachable!("main stops `--step embed / wrap` before proving when embed is not built");
 }

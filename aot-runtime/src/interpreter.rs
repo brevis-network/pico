@@ -70,6 +70,11 @@ impl AotEmulatorCore {
     ) -> Result<Option<NextStep>, String> {
         use Opcode::*;
         self.fallback_insns += 1;
+        // Counted before it runs: the step's own split check, in `finish_interpreter_step`,
+        // must see its rows.
+        if !self.is_unconstrained_mode() {
+            self.chunk_split_state.count_insn(inst.opcode);
+        }
         match inst.opcode {
             JAL => Ok(Some(self.interpret_jal(pc, &inst)?)),
             JALR => Ok(Some(self.interpret_jalr(pc, &inst)?)),

@@ -11,15 +11,15 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             read_counts: ReadCounts::default(),
             sponge: [0u32; WIDTH],
             lane_fresh: [false; WIDTH],
-            sponge_blocks: [0u32; 4],
-            sponge_unpacked: [None; 4],
+            sponge_blocks: [0u32; PERM_BLOCKS],
+            sponge_unpacked: [None; PERM_BLOCKS],
             absorb_idx: 0,
             sample_idx: 0,
             addr_zero: 0,
             addr_one: 0,
             addr_two: 0,
             addr_inv2: 0,
-            ef_basis: [0u32; 3],
+            ef_basis: [0u32; EXTENSION_DEGREE - 1],
             const_f_addrs: HashMap::new(),
         }
     }
@@ -42,7 +42,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         addr
     }
 
-    /// `Block([c,0,0,0])` for a canonical `c`, written on first use and read from that one address
+    /// `Block::from(c)` for a canonical `c`, written on first use and read from that one address
     /// thereafter. Sharing is sound for the reason `addr_zero` is: `finish` backfills the write's
     /// mult with every read. The cache spans the whole program, so a constant first written
     /// inside one child's span can be read by the next (`Runtime::run_split` hoists such writes).
@@ -50,7 +50,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         if let Some(&addr) = self.const_f_addrs.get(&c) {
             return addr;
         }
-        let addr = self.write_const(Block([F::from_u32(c), F::ZERO, F::ZERO, F::ZERO]));
+        let addr = self.write_const(Block::from(F::from_u32(c)));
         self.const_f_addrs.insert(c, addr);
         addr
     }
@@ -63,21 +63,22 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         self.addr_two = self.const_f(2);
         // 2^{-1} = (P+1)/2 (KoalaBear → 1065353217).
         self.addr_inv2 = self.const_f(F::ORDER_U64.div_ceil(2) as u32);
-        self.ef_basis = [
-            self.write_const(Block([F::ZERO, F::ONE, F::ZERO, F::ZERO])),
-            self.write_const(Block([F::ZERO, F::ZERO, F::ONE, F::ZERO])),
-            self.write_const(Block([F::ZERO, F::ZERO, F::ZERO, F::ONE])),
-        ];
+        // x, x^2, …, x^(EXTENSION_DEGREE - 1): basis element k + 1 has a one in lane k + 1.
+        self.ef_basis = std::array::from_fn(|k| {
+            self.write_const(Block::from_fn(
+                |i| if i == k + 1 { F::ONE } else { F::ZERO },
+            ))
+        });
         self.sponge = [az; WIDTH];
         self.lane_fresh = [false; WIDTH];
-        self.sponge_blocks = [az; 4];
-        self.sponge_unpacked = [None; 4];
+        self.sponge_blocks = [az; PERM_BLOCKS];
+        self.sponge_unpacked = [None; PERM_BLOCKS];
         az
     }
 
     // ─── Hint helpers ─────────────────────────────────────────────────────────
 
-    /// Hint 1 F value (Block([f,0,0,0])) from witness_stream. Returns the output address.
+    /// Hint 1 F value (`Block::from(f)`) from witness_stream. Returns the output address.
     pub(super) fn hint_f(&mut self) -> u32 {
         let addr = self.alloc();
         self.instructions.push(Instruction::Hint(HintInstr {
@@ -103,14 +104,14 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         addrs
     }
 
-    /// Hint 1 EF value (Block([c0,c1,c2,c3])) then decompose into 4 F addresses.
-    /// Returns (ef_block_addr, [f0_addr, f1_addr, f2_addr, f3_addr]).
+    /// Hint 1 EF value (one block of `EXTENSION_DEGREE` coefficients) then decompose into its F
+    /// addresses. Returns (ef_block_addr, its `EXTENSION_DEGREE` coefficient addresses).
     ///
     /// The decomposition is CONSTRAINED via `UnpackBlock`, whose AIR receives the input block
-    /// on the memory bus and forwards `val.0[i]` as the four outputs — forcing
+    /// on the memory bus and forwards `val.0[i]` as the `EXTENSION_DEGREE` outputs — forcing
     /// `f_addrs == lanes(ef_addr)`. A raw `HintExt2Felts` would NOT: that instruction is
     /// handled only by MemoryVar, which writes the outputs with no receive/interaction on the
-    /// input, leaving the four felts unconstrained relative to the EF block. Since callers
+    /// input, leaving the felts unconstrained relative to the EF block. Since callers
     /// absorb `f_addrs` into the Fiat-Shamir sponge / hash them into WHIR Merkle leaves while
     /// feeding `ef_addr` to the field algebra, an unconstrained split would let the absorbed /
     /// Merkle-verified felts diverge from the checked EF value (a Fiat-Shamir + WHIR-opening
@@ -159,22 +160,20 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         self.assert_ext_zero(diff);
     }
 
-    /// Pack four F-addresses (each Block([fi,0,0,0])) into a single EF Block address.
-    /// Uses 6 ExtAlu instructions: 3 MulE (basis projection) + 3 AddE (accumulate).
-    pub(super) fn pack_ef(&mut self, r: [u32; 4]) -> u32 {
-        let [r0, r1, r2, r3] = r;
-        let [t1, t2, t3] = self.ef_basis;
-        // r1·(0,1,0,0) = (0,r1,0,0)  etc.
-        let r1_e = self.ext_mul(r1, t1);
-        let r2_e = self.ext_mul(r2, t2);
-        let r3_e = self.ext_mul(r3, t3);
-        let p01 = self.ext_add(r0, r1_e);
-        let p012 = self.ext_add(p01, r2_e);
-        self.ext_add(p012, r3_e) // Block([r0,r1,r2,r3])
+    /// Pack `EXTENSION_DEGREE` F-addresses (each `Block::from(fi)`) into a single EF Block address.
+    /// Uses 2 · (EXTENSION_DEGREE − 1) ExtAlu instructions: one MulE per basis projection
+    /// `r_k · x^k` (no reduction occurs for k < EXTENSION_DEGREE) and one AddE to accumulate.
+    pub(super) fn pack_ef(&mut self, r: [u32; EXTENSION_DEGREE]) -> u32 {
+        let mut acc = r[0];
+        for k in 1..EXTENSION_DEGREE {
+            let rk_e = self.ext_mul(r[k], self.ef_basis[k - 1]);
+            acc = self.ext_add(acc, rk_e);
+        }
+        acc // the block whose lane k holds r_k
     }
 
-    /// Emit PackBlock: pack 4 single-F addresses into one 4-lane block address.
-    pub(super) fn pack_block(&mut self, lanes: [u32; 4]) -> u32 {
+    /// Emit PackBlock: pack `PACK_LANES` single-F addresses into one packed block address.
+    pub(super) fn pack_block(&mut self, lanes: [u32; PACK_LANES]) -> u32 {
         let out = self.alloc();
         for a in lanes {
             self.mark_read(a);
@@ -188,17 +187,26 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         out
     }
 
-    /// Emit UnpackBlock: expose the 4 lanes of a block as single-F addresses.
-    pub(super) fn unpack_block(&mut self, block: u32) -> [u32; 4] {
-        let outs: [u32; 4] = std::array::from_fn(|_| self.alloc());
+    /// Emit UnpackBlock: expose every lane of a block as a single-F address (the EF path reads
+    /// all of them; the packing path reads the first `PACK_LANES`, see [`Self::unpack_lanes`]).
+    pub(super) fn unpack_block(&mut self, block: u32) -> [u32; EXTENSION_DEGREE] {
+        let outs: [u32; EXTENSION_DEGREE] = std::array::from_fn(|_| self.alloc());
         self.mark_read(block);
         self.instructions
             .push(Instruction::UnpackBlock(Box::new(UnpackBlockInstr {
                 in_addr: Address(F::from_u32(block)),
                 out_addrs: outs.map(|a| Address(F::from_u32(a))),
-                mults: [F::ZERO; 4], // backfilled
+                mults: [F::ZERO; EXTENSION_DEGREE], // backfilled
             })));
         outs
+    }
+
+    /// Unpack a packed block: its first `PACK_LANES` lanes as single-F addresses. The remaining
+    /// outputs of the UnpackBlock instruction are never read, so `finish` backfills their
+    /// multiplicity with zero.
+    pub(super) fn unpack_lanes(&mut self, block: u32) -> [u32; PACK_LANES] {
+        let outs = self.unpack_block(block);
+        std::array::from_fn(|i| outs[i])
     }
 
     /// Emit MleOpen: record (air_id, col_id, opening_value) for global MLE-opening consistency.

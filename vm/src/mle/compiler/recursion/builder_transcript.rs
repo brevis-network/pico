@@ -8,15 +8,16 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
     pub(super) fn reset_sponge(&mut self) {
         self.sponge = [self.addr_zero; WIDTH];
         self.lane_fresh = [false; WIDTH];
-        self.sponge_blocks = [self.addr_zero; 4];
-        self.sponge_unpacked = [None; 4];
+        self.sponge_blocks = [self.addr_zero; PERM_BLOCKS];
+        self.sponge_unpacked = [None; PERM_BLOCKS];
         self.absorb_idx = 0;
         self.sample_idx = 0;
     }
 
-    /// Emit Poseidon2Packed over 4 input block addresses; returns 4 output blocks.
-    pub(super) fn permute_packed(&mut self, in_blocks: [u32; 4]) -> [u32; 4] {
-        let out: [u32; 4] = std::array::from_fn(|_| self.alloc());
+    /// Emit Poseidon2Packed over PERM_BLOCKS input block addresses; returns PERM_BLOCKS output
+    /// blocks.
+    pub(super) fn permute_packed(&mut self, in_blocks: [u32; PERM_BLOCKS]) -> [u32; PERM_BLOCKS] {
+        let out: [u32; PERM_BLOCKS] = std::array::from_fn(|_| self.alloc());
         for b in in_blocks {
             self.mark_read(b);
         }
@@ -25,7 +26,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                 Poseidon2PackedInstr {
                     input_addrs: in_blocks.map(|a| Address(F::from_u32(a))),
                     output_addrs: out.map(|a| Address(F::from_u32(a))),
-                    mults: [F::ZERO; 4], // backfilled
+                    mults: [F::ZERO; PERM_BLOCKS], // backfilled
                 },
             )));
         out
@@ -33,36 +34,37 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
 
     /// Lane addresses of sponge output block j (unpacking lazily on first use).
     pub(super) fn sponge_lane(&mut self, lane: usize) -> u32 {
-        let j = lane / 4;
+        let j = lane / PACK_LANES;
         if self.sponge_unpacked[j].is_none() {
-            let outs = self.unpack_block(self.sponge_blocks[j]);
+            let outs = self.unpack_lanes(self.sponge_blocks[j]);
             self.sponge_unpacked[j] = Some(outs);
         }
-        self.sponge_unpacked[j].unwrap()[lane % 4]
+        self.sponge_unpacked[j].unwrap()[lane % PACK_LANES]
     }
 
     /// Build the input block j for the next permutation from fresh lanes and/or
     /// the previous output block (packing only when the block is not intact).
     pub(super) fn build_sponge_block(&mut self, j: usize) -> u32 {
-        let fresh: [bool; 4] = std::array::from_fn(|k| self.lane_fresh[4 * j + k]);
+        let fresh: [bool; PACK_LANES] =
+            std::array::from_fn(|k| self.lane_fresh[PACK_LANES * j + k]);
         if fresh.iter().all(|&f| !f) {
             return self.sponge_blocks[j];
         }
-        let lanes: [u32; 4] = std::array::from_fn(|k| {
+        let lanes: [u32; PACK_LANES] = std::array::from_fn(|k| {
             if fresh[k] {
-                self.sponge[4 * j + k]
+                self.sponge[PACK_LANES * j + k]
             } else {
-                self.sponge_lane(4 * j + k)
+                self.sponge_lane(PACK_LANES * j + k)
             }
         });
         self.pack_block(lanes)
     }
 
     pub(super) fn do_permute(&mut self) {
-        let in_blocks: [u32; 4] = std::array::from_fn(|j| self.build_sponge_block(j));
+        let in_blocks: [u32; PERM_BLOCKS] = std::array::from_fn(|j| self.build_sponge_block(j));
         let out = self.permute_packed(in_blocks);
         self.sponge_blocks = out;
-        self.sponge_unpacked = [None; 4];
+        self.sponge_unpacked = [None; PERM_BLOCKS];
         self.lane_fresh = [false; WIDTH];
         self.absorb_idx = 0;
         self.sample_idx = RATE;
@@ -103,19 +105,19 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
     }
 
     /// Observe 8 F constant addresses (Digest from VK, already in memory as Mem(Write)).
-    pub(super) fn observe_const_digest(&mut self, addrs: [u32; 8]) {
+    pub(super) fn observe_const_digest(&mut self, addrs: [u32; DIGEST_SIZE]) {
         for a in addrs {
             self.absorb_f(a);
         }
     }
 
     /// Hint and absorb 8 F values (a digest), returning all 8 addresses.
-    pub(super) fn observe_digest_addrs(&mut self) -> [u32; 8] {
+    pub(super) fn observe_digest_addrs(&mut self) -> [u32; DIGEST_SIZE] {
         std::array::from_fn(|_| self.observe_f_for_chip())
     }
 
     /// Like observe_digest_for_whir, but also returns all 8 F addresses.
-    pub(super) fn observe_digest_for_whir_addrs(&mut self) -> [u32; 8] {
+    pub(super) fn observe_digest_for_whir_addrs(&mut self) -> [u32; DIGEST_SIZE] {
         std::array::from_fn(|_| self.observe_f_for_chip())
     }
 
@@ -164,14 +166,14 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
     }
 
     /// Hash `elems` (F addresses) with a fresh Poseidon2 sponge.
-    /// Returns the digest as 2 packed block addresses (8 lanes).
-    pub(super) fn hash_poseidon2_fresh(&mut self, elems: &[u32]) -> [u32; 2] {
+    /// Returns the digest as `DIGEST_BLOCKS` packed block addresses (`DIGEST_SIZE` felts).
+    pub(super) fn hash_poseidon2_fresh(&mut self, elems: &[u32]) -> [u32; DIGEST_BLOCKS] {
         let az = self.addr_zero;
-        let mut blocks: [u32; 4] = [az; 4];
-        let mut unpacked: [Option<[u32; 4]>; 2] = [None; 2];
+        let mut blocks: [u32; PERM_BLOCKS] = [az; PERM_BLOCKS];
+        let mut unpacked: [Option<[u32; PACK_LANES]>; RATE_BLOCKS] = [None; RATE_BLOCKS];
         // absorb index within the current rate window
         let mut idx;
-        let mut pending: [u32; 8] = [az; 8];
+        let mut pending: [u32; RATE] = [az; RATE];
         let mut it = elems.iter().peekable();
         while it.peek().is_some() {
             idx = 0;
@@ -187,29 +189,24 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             if idx == 0 {
                 break;
             }
-            // Build rate blocks 0..2 from pending lanes; keep old lanes when partial.
+            // Build the rate blocks from pending lanes; keep old lanes when partial.
             let mut in_blocks = blocks;
-            for j in 0..2 {
-                let lo = 4 * j;
-                if idx >= lo + 4 {
-                    in_blocks[j] = self.pack_block([
-                        pending[lo],
-                        pending[lo + 1],
-                        pending[lo + 2],
-                        pending[lo + 3],
-                    ]);
+            for j in 0..RATE_BLOCKS {
+                let lo = PACK_LANES * j;
+                if idx >= lo + PACK_LANES {
+                    in_blocks[j] = self.pack_block(std::array::from_fn(|k| pending[lo + k]));
                 } else if idx > lo {
                     // partial block: mix fresh lanes with old state lanes
-                    let old: [u32; 4] = if unpacked[j].is_some() {
+                    let old: [u32; PACK_LANES] = if unpacked[j].is_some() {
                         unpacked[j].unwrap()
                     } else if blocks[j] == az {
-                        [az; 4]
+                        [az; PACK_LANES]
                     } else {
-                        let outs = self.unpack_block(blocks[j]);
+                        let outs = self.unpack_lanes(blocks[j]);
                         unpacked[j] = Some(outs);
                         outs
                     };
-                    let lanes: [u32; 4] = std::array::from_fn(|k| {
+                    let lanes: [u32; PACK_LANES] = std::array::from_fn(|k| {
                         if lo + k < idx {
                             pending[lo + k]
                         } else {
@@ -221,15 +218,15 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                 // idx <= lo: block untouched, keep old block addr
             }
             blocks = self.permute_packed(in_blocks);
-            unpacked = [None; 2];
+            unpacked = [None; RATE_BLOCKS];
             if idx < RATE {
                 break;
             }
         }
-        [blocks[0], blocks[1]]
+        std::array::from_fn(|j| blocks[j])
     }
 
-    /// Hash `n_values` F values that already live PACKED in `in_blocks` (4 lanes per
+    /// Hash `n_values` F values that already live PACKED in `in_blocks` (`PACK_LANES` values per
     /// block, in value order, last block zero-padded) with a fresh Poseidon2 sponge.
     /// Absorbs full blocks directly (zero packing cost); only a partial tail block
     /// mixes fresh lanes with prior state lanes via one unpack + one pack.
@@ -239,31 +236,35 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         &mut self,
         in_blocks: &[u32],
         n_values: usize,
-    ) -> [u32; 2] {
+    ) -> [u32; DIGEST_BLOCKS] {
         let az = self.addr_zero;
-        debug_assert_eq!(in_blocks.len(), n_values.div_ceil(4));
-        let full_blocks = n_values / 4;
-        let tail = n_values % 4;
-        let mut state: [u32; 4] = [az; 4];
+        debug_assert_eq!(in_blocks.len(), n_values.div_ceil(PACK_LANES));
+        let full_blocks = n_values / PACK_LANES;
+        let tail = n_values % PACK_LANES;
+        let mut state: [u32; PERM_BLOCKS] = [az; PERM_BLOCKS];
         let mut bi = 0usize;
         while bi < in_blocks.len() {
             let mut in_state = state;
             let mut absorbed = false;
-            for j in 0..2 {
+            for j in 0..RATE_BLOCKS {
                 if bi < full_blocks {
                     // Full block: absorb directly (overwrite the rate lane group).
                     in_state[j] = in_blocks[bi];
                     bi += 1;
                     absorbed = true;
                 } else if tail > 0 && bi < in_blocks.len() {
-                    // Partial tail block: keep old state lanes beyond the tail.
-                    let fresh = self.unpack_block(in_blocks[bi]);
-                    let old: [u32; 4] = if state[j] == az {
-                        [az; 4]
+                    // Partial tail block: keep old state lanes beyond the tail. This is the one
+                    // read of a hinted packed block that does not go through `looked_packed`:
+                    // UnpackBlock forwards all its lanes, and its outputs past `PACK_LANES` are
+                    // never read. Harmless for the lane rule because the same block is also read
+                    // by ExtDotProduct (every opened-row block is), which pins the padding lanes.
+                    let fresh = self.unpack_lanes(in_blocks[bi]);
+                    let old: [u32; PACK_LANES] = if state[j] == az {
+                        [az; PACK_LANES]
                     } else {
-                        self.unpack_block(state[j])
+                        self.unpack_lanes(state[j])
                     };
-                    let lanes: [u32; 4] =
+                    let lanes: [u32; PACK_LANES] =
                         std::array::from_fn(|k| if k < tail { fresh[k] } else { old[k] });
                     in_state[j] = self.pack_block(lanes);
                     bi += 1;
@@ -273,20 +274,33 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             debug_assert!(absorbed);
             state = self.permute_packed(in_state);
         }
-        [state[0], state[1]]
+        std::array::from_fn(|j| state[j])
     }
 
     // ─── Merkle/fold helpers ──────────────────────────────────────────────────
 
-    /// Poseidon2 compress on packed digests: permute([left(2 blocks), right(2 blocks)])
-    /// → first 2 output blocks.
-    pub(super) fn compress_poseidon2(&mut self, left: [u32; 2], right: [u32; 2]) -> [u32; 2] {
-        let out = self.permute_packed([left[0], left[1], right[0], right[1]]);
-        [out[0], out[1]]
+    /// Poseidon2 compress on packed digests: permute([left, right]) (`DIGEST_BLOCKS` blocks each)
+    /// → the first `DIGEST_BLOCKS` output blocks.
+    pub(super) fn compress_poseidon2(
+        &mut self,
+        left: [u32; DIGEST_BLOCKS],
+        right: [u32; DIGEST_BLOCKS],
+    ) -> [u32; DIGEST_BLOCKS] {
+        let out = self.permute_packed(std::array::from_fn(|i| {
+            if i < DIGEST_BLOCKS {
+                left[i]
+            } else {
+                right[i - DIGEST_BLOCKS]
+            }
+        }));
+        std::array::from_fn(|j| out[j])
     }
 
-    /// Binary tree compression: pairwise compress until 1 digest (2 packed blocks).
-    pub(super) fn tree_compress_circuit(&mut self, mut hashes: Vec<[u32; 2]>) -> [u32; 2] {
+    /// Binary tree compression: pairwise compress until 1 digest (`DIGEST_BLOCKS` packed blocks).
+    pub(super) fn tree_compress_circuit(
+        &mut self,
+        mut hashes: Vec<[u32; DIGEST_BLOCKS]>,
+    ) -> [u32; DIGEST_BLOCKS] {
         while hashes.len() > 1 {
             let mut next = Vec::with_capacity(hashes.len() / 2);
             for pair in hashes.as_chunks::<2>().0 {
@@ -298,9 +312,14 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
     }
 
     /// Digest-wide bit-select via the DigestSelect chip (packed digests):
-    /// returns 2 block addrs of (bit == 0 ? h0 : h1) in one instruction.
-    pub(super) fn select_digest(&mut self, bit: u32, h0: [u32; 2], h1: [u32; 2]) -> [u32; 2] {
-        let outs: [u32; 2] = std::array::from_fn(|_| self.alloc());
+    /// returns the `DIGEST_BLOCKS` block addrs of (bit == 0 ? h0 : h1) in one instruction.
+    pub(super) fn select_digest(
+        &mut self,
+        bit: u32,
+        h0: [u32; DIGEST_BLOCKS],
+        h1: [u32; DIGEST_BLOCKS],
+    ) -> [u32; DIGEST_BLOCKS] {
+        let outs: [u32; DIGEST_BLOCKS] = std::array::from_fn(|_| self.alloc());
         self.mark_read(bit);
         for a in h0 {
             self.mark_read(a);
@@ -314,40 +333,42 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                 in1_addrs: h0.map(|a| Address(F::from_u32(a))),
                 in2_addrs: h1.map(|a| Address(F::from_u32(a))),
                 out_addrs: outs.map(|a| Address(F::from_u32(a))),
-                mults: [F::ZERO; 2], // backfilled
+                mults: [F::ZERO; DIGEST_BLOCKS], // backfilled
             })));
         outs
     }
 
     /// Merkle path verification. Leaf hash + path → verify against root.
     /// index_bits: [n_bits] F addrs each holding 0 or 1.
-    /// siblings: [n_bits] × 8 F addrs.
-    /// root_addrs: [8] F addrs of the expected root digest.
+    /// siblings: n_bits × `DIGEST_BLOCKS` packed block addrs (one hinted digest per level).
+    /// root_blocks: the `DIGEST_BLOCKS` packed block addrs of the expected root digest.
+    ///
+    /// Each level orders the pair with two DigestSelects and compresses once, rather
+    /// than compressing both orders and selecting: one Poseidon2Packed row fewer per level for
+    /// half a DigestSelect row more. Sound because DigestSelect asserts its bit boolean, so the
+    /// pair is (cur, sibling) or (sibling, cur), exactly the two inputs the old form hashed.
     pub(super) fn verify_merkle_path_circuit(
         &mut self,
-        leaf_hash: [u32; 2],
+        leaf_hash: [u32; DIGEST_BLOCKS],
         index_bits: &[u32],
-        siblings: &[[u32; 2]],
-        root_blocks: [u32; 2],
+        siblings: &[[u32; DIGEST_BLOCKS]],
+        root_blocks: [u32; DIGEST_BLOCKS],
     ) {
         let mut cur = leaf_hash;
         for (&bit_addr, &sibling) in index_bits.iter().zip(siblings.iter()) {
-            let h0 = self.compress_poseidon2(cur, sibling);
-            let h1 = self.compress_poseidon2(sibling, cur);
-            // cur = bit == 0 ? h0 : h1, one DigestSelect instruction for both blocks.
-            cur = self.select_digest(bit_addr, h0, h1);
+            // (left, right) = bit == 0 ? (cur, sibling) : (sibling, cur).
+            let left = self.select_digest(bit_addr, cur, sibling);
+            let right = self.select_digest(bit_addr, sibling, cur);
+            cur = self.compress_poseidon2(left, right);
         }
-        for j in 0..2 {
+        for j in 0..DIGEST_BLOCKS {
             self.assert_ext_eq(cur[j], root_blocks[j]);
         }
     }
 
-    /// Pack an 8-lane digest of single-F addresses into 2 block addresses
+    /// Pack a DIGEST_SIZE-lane digest of single-F addresses into DIGEST_BLOCKS block addresses
     /// (done once per digest; reused as Merkle root across all queries).
-    pub(super) fn pack_digest(&mut self, addrs: [u32; 8]) -> [u32; 2] {
-        [
-            self.pack_block([addrs[0], addrs[1], addrs[2], addrs[3]]),
-            self.pack_block([addrs[4], addrs[5], addrs[6], addrs[7]]),
-        ]
+    pub(super) fn pack_digest(&mut self, addrs: [u32; DIGEST_SIZE]) -> [u32; DIGEST_BLOCKS] {
+        std::array::from_fn(|j| self.pack_block(std::array::from_fn(|k| addrs[PACK_LANES * j + k])))
     }
 }

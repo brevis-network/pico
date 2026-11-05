@@ -2,16 +2,20 @@ use clap::{Parser, ValueEnum};
 
 use super::embed::EmbeddedProgram;
 
-/// Proving step for the single-node MLE/WHIR prover. All three are wired (GPU only for the two
+/// Proving step for the single-node MLE/WHIR prover. All four are wired (GPU only for the three
 /// recursion steps): `riscv` = Phase-1 chunk proofs, `convert` = the riscv pipeline with the
 /// streaming convert stage spliced in, `combine` = convert plus the scheduler's aggregation tree,
-/// reduced to one complete root proof and verified.
+/// reduced to one complete root proof and verified, `compress` = combine plus the root re-proved
+/// at the compress preset (the final compression layer) and the compress proof verified.
+/// Under `compress` the root is verified host-side only with `MLE_VERIFY` set; otherwise the
+/// compress proof checks it.
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 #[clap(rename_all = "lowercase")]
 pub enum Step {
     Riscv,
     Convert,
     Combine,
+    Compress,
 }
 
 /// CLI / env config for the single-node MLE/WHIR prover (KoalaBear).
@@ -20,7 +24,8 @@ pub enum Step {
 #[derive(Parser, Debug, Clone)]
 #[clap(about = "single-node MLE/WHIR prover (KoalaBear)", version = crate::VERSION)]
 pub struct MleSingleNodeConfig {
-    /// Proving step: `riscv` | `convert` | `combine`. The latter two require `cuda`.
+    /// Proving step: `riscv` | `convert` | `combine` | `compress`. The last three require
+    /// `cuda`.
     #[clap(long, value_enum, env = "MLE_STEP", default_value = "riscv")]
     pub step: Step,
 

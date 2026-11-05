@@ -1,10 +1,10 @@
-//! History readers agree with generated less-than rows, deferred commits and batched emulation.
+//! History readers agree with generated less-than rows, the commit tally and batched emulation.
 
 use std::{borrow::BorrowMut, collections::BTreeMap, sync::Arc};
 
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use pico_vm::{
-    chips::chips::riscv_ecall::traces::deferred_commit_tally,
+    chips::chips::riscv_ecall::traces::commit_tally,
     compiler::word::Word,
     emulator::{
         opts::EmulatorOpts,
@@ -33,7 +33,7 @@ use record_parity::{opts, program, stdin, Guest, Run, GUESTS};
 #[derive(Debug, PartialEq)]
 struct Reading {
     public_values: Vec<u32>,
-    /// How many deferred commits ran, and their word mask.
+    /// How many COMMIT and COMMIT_DEFERRED_PROOFS ecalls ran, and their mask (`commit_tally`).
     tally: (u32, u32),
     natural: BTreeMap<String, usize>,
     heights: Vec<(String, usize)>,
@@ -68,7 +68,7 @@ fn read(record: &EmulationRecord) -> Reading {
         .count();
     Reading {
         public_values: public_values_without_chunk_counters(&augmented),
-        tally: deferred_commit_tally(&augmented),
+        tally: commit_tally(&augmented),
         natural: mle_natural_heights(&augmented),
         heights: RiscvChipType::<Kb>::riscv_heights(&augmented),
         less_than_ops,
@@ -197,7 +197,11 @@ fn check(name: &str) {
             branches += reading.branches;
         }
         let words = DIGEST_SIZE as u32;
-        assert_eq!(tally, (words, (1 << words) - 1), "deferred commits at halt");
+        assert_eq!(
+            tally,
+            (2 * words, (1 << (2 * words)) - 1),
+            "the commits a guest makes before it halts"
+        );
         assert!(found.is_empty(), "{}", found.join("\n"));
         println!(
             "{name} @ {}: {} CPU chunks, {} records, cycle {}",

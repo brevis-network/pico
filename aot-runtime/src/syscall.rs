@@ -336,6 +336,7 @@ impl AotEmulatorCore {
         if let Some(record) = self.emitting_record_mut() {
             record.public_values.committed_value_digest[idx] = word;
         }
+        self.chunk_split_state.commits += 1;
         self.note_digest_word();
         Ok(())
     }
@@ -354,7 +355,7 @@ impl AotEmulatorCore {
         if let Some(record) = self.emitting_record_mut() {
             record.public_values.deferred_proofs_digest[idx] = word;
         }
-        self.chunk_split_state.deferred_commits += 1;
+        self.chunk_split_state.commits += 1;
         self.note_digest_word();
         Ok(())
     }
@@ -362,10 +363,8 @@ impl AotEmulatorCore {
     /// A commit tail in flight holds the chunk cut until it lands (see `should_split`).
     #[inline(always)]
     fn note_digest_word(&mut self) {
-        self.chunk_split_state.commit_in_flight = commit_tail_in_flight(
-            &self.committed_value_digest,
-            self.chunk_split_state.deferred_commits,
-        );
+        self.chunk_split_state.commit_in_flight =
+            commit_tail_in_flight(self.chunk_split_state.commits);
     }
 
     /// Execute a syscall using the AOT syscall system.
@@ -790,7 +789,7 @@ mod tests {
         assert!(emu.chunk_split_state.commit_in_flight);
         emu.exit_unconstrained_mode();
         assert!(!emu.chunk_split_state.commit_in_flight);
-        assert_eq!(emu.chunk_split_state.deferred_commits, 0);
+        assert_eq!(emu.chunk_split_state.commits, 0);
         assert_eq!(emu.committed_value_digest, [0; 8]);
     }
 

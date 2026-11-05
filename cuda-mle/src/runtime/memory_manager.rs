@@ -533,6 +533,14 @@ fn current_manager_opt() -> Option<&'static Mutex<MemoryManager>> {
 /// per-crate [`MemoryManager`] counters, this reflects the WHOLE device: CUDA context, JIT'd
 /// cubins, the external pool's cached (freed-but-retained) reservation, and any other process —
 /// i.e. the true figure the driver checks when an allocation OOMs.
+/// `MLE_MEMINFO_LAZY` (cached; default on): keep `cudaMemGetInfo` off the prove boundary (see
+/// `logup_zerocheck::gkr_buf_cache::free_vram` and `stacked_pcs`). `0` queries every time, as
+/// before, for an A/B.
+pub fn meminfo_lazy() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| !std::env::var("MLE_MEMINFO_LAZY").is_ok_and(|v| v == "0"))
+}
+
 pub fn device_mem_info() -> (usize, usize) {
     let mut free = 0usize;
     let mut total = 0usize;

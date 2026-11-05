@@ -12,15 +12,16 @@
 //! The tree has a FIXED depth ([`MLE_VK_MERKLE_DEPTH`], baked into the membership circuit);
 //! unused leaves are zero digests (nothing proves under a zero-commitment key). The whitelist
 //! contents are a per-config artifact: one convert VK per RISC-V shape the whitelist admits
-//! (`shape::mle_riscv_shapes`), the combine node VKs, then the deferred node VK, in that leaf
-//! order.
+//! (`shape::mle_riscv_shapes`), the combine node VKs, the deferred node VK, then the compress
+//! node VK (one: in whitelist mode every complete root has the one combine-tier layout, so the
+//! compress node has one key), in that leaf order.
 
 use std::collections::HashMap;
 
 use p3_field::PrimeCharacteristicRing;
 use pico_mle_core::{
     config::{
-        riscv_params_with_100_bits_security,
+        riscv_params_with_128_bits_security,
         soundness::{admit_production_vk, UnderBudgetError},
     },
     keygen::types::MultiStarkVerifyingKey,
@@ -149,7 +150,7 @@ pub fn synthesize_riscv_child_heights(
 pub fn whitelist_riscv_vk(
     program: Arc<Program>,
 ) -> Result<MultiStarkVerifyingKey<Sc>, UnderBudgetError> {
-    let engine: Engine = StarkEngine::new(riscv_params_with_100_bits_security(
+    let engine: Engine = StarkEngine::new(riscv_params_with_128_bits_security(
         super::riscv::log_stacked_height_from_env(),
     ));
     let airs = super::riscv::mle_riscv_air_refs(program, true);
@@ -278,16 +279,31 @@ pub fn pinned_root_from_env() -> Option<[Kb; 8]> {
     )
 }
 
+/// What the whitelist holds, as the root file says it: one leaf per riscv shape, the combine
+/// node shapes, the deferred node and the compress node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VkMapLeafCounts {
+    pub convert: usize,
+    pub combine: usize,
+    pub deferred: usize,
+    pub compress: usize,
+}
+
+impl VkMapLeafCounts {
+    pub fn total(&self) -> usize {
+        self.convert + self.combine + self.deferred + self.compress
+    }
+}
+
 /// The text of `mle_vk_root.txt`, the file that ships beside the artifact: what the artifact
-/// holds, the config digest it was built for and the pinned root. Its `MLE_VK_ROOT="..."` line
-/// is the one readers parse (the artifact unit test and the SDK's whitelist fixture); the rest is
-/// for the eye.
+/// holds, the riscv key it was built for, the config digest and the pinned root. Two lines are
+/// parsed: `MLE_VK_ROOT="..."` (the artifact unit test and the SDK's whitelist fixture,
+/// [`root_from_root_file`]) and `pre_hash is [...]` (the artifact unit test,
+/// [`riscv_pre_hash_from_root_file`]); the rest is for the eye.
 pub fn root_file_text(
     artifact: &VkMapArtifact,
     bin_name: &str,
-    n_convert: usize,
-    n_combine: usize,
-    n_deferred: usize,
+    leaves: VkMapLeafCounts,
     riscv_pre_hash: [u32; 8],
     date: &str,
 ) -> String {
@@ -300,10 +316,14 @@ pub fn root_file_text(
         .join(" ");
     let lines = [
         format!(
-            "# MLE whitelist artifact {bin_name}: {n_convert} convert VKs (one per riscv shape) + \
-             {n_combine} combine node VKs + {n_deferred} deferred node VK = {} leaves in a \
+            "# MLE whitelist artifact {bin_name}: {} convert VKs (one per riscv shape) + {} combine \
+             node VKs + {} deferred node VK + {} compress node VK = {} leaves in a \
              depth-{MLE_VK_MERKLE_DEPTH} Merkle tree,",
-            n_convert + n_combine + n_deferred
+            leaves.convert,
+            leaves.combine,
+            leaves.deferred,
+            leaves.compress,
+            leaves.total()
         ),
         format!(
             "# built {date} with mle_build_vk_map for the riscv machine whose whitelist-mode vk \
@@ -329,6 +349,22 @@ pub const SHIPPED_VK_MAP_BIN: &[u8] = include_bytes!("../shape_vk_bins/mle_vk_ma
 // so prover and verifier trust one copy. `the_shipped_artifact_matches_this_binary` checks that
 // the root is the shipped artifact's.
 pub use pico_verifier::whitelist::{root_from_root_file, shipped_vk_root, SHIPPED_VK_ROOT_FILE};
+
+/// The whitelist-mode riscv key's pre-hash a root file names, from its `pre_hash is [...]` line
+/// (the artifact unit test holds it against the riscv vk this binary keygens).
+pub fn riscv_pre_hash_from_root_file(text: &str) -> Option<[u32; 8]> {
+    let inner = text
+        .lines()
+        .find_map(|l| l.split_once("pre_hash is ["))?
+        .1
+        .split(']')
+        .next()?;
+    let limbs: Vec<u32> = inner
+        .split(',')
+        .map(|x| x.trim().parse().ok())
+        .collect::<Option<_>>()?;
+    limbs.try_into().ok()
+}
 
 /// The content key of a riscv shape: its `name:height` pairs, sorted. Two shapes with the same
 /// key are the same shape whatever label or index the enumeration gave them; the builder
@@ -665,7 +701,9 @@ mod tests {
 
     /// The shipped artifact loads under this binary's shape config, and the root file beside it
     /// names the root it carries. A machine or config change that invalidates the whitelist
-    /// fails here rather than at a prover's first whitelist lookup.
+    /// fails here rather than at a prover's first whitelist lookup. It also keygens the
+    /// whitelist-mode embed key, which neither the digest nor a leaf covers, and holds it against
+    /// the soundness manifest.
     #[test]
     fn the_shipped_artifact_matches_this_binary() {
         use p3_field::PrimeField32;
@@ -673,15 +711,21 @@ mod tests {
         let map = MleVkMap::shipped().unwrap_or_else(|e| panic!("shipped whitelist: {e}"));
         use crate::{
             compiler::riscv::compiler::{Compiler, SourceType},
-            mle::machine::{combine::CombineMachine, deferred::DeferredMachine, exe::RiscvVmVk},
+            mle::machine::{
+                combine::CombineMachine, compress::CompressMachine, deferred::DeferredMachine,
+                exe::RiscvVmVk,
+            },
         };
-        use pico_mle_core::config::recursion_params_with_100_bits_security;
+        use pico_mle_core::config::{
+            compress_params_with_128_bits_security, recursion_params_with_128_bits_security,
+        };
         let shapes = super::super::shape::mle_riscv_shapes();
         let nodes = CombineMachine::standard_node_count();
         assert_eq!(
             map.entries.len(),
-            shapes.len() + nodes + 1,
-            "leaf count: {} riscv shapes + {nodes} combine node shapes + 1 deferred node",
+            shapes.len() + nodes + 2,
+            "leaf count: {} riscv shapes + {nodes} combine node shapes + 1 deferred node + 1 \
+             compress node",
             shapes.len()
         );
         let _ = map.root().map(|f| f.as_canonical_u32());
@@ -698,7 +742,44 @@ mod tests {
             .expect("fib elf")
             .compile();
         let riscv_vk = whitelist_riscv_vk(program.clone()).expect("riscv keygen");
-        let engine: Engine = StarkEngine::new(recursion_params_with_100_bits_security());
+        // The soundness manifest records the identities an apex verifier is built from; they must
+        // be this tree's. Checked first: it costs no keygen, so a stale manifest is reported
+        // before the probes below spend theirs.
+        let manifest: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../mle-core/tests/soundness_manifest.json"
+        ))
+        .expect("the soundness manifest parses");
+        let limbs = |v: &serde_json::Value| -> Vec<u32> {
+            v.as_array()
+                .expect("an array of limbs")
+                .iter()
+                .map(|x| x.as_u64().expect("a limb") as u32)
+                .collect()
+        };
+        let regenerate = "regenerate it: cargo run --release -p pico-vm --example \
+                          mle_soundness_manifest";
+        assert_eq!(
+            limbs(&manifest["apex"]["vk_root"]),
+            shipped_vk_root().map(|f| f.as_canonical_u32()),
+            "the soundness manifest records another whitelist root than mle_vk_root.txt; \
+             {regenerate}"
+        );
+        assert_eq!(
+            limbs(&manifest["apex"]["riscv_vk_pre_hash"]),
+            riscv_vk.pre_hash.map(|f| f.as_canonical_u32()),
+            "the soundness manifest records another whitelist-mode riscv key than this binary \
+             keygens; {regenerate}"
+        );
+        // The root file names the riscv key the artifact was built for: the one line of it the
+        // builder writes from a keygen, held against this binary's.
+        assert_eq!(
+            riscv_pre_hash_from_root_file(SHIPPED_VK_ROOT_FILE),
+            Some(riscv_vk.pre_hash.map(|f| f.as_canonical_u32())),
+            "mle_vk_root.txt names another whitelist-mode riscv key than this binary keygens: the \
+             riscv machine changed since the artifact was built; rebuild it \
+             with `cargo run --release -p pico-vm --example mle_build_vk_map`"
+        );
+        let engine: Engine = StarkEngine::new(recursion_params_with_128_bits_security());
         // Labels are `core:...`, `memory:...` and `precompile:<kind>:...`; the family key is
         // the label up to the kind.
         let family = |label: &str| -> String {
@@ -732,7 +813,7 @@ mod tests {
         }
         let vm_vk = RiscvVmVk::from_program_and_vk(&program, &riscv_vk);
         let mut combine = CombineMachine::new(
-            recursion_params_with_100_bits_security(),
+            recursion_params_with_128_bits_security(),
             vm_vk.clone(),
             true,
         );
@@ -746,47 +827,91 @@ mod tests {
              the combine tier changed since the artifact was built; rebuild it \
              with `cargo run --release -p pico-vm --example mle_build_vk_map`"
         );
-        let mut deferred =
-            DeferredMachine::new(recursion_params_with_100_bits_security(), vm_vk, true);
+        let mut deferred = DeferredMachine::new(
+            recursion_params_with_128_bits_security(),
+            vm_vk.clone(),
+            true,
+        );
         let layout = combine
             .combine_tier_child_layout(first_convert)
             .expect("combine keygen");
         let node = deferred.preregister(&layout).expect("deferred keygen");
         assert_eq!(
             map.find(&vk_identity(&node)),
-            Some(map.entries.len() - 1),
-            "the deferred node VK is not the whitelist's last leaf: the deferred program or the \
-             combine tier changed since the artifact was built; rebuild it \
+            Some(map.entries.len() - 2),
+            "the deferred node VK is not the whitelist's second-to-last leaf: the deferred program \
+             or the combine tier changed since the artifact was built; rebuild it \
              with `cargo run --release -p pico-vm --example mle_build_vk_map`"
         );
-
-        // The soundness manifest records the identities an apex verifier is built from; they must
-        // be this tree's.
-        let manifest: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../mle-core/tests/soundness_manifest.json"
-        ))
-        .expect("the soundness manifest parses");
-        let limbs = |v: &serde_json::Value| -> Vec<u32> {
-            v.as_array()
-                .expect("an array of limbs")
+        let mut compress = CompressMachine::new(
+            compress_params_with_128_bits_security(),
+            vm_vk.clone(),
+            true,
+        );
+        let node = compress.preregister(&layout).expect("compress keygen");
+        assert_eq!(
+            map.find(&vk_identity(&node)),
+            Some(map.entries.len() - 1),
+            "the compress node VK is not the whitelist's last leaf: the compress program, the \
+             compress preset or the combine tier changed since the artifact was built; rebuild it \
+             with `cargo run --release -p pico-vm --example mle_build_vk_map`"
+        );
+        // The embed key is no leaf and its row is not in the digest either, so nothing
+        // above notices an embed row or preset that moved while the soundness manifest did not;
+        // yet the wrap circuit, and its Groth16 setup, bake that key in. Keygen embed over the
+        // compress proof's whitelist-mode layout, as the manifest generator does, and require the
+        // manifest's whitelist-set embed identity.
+        #[cfg(feature = "multi-field-transcript")]
+        {
+            use crate::mle::machine::{embed::EmbedMachine, recursion::compress_proof_layout};
+            let mut embed = EmbedMachine::new(
+                pico_mle_core::config::embed_params_with_128_bits_security(),
+                vm_vk,
+                true,
+            );
+            assert!(
+                embed.preregister(&layout).is_err(),
+                "embed must refuse a combine-tier child (its guard)"
+            );
+            let embed_vk = embed
+                .preregister(&compress_proof_layout(&node))
+                .expect("embed keygen");
+            let decimals = |v: &serde_json::Value| -> Vec<String> {
+                v.as_array()
+                    .expect("an array of decimal strings")
+                    .iter()
+                    .map(|x| x.as_str().expect("a decimal string").to_string())
+                    .collect()
+            };
+            let row = manifest["keys"]
+                .as_array()
+                .expect("the manifest's keys")
                 .iter()
-                .map(|x| x.as_u64().expect("a limb") as u32)
-                .collect()
-        };
-        let regenerate = "regenerate it: cargo run --release -p pico-vm --example \
-                          mle_soundness_manifest";
-        assert_eq!(
-            limbs(&manifest["apex"]["vk_root"]),
-            shipped_vk_root().map(|f| f.as_canonical_u32()),
-            "the soundness manifest records another whitelist root than mle_vk_root.txt; \
-             {regenerate}"
-        );
-        assert_eq!(
-            limbs(&manifest["apex"]["riscv_vk_pre_hash"]),
-            riscv_vk.pre_hash.map(|f| f.as_canonical_u32()),
-            "the soundness manifest records another whitelist-mode riscv key than this binary \
-             keygens; {regenerate}"
-        );
+                .find(|k| k["machine"] == "embed" && k["mode"] == "whitelist")
+                .expect("the manifest's whitelist-set embed key");
+            let stale = format!(
+                "the soundness manifest records another whitelist-mode embed key than this binary \
+                 keygens: the embed row, the embed preset or the compress row moved; {regenerate}, \
+                 and the wrap circuit's Groth16 setup moves with it"
+            );
+            assert_eq!(
+                embed_vk
+                    .pre_hash
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>(),
+                decimals(&row["vk_pre_hash"]),
+                "{stale}"
+            );
+            assert_eq!(
+                embed_vk
+                    .inner
+                    .merged_preprocessed_commit
+                    .map(|c| c.iter().map(|x| x.to_string()).collect::<Vec<_>>()),
+                row.get("merged_preprocessed_commit").map(decimals),
+                "{stale}"
+            );
+        }
     }
 
     #[test]
@@ -796,13 +921,24 @@ mod tests {
         let text = root_file_text(
             &artifact,
             "mle_vk_map_kb.bin",
-            1,
-            1,
-            0,
+            VkMapLeafCounts {
+                convert: 1,
+                combine: 1,
+                deferred: 0,
+                compress: 0,
+            },
             [7; 8],
             "2026-01-02",
         );
         assert_eq!(root_from_root_file(&text), Some(map.root()));
+        assert_eq!(riscv_pre_hash_from_root_file(&text), Some([7; 8]));
+        assert_eq!(riscv_pre_hash_from_root_file("no such line"), None);
+        assert_eq!(riscv_pre_hash_from_root_file("pre_hash is [1, 2, 3]"), None);
+        assert_eq!(
+            riscv_pre_hash_from_root_file("pre_hash is [a, 2, 3, 4, 5, 6, 7, 8]"),
+            None
+        );
+        assert!(text.contains("+ 0 deferred node VK + 0 compress node VK = 2 leaves"));
         assert!(text.contains(&format!("config digest = {:?}", artifact.config_digest)));
         assert!(text.contains("2 leaves in a depth-15 Merkle tree"));
         assert!(text.contains("built 2026-01-02"));

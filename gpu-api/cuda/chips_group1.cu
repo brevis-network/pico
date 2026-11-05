@@ -146,11 +146,9 @@ namespace pico_gpu {
     } // cuda_univariate_fold_generate_preprocessed
     PICO_FFI
     RustError::by_value cuda_univariate_fold_generate_main(
-      const UnivariateFoldFlatEvent<field_t>* events, size_t events_len, field_t* trace, size_t num_cols, uint32_t w, cudaStream_t stream)
+      const UnivariateFoldFlatEvent<field_t>* events, size_t events_len, field_t* trace, size_t num_cols, cudaStream_t stream)
     {
-      // `w` is passed as the canonical u32 of the binomial extension constant; reconstruct the
-      // field element at the FFI boundary so the Rust side never depends on the field's internal repr.
-      return generate_main(events, events_len, trace, num_cols, field_t::from_canonical_u32(w), stream);
+      return generate_main(events, events_len, trace, num_cols, stream);
     } // cuda_univariate_fold_generate_main
   } // namespace univariate_fold
 
@@ -258,10 +256,9 @@ namespace pico_gpu {
     } // cuda_gkr_sumcheck_round_generate_preprocessed
     PICO_FFI
     RustError::by_value cuda_gkr_sumcheck_round_generate_main(
-      const GkrSumcheckRoundEvent<field_t>* events, size_t events_len, field_t* trace, size_t num_cols, uint32_t w, cudaStream_t stream)
+      const GkrSumcheckRoundEvent<field_t>* events, size_t events_len, field_t* trace, size_t num_cols, cudaStream_t stream)
     {
-      // `w` is the canonical u32 of the binomial extension constant; rebuilt at the FFI boundary.
-      return generate_main(events, events_len, trace, num_cols, field_t::from_canonical_u32(w), stream);
+      return generate_main(events, events_len, trace, num_cols, stream);
     } // cuda_gkr_sumcheck_round_generate_main
   } // namespace gkr_sumcheck_round
 
@@ -275,9 +272,9 @@ namespace pico_gpu {
     } // cuda_horner_eval_generate_preprocessed
     PICO_FFI
     RustError::by_value cuda_horner_eval_generate_main(
-      const HornerEvalEvent<field_t>* events, size_t events_len, field_t* trace, size_t num_cols, uint32_t w, cudaStream_t stream)
+      const HornerEvalEvent<field_t>* events, size_t events_len, field_t* trace, size_t num_cols, cudaStream_t stream)
     {
-      return generate_main(events, events_len, trace, num_cols, field_t::from_canonical_u32(w), stream);
+      return generate_main(events, events_len, trace, num_cols, stream);
     } // cuda_horner_eval_generate_main
   } // namespace horner_eval
 

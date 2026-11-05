@@ -3,18 +3,15 @@ use crate::runtime::{
     error::{check, CudaError},
 };
 
-use p3_field::extension::BinomialExtensionField;
-use p3_koala_bear::KoalaBear;
-
 use crate::{
     poly::EqEvalSegments,
     stacked_reduction::{UnstackedSlice, STACKED_REDUCTION_S_DEG},
 };
 
-// `cuda_kb_all` is the KoalaBear link unit; this FFI is typed as KoalaBear.
-type F = KoalaBear;
-type EF = BinomialExtensionField<KoalaBear, 4>;
-const D_EF: usize = 4;
+// `cuda_kb_all` is the KoalaBear link unit; this FFI is typed on the crate's KoalaBear field and
+// challenge extension. These were local aliases pinned to `BinomialExtensionField<KoalaBear, 4>`,
+// which kept this module degree 4 while everything calling it followed `mle_core`'s `EF`.
+use crate::prelude::{D_EF, EF, F};
 
 /// How many partial-sum polynomials (G0, G1, G2) the round-0 kernel emits per point of the
 /// univariate skip domain.
@@ -212,7 +209,7 @@ pub unsafe fn initialize_k_rot_from_eq_segments(
 ///   - every slice addresses memory inside `column_evals`.
 /// - `lambda_powers` is a (possibly offset) pointer into a `DeviceBuffer<EF>` with at least
 ///   `2 * num_columns` initialized entries, since rotated columns use a second power each.
-/// - `accumulator` has room for `S_DEG * D_EF = 8` values and starts zeroed.
+/// - `accumulator` has room for `S_DEG * D_EF` values (2 × the extension degree) and starts zeroed.
 #[allow(clippy::too_many_arguments)]
 pub unsafe fn stacked_reduction_sumcheck_mle_round(
     column_evals: &DeviceBuffer<*const EF>,
@@ -248,7 +245,7 @@ pub unsafe fn stacked_reduction_sumcheck_mle_round(
 /// `accumulator`, which the caller zeroes beforehand and reduces modulo P afterwards.
 ///
 /// # Safety
-/// - `accumulator` has room for `S_DEG * D_EF = 8` values and starts zeroed.
+/// - `accumulator` has room for `S_DEG * D_EF` values (2 × the extension degree) and starts zeroed.
 #[allow(clippy::too_many_arguments)]
 pub unsafe fn stacked_reduction_sumcheck_mle_round_degenerate(
     column_evals: &DeviceBuffer<*const EF>,

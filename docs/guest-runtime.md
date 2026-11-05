@@ -23,10 +23,14 @@ compiled as a static library, so a Rust guest and a C guest get the same symbols
 - `_start`;
 - `read_input` / `write_output` (`zkvm_io.h` in zkevm-standards);
 - the accelerators (`syscall_*`);
-- `memcpy` / `memset`;
+- `memcpy` / `memset` (see [Memory functions](#memory-functions));
 - `abort`, and `__assert_func` / `__assert_fail`, which a failed `assert()` calls in newlib /
-  picolibc and in glibc / musl. These three are weak, so a C library linked into the guest that
-  brings its own takes precedence instead of clashing.
+  picolibc and in glibc / musl;
+- `atexit`, `__cxa_atexit` and `__dso_handle`, through which C++ registers its static
+  destructors; `_start` runs the handlers after `main`, latest first, before `.fini_array`.
+
+The C-library ones (`abort` through `__dso_handle`) are weak, so a C library linked into the
+guest that brings its own takes precedence instead of clashing.
 
 The library carries the Rust standard library it is written against; `main` is left for the
 guest. A C guest that uses no C library links like this:
@@ -38,8 +42,38 @@ clang --target=riscv64-unknown-elf -march=rv64im -mabi=lp64 -mcmodel=medany -O2 
 ld.lld -T pico-zkvm/pico.ld main.o pico-zkvm/libpico_zkvm.a --gc-sections -o guest.elf
 ```
 
+GNU ld (`riscv64-unknown-elf-ld`) takes the same arguments, but must be recent: binutils 2.38
+(Ubuntu 22.04's) rejects the objects LLVM builds for RV64IM, the library's included, on the `zmmul`
+extension their `.riscv.attributes` name. `examples/c-guest` is a complete C and
+C++ guest, built with both linkers in CI.
+
 The crate it builds is generated in `~/.pico/lib` (`$PICO_LIB_CACHE`) and takes `pico-sdk` from
 this CLI's release, or from the checkout at `$PICO_SOURCE`.
+
+## Memory functions
+
+`memcpy` and `memset` are the runtime's assembly (`sdk/sdk/src/memcpy.s`, `memset.s`), and every
+guest must link them rather than another definition: a guest that links another runs correctly
+but slower. reth's ELF once kept `compiler_builtins`' `memcpy` and retired 5 % more
+instructions, and nothing reported it.
+
+**How they win.** They are in the same `global_asm!` as `_start`, so in the same object file,
+and every link takes that object because `_start` is the entry point. Their definitions are
+strong; `compiler_builtins`', which the guest build enables with `compiler-builtins-mem`, are
+weak. So a Rust guest needs no linker flag, and a C guest needs no `--whole-archive`. A C library
+linked into the guest that defines its own `memcpy` strongly fails the link with a duplicate
+symbol rather than silently replacing Pico's; put `libpico_zkvm.a` before it on the command line,
+so that its object is taken first and the C library's `memcpy` is never pulled in.
+
+**The check.** The runtime puts an alias on each, `__pico_memcpy` / `__pico_memset`, and
+`cargo pico build` fails if the ELF's `memcpy` or `memset` is anywhere but at its alias. An ELF
+without a symbol table, or built with a `pico-sdk` from before the aliases, cannot be checked and
+only gets a warning.
+
+**The tests.** `vm/examples/patch-testing/guests/memory-functions` checks `memcpy`, `memset` and
+`memmove` (`compiler_builtins`') against byte-by-byte references at every source and
+destination alignment, lengths 0 to 40 and three longer ones, and `memmove` over overlapping
+ranges both ways; `sdk/prover/src/tests/memory_functions.rs` runs it.
 
 ## Memory layout
 
@@ -69,8 +103,9 @@ per-program input. 8 MiB is about 150 times the deepest stack reth reaches (52 K
 2. Initialises IO: the public-values hasher and the deferred-proof digest.
 3. Runs `.preinit_array` and `.init_array`: C++ static constructors.
 4. Calls `int main(void)`.
-5. Runs `.fini_array` in reverse: static destructors.
-6. Halts with `main`'s return value.
+5. Runs the `atexit` / `__cxa_atexit` handlers, latest first: C++'s static destructors.
+6. Runs `.fini_array` in reverse.
+7. Halts with `main`'s return value.
 
 The loader zeroes `.bss`; `_start` does not.
 

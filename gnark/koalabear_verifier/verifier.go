@@ -184,8 +184,12 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		case "SelectE":
 			exts[cs.Args[0][0]] = fieldAPI.SelectE(vars[cs.Args[1][0]], exts[cs.Args[2][0]], exts[cs.Args[3][0]])
 		case "Ext2Felt":
-			out := fieldAPI.Ext2Felt(exts[cs.Args[4][0]])
-			for i := 0; i < 4; i++ {
+			// The ExtDegree limbs, then the ext.
+			if len(cs.Args) != koalabear.ExtDegree+1 {
+				return fmt.Errorf("%s takes %d limbs and an ext, not %d arguments", cs.Opcode, koalabear.ExtDegree, len(cs.Args))
+			}
+			out := fieldAPI.Ext2Felt(exts[cs.Args[koalabear.ExtDegree][0]])
+			for i := 0; i < koalabear.ExtDegree; i++ {
 				felts[cs.Args[i][0]] = out[i]
 			}
 		case "AssertEqV":
@@ -205,7 +209,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		case "PrintE":
 			// Same reasoning as PrintF: ReduceE only promises a 31-bit representative.
 			e := exts[cs.Args[0][0]]
-			for j := 0; j < 4; j++ {
+			for j := 0; j < koalabear.ExtDegree; j++ {
 				api.Println(fieldAPI.Felt2Var(e.Value[j]))
 			}
 		case "WitnessV":
@@ -240,7 +244,15 @@ func (circuit *Circuit) Define(api frontend.API) error {
 				fieldAPI.AssertIsEqualF(felts[cs.Args[0][i]], koalabear.NewFConst(cs.Args[1][i]))
 			}
 		case "CircuitFelts2Ext":
-			exts[cs.Args[0][0]] = koalabear.Felts2Ext(felts[cs.Args[1][0]], felts[cs.Args[2][0]], felts[cs.Args[3][0]], felts[cs.Args[4][0]])
+			// The ext, then its ExtDegree limbs.
+			if len(cs.Args) != koalabear.ExtDegree+1 {
+				return fmt.Errorf("%s takes an ext and %d limbs, not %d arguments", cs.Opcode, koalabear.ExtDegree, len(cs.Args))
+			}
+			var limbs [koalabear.ExtDegree]koalabear.Variable
+			for i := range limbs {
+				limbs[i] = felts[cs.Args[i+1][0]]
+			}
+			exts[cs.Args[0][0]] = koalabear.Felts2Ext(limbs)
 		case "CircuitFelt2Var":
 			// Lazy canonicality: this is the boundary where a felt stops being a mod-p value and
 			// becomes a BN254 integer -- it goes on to be hashed by the Poseidon2-BN254

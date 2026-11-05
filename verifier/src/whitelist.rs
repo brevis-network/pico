@@ -14,10 +14,10 @@ use crate::{
     Kb, Sc,
 };
 
-/// Fixed Merkle depth: 2^15 = 32,768 whitelist slots. The whitelist holds 15,683 leaves (15,646
-/// riscv shapes, 36 combine node shapes and the deferred node), so this leaves 109% headroom;
-/// depth 14 would leave 701 free slots (4.3%). A new precompile kind sweeps a few hundred shapes,
-/// so a few more kinds would use those up.
+/// Fixed Merkle depth: 2^15 = 32,768 whitelist slots. The whitelist holds 15,684 leaves (15,646
+/// riscv shapes, 36 combine node shapes, the deferred node and the compress node), so this leaves
+/// 109% headroom; depth 14 would leave 700 free slots (4.3%). A new precompile kind sweeps a few
+/// hundred shapes, so a few more kinds would use those up.
 /// The depth is baked into the membership circuit, so changing it changes every combine VK and
 /// the root.
 pub const MLE_VK_MERKLE_DEPTH: usize = 15;
@@ -155,8 +155,9 @@ impl VkMerkleTree {
 /// One whitelist member and its Merkle path.
 ///
 /// What a verifier outside the prover holds instead of the whole whitelist: an apex only has to
-/// authenticate the ROOT proof's vk (every other key is checked in-circuit against the root), so
-/// the memberships of the keys a root can carry stand in for the full map.
+/// authenticate the vk of the proof it is handed (every other key is checked in-circuit against
+/// the root), so the memberships of the keys a root or a compress proof can carry -- the combine,
+/// deferred and compress node keys -- stand in for the full map.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VkMembership {
     pub identity: VkIdentity,

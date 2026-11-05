@@ -4,10 +4,14 @@ use serde::{Deserialize, Serialize};
 
 /// A stopping point in the proving chain — the `--step` vocabulary of `vm/examples/test_mle_e2e.rs`.
 ///
-/// All five variants exist on every build. Only the implementations are
+/// All six variants exist on every build. Only the implementations are
 /// feature-gated, so a caller can always *name* a phase in order to be told it is unavailable:
 /// [`Phase::Embed`] and [`Phase::Wrap`] return [`crate::ProveError::FeatureMissing`] without
-/// `multi-field-transcript`.
+/// `multi-field-transcript`; [`Phase::Compress`] needs no feature.
+///
+/// The order is the order of the chain, riscv → convert → combine → compress → embed → wrap:
+/// each phase is built from the one before it, so proving to a phase passes through every
+/// phase before it, and any phase can be the stopping point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Phase {
     /// One proof per emulation chunk, verified against a key derived from the ELF.
@@ -16,7 +20,10 @@ pub enum Phase {
     Convert,
     /// The convert proofs tree-reduced to one complete root. What [`crate::Prover::prove`] returns.
     Combine,
-    /// The complete root re-proved under the outer BN254-hashed config.
+    /// The complete root re-proved under the inner config at the compress preset: the final
+    /// compression layer, the proof that is handed out (≤ 300 KiB).
+    Compress,
+    /// The compress proof re-proved under the outer BN254-hashed config, for the on-chain path.
     Embed,
     /// The embed-proof verifier emitted as a gnark circuit plus its witness.
     Wrap,
@@ -28,6 +35,7 @@ impl std::fmt::Display for Phase {
             Phase::Riscv => "riscv",
             Phase::Convert => "convert",
             Phase::Combine => "combine",
+            Phase::Compress => "compress",
             Phase::Embed => "embed",
             Phase::Wrap => "wrap",
         };
@@ -54,18 +62,23 @@ mod tests {
     use super::*;
 
     /// The CLI's `--phase` values and proof file names are these spellings, and
-    /// [`crate::Proof::binds_complete_execution`] reads the order.
+    /// [`crate::Proof::binds_complete_execution`] reads the order. The order is that of the chain,
+    /// and so of the stopping points.
     #[test]
-    fn phases_display_and_order_as_the_chain_runs() {
+    fn phases_display_and_order_as_stopping_points() {
         let chain = [
             Phase::Riscv,
             Phase::Convert,
             Phase::Combine,
+            Phase::Compress,
             Phase::Embed,
             Phase::Wrap,
         ];
         let names: Vec<String> = chain.iter().map(Phase::to_string).collect();
-        assert_eq!(names, ["riscv", "convert", "combine", "embed", "wrap"]);
+        assert_eq!(
+            names,
+            ["riscv", "convert", "combine", "compress", "embed", "wrap"]
+        );
         assert!(chain.windows(2).all(|pair| pair[0] < pair[1]));
     }
 }

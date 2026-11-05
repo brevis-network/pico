@@ -20,5 +20,10 @@ pub struct GlobalCols<T: Copy> {
     pub is_real: T,
     pub is_receive: T,
     pub is_send: T,
+    /// 16 + 9 limb decomposition of message[1], range-checking it to 25 bits: the clk
+    /// of a memory message, which otherwise only the bus cancellation binds.
+    pub message_1_16bit_limb: T,
+    pub message_1_hi9: T,
+    /// Last: `GcsBindAir` reads the chunk total from the trailing cells of the last row.
     pub accumulation: GlobalAccumulationOperation<T, 1>,
 }

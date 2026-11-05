@@ -1,4 +1,7 @@
-use crate::{compiler::recursion::types::Address, primitives::consts::DIGEST_SELECT_DATAPAR};
+use crate::{
+    compiler::recursion::types::Address,
+    primitives::consts::{DIGEST_BLOCKS, DIGEST_SELECT_DATAPAR, DIGEST_SIZE},
+};
 use pico_derive::AlignedBorrow;
 
 pub const NUM_DIGEST_SELECT_COLS: usize = core::mem::size_of::<DigestSelectCols<u8>>();
@@ -11,10 +14,10 @@ pub const NUM_DIGEST_SELECT_PREPROCESSED_COLS: usize =
 pub struct DigestSelectPreprocessedValueCols<F: Copy> {
     pub is_real: F,
     pub bit_addr: Address<F>,
-    pub in1_addrs: [Address<F>; 2],
-    pub in2_addrs: [Address<F>; 2],
-    pub out_addrs: [Address<F>; 2],
-    pub mults: [F; 2],
+    pub in1_addrs: [Address<F>; DIGEST_BLOCKS],
+    pub in2_addrs: [Address<F>; DIGEST_BLOCKS],
+    pub out_addrs: [Address<F>; DIGEST_BLOCKS],
+    pub mults: [F; DIGEST_BLOCKS],
 }
 
 /// Preprocessed columns: DATAPAR independent selects per row.
@@ -29,9 +32,9 @@ pub struct DigestSelectPreprocessedCols<F: Copy> {
 #[repr(C)]
 pub struct DigestSelectValueCols<F: Copy> {
     pub bit: F,
-    pub in1: [F; 8],
-    pub in2: [F; 8],
-    pub out: [F; 8],
+    pub in1: [F; DIGEST_SIZE],
+    pub in2: [F; DIGEST_SIZE],
+    pub out: [F; DIGEST_SIZE],
 }
 
 /// Main columns: DATAPAR independent selects per row.

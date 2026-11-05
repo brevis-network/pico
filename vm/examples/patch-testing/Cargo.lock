@@ -1851,6 +1851,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "guest-memory-functions"
+version = "1.0.0"
+dependencies = [
+ "pico-sdk",
+]
+
+[[package]]
 name = "guest-standard-io"
 version = "1.0.0"
 dependencies = [

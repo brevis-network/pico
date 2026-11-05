@@ -139,6 +139,13 @@ fn main() {
         program.child_spans,
     );
 
+    // `MLE_REC_PLANNED=1` holds the prover's planned run (`MLE_REC_WAVEFRONT`) to the same gate:
+    // the in-order run against the planned one, alternating, records compared by digest.
+    if std::env::var("MLE_REC_PLANNED").is_ok_and(|v| v == "1") {
+        planned_ab(&program, &witness_stream, iters);
+        return;
+    }
+
     // A fresh `Runtime` per iteration: `run()` drains the witness stream and fills the memory
     // table and the record, so a reused one would neither replay the same work nor even succeed.
     // Construction is charged separately for the same reason the prover's `emulate_ms` starts
@@ -248,5 +255,142 @@ fn main() {
         "{arm} vs serial: median {:+.1}%, min {:+.1}%",
         100.0 * (pmed - smed) / smed,
         100.0 * (pmin - smin) / smin,
+    );
+}
+
+/// KoalaBear states permuted 16 at a time on the packed field; a lone state goes scalar.
+fn kb_batch_perm() -> pico_vm::emulator::recursion::emulator::BatchPerm<Kb> {
+    type Packed = <Kb as Field>::Packing;
+    let perm = default_koalabear_poseidon2_16();
+    Arc::new(move |states: &mut [[Kb; 16]]| {
+        let lanes = Packed::WIDTH;
+        for group in states.chunks_mut(lanes) {
+            if group.len() == 1 {
+                group[0] = perm.permute(group[0]);
+                continue;
+            }
+            let n = group.len();
+            let mut packed: [Packed; 16] = std::array::from_fn(|e| {
+                Packed::from_fn(|l| if l < n { group[l][e] } else { Kb::ZERO })
+            });
+            perm.permute_mut(&mut packed);
+            for (l, state) in group.iter_mut().enumerate() {
+                for (e, x) in state.iter_mut().enumerate() {
+                    *x = packed[e].as_slice()[l];
+                }
+            }
+        }
+    })
+}
+
+/// Serial `run()` against the planned wavefront run, alternating, records compared.
+fn planned_ab(
+    program: &Arc<RecursionProgram<Kb>>,
+    witness_stream: &std::collections::VecDeque<Block<Kb>>,
+    iters: usize,
+) {
+    use pico_vm::{
+        compiler::recursion::instruction::Instruction,
+        emulator::recursion::emulator::{WavefrontPlan, WAVEFRONT_WINDOW as window},
+    };
+    let t = Instant::now();
+    let perm = default_koalabear_poseidon2_16();
+    let mut rt = Runtime::<Kb, EF, _, _, KOALABEAR_S_BOX_DEGREE>::new(Arc::clone(program), perm);
+    rt.witness_stream = witness_stream.clone();
+    let (depth, entries) = rt.census().expect("census failed");
+    let census_ms = t.elapsed().as_secs_f64() * 1e3;
+    let t = Instant::now();
+    let plan = WavefrontPlan::new(
+        0,
+        program.instructions.len(),
+        &depth,
+        &entries,
+        window,
+        |i| matches!(program.instructions[i], Instruction::Poseidon2Packed(_)),
+    );
+    println!(
+        "census {census_ms:.1} ms, plan {:.1} ms (one-off per program), window {window}, \
+         levels {}",
+        t.elapsed().as_secs_f64() * 1e3,
+        plan.levels.len()
+    );
+    let batch = kb_batch_perm();
+    // A combine program also runs split with a plan per child, against serial `run_split`.
+    if let [(s0, e0), (s1, e1)] = program.child_spans[..] {
+        let is_p2 = |i: usize| matches!(program.instructions[i], Instruction::Poseidon2Packed(_));
+        let plans = Arc::new([
+            WavefrontPlan::new(s0, e0, &depth, &entries, window, is_p2),
+            WavefrontPlan::new(s1, e1, &depth, &entries, window, is_p2),
+        ]);
+        let split = |planned: bool| -> (f64, u64) {
+            let perm = default_koalabear_poseidon2_16();
+            let mut rt =
+                Runtime::<Kb, EF, _, _, KOALABEAR_S_BOX_DEGREE>::new(Arc::clone(program), perm);
+            rt.witness_stream = witness_stream.clone();
+            if planned {
+                rt.batch_perm = Some(Arc::clone(&batch));
+                rt.child_plans = Some(Arc::clone(&plans));
+            }
+            let t = Instant::now();
+            assert!(rt.run_split().expect("split run failed"), "split declined");
+            (t.elapsed().as_secs_f64() * 1e3, rt.record.digest())
+        };
+        let (mut a_ms, mut b_ms) = (Vec::new(), Vec::new());
+        for i in 0..iters {
+            let (a, b) = if i % 2 == 0 {
+                let a = split(false);
+                (a, split(true))
+            } else {
+                let b = split(true);
+                (split(false), b)
+            };
+            assert_eq!(a.1, b.1, "planned split record differs from split");
+            a_ms.push(a.0);
+            b_ms.push(b.0);
+        }
+        a_ms.sort_by(f64::total_cmp);
+        b_ms.sort_by(f64::total_cmp);
+        let (am, bm) = (a_ms[a_ms.len() / 2], b_ms[b_ms.len() / 2]);
+        println!(
+            "split median {am:.2} ms, planned split median {bm:.2} ms ({:+.1}%), records identical \
+             over {iters} pairs",
+            100.0 * (bm - am) / am
+        );
+    }
+    let run = |planned: bool| -> (f64, u64) {
+        let perm = default_koalabear_poseidon2_16();
+        let mut rt =
+            Runtime::<Kb, EF, _, _, KOALABEAR_S_BOX_DEGREE>::new(Arc::clone(program), perm);
+        rt.witness_stream = witness_stream.clone();
+        rt.batch_perm = Some(Arc::clone(&batch));
+        let t = Instant::now();
+        if planned {
+            rt.run_range_planned(&plan, false)
+                .expect("planned run failed");
+        } else {
+            rt.run().expect("serial run failed");
+        }
+        (t.elapsed().as_secs_f64() * 1e3, rt.record.digest())
+    };
+    let (mut s_ms, mut w_ms) = (Vec::new(), Vec::new());
+    for i in 0..iters {
+        let (a, b) = if i % 2 == 0 {
+            let a = run(false);
+            (a, run(true))
+        } else {
+            let b = run(true);
+            (run(false), b)
+        };
+        assert_eq!(a.1, b.1, "planned record differs from serial");
+        s_ms.push(a.0);
+        w_ms.push(b.0);
+    }
+    s_ms.sort_by(f64::total_cmp);
+    w_ms.sort_by(f64::total_cmp);
+    let (sm, wm) = (s_ms[s_ms.len() / 2], w_ms[w_ms.len() / 2]);
+    println!(
+        "serial median {sm:.2} ms, planned median {wm:.2} ms ({:+.1}%), records identical over \
+         {iters} pairs",
+        100.0 * (wm - sm) / sm
     );
 }

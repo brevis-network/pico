@@ -8,16 +8,20 @@ use crate::{
     },
     emulator::recursion::emulator::RecursionRecord,
     machine::chip::ChipBehavior,
+    primitives::consts::EXTENSION_DEGREE,
 };
-use p3_field::{Field, PrimeCharacteristicRing};
+use p3_field::{
+    extension::QuinticTrinomialExtensionField, BasedVectorSpace, Field, PrimeCharacteristicRing,
+};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 use pico_mle_core::poly::interpolate_cubic_at_0123;
 
 type F = KoalaBear;
+type EF = QuinticTrinomialExtensionField<KoalaBear>;
 
 fn b(v: u32) -> Block<F> {
-    Block([F::from_u32(v), F::ZERO, F::ZERO, F::ZERO])
+    Block::from(F::from_u32(v))
 }
 
 /// The chip's closed-form cubic interpolation (base lane), for cross-checking
@@ -80,8 +84,8 @@ fn test_gkr_round_trace_dimensions_and_r_sq() {
         r: b(9),
         xi: b(3),
         eq_in: b(2),
-        next_claim: Block([next, F::ZERO, F::ZERO, F::ZERO]),
-        eq_out: Block([eq_out, F::ZERO, F::ZERO, F::ZERO]),
+        next_claim: Block::from(next),
+        eq_out: Block::from(eq_out),
     };
 
     let mut record = RecursionRecord::<F>::default();
@@ -92,13 +96,14 @@ fn test_gkr_round_trace_dimensions_and_r_sq() {
 
     assert!(trace.height() >= 16);
     assert_eq!(trace.width(), super::columns::NUM_GKR_SUMCHECK_ROUND_COLS);
-    // Columns: [claim, s1, s2, s3, r, xi, eq_in, r_sq, next_claim, eq_out] x Block(4).
+    // Columns: [claim, s1, s2, s3, r, xi, eq_in, r_sq, next_claim, eq_out] x Block(E).
+    const E: usize = EXTENSION_DEGREE;
     let row = trace.row_slice(0).unwrap();
     assert_eq!(row[0], claim);
-    assert_eq!(row[4 * 4], r);
-    assert_eq!(row[7 * 4], r * r); // r_sq recomputed by tracegen
-    assert_eq!(row[8 * 4], next);
-    assert_eq!(row[9 * 4], eq_out);
+    assert_eq!(row[4 * E], r);
+    assert_eq!(row[7 * E], r * r); // r_sq recomputed by tracegen
+    assert_eq!(row[8 * E], next);
+    assert_eq!(row[9 * E], eq_out);
 }
 
 #[test]
@@ -132,6 +137,48 @@ fn test_gkr_round_preprocessed_dimensions() {
     );
     assert_eq!(preprocessed.row_slice(0).unwrap()[0], F::ONE); // is_real
     assert_eq!(preprocessed.row_slice(1).unwrap()[0], F::ZERO); // padding
+}
+
+/// An extension element with every one of its `EXTENSION_DEGREE` coefficients non-zero and
+/// distinct, so a tracegen that only handled the first four would disagree with `EF`.
+fn ef(seed: u32) -> EF {
+    EF::from_basis_coefficients_fn(|i| F::from_u32(seed + 7 * i as u32 + 1))
+}
+
+fn blk(e: EF) -> Block<F> {
+    Block::from(e.as_basis_coefficients_slice())
+}
+
+fn ef_at(row: &[F], at: usize) -> EF {
+    EF::from_basis_coefficients_slice(&row[at..at + EXTENSION_DEGREE]).unwrap()
+}
+
+#[test]
+fn test_gkr_round_r_sq_all_lanes() {
+    let chip = GkrSumcheckRoundChip::<F>::default();
+
+    let r = ef(9);
+    let mut record = RecursionRecord::<F>::default();
+    record
+        .gkr_sumcheck_round_events
+        .push(GkrSumcheckRoundEvent {
+            claim: blk(ef(100)),
+            s1: blk(ef(40)),
+            s2: blk(ef(50)),
+            s3: blk(ef(60)),
+            r: blk(r),
+            xi: blk(ef(3)),
+            eq_in: blk(ef(2)),
+            next_claim: blk(ef(7)),
+            eq_out: blk(ef(8)),
+        });
+
+    let mut output = RecursionRecord::<F>::default();
+    let trace = chip.generate_main(&record, &mut output);
+    const E: usize = EXTENSION_DEGREE;
+    let row = trace.row_slice(0).unwrap();
+    assert_eq!(ef_at(&row[..], 4 * E), r);
+    assert_eq!(ef_at(&row[..], 7 * E), r * r); // r_sq, recomputed by the tracegen
 }
 
 /// GPU trace-gen must be element-wise identical to the CPU path, including the device-computed r_sq

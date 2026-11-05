@@ -661,7 +661,7 @@ impl RiscvEmulator {
             defer_only,
             log_syscalls,
             emu_fn: RiscvEmulator::emulate_instruction,
-            field: if same_field::<F, KoalaBear, 4>() {
+            field: if same_field::<F, KoalaBear>() {
                 "KoalaBear"
             } else {
                 panic!("Unsupported field type");
@@ -743,6 +743,10 @@ impl RiscvEmulator {
 
         // Emulate the instruction.
         (self.emu_fn)(self, &instruction)?;
+        // Only the run that picks the cuts needs the rows; a replay to a given target does not.
+        if self.target_global_clk.is_none() && !self.is_unconstrained() {
+            self.chunk_split_state.count_insn(instruction.opcode);
+        }
 
         // Increment the clock.
         self.state.global_clk += 1;
@@ -841,6 +845,9 @@ impl RiscvEmulator {
 
         let instruction = self.program.fetch(self.state.pc);
         Self::emulate_instruction_simple(self, &instruction)?;
+        if self.target_global_clk.is_none() && !self.is_unconstrained() {
+            self.chunk_split_state.count_insn(instruction.opcode);
+        }
         self.state.global_clk += 1;
 
         if let Some(max_cycles) = self.opts.max_cycles {

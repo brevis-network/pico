@@ -1,6 +1,9 @@
 //! Shared test inputs, and the host-side oracles the assertions compare against.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use pico_vm::{
     compiler::riscv::{
@@ -12,7 +15,8 @@ use pico_vm::{
 };
 
 pub(super) use super::scratch::scratch_dir;
-use crate::{prover::ProverBuilder, Execution, Stdin};
+use crate::{proof::digest_words, prover::ProverBuilder, Execution, Stdin};
+use pico_vm::mle::machine::vk_map::MleVkMap;
 
 /// The prebuilt RV64 fibonacci guest, the same fixture `vm/src/mle/machine/riscv.rs` proves
 /// against. It commits `(n, F(n), F(n+1))` as three 32-byte big-endian words via `commit_bytes`.
@@ -32,6 +36,13 @@ pub(super) const OTHER_ELF: &[u8] = include_bytes!(concat!(
 pub(super) const COMMIT_OUT_OF_RANGE_ELF: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../perf/bench_data/rv64/commit-out-of-range-elf"
+));
+
+/// The memory-functions guest (`vm/examples/patch-testing/guests/memory-functions`): it checks the
+/// runtime's `memcpy`, `memset` and `memmove` and returns non-zero on the first failure.
+pub(super) const MEMORY_FUNCTIONS_ELF: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../perf/bench_data/rv64/memory-functions-elf"
 ));
 
 /// The poseidon2 guest (`vm/examples/patch-testing/patches/poseidon2`); it reads its round count.
@@ -100,6 +111,18 @@ pub(super) fn shipped_whitelist_builder() -> ProverBuilder {
         .verify_keys(true)
         .vk_map(map)
         .trusted_vk_root(root)
+}
+
+/// [`whitelist_builder`] in whitelist mode under `map`, written into `dir` (a scratch dir the
+/// test keeps alive), with the map's own root trusted: for tests that need a whitelist other than
+/// the shipped one.
+pub(super) fn whitelist_builder_with_map(map: &MleVkMap, dir: &Path) -> ProverBuilder {
+    let path = dir.join("mle_vk_map_kb.bin");
+    map.save_bin(&path);
+    whitelist_builder()
+        .verify_keys(true)
+        .vk_map(path)
+        .trusted_vk_root(digest_words(&map.root()))
 }
 
 pub(super) fn fib_program() -> Arc<Program> {

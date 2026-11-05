@@ -23,7 +23,15 @@
 //!
 //! A fourth selects a shipped path rather than measuring: `MLE_REC_PARALLEL_CHILDREN` interprets
 //! a combine node's two children concurrently (`Runtime::run_split`). Unlike the three above it is
-//! **on** unless set to `0`. It is echoed as `split`.
+//! **on** unless set to `0`. It is echoed as `split`. `MLE_REC_WAVEFRONT`, also on unless `0`,
+//! runs convert emulations and split combine children by a per-program plan with their Poseidon2
+//! permutations batched (`mod wavefront`); it is echoed as `wave`.
+//!
+//! A fifth is a negative-test hook and the only one that DOES change a witnessed value:
+//! `N11_TAMPER_PACKED_LANE` (default OFF, `"1"`-valued) sets the padding lane of the first packed
+//! opened-row block of every WHIR round-0 (query, commit) pair to one, so the proof it is used in
+//! must fail (`vm/examples/test_mle_e2e.rs`). It logs once when it fires, at info level because
+//! the forest logger (`RUST_LOGGER=forest`, `machine/logger.rs`) prints only INFO events.
 //!
 //! The interpreter these drivers hand off to has its own knobs, documented with it in
 //! `emulator/recursion/emulator/profile.rs`: `MLE_REC_EMULATE_PROFILE` prices `Runtime::run()` by
@@ -73,7 +81,8 @@ use crate::{
         },
     },
     primitives::consts::{
-        DIGEST_SIZE, KOALABEAR_S_BOX_DEGREE, MAX_NUM_PVS, RECURSION_NUM_PVS, RISCV_NUM_PVS,
+        DIGEST_BLOCKS, DIGEST_SIZE, EXTENSION_DEGREE, KOALABEAR_S_BOX_DEGREE, MAX_NUM_PVS,
+        PACK_LANES, RECURSION_NUM_PVS, RISCV_NUM_PVS,
     },
 };
 use pico_mle_core::{
@@ -88,10 +97,10 @@ use pico_mle_core::{
 
 use super::{layout::extract_recursion_vk_layout, Kb, Sc};
 
-/// The three knobs, each read once. `std::env::var` takes a process-wide lock and allocates a
+/// The knobs, each read once. `std::env::var` takes a process-wide lock and allocates a
 /// `String`; these are consulted per child proof on the derive path.
 ///
-/// All three are measurement knobs, default OFF, enabled with `"1"`.
+/// The first three are measurement knobs, default OFF, enabled with `"1"`.
 mod flags {
     use std::sync::LazyLock;
 
@@ -122,6 +131,9 @@ mod flags {
     flag!(WITNESS_HASH, "MLE_WITNESS_HASH");
     flag!(TRANSCRIPT_PROF, "MLE_TRANSCRIPT_PROF");
     flag!(WALKER_XCHECK, "MLE_WALKER_XCHECK");
+    // Negative-test hook (see the module header): corrupts the padding lane of packed opened-row
+    // blocks so that the memory bus of the proof using this witness cannot balance.
+    flag!(TAMPER_PACKED_LANE, "N11_TAMPER_PACKED_LANE");
 
     // `MLE_REC_PARALLEL_CHILDREN` interprets a combine node's two children concurrently
     // (`Runtime::run_split`). **On by default**, `=0` puts the node back on one thread. The
@@ -129,6 +141,12 @@ mod flags {
     // `rec-emulate-replay` checks it by digest on a dumped node. A shipped path, not a
     // measurement: the module header's count of three does not include it.
     flag_on_by_default!(REC_PARALLEL_CHILDREN, "MLE_REC_PARALLEL_CHILDREN");
+
+    // `MLE_REC_WAVEFRONT` runs convert emulations, and split combine children, by a per-program
+    // plan with their Poseidon2 permutations batched (`mod wavefront`). **On by default**, `=0`
+    // runs them in order. The record is the same either way, checked the same way as the split.
+    // Echoed as `wave`.
+    flag_on_by_default!(REC_WAVEFRONT, "MLE_REC_WAVEFRONT");
 }
 
 /// Every recursion knob and its resolved value — the one that selects a shipped path included, so a
@@ -137,12 +155,14 @@ mod flags {
 /// Each is a `LazyLock`: the value here is the one this process uses for the rest of its life, so
 /// no layer above can offer a setter for it.
 #[doc(hidden)]
-pub fn witness_flags() -> [(&'static str, bool); 4] {
+pub fn witness_flags() -> [(&'static str, bool); 6] {
     [
         ("MLE_WITNESS_HASH", *flags::WITNESS_HASH),
         ("MLE_TRANSCRIPT_PROF", *flags::TRANSCRIPT_PROF),
         ("MLE_WALKER_XCHECK", *flags::WALKER_XCHECK),
         ("MLE_REC_PARALLEL_CHILDREN", *flags::REC_PARALLEL_CHILDREN),
+        ("MLE_REC_WAVEFRONT", *flags::REC_WAVEFRONT),
+        ("N11_TAMPER_PACKED_LANE", *flags::TAMPER_PACKED_LANE),
     ]
 }
 
@@ -184,14 +204,17 @@ fn assert_hint_count(kind: &str, program: &RecursionProgram<Kb>, stream: &VecDeq
 
 /// Pack one base-field element into a witness [`Block`].
 fn kb_to_block(f: Kb) -> Block<Kb> {
-    Block([f, Kb::ZERO, Kb::ZERO, Kb::ZERO])
+    Block::from(f)
 }
 
-/// Pack one extension-field element into a witness [`Block`] (`[c0, c1, c2, c3]`).
+/// Pack one extension-field element into a witness [`Block`] (all `EXTENSION_DEGREE` coefficients).
 fn ef_to_block(ef: EF) -> Block<Kb> {
-    let c = ef.as_basis_coefficients_slice();
-    Block([c[0], c[1], c[2], c[3]])
+    Block::from(ef.as_basis_coefficients_slice())
 }
+const _: () = assert!(
+    EXTENSION_DEGREE == <EF as BasedVectorSpace<Kb>>::DIMENSION,
+    "a Block holds exactly the coefficients of one EF element"
+);
 
 /// Host replay of one in-circuit `curve_add_septic`: push its hint block —
 /// `p3 = p1 + p2` (x then y, 7 limbs each) followed by `inv(p2.x − p1.x)` (7 limbs, the F7
@@ -1091,8 +1114,8 @@ fn push_proof_to_witness_stream(
             let fold_size = 1usize << vk.k_whir;
 
             if whir_round == 0 {
-                // Initial round: for each commit, push fold_size rows × width F values,
-                // then n_bits × 8 F siblings.
+                // Initial round: for each commit, push fold_size rows × width F values (packed),
+                // then n_bits sibling digests (DIGEST_BLOCKS packed blocks each).
                 for (commit_idx, &width) in vk.stacking_widths.iter().enumerate() {
                     // opened_rows: fold_size rows × width F values
                     let opened_rows = whir
@@ -1113,11 +1136,37 @@ fn push_proof_to_witness_stream(
                             }
                         }
                     }
-                    // PACKED: 4 row values per block (tail zero-padded), row-major —
-                    // mirrors the lowering's `hint_fs(fold_size * ceil(width/4))` read.
+                    // PACKED: PACK_LANES row values per block (tail zero-padded), row-major —
+                    // mirrors the lowering's `hint_fs(fold_size * ceil(width/PACK_LANES))` read.
+                    // Negative-test hook N11_TAMPER_PACKED_LANE: the first packed block of every
+                    // (query, commit) pair gets a non-zero padding lane. Its `looked_packed`
+                    // consumers read that lane as the constant zero, so the memory bus cannot
+                    // balance and the prover of the first proof built on this witness (a convert
+                    // proof) fails its LogUp root-sum check: `LogupZerocheck(NonZeroRootSum)`.
+                    let tamper_padding_lane = *flags::TAMPER_PACKED_LANE;
+                    if tamper_padding_lane {
+                        // Info, not warn: the forest logger prints only INFO events, and the
+                        // log of a negative run has to show that the hook fired.
+                        static LOGGED: std::sync::Once = std::sync::Once::new();
+                        LOGGED.call_once(|| {
+                            tracing::info!(
+                                "N11_TAMPER_PACKED_LANE: setting lane {PACK_LANES} of packed \
+                                 opened-row blocks to one — the proof MUST FAIL"
+                            );
+                        });
+                    }
+                    let mut first_packed_block = true;
                     for row_idx in 0..fold_size {
-                        let mut lanes = [Kb::ZERO; 4];
+                        let mut lanes = [Kb::ZERO; PACK_LANES];
                         let mut lane = 0usize;
+                        let mut push_packed = |lanes: [Kb; PACK_LANES]| {
+                            let mut block = Block::packed(lanes);
+                            if tamper_padding_lane && first_packed_block {
+                                block.0[PACK_LANES] = Kb::ONE;
+                                first_packed_block = false;
+                            }
+                            witness_stream.push_back(block);
+                        };
                         for col_idx in 0..width {
                             lanes[lane] = opened_rows
                                 .and_then(|rows| rows.get(row_idx))
@@ -1125,17 +1174,17 @@ fn push_proof_to_witness_stream(
                                 .copied()
                                 .unwrap_or(Kb::ZERO);
                             lane += 1;
-                            if lane == 4 {
-                                witness_stream.push_back(Block(lanes));
-                                lanes = [Kb::ZERO; 4];
+                            if lane == PACK_LANES {
+                                push_packed(lanes);
+                                lanes = [Kb::ZERO; PACK_LANES];
                                 lane = 0;
                             }
                         }
                         if lane > 0 {
-                            witness_stream.push_back(Block(lanes));
+                            push_packed(lanes);
                         }
                     }
-                    // Merkle siblings: n_bits × 8 F values
+                    // Merkle siblings: n_bits digests, DIGEST_BLOCKS packed blocks each
                     let siblings = whir
                         .initial_round_merkle_proofs
                         .get(commit_idx)
@@ -1144,15 +1193,18 @@ fn push_proof_to_witness_stream(
                         let sib = siblings
                             .and_then(|s| s.get(sib_idx))
                             .copied()
-                            .unwrap_or([Kb::ZERO; 8]);
-                        // Packed: 2 blocks of 4 lanes per sibling digest.
-                        witness_stream.push_back(Block([sib[0], sib[1], sib[2], sib[3]]));
-                        witness_stream.push_back(Block([sib[4], sib[5], sib[6], sib[7]]));
+                            .unwrap_or([Kb::ZERO; DIGEST_SIZE]);
+                        // Packed: DIGEST_BLOCKS blocks of PACK_LANES lanes per sibling digest.
+                        for j in 0..DIGEST_BLOCKS {
+                            witness_stream.push_back(Block::packed(std::array::from_fn(|k| {
+                                sib[PACK_LANES * j + k]
+                            })));
+                        }
                     }
                 }
             } else {
                 // Non-initial round: push fold_size EF values (1 hint_f each as EF block),
-                // then n_bits × 8 F siblings.
+                // then n_bits sibling digests (DIGEST_BLOCKS packed blocks each).
                 let opened_ef = whir
                     .codeword_opened_values
                     .get(whir_round - 1)
@@ -1164,7 +1216,7 @@ fn push_proof_to_witness_stream(
                         .unwrap_or(EF::ZERO);
                     witness_stream.push_back(ef_to_block(ef_val));
                 }
-                // Merkle siblings: n_bits × 8 F values
+                // Merkle siblings: n_bits digests, DIGEST_BLOCKS packed blocks each
                 let siblings = whir
                     .codeword_merkle_proofs
                     .get(whir_round - 1)
@@ -1173,10 +1225,13 @@ fn push_proof_to_witness_stream(
                     let sib = siblings
                         .and_then(|s| s.get(sib_idx))
                         .copied()
-                        .unwrap_or([Kb::ZERO; 8]);
-                    // Packed: 2 blocks of 4 lanes per sibling digest.
-                    witness_stream.push_back(Block([sib[0], sib[1], sib[2], sib[3]]));
-                    witness_stream.push_back(Block([sib[4], sib[5], sib[6], sib[7]]));
+                        .unwrap_or([Kb::ZERO; DIGEST_SIZE]);
+                    // Packed: DIGEST_BLOCKS blocks of PACK_LANES lanes per sibling digest.
+                    for j in 0..DIGEST_BLOCKS {
+                        witness_stream.push_back(Block::packed(std::array::from_fn(|k| {
+                            sib[PACK_LANES * j + k]
+                        })));
+                    }
                 }
             }
         }
@@ -1208,11 +1263,11 @@ fn push_proof_to_witness_stream(
                 expected6 += 2 + nb; // zi_root + zi_root_inv + index_bits
                 if r == 0 {
                     for &w in &vk.stacking_widths {
-                        // PACKED opened rows: ceil(w/4) blocks per row.
-                        expected6 += fold_size_diag * w.div_ceil(4) + nb * 2;
+                        // PACKED opened rows: ceil(w/PACK_LANES) blocks per row.
+                        expected6 += fold_size_diag * w.div_ceil(PACK_LANES) + nb * DIGEST_BLOCKS;
                     }
                 } else {
-                    expected6 += fold_size_diag + nb * 2;
+                    expected6 += fold_size_diag + nb * DIGEST_BLOCKS;
                 }
             }
         }
@@ -1265,7 +1320,7 @@ pub fn setup_for_convert_with_program(
     proof: &Proof<Sc>,
     program: Arc<RecursionProgram<Kb>>,
     deferred_digest: [Kb; DIGEST_SIZE],
-    vk_root: Option<[Kb; 8]>,
+    vk_root: Option<[Kb; DIGEST_SIZE]>,
 ) -> (Arc<RecursionProgram<Kb>>, RecursionRecord<Kb>) {
     // The second of two identical extractions per chunk — `prepare_one` already built this exact
     // layout to key the keygen cache. Each call rebuilds every RISC-V AIR's `EvalDag`. Timed on
@@ -1406,16 +1461,23 @@ pub fn setup_for_convert_with_program(
     dump_emulation(runtime.dump_label, &program, &runtime.witness_stream);
 
     let t_emulate = std::time::Instant::now();
-    runtime.run().expect("convert recursion runtime failed");
+    let wave = if wavefront::enabled() {
+        wavefront::run(&mut runtime, &program).expect("convert recursion runtime failed")
+    } else {
+        runtime.run().expect("convert recursion runtime failed");
+        wavefront::Wave::InOrder
+    };
     tracing::info!(
         // `target: "bench"` for the same reason `combine_timing` carries it: the production
         // `RUST_LOG` filters this module's path out, and the two halves of a derive result have to
         // survive the same filter or the convert half silently reads as absent.
         target: "bench",
         "convert_timing setup: witness_ms = {witness_ms}, emulate_ms = {}, \
-         derive_ms = {}, derive_us = {derive_us}, extract_us = {extract_us}, probes = {}",
+         derive_ms = {}, derive_us = {derive_us}, extract_us = {extract_us}, wave = {}, \
+         probes = {}",
         t_emulate.elapsed().as_millis(),
         derive_us / 1_000,
+        wave as u8,
         interpreter_probes()
     );
     // Measurement harness (log-only, no semantic effect): deterministic per-proof cycle
@@ -1602,22 +1664,28 @@ pub fn setup_for_combine_with_program(
     let t_emulate = std::time::Instant::now();
     // `run_split` runs the program whichever path it takes, and reports which — a program
     // without exactly two child ranges is interpreted serially inside it.
-    let split = if *flags::REC_PARALLEL_CHILDREN {
-        runtime
+    // The plan covers the split path only: with the children on one thread the node runs in order.
+    let (split, wave) = if *flags::REC_PARALLEL_CHILDREN && wavefront::enabled() {
+        wavefront::run_combine(&mut runtime, &program).expect("combine recursion runtime failed")
+    } else if *flags::REC_PARALLEL_CHILDREN {
+        let split = runtime
             .run_split()
-            .expect("combine recursion runtime failed")
+            .expect("combine recursion runtime failed");
+        (split, wavefront::Wave::InOrder)
     } else {
         runtime.run().expect("combine recursion runtime failed");
-        false
+        (false, wavefront::Wave::InOrder)
     };
     tracing::info!(
         target: "bench",
         "combine_timing setup: witness_ms = {witness_ms}, emulate_ms = {}, \
-         derive_ms = {}, derive_us = {derive_us}, children = {}, split = {}, probes = {}",
+         derive_ms = {}, derive_us = {derive_us}, children = {}, split = {}, wave = {}, \
+         probes = {}",
         t_emulate.elapsed().as_millis(),
         derive_us / 1_000,
         children.len(),
         u8::from(split),
+        wave as u8,
         interpreter_probes()
     );
     (program, runtime.record)
@@ -1711,4 +1779,206 @@ pub fn setup_for_deferred_with_program(
         interpreter_probes()
     );
     (program, runtime.record)
+}
+
+/// Planned recursion emulation (`MLE_REC_WAVEFRONT`, on unless `0`): a convert emulation, and
+/// each child of a split combine node, runs level by level of data dependency with each level's
+/// Poseidon2 permutations packed `Packing::WIDTH` to a batch (`Runtime::run_range_planned`).
+///
+/// The plan comes from a census of the program: one in-order run with depth tracking on. The
+/// first emulation of a program starts it on a thread of its own, over a copy of its witness
+/// stream, and runs as it would without a plan, as does every emulation of that program until the
+/// census lands; so the census is never on the critical path, and a cold process pays nothing but
+/// one core for ~0.1-0.2 s per program. The plan is kept beside the program (a `Weak` to it, so
+/// an evicted program's address cannot be mistaken for a new one). The record is the in-order
+/// run's either way; `rec-emulate-replay` with `MLE_REC_PLANNED=1` checks it by digest on a
+/// dumped emulation.
+///
+/// The profile and `RECURSION_EARLY_EXIT_TS` count instructions as they run in order, so either
+/// one keeps the in-order path.
+mod wavefront {
+    use std::{
+        collections::VecDeque,
+        sync::{Arc, LazyLock, Mutex, OnceLock, Weak},
+    };
+
+    use p3_field::{Field, PackedValue, PrimeCharacteristicRing};
+    use p3_symmetric::Permutation;
+    use pico_mle_core::config::koala_bear_poseidon2::default_koalabear_poseidon2_16;
+
+    use crate::{
+        compiler::recursion::{instruction::Instruction, ir::Block, program::RecursionProgram},
+        emulator::recursion::emulator::{
+            profile as emulator_profile, BatchPerm, Runtime, RuntimeError, WavefrontPlan,
+            WAVEFRONT_WINDOW as WINDOW,
+        },
+        primitives::consts::KOALABEAR_S_BOX_DEGREE,
+    };
+
+    use super::{flags, Kb, EF};
+
+    /// How an emulation ran, echoed as `wave` on the timing lines: `0` in order (off, or a path the
+    /// plan does not cover), `1` in order while the program's census runs, `2` by plan.
+    #[derive(Clone, Copy)]
+    pub(super) enum Wave {
+        InOrder = 0,
+        Pending = 1,
+        Planned = 2,
+    }
+
+    pub(super) fn enabled() -> bool {
+        static ON: LazyLock<bool> = LazyLock::new(|| {
+            *flags::REC_WAVEFRONT
+                && !*emulator_profile::PROFILE
+                && std::env::var_os("RECURSION_EARLY_EXIT_TS").is_none()
+        });
+        *ON
+    }
+
+    /// A program's plans: one per child for a program with two child ranges (combine), one over
+    /// the whole program otherwise (convert).
+    enum Plans {
+        Whole(Box<WavefrontPlan>),
+        Children(Arc<[WavefrontPlan; 2]>),
+    }
+
+    /// Filled by the program's census when it lands.
+    type Slot = Arc<OnceLock<Plans>>;
+
+    #[allow(clippy::type_complexity)]
+    static PLANS: LazyLock<Mutex<Vec<(Weak<RecursionProgram<Kb>>, Slot)>>> =
+        LazyLock::new(|| Mutex::new(Vec::new()));
+
+    /// The program's plans once its census has landed. The first call for a program starts the
+    /// census (see the module docs); until it lands every call returns `None`.
+    fn plans(
+        program: &Arc<RecursionProgram<Kb>>,
+        witness_stream: &VecDeque<Block<Kb>>,
+    ) -> Option<Slot> {
+        let slot = {
+            let mut list = PLANS.lock().unwrap();
+            list.retain(|(w, _)| w.strong_count() > 0);
+            if let Some((_, slot)) = list
+                .iter()
+                .find(|(w, _)| w.upgrade().is_some_and(|p| Arc::ptr_eq(&p, program)))
+            {
+                return slot.get().is_some().then(|| Arc::clone(slot));
+            }
+            let slot = Slot::default();
+            list.push((Arc::downgrade(program), Arc::clone(&slot)));
+            slot
+        };
+        let program = Arc::clone(program);
+        let witness_stream = witness_stream.clone();
+        std::thread::Builder::new()
+            .name("rec-census".into())
+            .spawn(move || {
+                let mut rt = Runtime::<Kb, EF, _, _, KOALABEAR_S_BOX_DEGREE>::new(
+                    Arc::clone(&program),
+                    default_koalabear_poseidon2_16(),
+                );
+                rt.witness_stream = witness_stream;
+                // A census that fails leaves the slot empty, so the program keeps running in
+                // order; the emulation it copied the stream from reports the error itself.
+                let Ok((depth, entries)) = rt.census() else {
+                    return;
+                };
+                let is_p2 =
+                    |i: usize| matches!(program.instructions[i], Instruction::Poseidon2Packed(_));
+                let plans = match program.child_spans[..] {
+                    [(s0, e0), (s1, e1)] => Plans::Children(Arc::new([
+                        WavefrontPlan::new(s0, e0, &depth, &entries, WINDOW, is_p2),
+                        WavefrontPlan::new(s1, e1, &depth, &entries, WINDOW, is_p2),
+                    ])),
+                    _ => Plans::Whole(Box::new(WavefrontPlan::new(
+                        0,
+                        program.instructions.len(),
+                        &depth,
+                        &entries,
+                        WINDOW,
+                        is_p2,
+                    ))),
+                };
+                let _ = slot.set(plans);
+            })
+            .expect("spawn the recursion census");
+        None
+    }
+
+    /// KoalaBear states permuted `Packing::WIDTH` at a time on the packed field; a lone state goes
+    /// scalar.
+    fn batch_perm() -> BatchPerm<Kb> {
+        static PERM: LazyLock<BatchPerm<Kb>> = LazyLock::new(|| {
+            type Packed = <Kb as Field>::Packing;
+            let perm = default_koalabear_poseidon2_16();
+            Arc::new(move |states: &mut [[Kb; 16]]| {
+                let lanes = Packed::WIDTH;
+                for group in states.chunks_mut(lanes) {
+                    if group.len() == 1 {
+                        group[0] = perm.permute(group[0]);
+                        continue;
+                    }
+                    let n = group.len();
+                    let mut packed: [Packed; 16] = std::array::from_fn(|e| {
+                        Packed::from_fn(|l| if l < n { group[l][e] } else { Kb::ZERO })
+                    });
+                    perm.permute_mut(&mut packed);
+                    for (l, state) in group.iter_mut().enumerate() {
+                        for (e, x) in state.iter_mut().enumerate() {
+                            *x = packed[e].as_slice()[l];
+                        }
+                    }
+                }
+            })
+        });
+        Arc::clone(&PERM)
+    }
+
+    /// The combine side: once a program has its plans, `run_split` runs each child by its plan. A
+    /// program without two child ranges goes to `run_split` as before, which runs it in order.
+    pub(super) fn run_combine<EP, IP, const D: u64>(
+        runtime: &mut Runtime<'_, Kb, EF, EP, IP, D>,
+        program: &Arc<RecursionProgram<Kb>>,
+    ) -> Result<(bool, Wave), RuntimeError<Kb, EF>>
+    where
+        Kb: p3_field::InjectiveMonomial<D>,
+        EP: p3_poseidon2::ExternalLayer<Kb, 16, D> + Clone + Send + Sync,
+        IP: p3_poseidon2::InternalLayer<Kb, 16, D> + Clone + Send + Sync,
+    {
+        if program.child_spans.len() != 2 {
+            return Ok((runtime.run_split()?, Wave::InOrder));
+        }
+        let Some(slot) = plans(program, &runtime.witness_stream) else {
+            return Ok((runtime.run_split()?, Wave::Pending));
+        };
+        let Some(Plans::Children(children)) = slot.get() else {
+            return Ok((runtime.run_split()?, Wave::InOrder));
+        };
+        runtime.batch_perm = Some(batch_perm());
+        runtime.child_plans = Some(Arc::clone(children));
+        Ok((runtime.run_split()?, Wave::Planned))
+    }
+
+    /// The convert side: the whole program by its plan once it has one.
+    pub(super) fn run<EP, IP, const D: u64>(
+        runtime: &mut Runtime<'_, Kb, EF, EP, IP, D>,
+        program: &Arc<RecursionProgram<Kb>>,
+    ) -> Result<Wave, RuntimeError<Kb, EF>>
+    where
+        Kb: p3_field::InjectiveMonomial<D>,
+        EP: p3_poseidon2::ExternalLayer<Kb, 16, D>,
+        IP: p3_poseidon2::InternalLayer<Kb, 16, D>,
+    {
+        let Some(slot) = plans(program, &runtime.witness_stream) else {
+            runtime.run()?;
+            return Ok(Wave::Pending);
+        };
+        let Some(Plans::Whole(plan)) = slot.get() else {
+            runtime.run()?;
+            return Ok(Wave::InOrder);
+        };
+        runtime.batch_perm = Some(batch_perm());
+        runtime.run_range_planned(plan, false)?;
+        Ok(Wave::Planned)
+    }
 }

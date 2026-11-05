@@ -14,9 +14,9 @@ pub const DEFAULT_K_WHIR: usize = 4;
 /// security target. SOUNDNESS: re-validate (soundness calculator) before shipping a lowered value.
 pub const DEFAULT_QUERY_PHASE_POW_BITS: usize = 20;
 
-/// Upper bound on one WHIR round's query count. Production rounds draw at most 193, and the weakest
+/// Upper bound on one WHIR round's query count. Production rounds draw at most 261, and the weakest
 /// nonzero per-query figure any (regime, integer rate) gives, `ListDecoding { m: 2 }` at rate 1/2
-/// (0.18 bits), needs fewer than 600 for a 100-bit target. A larger count can only come from a
+/// (0.18 bits), needs fewer than 720 for a 128-bit target. A larger count can only come from a
 /// broken target, and the prover sizes per-query buffers by it. It is deliberately not a bound by
 /// the round's domain: queries are drawn with replacement, and the small test schedules draw more
 /// queries than a late round's domain has points.

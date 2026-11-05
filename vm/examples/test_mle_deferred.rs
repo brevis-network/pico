@@ -17,7 +17,7 @@
 //!   cargo run --release -p pico-vm --example test_mle_deferred -- --elf fib --n 10 --field kb
 
 use p3_field::PrimeCharacteristicRing;
-use pico_mle_core::config::recursion_params_with_100_bits_security;
+use pico_mle_core::config::recursion_params_with_128_bits_security;
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
@@ -104,7 +104,7 @@ fn main() {
     // sub-proof's own guest stands in for it; in a tree the two differ and continuity is what
     // forces this field to the main program's value.
     let mut deferred = DeferredMachine::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         riscv_vm_vk.clone(),
         false,
     );
@@ -146,8 +146,8 @@ fn main() {
     }
     // `digest` is not checked here: it is the parent's `assert_child_pv_digests` that has to
     // recompute it, and this node has no parent yet.
-    // It makes no claim about the program's output or its own deferred digest: the merge's
-    // consistency lock reads a zero output as "no opinion", and it sums deferred digests.
+    // It makes no claim about the program's output or its own deferred digest: the merge sums
+    // both, so a zero adds nothing.
     for (j, word) in col.committed_value_digest.iter().enumerate() {
         for (k, &idx) in word.0.iter().enumerate() {
             assert_eq!(pvs[idx], zero, "committed_value_digest[{j}][{k}]");

@@ -8,28 +8,33 @@ use crate::{
     },
     emulator::recursion::emulator::RecursionRecord,
     machine::chip::ChipBehavior,
-    primitives::consts::{EXT_DOT_PRODUCT_DATAPAR, EXT_DOT_PRODUCT_GROUPS},
+    primitives::consts::{
+        EXTENSION_DEGREE, EXT_DOT_PRODUCT_DATAPAR, EXT_DOT_PRODUCT_GROUPS, PACK_LANES,
+    },
 };
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{
+    extension::QuinticTrinomialExtensionField, BasedVectorSpace, PrimeCharacteristicRing,
+};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 
 type F = KoalaBear;
+type EF = QuinticTrinomialExtensionField<KoalaBear>;
 const D: usize = EXT_DOT_PRODUCT_DATAPAR;
 const G: usize = EXT_DOT_PRODUCT_GROUPS;
 
 fn b(v: u32) -> Block<F> {
-    Block([F::from_u32(v), F::ZERO, F::ZERO, F::ZERO])
+    Block::from(F::from_u32(v))
 }
 
 #[test]
 fn test_ext_dot_product_trace_row_acc() {
     let chip = ExtDotProductChip::<F>::default();
 
-    // One row: G packed value blocks (lanes all 2) and D mus = 1..D
+    // One row: G packed value blocks (value lanes all 2) and D mus = 1..D
     // -> acc = 2 * (1+..+D).
     let mus: [Block<F>; D] = std::array::from_fn(|j| b(j as u32 + 1));
-    let vals: [Block<F>; G] = std::array::from_fn(|_| Block([F::from_u32(2); 4]));
+    let vals: [[F; PACK_LANES]; G] = [[F::from_u32(2); PACK_LANES]; G];
     let sum = 2 * (D * (D + 1) / 2) as u32;
 
     let mut record = RecursionRecord::<F>::default();
@@ -43,12 +48,13 @@ fn test_ext_dot_product_trace_row_acc() {
     let trace = chip.generate_main(&record, &mut output);
     assert!(trace.height() >= 16);
     assert_eq!(trace.width(), super::columns::NUM_EXT_DOT_PRODUCT_COLS);
-    // Column layout: [mus[D] (4 lanes each), vals[G] (4 lanes each), acc]
+    // Column layout: [mus[D] (EXTENSION_DEGREE lanes each), vals[G] (PACK_LANES value lanes
+    // each), acc (EXTENSION_DEGREE lanes)]
     let row = trace.row_slice(0).unwrap();
     assert_eq!(row[0], F::from_u32(1)); // mus[0] lane 0
-    assert_eq!(row[4 * D], F::from_u32(2)); // vals[0] lane 0
-    assert_eq!(row[4 * D + 1], F::from_u32(2)); // vals[0] lane 1 (packed!)
-    assert_eq!(row[4 * D + 4 * G], F::from_u32(sum)); // acc
+    assert_eq!(row[EXTENSION_DEGREE * D], F::from_u32(2)); // vals[0] lane 0
+    assert_eq!(row[EXTENSION_DEGREE * D + 1], F::from_u32(2)); // vals[0] lane 1 (packed!)
+    assert_eq!(row[EXTENSION_DEGREE * D + PACK_LANES * G], F::from_u32(sum)); // acc
 }
 
 #[test]
@@ -100,6 +106,57 @@ fn test_ext_dot_product_preprocessed_segmentation() {
     }
 }
 
+/// An extension element with every one of its `EXTENSION_DEGREE` coefficients non-zero and
+/// distinct, so a tracegen that only handled the first four would disagree with `EF`.
+fn ef(seed: u32) -> EF {
+    EF::from_basis_coefficients_fn(|i| F::from_u32(seed + 7 * i as u32 + 1))
+}
+
+fn blk(e: EF) -> Block<F> {
+    Block::from(e.as_basis_coefficients_slice())
+}
+
+fn ef_at(row: &[F], at: usize) -> EF {
+    EF::from_basis_coefficients_slice(&row[at..at + EXTENSION_DEGREE]).unwrap()
+}
+
+#[test]
+fn test_ext_dot_product_trace_row_acc_all_lanes() {
+    let chip = ExtDotProductChip::<F>::default();
+
+    // One row: full extension mus and distinct base values in every value lane; the
+    // accumulator is the extension-field dot product the emulator and the AIR both compute,
+    // `sum_g sum_k mus[g * PACK_LANES + k] * vals[g][k]`.
+    let mus: [EF; D] = std::array::from_fn(|j| ef(10 * j as u32 + 3));
+    let vals: [[F; PACK_LANES]; G] = std::array::from_fn(|g| {
+        std::array::from_fn(|k| F::from_u32(100 + 10 * g as u32 + k as u32))
+    });
+    let mut acc = EF::ZERO;
+    for g in 0..G {
+        for k in 0..PACK_LANES {
+            acc += mus[g * PACK_LANES + k] * EF::from(vals[g][k]);
+        }
+    }
+
+    let mut record = RecursionRecord::<F>::default();
+    record.ext_dot_product_events.push(ExtDotProductEvent {
+        mus: mus.map(blk),
+        vals,
+        acc: blk(acc),
+    });
+
+    let mut output = RecursionRecord::<F>::default();
+    let trace = chip.generate_main(&record, &mut output);
+    const E: usize = EXTENSION_DEGREE;
+    let row = trace.row_slice(0).unwrap();
+    assert_eq!(ef_at(&row[..], E * (D - 1)), mus[D - 1]); // last mu, all lanes
+    assert_eq!(
+        row[E * D + PACK_LANES * (G - 1) + PACK_LANES - 1],
+        vals[G - 1][PACK_LANES - 1]
+    );
+    assert_eq!(ef_at(&row[..], E * D + PACK_LANES * G), acc);
+}
+
 /// GPU trace-gen must be element-wise identical to the CPU path. The main event maps 1:1 to a row;
 /// each preprocessed instruction expands to a data-dependent number of rows (host-side), so this
 /// exercises multi-instruction concatenation and multi-row segments. KoalaBear-only; needs a CUDA
@@ -134,8 +191,10 @@ mod gpu {
             .map(|i| {
                 let base = i.wrapping_mul(1000);
                 ExtDotProductEvent {
-                    mus: std::array::from_fn(|j| blk(base + 4 * j as u32)),
-                    vals: std::array::from_fn(|g| blk(base + 100 + 4 * g as u32)),
+                    mus: std::array::from_fn(|j| blk(base + 8 * j as u32)),
+                    vals: std::array::from_fn(|g| {
+                        std::array::from_fn(|k| F::from_u32(base + 100 + 8 * g as u32 + k as u32))
+                    }),
                     acc: blk(base + 900),
                 }
             })

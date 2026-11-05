@@ -3,8 +3,9 @@
 //! Everything a verifier outside the prover needs: the standalone apex ([`apex`]), the whitelist
 //! Merkle tree it authenticates keys against ([`whitelist`]), the exe identity ([`vm_vk`]), the
 //! recursion public-value checks ([`public_values`]), and the two wire formats a verifier is
-//! handed ([`bundle`], [`envelope`]). `pico-vm` re-exports these rather than keeping its own
-//! copies, so this crate is the single implementation.
+//! handed ([`bundle`], [`envelope`]). `pico-vm` builds on the whitelist, exe identity,
+//! public-value checks and bundle here, but keeps its own apex, which also verifies compress proofs
+//! (`TODO(compress-apex)` in [`apex`]).
 //!
 //! [`verify`] is the one-call entry point: VK bundle + v3 envelope + committed bytes, under the
 //! shipped whitelist root; [`verify_with_root`] takes another.

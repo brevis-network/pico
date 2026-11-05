@@ -12,14 +12,13 @@ use std::panic::{self, UnwindSafe};
 
 use pico_mle_core::{
     config::{
-        check_field_admissible, check_sample_widths, compress_params_with_100_bits_security,
-        embed_params_with_100_bits_security,
+        check_field_admissible, check_sample_widths, compress_params_with_128_bits_security,
+        embed_params_with_128_bits_security,
         koala_bear_poseidon2::{default_duplex_sponge, KoalaBearPoseidon2Config},
-        max_sample_bits, recursion_params_with_100_bits_security,
-        riscv_params_with_100_bits_security, try_compress_params_with_100_bits_security,
-        try_riscv_params_with_100_bits_security, ParamsError, ProximityRegime, SystemParams,
-        WhirConfig, WhirParams, WhirProximityStrategy, WhirRoundConfig,
-        MAX_RISCV_LOG_STACKED_HEIGHT, MAX_WHIR_QUERIES,
+        max_sample_bits, recursion_params_with_128_bits_security,
+        riscv_params_with_128_bits_security, try_riscv_params_with_128_bits_security, ParamsError,
+        ProximityRegime, SystemParams, WhirConfig, WhirParams, WhirProximityStrategy,
+        WhirRoundConfig, MAX_RISCV_LOG_STACKED_HEIGHT, MAX_WHIR_QUERIES,
     },
     interaction::LogUpSecurityParameters,
     keygen::MultiStarkKeygenBuilder,
@@ -74,7 +73,7 @@ fn try_params(
 #[test]
 fn riscv_h24_is_refused_at_construction() {
     let err =
-        try_riscv_params_with_100_bits_security(24).expect_err("2^25 is not a KoalaBear domain");
+        try_riscv_params_with_128_bits_security(24).expect_err("2^25 is not a KoalaBear domain");
     assert_eq!(
         err,
         ParamsError::RsDomainTooLarge {
@@ -90,13 +89,18 @@ fn riscv_h24_is_refused_at_construction() {
         text.contains("log_stacked_height 24") && text.contains("two-adicity 24"),
         "{text}"
     );
-    assert_eq!(panic_text(|| riscv_params_with_100_bits_security(24)), text);
+    assert_eq!(panic_text(|| riscv_params_with_128_bits_security(24)), text);
 }
 
+/// A `log_blowup = 2` schedule at height 23 asks for a 2^25 domain, past KoalaBear's two-adicity.
+/// The constructor leaves the field checks to keygen, so the refusal comes from the admissibility
+/// check the presets run.
 #[test]
-fn compress_h23_is_refused_at_construction() {
+fn a_blowup_2_schedule_at_h23_is_refused() {
+    let params = try_params(2, 19, 10, WhirProximityStrategy::UniqueDecoding, 128)
+        .expect("the constructor does not check the field");
     let err =
-        try_compress_params_with_100_bits_security(23).expect_err("2^25 is not a KoalaBear domain");
+        check_field_admissible::<KoalaBear>(&params).expect_err("2^25 is not a KoalaBear domain");
     assert_eq!(
         err,
         ParamsError::RsDomainTooLarge {
@@ -107,14 +111,10 @@ fn compress_h23_is_refused_at_construction() {
         }
     );
     let text = err.to_string();
-    println!("compress(23): RS domain log-size 25 refused: {text}");
+    println!("log_blowup 2 at height 23: RS domain log-size 25 refused: {text}");
     assert!(
         text.contains("log_stacked_height 23") && text.contains("two-adicity 24"),
         "{text}"
-    );
-    assert_eq!(
-        panic_text(|| compress_params_with_100_bits_security(23)),
-        text
     );
 }
 
@@ -122,12 +122,15 @@ fn compress_h23_is_refused_at_construction() {
 #[test]
 fn the_riscv_maximum_is_the_last_height_with_a_domain() {
     assert_eq!(MAX_RISCV_LOG_STACKED_HEIGHT, 23);
-    assert!(try_riscv_params_with_100_bits_security(MAX_RISCV_LOG_STACKED_HEIGHT).is_ok());
+    assert!(try_riscv_params_with_128_bits_security(MAX_RISCV_LOG_STACKED_HEIGHT).is_ok());
     assert!(matches!(
-        try_riscv_params_with_100_bits_security(MAX_RISCV_LOG_STACKED_HEIGHT + 1),
+        try_riscv_params_with_128_bits_security(MAX_RISCV_LOG_STACKED_HEIGHT + 1),
         Err(ParamsError::RsDomainTooLarge { .. })
     ));
-    assert!(try_compress_params_with_100_bits_security(22).is_ok());
+    // One notch lower the same bound admits a `log_blowup = 2` schedule at height 22.
+    let blowup_2_at_22 =
+        try_params(2, 18, 10, WhirProximityStrategy::UniqueDecoding, 128).expect("constructs");
+    assert_eq!(check_field_admissible::<KoalaBear>(&blowup_2_at_22), Ok(()));
 }
 
 /// At or below the final polynomial length (10) a preset has no WHIR round, and the prover sizes
@@ -135,7 +138,7 @@ fn the_riscv_maximum_is_the_last_height_with_a_domain() {
 /// the `l_skip` it would saturate to.
 #[test]
 fn a_schedule_with_no_whir_round_is_refused() {
-    let err = try_riscv_params_with_100_bits_security(10).expect_err("no WHIR round at 10");
+    let err = try_riscv_params_with_128_bits_security(10).expect_err("no WHIR round at 10");
     println!("riscv(10): {err}");
     assert_eq!(
         err,
@@ -144,21 +147,19 @@ fn a_schedule_with_no_whir_round_is_refused() {
             log_final_poly_len: 10,
         }
     );
-    assert!(try_compress_params_with_100_bits_security(10).is_err());
-    assert!(try_riscv_params_with_100_bits_security(11).is_ok());
+    assert!(matches!(
+        try_params(2, 6, 10, WhirProximityStrategy::UniqueDecoding, 128),
+        Err(ParamsError::NoWhirRound { .. })
+    ));
+    assert!(try_riscv_params_with_128_bits_security(11).is_ok());
 
-    for preset in [
-        try_riscv_params_with_100_bits_security,
-        try_compress_params_with_100_bits_security,
-    ] {
-        assert_eq!(
-            preset(2),
-            Err(ParamsError::NoWhirRound {
-                log_stacked_height: 2,
-                log_final_poly_len: 10,
-            })
-        );
-    }
+    assert_eq!(
+        try_riscv_params_with_128_bits_security(2),
+        Err(ParamsError::NoWhirRound {
+            log_stacked_height: 2,
+            log_final_poly_len: 10,
+        })
+    );
 }
 
 /// `log_stacked_height` 5 with `k = 4` and no final polynomial takes two rounds, folding 8
@@ -258,61 +259,51 @@ fn schedule(params: &SystemParams) -> (Vec<usize>, [usize; 4]) {
 #[test]
 fn production_presets_keep_their_schedules() {
     for h in 11..=MAX_RISCV_LOG_STACKED_HEIGHT {
-        riscv_params_with_100_bits_security(h);
-    }
-    for h in 11..=22 {
-        compress_params_with_100_bits_security(h);
+        riscv_params_with_128_bits_security(h);
     }
 
     let riscv = [15, 20, 5, 18];
-    let compress = [15, 20, 5, 18];
     let cases = [
         (
             "riscv(20)",
-            riscv_params_with_100_bits_security(20),
-            vec![193, 88, 81],
+            riscv_params_with_128_bits_security(20),
+            vec![261, 119, 110],
             riscv,
         ),
         (
             "riscv(22)",
-            riscv_params_with_100_bits_security(22),
-            vec![193, 88, 81],
+            riscv_params_with_128_bits_security(22),
+            vec![261, 119, 110],
             riscv,
         ),
         (
             "riscv(23)",
-            riscv_params_with_100_bits_security(23),
-            vec![193, 88, 81, 81],
+            riscv_params_with_128_bits_security(23),
+            vec![261, 119, 110, 109],
             riscv,
         ),
         (
-            "compress(20)",
-            compress_params_with_100_bits_security(20),
-            vec![118, 84, 81],
-            compress,
-        ),
-        (
-            "compress(22)",
-            compress_params_with_100_bits_security(22),
-            vec![118, 84, 81],
-            compress,
+            "compress",
+            compress_params_with_128_bits_security(),
+            vec![65, 34, 24],
+            [18, 20, 16, 18],
         ),
         (
             "recursion",
-            recursion_params_with_100_bits_security(),
-            vec![118, 84, 81],
+            recursion_params_with_128_bits_security(),
+            vec![160, 114, 109],
             [13, 20, 4, 18],
         ),
         (
             "embed",
-            embed_params_with_100_bits_security(),
-            vec![57, 28, 19],
+            embed_params_with_128_bits_security(),
+            vec![65, 34, 24],
             [18, 20, 16, 18],
         ),
     ];
     for (label, params, queries, pow_bits) in cases {
         assert_eq!(schedule(&params), (queries, pow_bits), "{label}");
-        // Embed sits exactly at the two-adicity (24); nothing here may refuse it.
+        // Compress and embed sit exactly at the two-adicity (24); nothing here may refuse them.
         assert_eq!(
             check_field_admissible::<KoalaBear>(&params),
             Ok(()),

@@ -3846,6 +3846,7 @@ dependencies = [
  "cargo_metadata",
  "clap",
  "dirs",
+ "elf",
  "env_logger",
  "futures",
  "hex",
@@ -3881,7 +3882,7 @@ dependencies = [
 [[package]]
 name = "pico-gpu"
 version = "0.1.11"
-source = "git+https://github.com/brevis-network/pico-gpu.git?rev=6ecbce715e7c8d52d95dbf128ac944a75781f01f#6ecbce715e7c8d52d95dbf128ac944a75781f01f"
+source = "git+https://github.com/brevis-network/pico-gpu.git?rev=0a8155ca577fee32b2b33d1a837a8774c1488668#0a8155ca577fee32b2b33d1a837a8774c1488668"
 
 [[package]]
 name = "pico-gpu-api"
@@ -3985,6 +3986,7 @@ dependencies = [
  "pico-verifier",
  "pico-vm",
  "serde",
+ "serde_json",
  "sha2",
  "thiserror 1.0.69",
 ]

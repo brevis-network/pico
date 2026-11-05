@@ -7,6 +7,7 @@ use crate::{
     },
     emulator::recursion::emulator::RecursionRecord,
     machine::chip::ChipBehavior,
+    primitives::consts::{DIGEST_BLOCKS, DIGEST_SIZE},
 };
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
@@ -18,8 +19,8 @@ type F = KoalaBear;
 fn test_digest_select_trace_values() {
     let chip = DigestSelectChip::<F>::default();
 
-    let in1: [F; 8] = std::array::from_fn(|i| F::from_u32(100 + i as u32));
-    let in2: [F; 8] = std::array::from_fn(|i| F::from_u32(200 + i as u32));
+    let in1: [F; DIGEST_SIZE] = std::array::from_fn(|i| F::from_u32(100 + i as u32));
+    let in2: [F; DIGEST_SIZE] = std::array::from_fn(|i| F::from_u32(200 + i as u32));
 
     // bit = 1 selects in2.
     let mut record = RecursionRecord::<F>::default();
@@ -34,13 +35,15 @@ fn test_digest_select_trace_values() {
     let trace = chip.generate_main(&record, &mut output);
     assert!(trace.height() >= 16);
     assert_eq!(trace.width(), super::columns::NUM_DIGEST_SELECT_COLS);
-    // Group 0 layout: [bit, in1[8], in2[8], out[8]] = 25 cols.
+    // Group 0 layout: [bit, in1[DIGEST_SIZE], in2[DIGEST_SIZE], out[DIGEST_SIZE]]
+    // = 1 + 3 * DIGEST_SIZE cols.
+    const S: usize = DIGEST_SIZE;
     let row = trace.row_slice(0).unwrap();
     assert_eq!(row[0], F::ONE);
     assert_eq!(row[1], in1[0]);
-    assert_eq!(row[9], in2[0]);
-    assert_eq!(row[17], in2[0]); // out = in2 since bit = 1
-    assert_eq!(row[25], F::ZERO); // group 1 empty
+    assert_eq!(row[1 + S], in2[0]);
+    assert_eq!(row[1 + 2 * S], in2[0]); // out = in2 since bit = 1
+    assert_eq!(row[1 + 3 * S], F::ZERO); // group 1 empty
 }
 
 #[test]
@@ -54,7 +57,7 @@ fn test_digest_select_preprocessed_groups() {
             in1_addrs: std::array::from_fn(|i| mk_addr(base + 10 + i as u32)),
             in2_addrs: std::array::from_fn(|i| mk_addr(base + 20 + i as u32)),
             out_addrs: std::array::from_fn(|i| mk_addr(base + 30 + i as u32)),
-            mults: [F::TWO; 2],
+            mults: [F::TWO; DIGEST_BLOCKS],
         }))
     };
 
@@ -69,13 +72,15 @@ fn test_digest_select_preprocessed_groups() {
         preprocessed.width(),
         super::columns::NUM_DIGEST_SELECT_PREPROCESSED_COLS
     );
-    // Group layout: [is_real, bit_addr, in1[2], in2[2], out[2], mults[2]] = 10 cols.
+    // Group layout: [is_real, bit_addr, in1[DIGEST_BLOCKS], in2[DIGEST_BLOCKS],
+    // out[DIGEST_BLOCKS], mults[DIGEST_BLOCKS]] = 2 + 4 * DIGEST_BLOCKS cols.
+    const G: usize = 2 + 4 * DIGEST_BLOCKS;
     let row0 = preprocessed.row_slice(0).unwrap();
     assert_eq!(row0[0], F::ONE); // group 0 is_real
-    assert_eq!(row0[10], F::ONE); // group 1 is_real
+    assert_eq!(row0[G], F::ONE); // group 1 is_real
     let row1 = preprocessed.row_slice(1).unwrap();
     assert_eq!(row1[0], F::ONE); // leftover
-    assert_eq!(row1[10], F::ZERO); // empty group
+    assert_eq!(row1[G], F::ZERO); // empty group
 }
 
 /// GPU trace-gen must be element-wise identical to the CPU path, including datapar packing and

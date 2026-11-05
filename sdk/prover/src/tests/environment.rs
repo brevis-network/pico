@@ -197,7 +197,7 @@ fn an_event_limit_scale_above_sixteen_builds() {
     );
 }
 
-/// The four recursion knobs the crate documentation says reach it. Each child starts with the
+/// The five recursion knobs the crate documentation says reach it. Each child starts with the
 /// variable set to the opposite of its default, so the VM resolves it from that value on first
 /// use; a knob the VM stopped reading, or reads under another name, keeps its default.
 macro_rules! knob_probe {
@@ -236,6 +236,7 @@ knob_probe!(
     "MLE_REC_PARALLEL_CHILDREN",
     true
 );
+knob_probe!(rec_wavefront_reaches_the_vm, "MLE_REC_WAVEFRONT", true);
 
 /// A variable the crate root documents as reaching the prover must be in the list callers warn
 /// from, and nothing else may be. A row that reaches it only with the `aot` or `cuda` feature counts only in

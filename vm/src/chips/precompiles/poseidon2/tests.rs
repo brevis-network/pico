@@ -43,14 +43,14 @@ use crate::{
     primitives::consts::{KoalaBearConfig, PERMUTATION_WIDTH},
 };
 use p3_air::{Air, RowWindow};
-use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing, PrimeField32};
+use p3_field::{extension::QuinticTrinomialExtensionField, PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_symmetric::Permutation;
 use std::borrow::BorrowMut;
 
 type F = KoalaBear;
-type EF = BinomialExtensionField<KoalaBear, 4>;
+type EF = QuinticTrinomialExtensionField<KoalaBear>;
 type Config = KoalaBearConfig;
 type Chip = FieldSpecificPrecompilePoseidon2Chip<F>;
 

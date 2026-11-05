@@ -7,26 +7,28 @@ use crate::{
         builder::{ChipBaseBuilder, ChipBuilder, RecursionBuilder},
         extension::BinomialExtension,
     },
-    primitives::consts::{EXTENSION_DEGREE, EXT_DOT_PRODUCT_DATAPAR, EXT_DOT_PRODUCT_GROUPS},
+    primitives::consts::{
+        EXTENSION_DEGREE, EXT_DOT_PRODUCT_DATAPAR, EXT_DOT_PRODUCT_GROUPS, PACK_LANES,
+    },
 };
 use p3_air::{Air, AirBuilder, WindowAccess};
-use p3_field::{extension::BinomiallyExtendable, Field};
+use p3_field::{extension::QuinticTrinomialExtendable, Field};
 use std::borrow::Borrow;
 
-/// Row-local dot contribution: sum over groups g and lanes k of
-/// val[g].lane_k (base) * mu[g*EXTENSION_DEGREE + k] (ext).
+/// Row-local dot contribution: sum over groups g and lanes k < PACK_LANES of
+/// val[g].lane_k (base) * mu[g*PACK_LANES + k] (ext).
 fn row_sum<F, CB>(
     cols: &ExtDotProductCols<CB::Var>,
 ) -> BinomialExtension<F, CB::Expr, EXTENSION_DEGREE>
 where
-    F: Field + BinomiallyExtendable<EXTENSION_DEGREE>,
+    F: Field + QuinticTrinomialExtendable,
     CB: ChipBuilder<F>,
 {
     let mut acc: Option<BinomialExtension<F, CB::Expr, EXTENSION_DEGREE>> = None;
     for g in 0..EXT_DOT_PRODUCT_GROUPS {
-        for k in 0..EXTENSION_DEGREE {
-            let mu = cols.mus[g * EXTENSION_DEGREE + k].as_extension::<F, CB>();
-            let val: CB::Expr = cols.vals[g].0[k].into();
+        for k in 0..PACK_LANES {
+            let mu = cols.mus[g * PACK_LANES + k].as_extension::<F, CB>();
+            let val: CB::Expr = cols.vals[g][k].into();
             let term = mu * BinomialExtension::from_base(val);
             acc = Some(match acc {
                 None => term,
@@ -37,7 +39,7 @@ where
     acc.unwrap()
 }
 
-impl<F: Field + BinomiallyExtendable<EXTENSION_DEGREE>, CB> Air<CB> for ExtDotProductChip<F>
+impl<F: Field + QuinticTrinomialExtendable, CB> Air<CB> for ExtDotProductChip<F>
 where
     CB: ChipBuilder<F>,
 {
@@ -58,7 +60,8 @@ where
             builder.looked_block(prepr_local.mu_addrs[j], local.mus[j], prepr_local.is_real);
         }
         for g in 0..EXT_DOT_PRODUCT_GROUPS {
-            builder.looked_block(prepr_local.val_addrs[g], local.vals[g], prepr_local.is_real);
+            // A packed block: lane PACK_LANES.. is the constant zero on the bus.
+            builder.looked_packed(prepr_local.val_addrs[g], local.vals[g], prepr_local.is_real);
         }
 
         // Memory write for the final accumulator (mult is zero on non-end rows).

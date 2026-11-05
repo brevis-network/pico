@@ -1168,12 +1168,14 @@ pub fn mle_riscv_shapes() -> Vec<(String, Vec<(String, usize)>)> {
     out
 }
 
-/// A digest of the whole shape config: every riscv shape the whitelist admits, the convert
-/// ladder rows and the combine and embed tier tables, and the Merkle depth. The vk-map artifact
-/// carries it, and loading an artifact under a binary whose config digests differently is
-/// refused -- a whitelist built from
-/// one shape config must not be used to prove under another, since the enumeration order, the
-/// tier tables and the depth all shape the leaves.
+/// A digest of the shape config that shapes the whitelist's leaves: every riscv shape the whitelist
+/// admits, the convert ladder rows, the combine and compress tier tables, and the Merkle depth. The
+/// vk-map artifact carries it, and loading an artifact under a binary whose config digests
+/// differently is refused -- a whitelist built from one shape config must not be used to prove
+/// under another, since the enumeration order, these tables and the depth all shape the leaves.
+///
+/// The embed row is left out: the embed key is no leaf, so its row moves only the embed
+/// key, which the soundness manifest records and the artifact unit test holds against this binary.
 ///
 /// Field-native: each shape is its `(air id, log height)` pairs sorted by air id, length-prefixed;
 /// then the convert row count and each tier table's heights in table order, length-prefixed;
@@ -1204,7 +1206,7 @@ pub fn mle_shape_config_digest() -> [Kb; 8] {
     pre.push(Kb::from_u32(MLE_RECURSION_CONVERT_LADDER.len() as u32));
     for table in MLE_RECURSION_CONVERT_LADDER.iter().copied().chain([
         MLE_RECURSION_COMBINE_LOG_HEIGHTS,
-        MLE_RECURSION_EMBED_LOG_HEIGHTS,
+        MLE_RECURSION_COMPRESS_LOG_HEIGHTS,
     ]) {
         pre.push(Kb::from_u32(table.len() as u32));
         pre.extend(table.iter().map(|(_, h)| Kb::from_u32(*h as u32)));
@@ -1679,8 +1681,9 @@ pub fn with_mle_preprocessed_shape(program: Arc<Program>) -> Arc<Program> {
 /// Node role in the recursion tree — the tree grammar is fixed (converts verify bucketed
 /// RISC-V proofs; combines verify convert-/combine-tier proofs), so shapes are selected by
 /// role rather than closest-fit matching: role selection is data-independent, which pins the
-/// child-shape base to exactly {C, B} and keeps the whitelist's shape product at 10 combine
-/// entries. (FRI's closest-fit over a multi-shape allowed set is data-dependent, so its
+/// child-shape base to exactly {C0, C1, C2, B} and keeps the whitelist's shape product at 36
+/// combine entries (the ordered pairs at both completeness flags plus the four single-child
+/// roots). (FRI's closest-fit over a multi-shape allowed set is data-dependent, so its
 /// whole cartesian product must be preregistered — see `get_all_shape_combinations`.)
 /// The root is NOT a tier: it is just the last combine round with `is_complete = true`,
 /// exactly as in the FRI path.
@@ -1689,11 +1692,16 @@ pub enum RecursionTier {
     /// A convert node, padded to this row of [`MLE_RECURSION_CONVERT_LADDER`].
     Convert(usize),
     Combine,
-    /// The embed node, which re-proves the complete root under the outer BN254-hashed config.
-    /// It had shared the combine tier, which meant tightening that table would silently have to
-    /// hold for a program nobody had measured. Its own table starts as a copy of the combine
-    /// values, so it keeps exactly the heights it has always run at until someone measures it.
+    /// The embed node, which re-proves the compress proof under the outer BN254-hashed config.
+    /// Its table is the program's natural heights in whitelist mode, over the compress
+    /// proof's layout, measured by the tier probe. It is not in `mle_shape_config_digest`: the
+    /// embed key is no whitelist leaf, so the table moves only the embed key.
     Embed,
+    /// The compress node, which re-proves the complete root under the inner config at the
+    /// compress preset (the final compression layer). Its table is the program's natural heights
+    /// in whitelist mode, measured by the tier probe; they decide the
+    /// whitelist-mode proof size.
+    Compress,
 }
 
 /// Convert-tier log2 heights, as a ladder: a convert program takes the FIRST row that holds its
@@ -1702,40 +1710,47 @@ pub enum RecursionTier {
 /// rows under the last one; that the last row holds every whitelist shape is what the builder
 /// and the tier probe assert (`check_recursion_tier` over the whole enumeration). Rows sit
 /// cheapest first by stacked width W = sum(w_main * 2^h) / 2^21, the quantity the convert time
-/// follows (~154 + 1.45 W ms on one card).
+/// follows (~154 + 1.45 W ms on one card, a KoalaBear⁴ calibration).
 ///
-/// One tier for every child had to be the componentwise maximum over the whole enumeration,
-/// W = 68, set by the core catch-all (Poseidon2Packed, ExtDotProduct, MemoryVar) and by keccak
-/// at its cap (ExtAlu), while the children the corpus actually produces need W = 8..28: the
-/// padding was 56% of the whitelist's E2E cost. With rows, each child pads to the nearest row
-/// above it and the combine machine learns one child layout per row
-/// (`preregister_standard_shapes`).
+/// One tier for every child would be the componentwise maximum over the whole enumeration,
+/// W = 74 on KoalaBear⁵, set by the core catch-all (Poseidon2Packed, ExtDotProduct, MemoryVar)
+/// and by keccak at its cap (ExtAlu, MleOpen, MemoryConst), while the children the corpus
+/// actually produces need W = 15..42. With rows, each child pads to the nearest row above it
+/// and the combine machine learns one child layout per row (`preregister_standard_shapes`).
 ///
-/// Row 0 (W 21) holds 14,867 of the 15,646 whitelist shapes, among them core classes 0-24, the
-/// small precompile / memory children and all 519 shapes of the poseidon2 and Ed25519
-/// precompiles (air ids 47-49); row 1 (W 37) holds 715: the five widest core classes (25-29) and
-/// the large keccak, memory and precompile children; row 2 (W 62) the catch-all and 63 keccak
-/// shapes. Fitted over the 80-block p99 corpus, tier-probed on this very config;
-/// `examples/mle_tier_probe.rs` walks every whitelist shape and reports which row it takes and
-/// the slack it leaves.
+/// Row 0 (W 19) holds 13,997 of the 15,646 whitelist shapes: core classes 0 and 1, 7,469 of
+/// the 7,980 memory shapes and the small shapes of every precompile kind but keccak (all 284
+/// shapes of the two Ed25519 precompiles among them); row 1 (W 42) 1,579: core classes 2 to 28,
+/// where the corpus's core chunks sit on KoalaBear⁵ (Poseidon2Packed at 2^18), the keccak
+/// children and the large precompile children; row 2 (W 74) the catch-all, core class 29 and
+/// 68 precompile shapes, all but one of which (a Bls381Fp2Mul shape) no corpus block uses. Of
+/// the corpus's 5,183 chunks 859 take row 0, 4,290 row 1 and 34 row 2; the padding costs 6.5%
+/// over the natural heights (3.6% on KoalaBear⁴). Fitted over the 80-block p99 corpus (natural
+/// riscv heights of 2026-09-23) with the KoalaBear⁵ chip widths and the convert heights
+/// `examples/mle_tier_probe.rs` measured over the whole enumeration (2026-10-27) under the 27-row
+/// core ladder; re-measured over the 15,646 shapes of the 30-row core ladder (2026-10-28), where
+/// the refit reproduced the same three rows and the combine and compress rows below (the embed row
+/// was re-measured later, over the compress proof). The fitting tools and the runs' records are not
+/// part of this repository (`docs/tier-tables.md`). The probe walks every whitelist shape and
+/// reports which row it takes and the slack it leaves.
 ///
 /// Converts have no fixpoint concern: their children are RISC-V proofs, not recursion proofs.
 pub const MLE_RECURSION_CONVERT_LADDER: &[&[(&str, usize)]] = &[
-    // row 0: W = 21
+    // row 0: W = 19
     &[
-        ("ExtAlu", 18),
-        ("ExtDotProduct", 17),
+        ("ExtAlu", 17),
+        ("ExtDotProduct", 16),
         ("Poseidon2Packed", 17),
         ("MemoryVar", 16),
-        ("HornerEval", 14),
-        ("MemoryConst", 14),
+        ("HornerEval", 15),
+        ("MemoryConst", 13),
         ("BaseAlu", 14),
         ("AssertZeroExt", 14),
         ("UnpackBlock", 15),
-        ("ExpBitsLen", 14),
+        ("ExpBitsLen", 15),
         ("MleOpen", 12),
-        ("DigestSelect", 13),
-        ("BinaryFoldStep", 13),
+        ("DigestSelect", 15),
+        ("BinaryFoldStep", 14),
         ("PackBlock", 13),
         ("GkrSumcheckRound", 9),
         ("FracFold", 5),
@@ -1745,21 +1760,21 @@ pub const MLE_RECURSION_CONVERT_LADDER: &[&[(&str, usize)]] = &[
         ("PublicValues", 4),
         ("UnivariateFold", 4),
     ],
-    // row 1: W = 37
+    // row 1: W = 42
     &[
         ("ExtAlu", 19),
         ("ExtDotProduct", 17),
         ("Poseidon2Packed", 18),
-        ("MemoryVar", 16),
-        ("HornerEval", 14),
+        ("MemoryVar", 17),
+        ("HornerEval", 15),
         ("MemoryConst", 14),
         ("BaseAlu", 14),
         ("AssertZeroExt", 14),
         ("UnpackBlock", 15),
-        ("ExpBitsLen", 14),
-        ("MleOpen", 13),
-        ("DigestSelect", 13),
-        ("BinaryFoldStep", 13),
+        ("ExpBitsLen", 15),
+        ("MleOpen", 12),
+        ("DigestSelect", 15),
+        ("BinaryFoldStep", 14),
         ("PackBlock", 13),
         ("GkrSumcheckRound", 9),
         ("FracFold", 5),
@@ -1769,23 +1784,25 @@ pub const MLE_RECURSION_CONVERT_LADDER: &[&[(&str, usize)]] = &[
         ("PublicValues", 4),
         ("UnivariateFold", 4),
     ],
-    // row 2: W = 62, the componentwise maximum over every whitelist shape. The peak is not
-    // always the core child: ExtAlu, MleOpen and MemoryConst are set by the keccak one,
-    // ExtDotProduct and MemoryVar by the core catch-all.
+    // row 2: W = 74, the componentwise maximum over every whitelist shape. The peak is not
+    // always the core child: ExtAlu, MleOpen and MemoryConst are set by keccak shapes,
+    // ExtDotProduct, MemoryVar and Poseidon2Packed by the core catch-all, UnpackBlock by the core
+    // classes that reach 2^15 (twenty of the 27, and the catch-all; the other seven stop at 2^14);
+    // the remaining chips are flat across the core classes.
     &[
         ("ExtAlu", 19),
-        ("ExtDotProduct", 18),
+        ("ExtDotProduct", 19),
         ("Poseidon2Packed", 19),
         ("MemoryVar", 18),
-        ("HornerEval", 14),
+        ("HornerEval", 15),
         ("MemoryConst", 14),
         ("BaseAlu", 14),
         ("AssertZeroExt", 14),
         ("UnpackBlock", 15),
-        ("ExpBitsLen", 14),
+        ("ExpBitsLen", 15),
         ("MleOpen", 13),
-        ("DigestSelect", 13),
-        ("BinaryFoldStep", 13),
+        ("DigestSelect", 15),
+        ("BinaryFoldStep", 14),
         ("PackBlock", 13),
         ("GkrSumcheckRound", 9),
         ("FracFold", 5),
@@ -1798,36 +1815,34 @@ pub const MLE_RECURSION_CONVERT_LADDER: &[&[(&str, usize)]] = &[
 ];
 
 /// Combine-tier log2 heights, shared by EVERY combine node including the root (the last,
-/// `is_complete = true` round): measured maxima over every such proof (children =
-/// natural-height recursion proofs; tier-padded children and the membership circuit add a
-/// little work — the pow2 slack absorbs it, and an overflow fails loudly with the chip's row
-/// width in the panic).
+/// `is_complete = true` round): the per-chip maximum over the 36 node shapes
+/// `preregister_standard_shapes` builds (the ordered pairs over {C0, C1, C2, B} at both
+/// completeness flags plus the four single-child roots), measured by `examples/mle_tier_probe.rs`
+/// over the KoalaBear⁵ convert rows (2026-10-27), no slack. The peaks:
+/// Poseidon2Packed at [C2,C2], ExtDotProduct and MemoryVar at [C0,C2], UnpackBlock and
+/// GkrSumcheckRound at [C0,C1], the rest at [C0,C0]. The deferred node pads to this row too and
+/// sits under it on every chip. Tier-padded children and the membership circuit are what the
+/// measurement covers; an overflow fails loudly with the chip's row width in the panic.
 ///
-/// Root proofs measured one notch below this table on several chips (the root proof is the
-/// shipped artifact, so its padding is what the ~3% gap to the ~494K natural-height floor is
-/// made of). If that margin is ever worth reclaiming, reintroduce a root-specific table:
-/// role-based selection keeps the child-shape base at {C, B} (the root is never a child), so
-/// the cost is a whitelist REBUILD, not more whitelist entries. Note the root's grammar-worst
-/// case (verifying two convert-tier children in a 2-chunk tree) matches a combine node's, so
-/// the shared table is the conservative choice.
+/// The root is a combine node on this table too; a root-specific table would reclaim what the
+/// root leaves under it, at the cost of a whitelist REBUILD rather than more whitelist entries
+/// (role-based selection keeps the child-shape base at {C0, C1, C2, B}; the root is never a
+/// child). The root's grammar-worst case (verifying two convert-tier children in a 2-chunk tree)
+/// matches a combine node's, so the shared table is the conservative choice.
 pub const MLE_RECURSION_COMBINE_LOG_HEIGHTS: &[(&str, usize)] = &[
     ("ExtAlu", 17),
     ("HornerEval", 17),
     ("Poseidon2Packed", 17),
-    // Follows the convert tier: a wider ExtDotProduct child pushes this to 34101 rows,
-    // 1333 over 2^15.
     ("MemoryVar", 16),
     ("ExtDotProduct", 16),
     ("ExpBitsLen", 15),
-    ("BaseAlu", 14),
-    ("AssertZeroExt", 14),
+    ("BaseAlu", 15),
+    ("AssertZeroExt", 15),
     ("BinaryFoldStep", 14),
-    // Combine verifies two recursion-proof children, so its EF-hint (now unpack_block) count is
-    // ~2x convert's. Measured maximum over all covered combine shapes: 2^16.
-    ("UnpackBlock", 15),
+    ("UnpackBlock", 16),
     ("MemoryConst", 13),
-    ("DigestSelect", 13),
-    ("PackBlock", 13),
+    ("DigestSelect", 15),
+    ("PackBlock", 14),
     ("MleOpen", 12),
     ("GkrSumcheckRound", 10),
     ("FracFold", 6),
@@ -1837,27 +1852,64 @@ pub const MLE_RECURSION_COMBINE_LOG_HEIGHTS: &[(&str, usize)] = &[
     ("PublicValues", 4),
     ("UnivariateFold", 4),
 ];
-/// Embed-tier log2 heights. Started as a copy of the combine tier, which is where the embed
-/// node ran before it had a tier of its own; the embed program has never been measured, so
-/// these are inherited rather than derived. Measure it before trusting them as bounds.
+
+/// Embed-tier log2 heights: the natural heights of the embed program in whitelist mode, where its
+/// child is the compress proof, padded to the compress row (`compress_proof_layout`), measured by
+/// the tier probe (2026-11-02), no slack. Measured after the compress row: a change to
+/// that row or to the compress preset means measuring this one again. Not in
+/// `mle_shape_config_digest`.
 pub const MLE_RECURSION_EMBED_LOG_HEIGHTS: &[(&str, usize)] = &[
-    ("ExtAlu", 17),
-    ("HornerEval", 17),
-    ("Poseidon2Packed", 17),
-    ("MemoryVar", 16),
-    ("ExtDotProduct", 16),
-    ("ExpBitsLen", 15),
-    ("BaseAlu", 14),
+    ("ExtAlu", 16),
+    ("HornerEval", 13),
+    ("Poseidon2Packed", 14),
+    ("MemoryVar", 13),
+    ("ExtDotProduct", 13),
+    ("ExpBitsLen", 13),
+    ("BaseAlu", 12),
+    ("AssertZeroExt", 12),
+    ("BinaryFoldStep", 11),
+    ("UnpackBlock", 13),
+    ("MemoryConst", 12),
+    ("DigestSelect", 12),
+    ("PackBlock", 12),
+    ("MleOpen", 11),
+    ("GkrSumcheckRound", 8),
+    ("FracFold", 5),
+    ("LagrangeEvalD2", 5),
+    ("Select", 4),
+    ("Poseidon2", 4),
+    ("PublicValues", 4),
+    ("UnivariateFold", 4),
+];
+
+/// Compress-tier log2 heights: the natural heights of the compress program in whitelist mode, where
+/// the root it re-proves has the one combine-tier (B) layout, measured by the tier probe
+/// (2026-10-27), no slack. The proof size in whitelist mode follows this row (one notch of slack on
+/// Poseidon2Packed alone adds ~11 stacked columns, ~45 KiB), and the whitelist-mode proof must have
+/// the largest dev-mode shape. The per-chip maximum of the dev-mode natural heights
+/// (`recursion_heights[compress]` of a `--step compress` run on fib-10 and reth 18884864 /
+/// 24600825, when the compress layer was introduced) is this row (PackBlock sits one notch under it
+/// on the two reth blocks), and the whitelist-mode proof measured on the same three inputs has the
+/// dev-mode figures: every chip at its row (slack 0), stacked width 20 + 5 = 25, 299,179 bytes,
+/// 128.05 bits.
+pub const MLE_RECURSION_COMPRESS_LOG_HEIGHTS: &[(&str, usize)] = &[
+    ("ExtAlu", 16),
+    ("HornerEval", 16),
+    ("Poseidon2Packed", 16),
+    ("MemoryVar", 14),
+    ("ExtDotProduct", 14),
+    ("ExpBitsLen", 14),
+    ("BaseAlu", 13),
     ("AssertZeroExt", 14),
-    ("BinaryFoldStep", 14),
-    ("UnpackBlock", 16),
-    ("MemoryConst", 13),
-    ("DigestSelect", 13),
+    ("BinaryFoldStep", 13),
+    ("UnpackBlock", 14),
+    ("MemoryConst", 12),
+    ("DigestSelect", 14),
     ("PackBlock", 13),
-    ("MleOpen", 12),
-    ("GkrSumcheckRound", 10),
-    ("FracFold", 6),
-    ("LagrangeEvalD2", 6),
+    ("MleOpen", 11),
+    ("GkrSumcheckRound", 8),
+    ("FracFold", 5),
+    ("LagrangeEvalD2", 5),
     ("Select", 4),
     ("Poseidon2", 4),
     ("PublicValues", 4),
@@ -1872,10 +1924,34 @@ pub fn mle_recursion_pad_shape_for(
         RecursionTier::Convert(row) => MLE_RECURSION_CONVERT_LADDER[row],
         RecursionTier::Combine => MLE_RECURSION_COMBINE_LOG_HEIGHTS,
         RecursionTier::Embed => MLE_RECURSION_EMBED_LOG_HEIGHTS,
+        RecursionTier::Compress => MLE_RECURSION_COMPRESS_LOG_HEIGHTS,
     };
     crate::instances::compiler::shapes::recursion_shape::RecursionPadShape {
         inner: table.iter().map(|(n, log)| (n.to_string(), *log)).collect(),
     }
+}
+
+/// [`mle_recursion_pad_shape_for`] raised wherever `natural` (the program's
+/// [`crate::mle::machine::recursion::recursion_natural_rows`]) is taller than the table: the
+/// shape a keygen can take on a table the circuits have outgrown (`padded_row_count` refuses a
+/// declared height below the real one). For the tier probe's report-only mode only; the prover
+/// pads to the table and nothing else, and `check_recursion_tier` refuses the overflow there.
+/// A chip the table lacks is left as it is: the probe runs `recursion_tier_fit` first, which
+/// panics on it.
+pub fn mle_recursion_pad_shape_holding(
+    tier: RecursionTier,
+    natural: &[(String, usize)],
+) -> crate::instances::compiler::shapes::recursion_shape::RecursionPadShape {
+    let mut pad = mle_recursion_pad_shape_for(tier);
+    for (name, rows) in natural {
+        let log = rows.next_power_of_two().trailing_zeros() as usize;
+        if let Some(tier_log) = pad.inner.get_mut(name) {
+            if log > *tier_log {
+                *tier_log = log;
+            }
+        }
+    }
+    pad
 }
 
 #[cfg(test)]
@@ -2288,8 +2364,8 @@ mod tests {
         use crate::mle::machine::riscv::{
             air_id_for, mle_riscv_air_refs, Engine, RISCV_APP_PREP_AIR_IDS,
         };
-        use pico_mle_core::{config::riscv_params_with_100_bits_security, StarkEngine};
-        let engine: Engine = StarkEngine::new(riscv_params_with_100_bits_security(22));
+        use pico_mle_core::{config::riscv_params_with_128_bits_security, StarkEngine};
+        let engine: Engine = StarkEngine::new(riscv_params_with_128_bits_security(22));
         let program = Program {
             instructions: vec![crate::compiler::riscv::instruction::Instruction::new(
                 crate::compiler::riscv::opcode::Opcode::ADD,

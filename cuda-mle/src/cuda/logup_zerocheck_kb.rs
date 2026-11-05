@@ -1,10 +1,15 @@
 use std::ffi::c_void;
 
 use super::*;
+use p3_field::PrimeCharacteristicRing;
+
 use crate::{
-    cuda::logup_zerocheck::{
-        BlockCtx, EvalCoreCtx, LogupCtx, LogupMonomialCommonCtx, LogupMonomialCtx, MainMatrixPtrs,
-        MonomialAirCtx, ZerocheckCtx,
+    cuda::{
+        field_kernels::GkrLens,
+        logup_zerocheck::{
+            BlockCtx, EvalCoreCtx, LogupCtx, LogupMonomialCommonCtx, LogupMonomialCtx,
+            MainMatrixPtrs, MonomialAirCtx, ZerocheckCtx,
+        },
     },
     monomial::{InteractionMonomialTerm, LambdaTerm, MonomialHeader, PackedVar},
     poly::SqrtEqLayers,
@@ -15,20 +20,38 @@ extern "C" {
     // ---- gkr.cu ----
     // Bit-reversal plus tree build, computed with KoalaBear arithmetic. The `_kb_gkr_` name keeps
     // it apart from the `_kb_bit_rev_frac_ext_build_k2` stub in ntt_bitrev_kb.cu.
-    fn _kb_gkr_bit_rev_frac_ext_build_k2(inout: *mut c_void, log_n: u32, alpha: EF) -> i32;
+    // GKR buffers take `real_len, logical_len`: `real_len < logical_len` marks a virtual buffer that
+    // holds only `real_len` of the power-of-two `logical_len` leaves; equal lengths are the dense
+    // layout. A virtual buffer's padding is read from `pad_dens`, 32 device entries with
+    // `pad_dens[k] = alpha^(2^k)` (null for a dense buffer).
+    fn _kb_gkr_bit_rev_frac_ext_build_k2(
+        inout: *mut c_void,
+        real_len: usize,
+        log_n: u32,
+        alpha: EF,
+    ) -> i32;
 
     fn _kb_frac_build_tree_layer(
         layer: *mut Frac<EF>,
         layer_len: usize,
+        real_len: usize,
+        logical_len: usize,
         revert: bool,
         alpha: EF,
         apply_alpha: bool,
+        pad_dens: *const EF,
     ) -> i32;
 
     /// Builds tree layers i and i+1 in a single launch. The right-half nodes produced in between
     /// are kept so a later revert can undo them. `half_next = N >> (i + 2)`, with i the lower of
     /// the two layer indices.
-    fn _kb_frac_build_tree_two_layers(layer: *mut Frac<EF>, half_next: usize) -> i32;
+    fn _kb_frac_build_tree_two_layers(
+        layer: *mut Frac<EF>,
+        half_next: usize,
+        real_len: usize,
+        logical_len: usize,
+        pad_dens: *const EF,
+    ) -> i32;
 
     pub fn _kb_frac_compute_round_temp_buffer_size(stride: u32) -> u32;
 
@@ -50,8 +73,11 @@ extern "C" {
         eq_hi: *const EF,
         layer: *mut Frac<EF>,
         num_x: usize,
+        real_len: usize,
+        logical_len: usize,
         eq_lo_cap: usize,
         lambda: EF,
+        pad_dens: *const EF,
         round_out: *mut EF,
         round_scratch: *mut EF,
     ) -> i32;
@@ -60,7 +86,10 @@ extern "C" {
         src: *const Frac<EF>,
         dst: *mut Frac<EF>,
         size: usize,
+        real_len: usize,
+        logical_len: usize,
         r: EF,
+        pad_dens: *const EF,
     ) -> i32;
 
     /// Folds and computes the round sums in one pass, out of place: reads the unfolded `pq_src`
@@ -72,9 +101,31 @@ extern "C" {
         pq_src: *const Frac<EF>,
         pq_dst: *mut Frac<EF>,
         pre_fold_len: usize,
+        real_len: usize,
+        logical_len: usize,
         eq_lo_cap: usize,
         lambda: EF,
         r_prev: EF,
+        pad_dens: *const EF,
+        round_out: *mut EF,
+        round_scratch: *mut EF,
+    ) -> i32;
+
+    /// The fused in-place round over a virtual layer, in two launches: `upper_scratch`
+    /// (`pre_fold_len / 4` entries, disjoint from `pq_buf`) takes the upper folded half first, then
+    /// the low `pre_fold_len / 2` entries of `pq_buf` receive the whole folded layer, dense.
+    fn _kb_frac_compute_round_and_fold_split(
+        eq_lo: *const EF,
+        eq_hi: *const EF,
+        pq_buf: *mut Frac<EF>,
+        upper_scratch: *mut Frac<EF>,
+        pre_fold_len: usize,
+        real_len: usize,
+        logical_len: usize,
+        eq_lo_cap: usize,
+        lambda: EF,
+        r_prev: EF,
+        pad_dens: *const EF,
         round_out: *mut EF,
         round_scratch: *mut EF,
     ) -> i32;
@@ -95,10 +146,13 @@ extern "C" {
 
     fn _kb_frac_precompute_m_build(
         pq: *const Frac<EF>,
+        real_len: usize,
+        logical_len: usize,
         rem_n: usize,
         w: usize,
         lambda: EF,
         r_prev: EF,
+        pad_dens: *const EF,
         inline_fold: bool,
         tail_eq_lo: *const EF,
         tail_eq_hi: *const EF,
@@ -121,8 +175,11 @@ extern "C" {
     fn _kb_frac_multifold(
         src: *const Frac<EF>,
         dst: *mut Frac<EF>,
+        real_len: usize,
+        logical_len: usize,
         rem_n: usize,
         w: usize,
+        pad_dens: *const EF,
         window_eq: *const EF,
     ) -> i32;
 
@@ -459,13 +516,19 @@ pub unsafe fn interpolate_columns_gpu_kb(
 
 /// Bit-reversal followed by the tree build, using the KoalaBear extension arithmetic
 /// (`FracExtKb` over `kb31_4_t`).
+///
+/// `real_len < 2^log_n` selects the virtual layout: `inout` then holds the first `real_len` leaves
+/// only (in natural order) and the tree is built without the padding.
 pub unsafe fn gkr_bit_rev_frac_ext_build_k2_kb(
     inout: &DeviceBuffer<(EF, EF)>,
+    real_len: usize,
     log_n: u32,
     alpha: EF,
 ) -> Result<(), CudaError> {
+    debug_assert!(inout.len() >= real_len && real_len <= 1usize << log_n);
     CudaError::from_result(_kb_gkr_bit_rev_frac_ext_build_k2(
         inout.as_mut_raw_ptr(),
+        real_len,
         log_n,
         alpha,
     ))
@@ -482,9 +545,34 @@ pub unsafe fn frac_build_tree_layer_kb(
     CudaError::from_result(_kb_frac_build_tree_layer(
         layer.as_mut_ptr(),
         layer_len,
+        0,
+        0,
         revert,
         alpha,
         apply_alpha,
+        std::ptr::null(),
+    ))
+}
+
+/// [`frac_build_tree_layer_kb`] on a virtual tree (`lens`, padding read from `pad_dens`):
+/// internal layers only, no denominator shift.
+pub unsafe fn frac_build_tree_layer_virt_kb(
+    layer: &mut DeviceBuffer<Frac<EF>>,
+    layer_len: usize,
+    lens: GkrLens,
+    revert: bool,
+    pad_dens: *const EF,
+) -> Result<(), CudaError> {
+    debug_assert!(layer.len() >= lens.real_len.min(layer_len));
+    CudaError::from_result(_kb_frac_build_tree_layer(
+        layer.as_mut_ptr(),
+        layer_len,
+        lens.real_len,
+        lens.logical_len,
+        revert,
+        EF::ZERO,
+        false,
+        pad_dens,
     ))
 }
 
@@ -494,9 +582,21 @@ pub unsafe fn frac_build_tree_two_layers_kb(
     layer: &mut DeviceBuffer<Frac<EF>>,
     half_next: usize,
 ) -> Result<(), CudaError> {
+    frac_build_tree_two_layers_virt_kb(layer, half_next, GkrLens::dense(0), std::ptr::null())
+}
+
+pub unsafe fn frac_build_tree_two_layers_virt_kb(
+    layer: &mut DeviceBuffer<Frac<EF>>,
+    half_next: usize,
+    lens: GkrLens,
+    pad_dens: *const EF,
+) -> Result<(), CudaError> {
     CudaError::from_result(_kb_frac_build_tree_two_layers(
         layer.as_mut_ptr(),
         half_next,
+        lens.real_len,
+        lens.logical_len,
+        pad_dens,
     ))
 }
 
@@ -550,6 +650,31 @@ pub unsafe fn frac_compute_round_and_revert_kb(
     round_out: &mut DeviceBuffer<EF>,
     round_scratch: &mut DeviceBuffer<EF>,
 ) -> Result<(), CudaError> {
+    frac_compute_round_and_revert_virt_kb(
+        eq_tab,
+        layer,
+        num_x,
+        GkrLens::dense(0),
+        lambda,
+        std::ptr::null(),
+        round_out,
+        round_scratch,
+    )
+}
+
+/// [`frac_compute_round_and_revert_kb`] on a tree that may be virtual (`lens`, padding
+/// read from `pad_dens`).
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn frac_compute_round_and_revert_virt_kb(
+    eq_tab: &SqrtEqLayers,
+    layer: &mut DeviceBuffer<Frac<EF>>,
+    num_x: usize,
+    lens: GkrLens,
+    lambda: EF,
+    pad_dens: *const EF,
+    round_out: &mut DeviceBuffer<EF>,
+    round_scratch: &mut DeviceBuffer<EF>,
+) -> Result<(), CudaError> {
     let low_n = eq_tab.low_n();
     let high_n = eq_tab.high_n();
     debug_assert_eq!(2 << (low_n + high_n), num_x);
@@ -561,15 +686,21 @@ pub unsafe fn frac_compute_round_and_revert_kb(
             have >= need as usize,
             "round scratch too small: {have} elements, kernel needs {need}"
         );
-        assert!(layer.len() >= 2 * num_x, "layer shorter than 2 * num_x");
+        assert!(
+            layer.len() >= (2 * num_x).min(lens.stored_len()),
+            "layer shorter than its stored entries"
+        );
     }
     CudaError::from_result(_kb_frac_compute_round_and_revert(
         eq_tab.low.get_ptr(low_n),
         eq_tab.high.get_ptr(high_n),
         layer.as_mut_ptr(),
         num_x,
+        lens.real_len,
+        lens.logical_len,
         1 << low_n,
         lambda,
+        pad_dens,
         round_out.as_mut_ptr(),
         round_scratch.as_mut_ptr(),
     ))
@@ -583,7 +714,36 @@ pub unsafe fn fold_ef_frac_columns_raw_kb(
     r: EF,
 ) -> Result<(), CudaError> {
     debug_assert!(src.len() >= size);
-    CudaError::from_result(_kb_frac_fold_fpext_columns(src.as_ptr(), dst, size, r))
+    CudaError::from_result(_kb_frac_fold_fpext_columns(
+        src.as_ptr(),
+        dst,
+        size,
+        0,
+        0,
+        r,
+        std::ptr::null(),
+    ))
+}
+
+/// [`fold_ef_frac_columns_raw_kb`] from a virtual `src` (`lens`, padding read from `pad_dens`)
+/// into a dense `dst` that does not overlap it.
+pub unsafe fn fold_ef_frac_columns_virt_kb(
+    src: &DeviceBuffer<Frac<EF>>,
+    dst: *mut Frac<EF>,
+    size: usize,
+    lens: GkrLens,
+    r: EF,
+    pad_dens: *const EF,
+) -> Result<(), CudaError> {
+    CudaError::from_result(_kb_frac_fold_fpext_columns(
+        src.as_ptr(),
+        dst,
+        size,
+        lens.real_len,
+        lens.logical_len,
+        r,
+        pad_dens,
+    ))
 }
 
 /// [`fold_ef_frac_columns_kb`] with the result written back into `buffer`.
@@ -594,7 +754,15 @@ pub unsafe fn fold_ef_frac_columns_inplace_kb(
 ) -> Result<(), CudaError> {
     debug_assert!(buffer.len() >= size);
     let ptr = buffer.as_mut_ptr();
-    CudaError::from_result(_kb_frac_fold_fpext_columns(ptr, ptr, size, r))
+    CudaError::from_result(_kb_frac_fold_fpext_columns(
+        ptr,
+        ptr,
+        size,
+        0,
+        0,
+        r,
+        std::ptr::null(),
+    ))
 }
 
 /// Folds the previous round's challenge into the data while computing the next round.
@@ -616,6 +784,35 @@ pub unsafe fn frac_compute_round_and_fold_kb(
     round_out: &mut DeviceBuffer<EF>,
     round_scratch: &mut DeviceBuffer<EF>,
 ) -> Result<(), CudaError> {
+    frac_compute_round_and_fold_virt_kb(
+        eq_tab,
+        pq_src,
+        pq_dst,
+        pre_fold_len,
+        GkrLens::dense(0),
+        lambda,
+        r_prev,
+        std::ptr::null(),
+        round_out,
+        round_scratch,
+    )
+}
+
+/// [`frac_compute_round_and_fold_kb`] with a source that may be virtual (`lens`, padding
+/// read from `pad_dens`); `pq_dst` is dense either way.
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn frac_compute_round_and_fold_virt_kb(
+    eq_tab: &SqrtEqLayers,
+    pq_src: &DeviceBuffer<Frac<EF>>,
+    pq_dst: &mut DeviceBuffer<Frac<EF>>,
+    pre_fold_len: usize,
+    lens: GkrLens,
+    lambda: EF,
+    r_prev: EF,
+    pad_dens: *const EF,
+    round_out: &mut DeviceBuffer<EF>,
+    round_scratch: &mut DeviceBuffer<EF>,
+) -> Result<(), CudaError> {
     let low_n = eq_tab.low_n();
     let high_n = eq_tab.high_n();
     // Post-fold: num_x = pre_fold_len / 4
@@ -627,7 +824,7 @@ pub unsafe fn frac_compute_round_and_fold_kb(
         let pq_size = pre_fold_len >> 1;
         assert!(num_x > 0, "num_x must be > 0");
         assert!(
-            pq_src.len() >= pre_fold_len,
+            pq_src.len() >= pre_fold_len.min(lens.stored_len()),
             "pq_src too small: {} < {}",
             pq_src.len(),
             pre_fold_len
@@ -651,9 +848,70 @@ pub unsafe fn frac_compute_round_and_fold_kb(
         pq_src.as_ptr(),
         pq_dst.as_mut_ptr(),
         pre_fold_len,
+        lens.real_len,
+        lens.logical_len,
         1 << low_n,
         lambda,
         r_prev,
+        pad_dens,
+        round_out.as_mut_ptr(),
+        round_scratch.as_mut_ptr(),
+    ))
+}
+
+/// The fused in-place round over a virtual layer, in two launches (in place, a virtual layer would
+/// hand some threads entries that other threads overwrite). `upper_scratch` takes the upper folded
+/// half (`pre_fold_len / 4` entries); afterwards the low `pre_fold_len / 2` entries of `pq_buf`
+/// hold the folded layer, dense.
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn frac_compute_round_and_fold_split_kb(
+    eq_tab: &SqrtEqLayers,
+    pq_buf: &mut DeviceBuffer<Frac<EF>>,
+    upper_scratch: &mut DeviceBuffer<Frac<EF>>,
+    pre_fold_len: usize,
+    lens: GkrLens,
+    lambda: EF,
+    r_prev: EF,
+    pad_dens: *const EF,
+    round_out: &mut DeviceBuffer<EF>,
+    round_scratch: &mut DeviceBuffer<EF>,
+) -> Result<(), CudaError> {
+    let low_n = eq_tab.low_n();
+    let high_n = eq_tab.high_n();
+    let num_x = pre_fold_len >> 2;
+    debug_assert_eq!(2 << (low_n + high_n), num_x);
+    assert!(lens.is_virtual(), "the split round is for virtual layers");
+    assert!(
+        upper_scratch.len() >= pre_fold_len / 4,
+        "upper_scratch too small: {} < {}",
+        upper_scratch.len(),
+        pre_fold_len / 4
+    );
+    assert!(
+        pq_buf.len() >= pre_fold_len / 2,
+        "pq_buf cannot take the dense folded layer"
+    );
+    #[cfg(debug_assertions)]
+    {
+        let have = round_scratch.len();
+        let need = _kb_frac_compute_round_temp_buffer_size(num_x as u32);
+        assert!(
+            have >= need as usize,
+            "round scratch too small: {have} elements, kernel needs {need}"
+        );
+    }
+    CudaError::from_result(_kb_frac_compute_round_and_fold_split(
+        eq_tab.low.get_ptr(low_n),
+        eq_tab.high.get_ptr(high_n),
+        pq_buf.as_mut_ptr(),
+        upper_scratch.as_mut_ptr(),
+        pre_fold_len,
+        lens.real_len,
+        lens.logical_len,
+        1 << low_n,
+        lambda,
+        r_prev,
+        pad_dens,
         round_out.as_mut_ptr(),
         round_scratch.as_mut_ptr(),
     ))
@@ -714,10 +972,12 @@ pub unsafe fn frac_compute_round_and_fold_inplace_kb(
 #[allow(clippy::too_many_arguments)]
 pub unsafe fn frac_precompute_m_build_raw_kb(
     pq: *const Frac<EF>,
+    lens: GkrLens,
     rem_n: usize,
     w: usize,
     lambda: EF,
     r_prev: EF,
+    pad_dens: *const EF,
     inline_fold: bool,
     tail_eq_lo: *const EF,
     tail_eq_hi: *const EF,
@@ -731,12 +991,16 @@ pub unsafe fn frac_precompute_m_build_raw_kb(
     debug_assert!(w > 0 && w <= rem_n);
     debug_assert!(tail_lo_cap.is_power_of_two());
     debug_assert!(tail_tile > 0);
+    debug_assert!(inline_fold || !lens.is_virtual());
     CudaError::from_result(_kb_frac_precompute_m_build(
         pq,
+        lens.real_len,
+        lens.logical_len,
         rem_n,
         w,
         lambda,
         r_prev,
+        pad_dens,
         inline_fold,
         tail_eq_lo,
         tail_eq_hi,
@@ -767,13 +1031,25 @@ pub unsafe fn frac_precompute_m_eval_round_raw_kb(
 pub unsafe fn frac_multifold_raw_kb(
     src: *const Frac<EF>,
     dst: *mut Frac<EF>,
+    lens: GkrLens,
     rem_n: usize,
     w: usize,
+    pad_dens: *const EF,
     window_eq: *const EF,
 ) -> Result<(), CudaError> {
     debug_assert!(rem_n > 0);
     debug_assert!(w > 0 && w <= rem_n);
-    CudaError::from_result(_kb_frac_multifold(src, dst, rem_n, w, window_eq))
+    debug_assert!(!lens.is_virtual() || !std::ptr::eq(src, dst as *const _));
+    CudaError::from_result(_kb_frac_multifold(
+        src,
+        dst,
+        lens.real_len,
+        lens.logical_len,
+        rem_n,
+        w,
+        pad_dens,
+        window_eq,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]

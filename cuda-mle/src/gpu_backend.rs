@@ -49,7 +49,7 @@ impl<HS: GpuHashScheme> Default for GenericGpuBackend<HS> {
 }
 
 impl<HS: GpuHashScheme> ProverBackend for GenericGpuBackend<HS> {
-    const CHALLENGE_EXT_DEGREE: u8 = D_EF as u8; // 4
+    const CHALLENGE_EXT_DEGREE: u8 = D_EF as u8;
 
     type Val = HS::BaseField;
     type Challenge = HS::ExtField;

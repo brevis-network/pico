@@ -1,10 +1,12 @@
 use crate::{
     machine::{builder::ChipBuilder, extension::BinomialExtension},
-    primitives::consts::EXTENSION_DEGREE,
+    primitives::consts::{EXTENSION_DEGREE, PACK_LANES},
 };
 use core::marker::PhantomData;
 use p3_air::AirBuilder;
-use p3_field::{extension::BinomiallyExtendable, ExtensionField, Field, PrimeCharacteristicRing};
+use p3_field::{
+    extension::QuinticTrinomialExtendable, ExtensionField, Field, PrimeCharacteristicRing,
+};
 use pico_derive::AlignedBorrow;
 use rand::{
     distr::{Distribution, StandardUniform},
@@ -25,7 +27,7 @@ where
     StandardUniform: Distribution<T>,
 {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Block<T> {
-        Block([rng.random(), rng.random(), rng.random(), rng.random()])
+        Block::from_fn(|_| rng.random())
     }
 }
 
@@ -44,6 +46,11 @@ pub trait BlockBuilder: AirBuilder {
 impl<AB: AirBuilder> BlockBuilder for AB {}
 
 impl<T> Block<T> {
+    /// A block whose lane `i` is `f(i)`.
+    pub fn from_fn<F: FnMut(usize) -> T>(f: F) -> Self {
+        Self(core::array::from_fn(f))
+    }
+
     pub fn map<F, U>(self, f: F) -> Block<U>
     where
         F: FnMut(T) -> U,
@@ -61,11 +68,19 @@ impl<T> Block<T> {
     }
 }
 
+impl<T: PrimeCharacteristicRing> Block<T> {
+    /// A block packing `PACK_LANES` base-field values: lanes `0..PACK_LANES` hold them, every
+    /// remaining lane is zero. The producers of packed blocks and at least one consumer of every
+    /// hinted packed block go through this constructor (`looking_packed` / `looked_packed`), so
+    /// the memory bus pins the padding lanes of a hinted packed block to zero; see `PACK_LANES`.
+    pub fn packed(lanes: [T; PACK_LANES]) -> Self {
+        let mut iter = lanes.into_iter();
+        Self::from_fn(|_| iter.next().unwrap_or(T::ZERO))
+    }
+}
+
 impl<T: Clone> Block<T> {
-    pub fn as_extension<
-        F: Field + BinomiallyExtendable<EXTENSION_DEGREE>,
-        AB: ChipBuilder<F, Var = T>,
-    >(
+    pub fn as_extension<F: Field + QuinticTrinomialExtendable, AB: ChipBuilder<F, Var = T>>(
         &self,
     ) -> BinomialExtension<F, AB::Expr, EXTENSION_DEGREE> {
         let arr: [AB::Expr; EXTENSION_DEGREE] = self.0.clone().map(|x| AB::Expr::ZERO + x);
@@ -73,7 +88,7 @@ impl<T: Clone> Block<T> {
     }
 
     pub fn as_extension_from_base<
-        F: Field + BinomiallyExtendable<EXTENSION_DEGREE>,
+        F: Field + QuinticTrinomialExtendable,
         AB: ChipBuilder<F, Var = T>,
     >(
         &self,
@@ -94,7 +109,8 @@ impl<T> From<[T; EXTENSION_DEGREE]> for Block<T> {
 
 impl<T: PrimeCharacteristicRing> From<T> for Block<T> {
     fn from(value: T) -> Self {
-        Self([value, T::ZERO, T::ZERO, T::ZERO])
+        let mut value = Some(value);
+        Self::from_fn(|_| value.take().unwrap_or(T::ZERO))
     }
 }
 

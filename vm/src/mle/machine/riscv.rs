@@ -104,7 +104,7 @@ use crate::{
 };
 use pico_mle_core::{
     config::{
-        riscv_params_with_100_bits_security,
+        riscv_params_with_128_bits_security,
         soundness::{admit_production_vk, UnderBudgetError},
     },
     keygen::{compute_vk_pre_hash, types::MultiStarkVerifyingKey},
@@ -521,7 +521,7 @@ pub fn log_stacked_height_from_env() -> usize {
     let h: usize = v
         .parse()
         .unwrap_or_else(|_| panic!("MLE_LOG_STACKED_HEIGHT {v:?} is not a stacked height"));
-    if let Err(err) = pico_mle_core::config::try_riscv_params_with_100_bits_security(h) {
+    if let Err(err) = pico_mle_core::config::try_riscv_params_with_128_bits_security(h) {
         panic!(
             "MLE_LOG_STACKED_HEIGHT {h} is not a height the backend can prove (maximum {}): {err}",
             pico_mle_core::config::MAX_RISCV_LOG_STACKED_HEIGHT
@@ -614,7 +614,8 @@ pub fn riscv_program_commit(
 /// Number of chunks [`RiscvMachine::prove`] proves concurrently. A single chunk prover is itself
 /// rayon-parallel but leaves a large host underused (reth chunks measured ~30 of 124 busy cores),
 /// so proving a few at once fills the machine; the bound caps peak memory (one full proving
-/// working set per in-flight chunk). Override with the `PROVE_CONCURRENCY` env var; defaults to 4.
+/// working set per in-flight chunk). Override with the `PROVE_CONCURRENCY` env var; defaults to
+/// [`DEFAULT_PROVE_CONCURRENCY`].
 ///
 /// Consulted only when the machine was given no explicit [`RiscvMachine::with_concurrency`]: an
 /// argument outranks the environment.
@@ -623,8 +624,24 @@ fn prove_concurrency() -> usize {
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .filter(|&n| n >= 1)
-        .unwrap_or(4)
+        .unwrap_or(DEFAULT_PROVE_CONCURRENCY)
 }
+
+/// [`prove_concurrency`] without `PROVE_CONCURRENCY`: 4 on the host, 1 on the GPU.
+///
+/// [`RiscvMachine::prove`] proves every chunk on the calling thread's card, so on the GPU the bound
+/// caps one card's VRAM. `test_mle_e2e` (whitelist on, `--step wrap`, one 32 GiB card):
+/// - at 4, reth 18884864 failed 5 of 9 runs with a trace allocation out of memory after 3 chunks;
+/// - at 2, reth 18884864 passed 8 of 8, but three corpus blocks (24003183 and 24002464, the
+///   heaviest chunks; 24003938, the most chunks) failed 9 of 9, the device pool reaching 29.3 GiB
+///   of 31.4;
+/// - at 1, those three passed 5 of 5, the pool peaking at 20.8 GiB.
+///
+/// The multi-card driver runs its own lanes per card and does not read this.
+#[cfg(not(feature = "cuda"))]
+const DEFAULT_PROVE_CONCURRENCY: usize = 4;
+#[cfg(feature = "cuda")]
+const DEFAULT_PROVE_CONCURRENCY: usize = 1;
 
 /// An explicit concurrency wins; only its absence consults the environment.
 fn resolved_concurrency(explicit: Option<NonZeroUsize>) -> usize {
@@ -688,11 +705,11 @@ fn par_in_prove_slots<T: Send, E: Send>(
 /// which is what makes the artifact workload-independent.
 pub fn riscv_constraint_dump(bucket: bool) -> String {
     use pico_mle_core::{
-        config::riscv_params_with_100_bits_security, keygen::compute_constraint_dump,
+        config::riscv_params_with_128_bits_security, keygen::compute_constraint_dump,
     };
 
     // Any operating point works: the dump excludes `SystemParams` and everything derived from it.
-    let engine: Engine = StarkEngine::new(riscv_params_with_100_bits_security(22));
+    let engine: Engine = StarkEngine::new(riscv_params_with_128_bits_security(22));
     let program = Program {
         instructions: vec![crate::compiler::riscv::instruction::Instruction::new(
             crate::compiler::riscv::opcode::Opcode::ADD,
@@ -1503,7 +1520,7 @@ pub fn build_ctx_gpu(
         .gpu_generate_extra_record_and_main(device_id, chips, record, prepared);
     let tracegen = t_tracegen.map(|since| (since, ledger::ProveMark::now()));
 
-    // Public values from the host record, as `build_ctx` takes them: the deferred-commit tally is
+    // Public values from the host record, as `build_ctx` takes them: the commit tally is
     // read off the history's ECALL steps alone.
     let (pvs_riscv, pvs_max) = pvs_for_record(record);
 
@@ -1695,9 +1712,9 @@ pub struct TraceReport {
 /// `cuda`; with it, `prove` prepares each chunk's events for the device instead.
 ///
 /// The stages are [`build_ctx`]'s own, in the prove slots `prove` uses and at its concurrency
-/// (`None`: `PROVE_CONCURRENCY`, else 4), so a stage ledger reads the same `prove.augment.*`,
-/// `prove.shape` and `prove.tracegen.*` lines here as in a host prove, and `prove.prove` and
-/// `prove.verify` as skipped. A record's traces drop before its slot takes the next record, so the
+/// (`None`: `PROVE_CONCURRENCY`, else [`DEFAULT_PROVE_CONCURRENCY`]), so a stage ledger reads the
+/// same `prove.augment.*`, `prove.shape` and `prove.tracegen.*` lines here as in a host prove, and
+/// `prove.prove` and `prove.verify` as skipped. A record's traces drop before its slot takes the next record, so the
 /// peak is `concurrency` records' traces, not the run's.
 pub fn trace_records(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
@@ -1749,7 +1766,7 @@ pub fn debug_records(
     bucket: bool,
 ) {
     let engine: KoalaBearPoseidon2CpuEngine =
-        StarkEngine::new(riscv_params_with_100_bits_security(log_stacked_height));
+        StarkEngine::new(riscv_params_with_128_bits_security(log_stacked_height));
     let airs = mle_riscv_air_refs(program, bucket);
     // Keygen once and reuse across chunks — `debug` would otherwise re-run it per record.
     let (pk, _) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
@@ -1972,7 +1989,7 @@ impl RiscvMachine {
         );
         #[allow(unused_mut)]
         let mut engine: Engine =
-            StarkEngine::new(riscv_params_with_100_bits_security(log_stacked_height));
+            StarkEngine::new(riscv_params_with_128_bits_security(log_stacked_height));
         // Do not cache the RS codeword: at 2^22 it holds ~9.2GiB resident that would OOM a 32GB
         // card, and WHIR simply recomputes it from the traces (~0.1s/chunk).
         #[cfg(feature = "cuda")]
@@ -2916,7 +2933,7 @@ mod tests {
     /// program commitment IS covered.
     #[test]
     fn lean_pre_hash_excludes_exactly_the_app_commitment() {
-        let engine: Engine = StarkEngine::new(riscv_params_with_100_bits_security(22));
+        let engine: Engine = StarkEngine::new(riscv_params_with_128_bits_security(22));
         let airs = mle_riscv_air_refs(Arc::new(test_program()), false);
         let (_, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
 
@@ -2975,7 +2992,7 @@ mod tests {
     /// check that carries the program binding the pre-hash deliberately does not.
     #[test]
     fn verify_riscv_rejects_program_commit_substitution() {
-        let engine: Engine = StarkEngine::new(riscv_params_with_100_bits_security(22));
+        let engine: Engine = StarkEngine::new(riscv_params_with_128_bits_security(22));
         let airs = mle_riscv_air_refs(Arc::new(test_program()), false);
         let (_, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
         let trusted_pre_hash = vk.pre_hash;

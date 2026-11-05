@@ -12,8 +12,10 @@ range checks with log-derivative lookups.
 ```
 pico-vm (Rust, KoalaBear)
   riscv -> convert -> combine        KoalaBear-Poseidon2
-    -> embed                         same root re-proved under BN254-Poseidon2
-      -> wrap                        wrap_constraints.json + wrap_groth16_witness.json
+    -> compress                      the root re-proved at the compress preset: the final
+                                     proof handed out
+      -> embed                       the compress proof re-proved under BN254-Poseidon2
+        -> wrap                      wrap_constraints.json + wrap_groth16_witness.json
                                      |
 gnark (Go, BN254) ------------------ v
   koalabear_verifier   replays the opcode stream as a circuit
@@ -22,8 +24,9 @@ gnark (Go, BN254) ------------------ v
   sdk                  setup / prove / verify / solve / exportSolidity
 ```
 
-The circuit verifies the **embed** proof, not the combine root directly. The embed layer exists
-to move the hash domain: a native BN254 width-3 permutation costs ~240 R1CS constraints against
+The circuit verifies the **embed** proof, which verifies the compress proof, not the combine root
+or the compress proof directly.
+The embed layer exists to move the hash domain: a native BN254 width-3 permutation costs ~240 R1CS constraints against
 ~7,858 for an emulated KoalaBear width-16 one, and verifying a KoalaBear-hashed proof directly
 would not fit.
 
@@ -134,16 +137,22 @@ with `PICO_GNARK_IMAGE=pico-gnark`, as the owner of the key directory.
 
 ## What the whitelist-mode circuit costs
 
-Measured during 3.0 development on one machine, with the shipped whitelist: the wrap circuit is the
-same for every program (fib, poseidon2 and ed25519 give byte-identical constraints files), and
+Measured with the 128-bit parameters (KoalaBear⁵, embed over the compress proof), on one 124-core
+machine, under the shipped whitelist (`vm/src/mle/shape_vk_bins`). The wrap circuit is the same for
+every program (fib, poseidon2 and ed25519 give byte-identical constraints
+files), so one setup and one verifier serve them all.
 
 | | |
 |---|---|
-| R1CS | 7,751,968, 7.6% under 2^23 |
-| setup | 3 min 39 s, 17 GB peak |
-| prove | 24 s, 12 GB peak (3 s of it the Groth16 prover) |
-| pk / ccs / vk | 1.69 GB / 0.64 GB / 560 B |
-| `verifyProof` transaction | 347,037 gas |
+| R1CS | 7,243,820, 13.6% under 2^23 (3.0, KoalaBear⁴ over the combine root: 7,751,968, 7.6%) |
+| setup | 3 min 48 s, 15.5 GB peak |
+| prove | 23 s, 11.2 GB peak (3 s of it the Groth16 prover) |
+| pk / ccs / vk | 1.61 GB / 0.64 GB / 560 B |
+| `verifyProof` transaction | about 347,000 gas; 359,000–361,000 for `verifyPicoProof` through `PicoVerifier`, depending on the public values |
+
+An extension multiplication (`MulE`) costs at most nine multiplications, as KoalaBear⁴'s Karatsuba
+did: it evaluates both operands at nine points and interpolates, and takes the pairwise form instead
+when that is cheaper, as for a felt lifted into the extension.
 
 Past 2^23 constraints the FFT domain doubles to 2^24, and the setup, the prove time and the proving
 key with it. `TestCircuitFitsGroth16Domain` checks the circuit beside it against that bound.
@@ -164,7 +173,7 @@ representative tape, so do not prune it.
 `utils` reads a proof file back and verifies it, changing each of its 14 fields in turn. The
 `koalabear_verifier` tests read `constraints.json` and `groth16_witness.json` from their own
 directory (copy `test_mle_e2e --step wrap`'s `wrap_constraints.json` and
-`wrap_groth16_witness.json` there under those names), and skip without them:
+`wrap_groth16_witness.json` there under those names, as CI's wrap job does), and skip without them:
 `TestSolveVerifierCircuit` solves the circuit, `TestTamperedWitnessIsUnsatisfiable` changes one
 witness value at a time and requires each change to leave it unsatisfiable, and
 `TestCircuitFitsGroth16Domain` compiles it and requires at most 2^23 constraints.

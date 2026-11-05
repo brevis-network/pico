@@ -120,14 +120,14 @@ fn mixture_at_boundary_stacked23() {
         .expect("mixture verify failed at the production-scale n_max == n_stack boundary");
 }
 
-/// The boundary under the EXACT production parameters (`riscv_params_with_100_bits_security(23)`:
+/// The boundary under the EXACT production parameters (`riscv_params_with_128_bits_security(23)`:
 /// max_constraint_degree=3, w_stack=2048, production WHIR/pow params) — the remaining parameter
 /// delta between the passing synthetic cases above and the failing reth run.
 #[test]
 #[ignore = "production scale (stacked 2^23): minutes and most of a card; run with --ignored --test-threads=1"]
 fn mixture_at_boundary_prod_params() {
-    use mle_core::config::riscv_params_with_100_bits_security;
-    let engine = KoalaBearPoseidon2GpuEngine::new(riscv_params_with_100_bits_security(23));
+    use mle_core::config::riscv_params_with_128_bits_security;
+    let engine = KoalaBearPoseidon2GpuEngine::new(riscv_params_with_128_bits_security(23));
     let fx = MixtureFixture::standard(23, engine.config().clone());
     let (pk, vk) = fx.keygen(&engine);
     let proof = fx.prove(&engine, &pk);

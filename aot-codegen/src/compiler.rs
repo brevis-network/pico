@@ -13,10 +13,12 @@ use crate::{
     cfg_analysis::CfgAnalysis,
     config::AotConfig,
     constants,
+    elf_parser::to_vm_opcode,
     instruction_translator::InstructionTranslator,
     metrics::{AotMetrics, ChunkMetrics, LookupStrategy, ProgramMetrics},
     types::{Opcode, ProgramInfo},
 };
+use pico_vm::emulator::riscv::chunk_split::{add_insn_leaf_rows, LEAF_INSN_CHIPS};
 use quote::{format_ident, quote};
 use std::{collections::HashSet, fs};
 use syn::visit_mut::VisitMut;
@@ -63,7 +65,7 @@ pub enum RuntimeSpec {
     #[default]
     InTree,
     /// The body of the dependency entry, written verbatim into every generated manifest, e.g.
-    /// `git = "https://github.com/brevis-network/pico", tag = "v3.0.0"`. A `path` here must be
+    /// `git = "https://github.com/brevis-network/pico", tag = "v3.1.0"`. A `path` here must be
     /// absolute: the chunk crates sit two directories below the dispatch crate.
     Entry(String),
 }
@@ -315,6 +317,7 @@ impl AotCompiler {
         let mut block_non_register_global_lookup_base_max: usize = 0;
         let mut block_reg_write_mask: u32 = 0;
         let mut block_global_lookup_base_max: usize = 0;
+        let mut block_leaf_rows = [0u32; LEAF_INSN_CHIPS];
         let max_block_instructions = self.config.max_block_instructions;
 
         for (idx, inst) in self.program.instructions.iter().enumerate() {
@@ -349,7 +352,7 @@ impl AotCompiler {
                             block_non_register_global_lookup_base_max,
                         reg_write_mask: block_reg_write_mask,
                         global_lookup_base_max: block_global_lookup_base_max,
-                        code: current_block_tokens.clone(),
+                        code: Self::with_leaf_rows(&block_leaf_rows, &current_block_tokens),
                         is_terminal: block_has_terminal,
                     });
                 }
@@ -367,6 +370,7 @@ impl AotCompiler {
                 block_non_register_global_lookup_base_max = 0;
                 block_reg_write_mask = 0;
                 block_global_lookup_base_max = 0;
+                block_leaf_rows = [0; LEAF_INSN_CHIPS];
             }
 
             if active {
@@ -410,6 +414,7 @@ impl AotCompiler {
                 block_terminated = is_terminal;
                 block_has_terminal = is_terminal;
                 block_insn_count += 1;
+                add_insn_leaf_rows(&mut block_leaf_rows, to_vm_opcode(inst.opcode));
 
                 if !is_terminal {
                     if max_block_instructions > 0
@@ -430,7 +435,7 @@ impl AotCompiler {
                             block_non_register_global_lookup_base_max,
                         reg_write_mask: block_reg_write_mask,
                         global_lookup_base_max: block_global_lookup_base_max,
-                        code: current_block_tokens.clone(),
+                        code: Self::with_leaf_rows(&block_leaf_rows, &current_block_tokens),
                         is_terminal: block_has_terminal,
                     });
                     active = false;
@@ -443,6 +448,7 @@ impl AotCompiler {
                     block_non_register_global_lookup_base_max = 0;
                     block_reg_write_mask = 0;
                     block_global_lookup_base_max = 0;
+                    block_leaf_rows = [0; LEAF_INSN_CHIPS];
                 }
             }
         }
@@ -468,12 +474,29 @@ impl AotCompiler {
                 non_register_global_lookup_base_max: block_non_register_global_lookup_base_max,
                 reg_write_mask: block_reg_write_mask,
                 global_lookup_base_max: block_global_lookup_base_max,
-                code: current_block_tokens,
+                code: Self::with_leaf_rows(&block_leaf_rows, &current_block_tokens),
                 is_terminal: block_has_terminal,
             });
         }
 
         Ok(blocks)
+    }
+
+    /// `code` behind the statements that add its rows on the per-instruction chips, one per
+    /// chip it touches. They lead the block so that a superblock, which keeps each inner
+    /// block's statements up to its pc assignment, keeps them too.
+    fn with_leaf_rows(
+        rows: &[u32; LEAF_INSN_CHIPS],
+        code: &proc_macro2::TokenStream,
+    ) -> proc_macro2::TokenStream {
+        let mut tokens = proc_macro2::TokenStream::new();
+        for (chip, &count) in rows.iter().enumerate() {
+            if count > 0 {
+                tokens.extend(quote! { emu.add_leaf_rows(#chip, #count); });
+            }
+        }
+        tokens.extend(code.clone());
+        tokens
     }
 
     /// Partition blocks into chunks using CFG-aware segmentation

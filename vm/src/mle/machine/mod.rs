@@ -7,9 +7,12 @@
 pub mod air;
 pub mod apex;
 pub mod combine;
+// Compress prover: re-proves a complete combine root under the inner config at the compress
+// preset — the final compression layer, the proof that is handed out.
+pub mod compress;
 pub mod convert;
 pub mod deferred;
-// Embed prover: re-proves a complete combine root under the outer BN254-hashed config.
+// Embed prover: re-proves the compress proof under the outer BN254-hashed config.
 #[cfg(feature = "multi-field-transcript")]
 pub mod embed;
 pub mod exe;

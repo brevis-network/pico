@@ -401,7 +401,7 @@ pub(crate) mod test_programs {
             emulator::{BaseAluOpcode, ExtAluOpcode},
             public_values::RecursionPublicValues,
         },
-        primitives::consts::EXTENSION_DEGREE,
+        primitives::consts::{DIGEST_BLOCKS, EXTENSION_DEGREE, PACK_LANES, PERM_BLOCKS},
     };
     use p3_field::PrimeCharacteristicRing;
 
@@ -434,7 +434,7 @@ pub(crate) mod test_programs {
             // instructions here. Lengths satisfy each generator's own `debug_assert`: MemoryVar
             // takes every Hint's output list (4 = one whole `div_ceil(VAR_MEM_DATAPAR)` row);
             // ExtDotProduct needs `val_addrs` a multiple of `EXT_DOT_PRODUCT_GROUPS`(2) and
-            // `mu_addrs` exactly 4x its group count; HornerEval needs `coeff_addrs` a multiple
+            // `mu_addrs` exactly PACK_LANES x its group count; HornerEval needs `coeff_addrs` a multiple
             // of `HORNER_EVAL_DATAPAR`(4).
             instructions.push(Instruction::Hint(HintInstr {
                 output_addrs_mults: vec![(a, Kb::ONE); 4],
@@ -519,10 +519,10 @@ pub(crate) mod test_programs {
             )));
             instructions.push(Instruction::DigestSelect(Box::new(DigestSelectInstr {
                 bit_addr: a,
-                in1_addrs: [a; 2],
-                in2_addrs: [a; 2],
-                out_addrs: [a; 2],
-                mults: [Kb::ONE; 2],
+                in1_addrs: [a; DIGEST_BLOCKS],
+                in2_addrs: [a; DIGEST_BLOCKS],
+                out_addrs: [a; DIGEST_BLOCKS],
+                mults: [Kb::ONE; DIGEST_BLOCKS],
             })));
             instructions.push(Instruction::BinaryFoldStep(Box::new(BinaryFoldStepInstr {
                 tw_addr: a,
@@ -536,20 +536,20 @@ pub(crate) mod test_programs {
                 mult: Kb::ONE,
             })));
             instructions.push(Instruction::PackBlock(Box::new(PackBlockInstr {
-                in_addrs: [a; 4],
+                in_addrs: [a; PACK_LANES],
                 out_addr: a,
                 mult: Kb::ONE,
             })));
             instructions.push(Instruction::UnpackBlock(Box::new(UnpackBlockInstr {
                 in_addr: a,
-                out_addrs: [a; 4],
-                mults: [Kb::ONE; 4],
+                out_addrs: [a; EXTENSION_DEGREE],
+                mults: [Kb::ONE; EXTENSION_DEGREE],
             })));
             instructions.push(Instruction::Poseidon2Packed(Box::new(
                 Poseidon2PackedInstr {
-                    input_addrs: [a; 4],
-                    output_addrs: [a; 4],
-                    mults: [Kb::ONE; 4],
+                    input_addrs: [a; PERM_BLOCKS],
+                    output_addrs: [a; PERM_BLOCKS],
+                    mults: [Kb::ONE; PERM_BLOCKS],
                 },
             )));
             // `num_bits < 32` per the instruction's contract; the chip emits a fixed
@@ -777,16 +777,13 @@ pub fn recursion_natural_rows(program: &RecursionProgram<Kb>) -> Vec<(String, us
     rows
 }
 
-/// The convert ladder row a program pads to: the first row of
-/// [`crate::mle::machine::shape::MLE_RECURSION_CONVERT_LADDER`] that holds every chip's natural
-/// height. The last row holds every shape the whitelist admits, so a program past it is not a
-/// whitelist shape at all and the panic names the chip.
-///
-/// `natural` is [`recursion_natural_rows`] of the program, read before it takes its shape; the
-/// builder and the prover both derive the row from the program alone, so they agree on it.
-pub fn select_convert_row(natural: &[(String, usize)]) -> usize {
+/// The first row of [`crate::mle::machine::shape::MLE_RECURSION_CONVERT_LADDER`] that holds every
+/// chip's natural height, or `None` when no row does. [`select_convert_row`] is this with the
+/// panic; the tier probe's report-only mode reads the `None` and walks on, which is how the
+/// tables are re-measured from a state the circuits have outgrown.
+pub fn try_select_convert_row(natural: &[(String, usize)]) -> Option<usize> {
     let ladder = crate::mle::machine::shape::MLE_RECURSION_CONVERT_LADDER;
-    for (row, table) in ladder.iter().enumerate() {
+    ladder.iter().enumerate().find_map(|(row, table)| {
         let holds = natural.iter().all(|(name, rows)| {
             let log = rows.next_power_of_two().trailing_zeros() as usize;
             let cap = table
@@ -796,10 +793,22 @@ pub fn select_convert_row(natural: &[(String, usize)]) -> usize {
                 .unwrap_or_else(|| panic!("chip `{name}` has no entry in convert row {row}"));
             log <= cap
         });
-        if holds {
-            return row;
-        }
+        holds.then_some(row)
+    })
+}
+
+/// The convert ladder row a program pads to: the first row of
+/// [`crate::mle::machine::shape::MLE_RECURSION_CONVERT_LADDER`] that holds every chip's natural
+/// height ([`try_select_convert_row`]). The last row holds every shape the whitelist admits, so a
+/// program past it is not a whitelist shape at all and the panic names the chip.
+///
+/// `natural` is [`recursion_natural_rows`] of the program, read before it takes its shape; the
+/// builder and the prover both derive the row from the program alone, so they agree on it.
+pub fn select_convert_row(natural: &[(String, usize)]) -> usize {
+    if let Some(row) = try_select_convert_row(natural) {
+        return row;
     }
+    let ladder = crate::mle::machine::shape::MLE_RECURSION_CONVERT_LADDER;
     let last = ladder.len() - 1;
     let over: Vec<String> = natural
         .iter()
@@ -909,7 +918,7 @@ pub fn pad_convert_program(
     tier
 }
 
-/// Whitelist mode: pad a recursion program to a fixed tier (combine, embed) and check it against
+/// Whitelist mode: pad a recursion program to a fixed tier (combine, embed, compress) and check it against
 /// that tier's table, from the natural row counts read before the program takes the shape.
 pub fn pad_recursion_program(
     label: &str,

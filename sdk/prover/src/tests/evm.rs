@@ -332,7 +332,8 @@ const WHITELIST_CONCURRENCY: usize = 2;
 /// against the wrap circuit's, read off the same proof.
 ///
 /// Run with `cargo test --release -p pico-prover -- --ignored --exact
-/// tests::evm::prove_evm_under_the_shipped_whitelist --nocapture`: about two minutes and 60 GB for this guest.
+/// tests::evm::prove_evm_under_the_shipped_whitelist --nocapture`: through compress and embed, about
+/// 75 seconds and a 36 GiB peak for this guest on a 124-core host.
 #[test]
 #[ignore = "whitelist mode proved to wrap: tens of GB, a large machine's run"]
 fn prove_evm_under_the_shipped_whitelist() {
@@ -353,6 +354,41 @@ fn prove_evm_under_the_shipped_whitelist() {
     let Payload::Wrap { embed, .. } = &bundle.proof().payload else {
         panic!("prove_evm returns a Phase::Wrap proof");
     };
+    // The embed key the wrap circuit, and its Groth16 setup, are made for: the soundness manifest's
+    // whitelist-set embed key. The vm crate's artifact test holds the key keygen'd over the
+    // synthesized compress layout against the same row; this is the one a real `prove_evm` makes.
+    let pre_hash: Vec<String> = embed.1.pre_hash.iter().map(|x| x.to_string()).collect();
+    let merged: Option<Vec<String>> = embed
+        .1
+        .inner
+        .merged_preprocessed_commit
+        .map(|c| c.iter().map(|x| x.to_string()).collect());
+    println!("[evm] embed key vk_pre_hash={pre_hash:?} merged_preprocessed_commit={merged:?}");
+    let manifest: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../mle-core/tests/soundness_manifest.json"
+    )))
+    .expect("the soundness manifest parses");
+    let row = manifest["keys"]
+        .as_array()
+        .expect("the manifest's keys")
+        .iter()
+        .find(|k| k["machine"] == "embed" && k["mode"] == "whitelist")
+        .expect("the manifest's whitelist-set embed key");
+    let decimals = |v: &serde_json::Value| -> Vec<String> {
+        v.as_array()
+            .expect("an array of decimal strings")
+            .iter()
+            .map(|x| x.as_str().expect("a decimal string").to_string())
+            .collect()
+    };
+    let stale = "prove_evm's embed key is not the soundness manifest's whitelist-set embed key";
+    assert_eq!(pre_hash, decimals(&row["vk_pre_hash"]), "{stale}");
+    assert_eq!(
+        merged,
+        row.get("merged_preprocessed_commit").map(decimals),
+        "{stale}"
+    );
     let (vkey_hash, committed_values_digest) = wrap_public_inputs(&embed.0);
     assert_eq!(bundle.program_id().vkey_hash(), be32(vkey_hash));
     assert_eq!(

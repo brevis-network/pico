@@ -6,7 +6,7 @@
 //!   cargo run --release -p pico-vm --example mle_shape_probe -- --elf fib --n 3000000 --field kb
 
 use p3_matrix::Matrix;
-use pico_mle_core::{config::riscv_params_with_100_bits_security, StarkEngine};
+use pico_mle_core::{config::riscv_params_with_128_bits_security, StarkEngine};
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
@@ -90,7 +90,7 @@ fn main() {
 
     // The cross-app acceptance value: with the program table bucketed, the RISC-V vk's lean
     // pre-hash must be IDENTICAL across guest programs.
-    let engine: riscv::Engine = StarkEngine::new(riscv_params_with_100_bits_security(
+    let engine: riscv::Engine = StarkEngine::new(riscv_params_with_128_bits_security(
         riscv::log_stacked_height_from_env(),
     ));
     let airs = riscv::mle_riscv_air_refs(compiler.compile(), true);
