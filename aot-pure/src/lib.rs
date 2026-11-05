@@ -66,7 +66,7 @@ pub struct PureState {
     /// Instructions run so far, the generated code's and the host's.
     pub insn_count: u64,
     /// The instruction count past which [`run`] stops the guest with [`EXIT_CYCLE_LIMIT`]; checked
-    /// between blocks, so a run may pass it by one block.
+    /// after each block and each host step, so a run may pass it by one block.
     pub max_insns: u64,
     /// Guest memory, `mem_len` bytes from guest address 0. The guest may access `mem_floor` and
     /// up.
@@ -133,8 +133,9 @@ pub fn run(state: &mut PureState, pc: u64, lookup: impl Fn(u64) -> Option<BlockF
                     // SAFETY: the host set `step` and owns what it reads.
                     let next = unsafe { (state.step)(state, pc) };
                     match PureState::host_next(next) {
-                        Ok(step) => step,
                         Err(fault) => return state.exit_with(fault),
+                        Ok(_) if state.insn_count >= state.max_insns => return EXIT_CYCLE_LIMIT,
+                        Ok(step) => step,
                     }
                 }
             },
@@ -463,4 +464,41 @@ alu! {
     srlw(b, c) sext_word(u64::from((b as u32).wrapping_shr((c & 0x1f) as u32)));
     sraw(b, c) sext_word((b as u32 as i32).wrapping_shr((c & 0x1f) as u32) as u32 as u64);
     mulw(b, c) sext_word(u64::from((b as u32).wrapping_mul(c as u32)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A host step that runs one instruction and stays at the same pc, like `jalr x0, 0(t0)` jumping
+    /// to itself in the middle of a block.
+    unsafe extern "C" fn spin(state: *mut PureState, pc: u64) -> u64 {
+        // SAFETY: `run` passes the state it was given.
+        unsafe { (*state).insn_count += 1 };
+        pc
+    }
+
+    unsafe extern "C" fn no_ecall(_: *mut PureState, _: u64) -> u64 {
+        NEXT_HOST_ERROR
+    }
+
+    #[test]
+    fn host_steps_stop_at_the_cycle_limit() {
+        let mut state = PureState {
+            regs: [0; 32],
+            insn_count: 0,
+            max_insns: 1000,
+            mem: core::ptr::null_mut(),
+            mem_len: 0,
+            mem_floor: 0,
+            host: core::ptr::null_mut(),
+            ecall: no_ecall,
+            step: spin,
+            fault: 0,
+            fault_value: 0,
+            fault_detail: 0,
+        };
+        assert_eq!(run(&mut state, 0x1000, |_| None), EXIT_CYCLE_LIMIT);
+        assert_eq!(state.insn_count, 1000);
+    }
 }
