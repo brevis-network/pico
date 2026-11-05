@@ -1,8 +1,7 @@
 # Requirements
 
 Pico 3.1 (`v3.1.0`): the default build is the CPU prover, and the `cuda` feature adds the GPU
-prover. The preview release `v3.1.0-gpu.1` predates that and needs CUDA for every build; see this
-page at that tag. For the 3.0 release, see this page at `v3.0.0`.
+prover. For the 3.0 release, see this page at `v3.0.0`.
 
 ## Host platform
 
@@ -49,9 +48,7 @@ cargo pico install
 or, from a checkout of the repository at `v3.1.0`, `cargo install --path sdk/cli --locked`. A CLI
 installed from `main` before the `v3.1.0` tag also reports version 3.1.0 but is not this release:
 `cargo install --list` shows where a CLI came from, and only one installed with `--tag v3.1.0` (it
-shows `?tag=v3.1.0`) or from a checkout of the tag is this release. The CLI of the
-preview release (`--tag v3.1.0-gpu.1`) builds only with the CUDA Toolkit and proves 3.0's proof
-system with 3.0's parameters; see this page at that tag.
+shows `?tag=v3.1.0`) or from a checkout of the tag is this release.
 
 ## Only for the EVM path (`cargo pico prove --evm`)
 
