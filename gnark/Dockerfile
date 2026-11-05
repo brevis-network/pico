@@ -25,12 +25,13 @@ RUN rustup toolchain install nightly-2026-09-27 --profile minimal
 WORKDIR /src
 # field-ffi alone. Cargo resolves the whole workspace to build any one member, which would fetch the
 # GPU crates and their git dependencies, none of which field-ffi uses. So the member list is cut
-# down to field-ffi before the build. Its dependencies
+# down to field-ffi before the build, and `default-members` goes too: it names members the cut
+# removes, and Cargo refuses a workspace whose default members are not members. Its dependencies
 # still resolve to the versions Cargo.lock pins; `--locked` cannot be passed, since the cut drops
 # the other members' entries from the lock.
 COPY Cargo.toml Cargo.lock ./
 COPY gnark/field-ffi gnark/field-ffi
-RUN sed -i 's|^members = .*|members = ["gnark/field-ffi"]|' Cargo.toml \
+RUN sed -i -e 's|^members = .*|members = ["gnark/field-ffi"]|' -e '/^default-members = /d' Cargo.toml \
  && grep -qx 'members = \["gnark/field-ffi"\]' Cargo.toml \
  && cargo build --release --package field-ffi
 

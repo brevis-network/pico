@@ -1,6 +1,6 @@
 # Requirements
 
-Pico 3.1 (`v3.1.0`): the default build is the CPU prover, and the `cuda` feature adds the GPU
+Pico 3.1 (`v3.1.1`): the default build is the CPU prover, and the `cuda` feature adds the GPU
 prover. For the 3.0 release, see this page at `v3.0.0`.
 
 ## Host platform
@@ -41,14 +41,14 @@ Install the CLI and the guest toolchain:
 
 ```bash
 rustup toolchain install nightly-2026-09-27
-cargo +nightly-2026-09-27 install --git https://github.com/brevis-network/pico --tag v3.1.0 --locked pico-cli
+cargo +nightly-2026-09-27 install --git https://github.com/brevis-network/pico --tag v3.1.1 --locked pico-cli
 cargo pico install
 ```
 
-or, from a checkout of the repository at `v3.1.0`, `cargo install --path sdk/cli --locked`. A CLI
-installed from `main` before the `v3.1.0` tag also reports version 3.1.0 but is not this release:
-`cargo install --list` shows where a CLI came from, and only one installed with `--tag v3.1.0` (it
-shows `?tag=v3.1.0`) or from a checkout of the tag is this release.
+or, from a checkout of the repository at `v3.1.1`, `cargo install --path sdk/cli --locked`.
+`cargo install --list` shows where a CLI came from: one installed with `--tag v3.1.1` shows
+`?tag=v3.1.1`. A CLI installed from `main` before the `v3.1.0` tag reports version 3.1.0 but is
+neither release.
 
 ## Only for the EVM path (`cargo pico prove --evm`)
 
