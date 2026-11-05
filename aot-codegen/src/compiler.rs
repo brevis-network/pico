@@ -876,7 +876,7 @@ impl AotCompiler {
         } else {
             "bigint-rug = [\"pico-aot-runtime/bigint-rug\"]\nmmap-memory = [\"pico-aot-runtime/mmap-memory\"]\n"
         };
-        let mut cargo_toml = format!(
+        let cargo_toml = format!(
             "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n{}{}\n\n[features]\n{}",
             if self.config.pure {
                 pure_dispatch_package(&self.program.elf_sha256)
@@ -887,11 +887,6 @@ impl AotCompiler {
             chunk_deps.join("\n"),
             features,
         );
-        if self.config.pure {
-            // Its own workspace: a host builds it wherever it caches it, inside another workspace
-            // or not.
-            cargo_toml.push_str("\n[workspace]\n");
-        }
         fs::write(output_dir.join("Cargo.toml"), cargo_toml)
             .map_err(|e| format!("Failed to write dispatch Cargo.toml: {}", e))?;
 

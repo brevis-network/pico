@@ -207,6 +207,64 @@ fn a_built_prover_executes_as_its_builder() {
     assert_eq!(from_prover, from_builder);
 }
 
+/// The static route: crates generated into another workspace for linking join that workspace, and
+/// export `PURE`. `cargo check` stands in for linking them into a host.
+#[cfg(feature = "pure-build")]
+#[test]
+#[ignore = "checks generated crates with cargo; run with --ignored --features pure-build"]
+fn pure_crates_link_inside_another_workspace() {
+    use std::{fs, path::Path, process::Command};
+
+    use pico_aot_codegen::{parse_elf, pure_dispatch_package, AotCompiler, AotConfig, RuntimeSpec};
+
+    let workspace = super::fixture::scratch_dir("pure-static");
+    let generated = workspace.join("aot-generated");
+    let program = parse_elf(FIB_ELF);
+    let package = pure_dispatch_package(&program.elf_sha256);
+    let runtime = format!(
+        "path = {:?}",
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../aot-pure")
+    );
+    AotCompiler::new(program, AotConfig::new(generated).with_pure(true))
+        .compile_with(&RuntimeSpec::Entry(runtime))
+        .expect("generate");
+
+    fs::write(
+        workspace.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"host\"]\nresolver = \"2\"\n",
+    )
+    .expect("workspace manifest");
+    fs::create_dir_all(workspace.join("host/src")).expect("host dir");
+    fs::write(
+        workspace.join("host/Cargo.toml"),
+        format!(
+            "[package]\nname = \"host\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+             [dependencies]\n{package} = {{ path = \"../aot-generated\" }}\n"
+        ),
+    )
+    .expect("host manifest");
+    fs::write(
+        workspace.join("host/src/lib.rs"),
+        format!(
+            "pub static PROGRAM: &{0}::PureProgram = &{0}::PURE;\n",
+            package.replace('-', "_")
+        ),
+    )
+    .expect("host source");
+
+    let output = Command::new("cargo")
+        .arg("check")
+        .arg("--manifest-path")
+        .arg(workspace.join("Cargo.toml"))
+        .output()
+        .expect("cargo");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 /// Builds each guest's pure-mode library and checks the AOT path against `execute_chunked`, and a
 /// library against an ELF it was not generated from.
 #[cfg(feature = "pure-build")]

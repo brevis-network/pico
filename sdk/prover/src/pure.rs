@@ -351,6 +351,14 @@ mod build {
         AotCompiler::new(program, AotConfig::new(crates.clone()).with_pure(true))
             .compile_with(&RuntimeSpec::Entry(runtime))
             .map_err(|e| fail("cannot generate the pure-mode crates", &e))?;
+        // Its own workspace, so it builds wherever the cache is, inside another workspace or not.
+        // Only here: crates generated into a workspace for static linking join that one.
+        let manifest = crates.join("Cargo.toml");
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&manifest)
+            .and_then(|mut file| std::io::Write::write_all(&mut file, b"\n[workspace]\n"))
+            .map_err(|e| fail("cannot write the dispatch manifest", &e))?;
 
         let mut cargo = Command::new(options.cargo.as_deref().unwrap_or(Path::new("cargo")));
         cargo
@@ -363,7 +371,7 @@ mod build {
                 "cdylib",
             ])
             .arg("--manifest-path")
-            .arg(crates.join("Cargo.toml"))
+            .arg(&manifest)
             .arg("--target-dir")
             .arg(scratch.join("target"));
         if options.offline {
