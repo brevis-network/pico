@@ -1345,9 +1345,10 @@ impl Prover {
     /// obtain an unverified one.
     ///
     /// A `cuda` build proves a whitelist-mode [`Phase::Combine`] through the GPU pipeline on every
-    /// visible card. Any other phase takes the path below, where the feature swaps the RISC-V and
-    /// compress proving engine for the GPU's on card 0, while convert, combine and embed prove on
-    /// the CPU. Build without `cuda` to prove everything on the CPU.
+    /// visible card, and a whitelist-mode [`Phase::Compress`] the same way to the root, then the
+    /// compress layer on card 0. Any other mode or phase takes the path below, where the feature
+    /// swaps the RISC-V and compress proving engine for the GPU's on card 0, while convert, combine
+    /// and embed prove on the CPU. Build without `cuda` to prove everything on the CPU.
     ///
     /// A [`Phase::Wrap`] proof made with `verify_keys(false)` is not accepted by the on-chain
     /// verifier: the wrap circuit bakes in the whitelist root only when there is one, so without it
@@ -1355,10 +1356,11 @@ impl Prover {
     pub fn prove_to(&mut self, stdin: Stdin, phase: Phase) -> Result<Proof, ProveError> {
         phase.ensure_available()?;
 
-        // Whitelist Combine goes to every visible card; the rest prove on card 0 (see `cuda`).
+        // Whitelist Combine and Compress go to every visible card; the rest prove on card 0 (see
+        // `cuda`).
         #[cfg(feature = "cuda")]
-        if matches!(phase, Phase::Combine) && self.vk_map.is_some() {
-            return self.prove_combine_gpu(stdin);
+        if matches!(phase, Phase::Combine | Phase::Compress) && self.vk_map.is_some() {
+            return self.prove_gpu(stdin, phase);
         }
 
         let emulated = self.emulate(stdin)?;
@@ -1764,10 +1766,23 @@ impl Prover {
         ))
     }
 
-    /// [`Phase::Combine`] on every visible GPU, in whitelist mode. The root is verified by the GPU
-    /// pipeline and again here, by the checks [`Self::verify_artifact`] runs on a loaded root.
+    /// [`Phase::Combine`] or [`Phase::Compress`] in whitelist mode: the root on every visible GPU,
+    /// then for `Compress` the compress layer over it, as the CPU path proves it.
     #[cfg(feature = "cuda")]
-    fn prove_combine_gpu(&mut self, stdin: Stdin) -> Result<Proof, ProveError> {
+    fn prove_gpu(&mut self, stdin: Stdin, phase: Phase) -> Result<Proof, ProveError> {
+        let (root, committed) = self.prove_root_gpu(stdin)?;
+        if phase == Phase::Combine {
+            return self.combine_proof(root, committed, None, None);
+        }
+        let (compress, shapes) = self.compress_root(*root)?;
+        self.compress_proof(Box::new(compress), committed, None, Some(shapes))
+    }
+
+    /// The complete root on every visible GPU, in whitelist mode, and the committed bytes. The root
+    /// is verified by the GPU pipeline and again here, by the checks [`Self::verify_artifact`] runs
+    /// on a loaded root.
+    #[cfg(feature = "cuda")]
+    fn prove_root_gpu(&mut self, stdin: Stdin) -> Result<(Box<ProofWithVk>, Vec<u8>), ProveError> {
         use pico_mle_core::codec::Decode;
 
         let Some(vk_map) = &self.vk_map else {
@@ -1809,7 +1824,7 @@ impl Prover {
         let root: Box<ProofWithVk> = Box::new((proof, Arc::new(vk)));
 
         self.verify_root(&root)?;
-        self.combine_proof(root, out.committed, None, None)
+        Ok((root, out.committed))
     }
 
     /// A root this prover did not just prove on the CPU: it must be complete, then pass the apex
