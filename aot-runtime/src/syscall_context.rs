@@ -36,7 +36,6 @@ use pico_vm::{
     emulator::riscv::{
         event_types::{RvAddr, RvChunk, RvClk, RvTimestamp, RvValue},
         record::EmulationRecord,
-        riscv_emulator::MIN_MAIN_MEMORY_ADDR,
         syscalls::{
             host::{Precompile, SyscallHost},
             precompiles::{
@@ -90,13 +89,6 @@ impl<'a> AotSyscallContext<'a> {
         })
     }
 
-    fn validate_main_memory_addr(addr: RvAddr) {
-        assert!(
-            addr >= MIN_MAIN_MEMORY_ADDR,
-            "syscall memory access below floor 0x{MIN_MAIN_MEMORY_ADDR:08x}: 0x{addr:08x}"
-        );
-    }
-
     /// The access's own window: the first access to `addr` in this syscall opens it at the cell it
     /// found, every later one moves its end.
     fn local_event(&mut self, addr: u64, prev: MemoryRecord, now: MemoryRecord) {
@@ -125,7 +117,10 @@ impl SyscallHost for AotSyscallContext<'_> {
     }
 
     fn mr_dword(&mut self, addr: RvAddr) -> (MemoryReadRecord, RvValue) {
-        Self::validate_main_memory_addr(addr);
+        // A refused access does not happen, as in the interpreter's syscall context.
+        if !self.core.syscall_access_allowed(addr, 8, false) {
+            return (MemoryReadRecord::default(), 0);
+        }
         debug_assert_eq!(addr & 7, 0, "mr_dword requires 8-byte-aligned address");
         let prev = self.core.memory.get(addr);
         let (chunk, timestamp) = (self.core.current_chunk, self.timestamp());
@@ -147,7 +142,9 @@ impl SyscallHost for AotSyscallContext<'_> {
     }
 
     fn mw_dword(&mut self, addr: RvAddr, value: RvValue) -> MemoryWriteRecord {
-        Self::validate_main_memory_addr(addr);
+        if !self.core.syscall_access_allowed(addr, 8, true) {
+            return MemoryWriteRecord::default();
+        }
         debug_assert_eq!(addr & 7, 0, "mw_dword requires 8-byte-aligned address");
         let prev = self.core.memory.get(addr);
         let (chunk, timestamp) = (self.core.current_chunk, self.timestamp());
@@ -173,7 +170,13 @@ impl SyscallHost for AotSyscallContext<'_> {
     }
 
     fn dword_slice_unsafe(&mut self, addr: RvAddr, len: usize) -> Vec<RvValue> {
-        Self::validate_main_memory_addr(addr);
+        if len > 0
+            && !self
+                .core
+                .syscall_access_allowed(addr, 8 * len as u64, false)
+        {
+            return vec![0; len];
+        }
         debug_assert_eq!(
             addr & 7,
             0,

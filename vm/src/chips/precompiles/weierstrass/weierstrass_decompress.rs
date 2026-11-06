@@ -1,4 +1,6 @@
 #[cfg(feature = "cuda")]
+use crate::chips::gadgets::code_range::{fill_on_device, NUM_CODE_RANGE_COLS};
+#[cfg(feature = "cuda")]
 use crate::mle::spans::device;
 use crate::{
     chips::{
@@ -8,6 +10,7 @@ use crate::{
         },
         gadgets::{
             addr_add::AddrAddGadget,
+            code_range::CodeRangeCols,
             curves::{
                 weierstrass::{
                     bls381::{bls12381_sqrt, Bls12381},
@@ -114,6 +117,9 @@ pub struct WeierstrassDecompressCols<T, P: FieldParameters + NumWords> {
     pub(crate) y: FieldSqrtCols<T, P>,
     pub(crate) neg_y: FieldOpCols<T, P>,
     pub(crate) neg_y_range_check: FieldLtCols<T, P>,
+
+    /// `y` is written to the slice's first half, which may not lie on the program's code.
+    pub code_range: CodeRangeCols<T>,
 }
 
 /// A set of columns to compute `WeierstrassDecompress` that decompresses a point on a Weierstrass
@@ -267,6 +273,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
         let mut new_byte_lookup_events = Vec::new();
 
         let modulus = E::BaseField::modulus();
+        let code = input.program.code();
 
         for i in 0..events.len() {
             let (_syscall_event, precompile_event) = &events[i];
@@ -289,6 +296,12 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
             let len = num_limbs as u64 * 2;
             cols.ptr
                 .populate(&mut new_byte_lookup_events, event.ptr, len);
+            cols.code_range.populate(
+                event.ptr,
+                num_limbs as u64,
+                &code,
+                &mut new_byte_lookup_events,
+            );
             cols.sign_bit = F::from_bool(event.sign_bit);
 
             let x = BigUint::from_bytes_le(
@@ -570,6 +583,39 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> GpuChipBehavior<
         }
 
         // 6. Switch to main stream and return result
+        // The code range, the last of the decompression's own columns (the lexicographic choice
+        // comes after them), which the kernel leaves zero. `y` goes to the slice's first
+        // half.
+        let writes: Vec<u64> = match E::CURVE_TYPE {
+            CurveType::Secp256k1 => prepared_gpu_events
+                .secp256k1_weierstrass_decompress_events
+                .iter()
+                .map(|event| u64::from(event.ptr))
+                .collect(),
+            CurveType::Secp256r1 => prepared_gpu_events
+                .secp256r1_weierstrass_decompress_events
+                .iter()
+                .map(|event| u64::from(event.ptr))
+                .collect(),
+            CurveType::Bls12381 => prepared_gpu_events
+                .bls12381_weierstrass_decompress_events
+                .iter()
+                .map(|event| u64::from(event.ptr))
+                .collect(),
+            _ => panic!("Unsupported curve"),
+        };
+        fill_on_device(
+            &mut d_trace,
+            total_cols,
+            num_cols - NUM_CODE_RANGE_COLS,
+            &writes,
+            <E::BaseField as NumLimbs>::Limbs::USIZE as u64,
+            &input.program.code(),
+            d_byte_trace,
+            mem_pool,
+            stream,
+        );
+
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
         device::launched(kernels, stream);
@@ -812,6 +858,16 @@ where
             local.ptr,
             local.is_real.into(),
         );
+        // `y` is written to the slice's first half, which may not lie on the program's code;
+        // `x`, the second half, is only read. The third limb is zero at any address the
+        // finalize check admits.
+        CodeRangeCols::<CB::F>::eval(
+            builder,
+            &local.code_range,
+            [ptr[0].into(), ptr[1].into()],
+            CB::Expr::from_u32(<E::BaseField as NumLimbs>::Limbs::USIZE as u32),
+            local.is_real.into(),
+        );
 
         // x_addrs[i] = ptr + num_limbs + 8*i
         for i in 0..local.x_addrs.len() {
@@ -1021,7 +1077,124 @@ mod tests {
         trace.to_host(stream)
     }
 
-    // TODO: add test_secp256r1_decompress_generate_extra_record_and_main
+    /// Secp256r1's decompression on the card against the host's: its generator and twice it, each
+    /// with both signs, and the padding rows. Its `a` is not zero, and the device's square root of
+    /// `x^3 + ax + b` comes out right only with the right Montgomery constant, which an inverse
+    /// does not need.
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_secp256r1_decompress_generate_extra_record_and_main() {
+        use crate::chips::gadgets::curves::weierstrass::secp256r1::Secp256r1;
+
+        fn bytes_to_u64_words(bytes: &[u8]) -> Vec<u64> {
+            bytes
+                .chunks(8)
+                .map(|chunk| u64::from_le_bytes(chunk.try_into().unwrap()))
+                .collect()
+        }
+        let x_memory = MemoryReadRecord {
+            value: 1010,
+            chunk: 0,
+            timestamp: 50,
+            prev_chunk: 0,
+            prev_timestamp: 20,
+        };
+        let y_memory = MemoryWriteRecord {
+            value: 10101,
+            chunk: 0,
+            timestamp: 52,
+            prev_value: 33,
+            prev_chunk: 0,
+            prev_timestamp: 22,
+        };
+        // (x, y, the sign bit y's parity gives), little-endian.
+        let points: [([u8; 32], [u8; 32], bool); 4] = [
+            (
+                hex!("96c298d84539a1f4a033eb2d817d0377f240a463e5e6bcf847422ce1f2d1176b"),
+                hex!("f551bf376840b6cbce5e316b5733ce2b169e0f7c4aebe78e9b7f1afee242e34f"),
+                true,
+            ),
+            (
+                hex!("96c298d84539a1f4a033eb2d817d0377f240a463e5e6bcf847422ce1f2d1176b"),
+                hex!("0aae40c897bf493431a1ce94a9cc31d4e961f083b51418716580e5011cbd1cb0"),
+                false,
+            ),
+            (
+                hex!("78996647fc480ba6351bf277e26989c0c31ab5040338528a7e4f038d187bf27c"),
+                hex!("d17378229db7049e2982e93ce6ad7dbadb30749fc69a3d2940d08edb10557707"),
+                true,
+            ),
+            (
+                hex!("78996647fc480ba6351bf277e26989c0c31ab5040338528a7e4f038d187bf27c"),
+                hex!("2e8c87dd6248fb61d67d16c31a52824524cf8b603965c2d6c02f7124eeaa88f8"),
+                false,
+            ),
+        ];
+        let mut rng = rand::rng();
+        let syscall = SyscallEvent {
+            chunk: rng.random(),
+            clk: rng.random(),
+            syscall_id: rng.random(),
+            arg1: rng.random(),
+            arg2: rng.random(),
+        };
+        let events = points
+            .iter()
+            .enumerate()
+            .map(|(i, (x, y, sign_bit))| {
+                let event = EllipticCurveDecompressEvent {
+                    chunk: 0,
+                    clk: 100 + i as u64,
+                    ptr: 200 + 64 * i as u64,
+                    sign_bit: *sign_bit,
+                    x_words: bytes_to_u64_words(x),
+                    decompressed_y_words: bytes_to_u64_words(y),
+                    x_memory_records: vec![x_memory; 4],
+                    y_memory_records: vec![y_memory; 4],
+                    local_mem_access: vec![],
+                };
+                (syscall, PrecompileEvent::Secp256r1Decompress(event))
+            })
+            .collect();
+        let chip = Chip::<F, Secp256r1>::default();
+        let mut record = EmulationRecord::default();
+        record
+            .precompile_events
+            .insert(SyscallCode::SECP256R1_DECOMPRESS, events);
+        // 16 rows: the four events and twelve padding rows, which decompress the generator's x.
+        let mut shape = RiscvPadShape::default();
+        shape.inner.insert(chip.name(), 4);
+        record.shape = Some(shape);
+
+        let mut complete = record.clone();
+        chip.extra_record(&record, &mut complete);
+        let cpu_trace = cpu_generate_main(&chip, &complete);
+        let cpu_byte_trace =
+            ByteChip::<F>::default().generate_main(&complete, &mut EmulationRecord::default());
+
+        let stream = init_test_stream();
+        let prepared = PreparedGpuEvents::new(&record, precompute_event_size::<F>(&record));
+        let mut memory = PreallocatedGpuMemory {
+            d_byte_trace: gpu_allocate_byte_trace(stream, 0).unwrap(),
+            ..Default::default()
+        };
+        let gpu_trace = gpu_generate_extra_record_and_main(&chip, &record, &prepared, &mut memory);
+        assert_eq!(cpu_trace.values.len(), gpu_trace.values.len());
+        for (i, (cpu_row, gpu_row)) in cpu_trace
+            .row_slices()
+            .zip(gpu_trace.row_slices())
+            .enumerate()
+        {
+            assert_eq!(cpu_row, gpu_row, "Main trace mismatch at row {i}");
+        }
+
+        gpu_finalize_byte_trace(stream, &mut memory).unwrap();
+        stream.synchronize().unwrap();
+        let gpu_byte_trace =
+            TraceData::<F>::Gpu(NUM_BYTE_MULT_COLS, memory.d_byte_trace.take().unwrap())
+                .to_host(stream);
+        assert_eq!(gpu_byte_trace.values, cpu_byte_trace.values);
+    }
 
     #[cfg(feature = "cuda")]
     #[test]
@@ -1681,8 +1854,12 @@ mod tests {
                     continue;
                 }
 
+                // The kernel's own columns: the code range is filled after it.
+                use crate::chips::gadgets::code_range::{kernel_columns, NUM_CODE_RANGE_COLS};
+                let offset = num_cols - NUM_CODE_RANGE_COLS;
                 assert_eq!(
-                    cpu_trace, gpu_trace,
+                    kernel_columns(&cpu_trace.values, total_cols, offset),
+                    kernel_columns(&gpu_trace.values, total_cols, offset),
                     "Main trace mismatch at bench size {}",
                     num_events
                 );

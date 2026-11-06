@@ -382,9 +382,16 @@ mod gpu_tests {
             let gpu_trace = TraceData::<F>::Gpu(num_cols, d_trace).to_host(stream);
             stream.synchronize().unwrap();
 
+            // The kernel's own columns: the code range is filled after it.
+            use crate::chips::gadgets::code_range::{kernel_columns, NUM_CODE_RANGE_COLS};
+            let offset = num_cols - NUM_CODE_RANGE_COLS;
             assert_eq!(
-                cpu_trace.values,
-                gpu_trace.values[..cpu_trace.values.len()],
+                kernel_columns(&cpu_trace.values, num_cols, offset),
+                kernel_columns(
+                    &gpu_trace.values[..cpu_trace.values.len()],
+                    num_cols,
+                    offset
+                ),
                 "Main trace mismatch at bench size {}",
                 num_events
             );

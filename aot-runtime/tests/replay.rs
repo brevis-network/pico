@@ -158,7 +158,7 @@ fn stand_in_block(emu: &mut AotEmulatorCore) -> Result<NextStep, String> {
             emu.pc,
         )
     });
-    if !emu.can_fit_block(len, 0, 0, 0) {
+    if !emu.can_fit_block(len, 0, 0, 0, 0) {
         CROSSINGS.set(CROSSINGS.get() + 1);
         return emu.interpret_from_current_pc();
     }

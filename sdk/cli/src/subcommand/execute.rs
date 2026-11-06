@@ -34,6 +34,7 @@ impl ExecuteCmd {
             "executed: {} cycle(s), {} chunk(s)",
             execution.cycles, execution.chunks
         );
+        println!("misaligned accesses: {}", execution.misaligned_accesses);
         println!(
             "committed ({} byte(s), not proved): {}",
             execution.committed_bytes.len(),

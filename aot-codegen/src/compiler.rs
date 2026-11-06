@@ -60,6 +60,9 @@ struct BlockInfo {
     mem_rw_events: usize,
     non_register_global_lookup_base_max: usize,
     reg_write_mask: u32,
+    /// The block's loads and stores: a bound on its misaligned accesses, which the chunk split
+    /// caps, and on the next dwords those touch.
+    memory_insns: usize,
     code: proc_macro2::TokenStream,
     rec_code: proc_macro2::TokenStream,
     /// The instructions whose rows the recording body writes directly, and those rows.
@@ -79,6 +82,7 @@ struct OpenBlock {
     non_register_global_lookup_base_max: usize,
     reg_write_mask: u32,
     leaf_rows: [u32; LEAF_INSN_CHIPS],
+    memory_insns: usize,
     direct_insns: u32,
     direct_rows: BlockRows,
 }
@@ -103,6 +107,7 @@ impl OpenBlock {
             non_register_global_lookup_base_max: 0,
             reg_write_mask: 0,
             leaf_rows: [0; LEAF_INSN_CHIPS],
+            memory_insns: 0,
             direct_insns: 0,
             direct_rows: BlockRows::default(),
         }
@@ -125,6 +130,7 @@ impl OpenBlock {
         self.recorded.extend(code.recorded);
         self.insn_count += 1;
         add_insn_leaf_rows(&mut self.leaf_rows, inst.opcode);
+        self.memory_insns += usize::from(AotCompiler::is_load_or_store(inst.opcode));
         if writes_rows_directly(pc, inst) {
             self.direct_insns += 1;
             add_direct_rows(&mut self.direct_rows, inst);
@@ -201,6 +207,7 @@ impl OpenBlock {
             mem_rw_events: self.mem_rw_events,
             non_register_global_lookup_base_max: self.non_register_global_lookup_base_max,
             reg_write_mask: self.reg_write_mask,
+            memory_insns: self.memory_insns,
             code,
             rec_code: self.recorded,
             direct_insns: self.direct_insns,
@@ -355,6 +362,25 @@ impl AotCompiler {
             Opcode::ECALL => translated_global_lookup_base_max.saturating_sub(1),
             _ => 0,
         }
+    }
+
+    /// A load or a store, which may be misaligned.
+    #[inline(always)]
+    fn is_load_or_store(opcode: Opcode) -> bool {
+        matches!(
+            opcode,
+            Opcode::LB
+                | Opcode::LH
+                | Opcode::LW
+                | Opcode::LBU
+                | Opcode::LHU
+                | Opcode::LWU
+                | Opcode::LD
+                | Opcode::SB
+                | Opcode::SH
+                | Opcode::SW
+                | Opcode::SD
+        )
     }
 
     /// Main compilation entry point, against the runtime `PICO_AOT_RUNTIME_SPEC` names
@@ -775,6 +801,7 @@ impl AotCompiler {
                 let mem_rw_events = block.mem_rw_events;
                 let non_register_global_lookup_base_max = block.non_register_global_lookup_base_max;
                 let reg_write_mask = block.reg_write_mask;
+                let memory_insns = block.memory_insns;
                 let code = &block.code;
                 let inline_attr = self.get_inline_attr(insn_count);
 
@@ -786,11 +813,13 @@ impl AotCompiler {
                         const BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX: usize =
                             #non_register_global_lookup_base_max;
                         const BLOCK_REG_WRITE_MASK: u32 = #reg_write_mask;
+                        const BLOCK_MEMORY_INSNS: usize = #memory_insns;
                         if !emu.can_fit_block(
                             BLOCK_INSNS,
                             BLOCK_MEM_RW_EVENTS,
                             BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX,
                             BLOCK_REG_WRITE_MASK,
+                            BLOCK_MEMORY_INSNS,
                         ) {
                             return emu.interpret_from_current_pc();
                         }
@@ -848,6 +877,7 @@ impl AotCompiler {
                         const BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX: usize =
                             #non_register_global_lookup_base_max;
                         const BLOCK_REG_WRITE_MASK: u32 = #reg_write_mask;
+                        const BLOCK_MEMORY_INSNS: usize = #memory_insns;
                         const BLOCK_DIRECT_INSNS: u32 = #direct_insns;
                         // The fallback writes through the core's sink, and stops at an ordinary
                         // block, which the dispatch run looks up again among the recording ones.
@@ -856,6 +886,7 @@ impl AotCompiler {
                             BLOCK_MEM_RW_EVENTS,
                             BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX,
                             BLOCK_REG_WRITE_MASK,
+                            BLOCK_MEMORY_INSNS,
                         ) {
                             return emu
                                 .with_sink_on_core(rec, AotEmulatorCore::interpret_from_current_pc);
@@ -1909,6 +1940,8 @@ mod tests {
         assert!(lib_rs.contains("const BLOCK_MEM_RW_EVENTS: usize ="));
         assert!(lib_rs.contains("const BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX: usize ="));
         assert!(lib_rs.contains("const BLOCK_REG_WRITE_MASK: u32 ="));
+        // The block's one `LD`.
+        assert!(lib_rs.contains("const BLOCK_MEMORY_INSNS: usize = 1usize;"));
         assert!(lib_rs.contains("can_fit_block"));
 
         let _ = fs::remove_dir_all(out_dir);
@@ -1975,5 +2008,42 @@ mod tests {
                 assert!(exit.contains("RecordStep :: Direct (rec_block_0x00001008)"));
             }
         }
+    }
+
+    /// Each block counts its own loads and stores, the bound the chunk split takes on its
+    /// misaligned accesses, whichever way the block ends: at a branch, at a jump that ends it at
+    /// once, or at the program's end.
+    #[test]
+    fn each_block_counts_its_loads_and_stores() {
+        let program = ProgramInfo::new(
+            vec![
+                Instruction::new(Opcode::LW, 1, 2, 3, false, true),
+                Instruction::new(Opcode::ADD, 2, 1, 1, false, false),
+                Instruction::new(Opcode::SD, 2, 1, 8, false, true),
+                // To the block after the `JALR`.
+                Instruction::new(Opcode::BEQ, 1, 2, 12, false, true),
+                Instruction::new(Opcode::LBU, 3, 1, 1, false, true),
+                Instruction::new(Opcode::JALR, 0, 1, 0, false, true),
+                Instruction::new(Opcode::SB, 3, 1, 5, false, true),
+                Instruction::new(Opcode::ADD, 4, 3, 3, false, false),
+            ],
+            0x1000,
+            0x1000,
+        );
+        let leaders = BlockAnalyzer::new(&program).analyze();
+        let compiler = AotCompiler::new(
+            program.clone(),
+            AotConfig::new(PathBuf::from("/tmp/aot-test")),
+        );
+        let blocks = compiler
+            .generate_blocks(&leaders)
+            .expect("block generation should succeed");
+        assert_eq!(
+            blocks
+                .iter()
+                .map(|b| (b.pc, b.insn_count, b.memory_insns))
+                .collect::<Vec<_>>(),
+            [(0x1000, 4, 2), (0x1010, 2, 1), (0x1018, 2, 1)],
+        );
     }
 }

@@ -5,9 +5,12 @@ use super::{
     MemoryReadWriteChip,
 };
 use crate::{
-    chips::chips::riscv_memory::{
-        event::MemoryAccessPosition,
-        read_write::columns::{MemoryChipValueCols, MemoryLiteCols},
+    chips::{
+        chips::riscv_memory::{
+            event::MemoryAccessPosition,
+            read_write::columns::{MemoryChipValueCols, MemoryLiteCols},
+        },
+        gadgets::code_range::CodeRangeCols,
     },
     compiler::riscv::opcode::{ByteOpcode, Opcode},
     machine::{
@@ -87,6 +90,22 @@ where
             );
             self.eval_memory_load::<CB>(builder, &local_memory_chip_value_cols);
             self.eval_memory_store::<CB>(builder, &local_memory_chip_value_cols);
+
+            // A store misses the program's code.
+            let cols = &local_memory_chip_value_cols;
+            let ins = &cols.instruction;
+            let width = CB::Expr::ZERO
+                + ins.is_sb
+                + ins.is_sh * CB::F::from_u8(2)
+                + ins.is_sw * CB::F::from_u8(4)
+                + ins.is_sd * CB::F::from_u8(8);
+            CodeRangeCols::<F>::eval(
+                builder,
+                &cols.code_range,
+                [cols.addr_word[0].into(), cols.addr_word[1].into()],
+                width,
+                self.is_store_instruction::<CB>(ins),
+            );
         }
     }
 }

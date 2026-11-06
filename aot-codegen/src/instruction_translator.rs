@@ -785,21 +785,20 @@ impl InstructionTranslator {
         let next_pc = pc.wrapping_add(4);
         let (rd, rs1, imm) = (register(inst.op_a), register(inst.op_b), inst.op_c);
 
-        // The loads that can fault on alignment return a `Result`.
-        let (helper, fallible) = match inst.opcode {
-            Opcode::LB => ("lb", false),
-            Opcode::LH => ("lh", true),
-            Opcode::LW => ("lw", true),
-            Opcode::LBU => ("lbu", false),
-            Opcode::LHU => ("lhu", true),
-            Opcode::LWU => ("lwu", true),
-            Opcode::LD => ("ld", true),
+        // Every load can fault: on the memory guard, whatever its width.
+        let helper = match inst.opcode {
+            Opcode::LB => "lb",
+            Opcode::LH => "lh",
+            Opcode::LW => "lw",
+            Opcode::LBU => "lbu",
+            Opcode::LHU => "lhu",
+            Opcode::LWU => "lwu",
+            Opcode::LD => "ld",
             _ => return quote! { unreachable!() },
         };
         let (helper, sink) = body.helper(helper);
-        let fault = fallible.then(|| quote! { ? });
         quote! {
-            emu.#helper(#sink, #rd, #rs1, #imm, #next_pc)#fault;
+            emu.#helper(#sink, #rd, #rs1, #imm, #next_pc)?;
         }
     }
 
@@ -812,17 +811,17 @@ impl InstructionTranslator {
         // op_a = rs2 (value), op_b = rs1 (base), op_c = imm.
         let (rs2, rs1, imm) = (register(inst.op_a), register(inst.op_b), inst.op_c);
 
-        let (helper, fallible) = match inst.opcode {
-            Opcode::SB => ("sb", false),
-            Opcode::SH => ("sh", true),
-            Opcode::SW => ("sw", true),
-            Opcode::SD => ("sd", true),
+        // Every store can fault: on the memory guard, whatever its width.
+        let helper = match inst.opcode {
+            Opcode::SB => "sb",
+            Opcode::SH => "sh",
+            Opcode::SW => "sw",
+            Opcode::SD => "sd",
             _ => return quote! { unreachable!() },
         };
         let (helper, sink) = body.helper(helper);
-        let fault = fallible.then(|| quote! { ? });
         quote! {
-            emu.#helper(#sink, #rs2, #rs1, #imm, #next_pc)#fault;
+            emu.#helper(#sink, #rs2, #rs1, #imm, #next_pc)?;
         }
     }
 }

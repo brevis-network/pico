@@ -58,6 +58,62 @@ pub fn syscalls(record: &EmulationRecord) -> &[SyscallEvent] {
     &history_of(record).syscalls
 }
 
+/// Whether the chunk has a load or store whose address is not a multiple of its width.
+#[must_use]
+pub fn has_unaligned(record: &EmulationRecord) -> bool {
+    !history_of(record).unaligned.is_empty()
+}
+
+/// How many stores the chunk made, aligned or not: each proves it misses the code, against the
+/// range the Program table holds.
+#[must_use]
+pub fn store_count(record: &EmulationRecord) -> usize {
+    let history = history_of(record);
+    let is_store = |step: u32| {
+        let pc = u64::from(history.steps[step as usize].pc);
+        matches!(
+            record.program.fetch(pc).opcode,
+            Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SD
+        )
+    };
+    let aligned = history
+        .chip_steps
+        .memory
+        .iter()
+        .filter(|&&step| is_store(step));
+    let unaligned = history.unaligned.iter().filter(|u| is_store(u.step));
+    aligned.count() + unaligned.count()
+}
+
+/// How many loads and stores of the chunk have an address that is not a multiple of their width:
+/// the `MemoryUnaligned` chip's height.
+#[must_use]
+pub fn unaligned_len(record: &EmulationRecord) -> usize {
+    history_of(record).unaligned.len()
+}
+
+/// The loads and stores whose address is not a multiple of their width, in execution
+/// order: each one's CPU event and, for one that runs into the next dword, that dword's access, at
+/// the step's clock plus `C`.
+#[must_use]
+pub fn unaligned_steps(record: &EmulationRecord) -> Vec<(CpuEvent, Option<MemoryRecordEnum>)> {
+    let history = history_of(record);
+    history
+        .unaligned
+        .iter()
+        .map(|unaligned| {
+            let index = unaligned.step as usize;
+            let event = step_cpu_event(history, &record.program, index);
+            let next = (unaligned.crosses != 0).then(|| {
+                let writes = Slots::of(&event.instruction).writes(MemoryAccessPosition::Memory);
+                let timestamp = history.steps[index].timestamp(MemoryAccessPosition::C);
+                memory_record(history.chunk, timestamp, writes, unaligned.next)
+            });
+            (event, next)
+        })
+        .collect()
+}
+
 /// How many consecutive steps [`CpuSteps::par_runs`] folds as one run of `len`: about one run per
 /// core. Branch comparisons keep these boundaries to preserve the less-than trace's row order.
 #[must_use]

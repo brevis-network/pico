@@ -18,7 +18,7 @@ pub fn uint256_mul(core: &mut impl PrecompileMemory, x_ptr: u64, y_ptr: u64) {
     let mut y = [0u64; UINT256_NUM_WORDS];
     let mut modulus = [0u64; UINT256_NUM_WORDS];
 
-    core.read_mem_dword_span_snapshot(x_ptr, &mut x);
+    core.read_mem_dword_span_snapshot_syscall(x_ptr, &mut x);
     core.read_mem_dword_span_at_clk(y_ptr, &mut y, clk);
 
     // The modulus is stored after the y value

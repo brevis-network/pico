@@ -210,6 +210,9 @@ pub struct Execution {
     /// `BLS12381_FP_MUL` into `BLS12381_FP_ADD`, through `SyscallCode::count_map` — and these do
     /// not. A precompile the run never called has no entry.
     pub precompile_calls: BTreeMap<SyscallCode, u64>,
+    /// Loads and stores whose address is not a multiple of their width (Zicclsm), outside
+    /// unconstrained blocks: the count the standard RISC-V target asks every proof to report.
+    pub misaligned_accesses: u64,
 }
 
 /// One emulation: the records proving needs, and what [`Execution`] reports about them.
@@ -964,6 +967,11 @@ fn emulate_program(
     for record in &emulated.records {
         count_precompile_calls(&mut precompile_calls, record);
     }
+    // Each report carries the running count; the last one ends the run.
+    let misaligned_accesses = emulated
+        .reports
+        .last()
+        .map_or(0, |report| report.misaligned_accesses);
     Ok(Emulation {
         records: emulated.records,
         execution: Execution {
@@ -972,6 +980,7 @@ fn emulate_program(
             chunks: emulated.chunks,
             reports: emulated.reports,
             precompile_calls,
+            misaligned_accesses,
         },
     })
 }
@@ -1012,12 +1021,18 @@ fn execute_program(
     .map_err(ProveError::from_emulate)?;
     // Ends the ledger run, as dropping a prove's records does.
     pico_vm::mle::ledger::drop_records(Vec::new());
+    // Each report carries the running count; the last one ends the run.
+    let misaligned_accesses = executed
+        .reports
+        .last()
+        .map_or(0, |report| report.misaligned_accesses);
     Ok(Execution {
         committed_bytes: executed.committed_bytes,
         cycles: executed.cycles,
         chunks: executed.chunks,
         reports: executed.reports,
         precompile_calls: calls,
+        misaligned_accesses,
     })
 }
 
@@ -1348,9 +1363,10 @@ impl Prover {
 
         let emulated = self.emulate(stdin)?;
         let committed = emulated.execution.committed_bytes;
+        let misaligned = emulated.execution.misaligned_accesses;
         let proved = self.prove_records(&emulated.records, committed, phase);
         pico_vm::mle::ledger::drop_records(emulated.records);
-        proved
+        proved.map(|proof| proof.counting(misaligned))
     }
 
     /// Prove to [`Phase::Wrap`] for the on-chain verifier, and return the gnark inputs with the
@@ -1367,9 +1383,11 @@ impl Prover {
             return Err(ProveError::EvmRequiresWhitelist);
         };
         let emulated = self.emulate(stdin)?;
+        let misaligned = emulated.execution.misaligned_accesses;
         let proved = if binding::commits(&emulated.records) {
             let committed = emulated.execution.committed_bytes;
             self.prove_records(&emulated.records, committed, Phase::Wrap)
+                .map(|proof| proof.counting(misaligned))
         } else {
             Err(ProveError::EvmNoCommittedDigest)
         };
@@ -1859,6 +1877,7 @@ impl Prover {
             committed_value_digest,
             chunk_count,
             distinct_shapes,
+            misaligned_accesses: None,
             payload,
         }
     }

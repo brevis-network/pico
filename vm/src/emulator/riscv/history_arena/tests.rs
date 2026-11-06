@@ -81,6 +81,8 @@ fn history(rows: u32) -> ExecutionHistory {
                 arg2: u64::from(i) + 9,
             })
             .collect(),
+        // On the heap whatever the slot: no region holds it.
+        unaligned: Rows::new(),
     }
 }
 

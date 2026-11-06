@@ -14,7 +14,7 @@
 use super::{emulator::AotEmulatorCore, NextStep};
 use pico_vm::{
     compiler::riscv::{instruction::Instruction, opcode::Opcode},
-    emulator::riscv::{memory::VALUES_SIZE, riscv_emulator::EmulationError},
+    emulator::riscv::riscv_emulator::EmulationError,
 };
 
 impl AotEmulatorCore {
@@ -385,38 +385,34 @@ impl AotEmulatorCore {
         let rd = rd as usize;
         let base = self.read_reg_b(rs1 as usize);
         let addr = base.wrapping_add(imm);
-        let max_addr = match inst.opcode {
-            Opcode::LD => (VALUES_SIZE - 8) as u64,
-            Opcode::LW | Opcode::LWU => (VALUES_SIZE - 4) as u64,
-            Opcode::LH | Opcode::LHU => (VALUES_SIZE - 2) as u64,
-            Opcode::LB | Opcode::LBU => (VALUES_SIZE - 1) as u64,
-            _ => unreachable!(),
+        self.check_access(inst.opcode, addr)?;
+        let width = match inst.opcode {
+            Opcode::LH | Opcode::LHU => 2,
+            Opcode::LW | Opcode::LWU => 4,
+            Opcode::LD => 8,
+            _ => 1,
         };
-        if addr > max_addr {
-            return Err(format!(
-                "Interpreter {:?} at PC {pc:#x} produced out-of-range addr {addr:#x} (base {base:#x}, imm {imm:#x})",
-                inst.opcode
-            ));
-        }
-        let unaligned = match inst.opcode {
-            Opcode::LH | Opcode::LHU => (!addr.is_multiple_of(2)).then_some("halfword"),
-            Opcode::LW | Opcode::LWU => (!addr.is_multiple_of(4)).then_some("word"),
-            Opcode::LD => (!addr.is_multiple_of(8)).then_some("doubleword"),
-            _ => None,
-        };
-        if let Some(width) = unaligned {
-            return Err(format!("Unaligned {width} access at {:#x}", addr));
-        }
-        let dword = self.read_mem_dword(Self::dword_addr(addr));
-        let value = match inst.opcode {
-            Opcode::LB => Self::read_u8_from_word(dword, addr) as i8 as i64 as u64,
-            Opcode::LH => (Self::read_u16_from_word(dword, addr) as i16) as i64 as u64,
-            Opcode::LW => (Self::extract_word(dword, addr) as u32 as i32) as i64 as u64,
-            Opcode::LWU => Self::extract_word(dword, addr),
-            Opcode::LD => dword,
-            Opcode::LBU => u64::from(Self::read_u8_from_word(dword, addr)),
-            Opcode::LHU => u64::from(Self::read_u16_from_word(dword, addr)),
-            _ => unreachable!(),
+        let (value, dword) = if addr.is_multiple_of(width) {
+            let dword = self.read_mem_dword(Self::dword_addr(addr));
+            let value = match inst.opcode {
+                Opcode::LB => Self::read_u8_from_word(dword, addr) as i8 as i64 as u64,
+                Opcode::LH => (Self::read_u16_from_word(dword, addr) as i16) as i64 as u64,
+                Opcode::LW => (Self::extract_word(dword, addr) as u32 as i32) as i64 as u64,
+                Opcode::LWU => Self::extract_word(dword, addr),
+                Opcode::LD => dword,
+                Opcode::LBU => u64::from(Self::read_u8_from_word(dword, addr)),
+                Opcode::LHU => u64::from(Self::read_u16_from_word(dword, addr)),
+                _ => unreachable!(),
+            };
+            (value, dword)
+        } else {
+            let (bytes, dword) = self.misaligned_load(inst.opcode, addr, width)?;
+            let value = match inst.opcode {
+                Opcode::LH => (bytes as u16 as i16) as i64 as u64,
+                Opcode::LW => (bytes as u32 as i32) as i64 as u64,
+                _ => bytes,
+            };
+            (value, dword)
         };
         self.write_reg(rd, value);
         self.emit_memory(pc, value, base, imm, dword);
@@ -432,47 +428,32 @@ impl AotEmulatorCore {
         let base = self.read_reg_b(rs1 as usize);
         let value = self.read_reg_a(rs2 as usize);
         let addr = base.wrapping_add(imm);
-        let max_addr = match inst.opcode {
-            Opcode::SD => (VALUES_SIZE - 8) as u64,
-            Opcode::SW => (VALUES_SIZE - 4) as u64,
-            Opcode::SH => (VALUES_SIZE - 2) as u64,
-            Opcode::SB => (VALUES_SIZE - 1) as u64,
-            _ => unreachable!(),
+        self.check_access(inst.opcode, addr)?;
+        let width = match inst.opcode {
+            Opcode::SH => 2,
+            Opcode::SW => 4,
+            Opcode::SD => 8,
+            _ => 1,
         };
-        if addr > max_addr {
-            return Err(format!(
-                "Interpreter {:?} at PC {pc:#x} produced out-of-range addr {addr:#x} (base {base:#x}, imm {imm:#x}, value {value:#x})",
-                inst.opcode
-            ));
-        }
-        let dword = match inst.opcode {
-            Opcode::SB => self.write_mem_dword_merged(Self::dword_addr(addr), |word| {
-                Self::write_u8_into_word(word, addr, value)
-            }),
-            Opcode::SH => {
-                if !addr.is_multiple_of(2) {
-                    return Err(format!("Unaligned halfword store at {:#x}", addr));
-                }
-                self.write_mem_dword_merged(Self::dword_addr(addr), |word| {
+        let dword = if !addr.is_multiple_of(width) {
+            self.misaligned_store(inst.opcode, addr, value, width)?
+        } else {
+            match inst.opcode {
+                Opcode::SB => self.write_mem_dword_merged(Self::dword_addr(addr), |word| {
+                    Self::write_u8_into_word(word, addr, value)
+                }),
+                Opcode::SH => self.write_mem_dword_merged(Self::dword_addr(addr), |word| {
                     Self::write_u16_into_word(word, addr, value)
-                })
-            }
-            Opcode::SW => {
-                if !addr.is_multiple_of(4) {
-                    return Err(format!("Unaligned word store at {:#x}", addr));
-                }
-                self.write_mem_dword_merged(Self::dword_addr(addr), |word| {
+                }),
+                Opcode::SW => self.write_mem_dword_merged(Self::dword_addr(addr), |word| {
                     Self::insert_word(word, addr, value)
-                })
-            }
-            Opcode::SD => {
-                if !addr.is_multiple_of(8) {
-                    return Err(format!("Unaligned doubleword store at {:#x}", addr));
+                }),
+                Opcode::SD => {
+                    self.write_mem_dword(addr, value);
+                    value
                 }
-                self.write_mem_dword(addr, value);
-                value
+                _ => unreachable!(),
             }
-            _ => unreachable!(),
         };
         self.emit_memory(pc, value, base, imm, dword);
         self.pc = next_pc;

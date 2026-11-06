@@ -1,4 +1,5 @@
 pub mod error;
+pub mod guard;
 pub mod instruction;
 pub mod instruction_simple;
 pub mod mode;
@@ -10,7 +11,9 @@ use crate::{
     chips::chips::events::{
         MemoryAccessPosition, MemoryLocalEvent, MemoryReadRecord, MemoryRecord, MemoryWriteRecord,
     },
-    compiler::riscv::{instruction::Instruction, program::Program, register::Register},
+    compiler::riscv::{
+        instruction::Instruction, opcode::Opcode, program::Program, register::Register,
+    },
     emulator::{
         opts::EmulatorOpts,
         record::RecordBehavior,
@@ -427,6 +430,9 @@ pub struct RiscvEmulator {
     /// at, or the pc of the last cut. The cut owes it to the record's public values, which do not
     /// depend on the record holding its CPU events.
     chunk_start_pc: RvAddr,
+
+    /// [`Program::code`], which no store may touch.
+    code: core::ops::Range<u64>,
 }
 
 /// The different modes the emulator can run in.
@@ -621,6 +627,7 @@ impl RiscvEmulator {
         // A replay can resume mid-chunk, so its first record starts where the state stands.
         let state = recovered_state.unwrap_or_else(|| RiscvEmulationState::new(pc_start));
         let chunk_start_pc = state.pc;
+        let code = program.code();
 
         let mut emu = Self {
             syscall_map,
@@ -664,6 +671,7 @@ impl RiscvEmulator {
                 panic!("Unsupported field type");
             },
             chunk_start_pc,
+            code,
         };
 
         emu.update_mode_deps();
@@ -722,6 +730,7 @@ impl RiscvEmulator {
                 .cycle_tracker
                 .then_some(core::mem::take(&mut self.cycle_tracker)),
             host_cycle_estimator: estimators,
+            misaligned_accesses: self.state.misaligned_accesses,
         }
     }
 
@@ -1765,47 +1774,212 @@ impl RiscvEmulator {
         self.rw_simple(rd, a);
     }
 
-    /// Fetch the input operand values for a load instruction.
+    /// Ends the run if a load or store at `addr` lands where no guest access may: see
+    /// [`guard::access_fault`].
+    #[inline(always)]
+    fn check_access(&self, opcode: Opcode, addr: u64) -> Result<(), EmulationError> {
+        let store = matches!(opcode, Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SD);
+        let width = guard::access_width(opcode);
+        match guard::access_fault(opcode, addr, width, store, &self.code) {
+            None => Ok(()),
+            Some(reason) => Err(AbnormalTermination::fault(reason).into()),
+        }
+    }
+
+    /// Fetch the input operand values for a load instruction, after checking where it lands.
     #[inline]
-    fn load_rr(&mut self, instruction: &Instruction) -> (Register, u64, u64, u64, u64) {
+    fn load_rr(
+        &mut self,
+        instruction: &Instruction,
+    ) -> Result<(Register, u64, u64, u64, u64), EmulationError> {
         let (rd, rs1, imm) = instruction.i_type();
         let (b, c) = (self.rr(rs1, MemoryAccessPosition::B), imm);
         let addr = b.wrapping_add(c);
+        self.check_access(instruction.opcode, addr)?;
         let memory_value = self.mr_cpu(align_u64(addr), MemoryAccessPosition::Memory);
-        (rd, b, c, addr, memory_value)
+        Ok((rd, b, c, addr, memory_value))
     }
 
-    /// Fetch the input operand values for a load instruction.
-    fn load_rr_simple(&mut self, instruction: &Instruction) -> (Register, u64, u64, u64, u64) {
+    /// Fetch the input operand values for a load instruction, after checking where it lands.
+    fn load_rr_simple(
+        &mut self,
+        instruction: &Instruction,
+    ) -> Result<(Register, u64, u64, u64, u64), EmulationError> {
         let (rd, rs1, imm) = instruction.i_type();
         let (b, c) = (self.rr_simple(rs1, MemoryAccessPosition::B), imm);
         let addr = b.wrapping_add(c);
+        self.check_access(instruction.opcode, addr)?;
         let memory_value = self.mr_cpu_simple(align_u64(addr), MemoryAccessPosition::Memory);
-        (rd, b, c, addr, memory_value)
+        Ok((rd, b, c, addr, memory_value))
     }
 
-    /// Fetch the input operand values for a store instruction.
+    /// Fetch the input operand values for a store instruction, after checking where it lands.
     /// Returns (a, b, c, addr, existing_dword) where existing_dword is the current 8-byte value.
     #[inline]
-    fn store_rr(&mut self, instruction: &Instruction) -> (u64, u64, u64, u64, u64) {
+    fn store_rr(
+        &mut self,
+        instruction: &Instruction,
+    ) -> Result<(u64, u64, u64, u64, u64), EmulationError> {
         let (rs1, rs2, imm) = instruction.s_type();
         let c = imm;
         let b = self.rr(rs2, MemoryAccessPosition::B);
         let a = self.rr(rs1, MemoryAccessPosition::A);
         let addr = b.wrapping_add(c);
+        self.check_access(instruction.opcode, addr)?;
         let memory_value = self.dword(align_u64(addr));
-        (a, b, c, addr, memory_value)
+        Ok((a, b, c, addr, memory_value))
     }
 
-    /// Fetch the input operand values for a store instruction.
-    fn store_rr_simple(&mut self, instruction: &Instruction) -> (u64, u64, u64, u64, u64) {
+    /// Fetch the input operand values for a store instruction, after checking where it lands.
+    fn store_rr_simple(
+        &mut self,
+        instruction: &Instruction,
+    ) -> Result<(u64, u64, u64, u64, u64), EmulationError> {
         let (rs1, rs2, imm) = instruction.s_type();
         let c = imm;
         let b = self.rr_simple(rs2, MemoryAccessPosition::B);
         let a = self.rr_simple(rs1, MemoryAccessPosition::A);
         let addr = b.wrapping_add(c);
+        self.check_access(instruction.opcode, addr)?;
         let memory_value = self.dword(align_u64(addr));
-        (a, b, c, addr, memory_value)
+        Ok((a, b, c, addr, memory_value))
+    }
+
+    /// Counts a load or store whose address is not a multiple of its width (Zicclsm). The
+    /// `MemoryUnaligned` chip proves it, and its height caps how many a chunk holds: the chunk
+    /// split counts them too. An unconstrained block's accesses are not proven, so they are not
+    /// counted.
+    fn misaligned(&mut self, _opcode: Opcode, _addr: u64) -> Result<(), EmulationError> {
+        if !self.is_unconstrained() {
+            self.state.misaligned_accesses += 1;
+            self.chunk_split_state.num_misaligned += 1;
+        }
+        Ok(())
+    }
+
+    /// The `width` bytes a load at `addr` reads, in the low bytes of the result; `dword` is the
+    /// doubleword [`Self::load_rr`] read at the aligned address. An access that crosses into the
+    /// next doubleword reads that one too, at the C position, which a load leaves free.
+    fn loaded(
+        &mut self,
+        opcode: Opcode,
+        addr: u64,
+        dword: u64,
+        width: u64,
+    ) -> Result<u64, EmulationError> {
+        let offset = addr % 8;
+        if !addr.is_multiple_of(width) {
+            self.misaligned(opcode, addr)?;
+        }
+        if offset + width <= 8 {
+            return Ok(util::dword_bytes(dword, offset, width));
+        }
+        let next = self.mr(
+            align_u64(addr) + 8,
+            self.chunk(),
+            self.timestamp(&MemoryAccessPosition::C),
+            None,
+        );
+        self.mode.set_next_dword(next.into(), &mut self.sink);
+        Ok(util::straddling_bytes(dword, next.value, offset, width))
+    }
+
+    /// [`Self::loaded`] for the simple emulator.
+    fn loaded_simple(
+        &mut self,
+        opcode: Opcode,
+        addr: u64,
+        dword: u64,
+        width: u64,
+    ) -> Result<u64, EmulationError> {
+        let offset = addr % 8;
+        if !addr.is_multiple_of(width) {
+            self.misaligned(opcode, addr)?;
+        }
+        if offset + width <= 8 {
+            return Ok(util::dword_bytes(dword, offset, width));
+        }
+        let next = self
+            .mr_simple(
+                align_u64(addr) + 8,
+                self.chunk(),
+                self.timestamp(&MemoryAccessPosition::C),
+                None,
+            )
+            .value;
+        Ok(util::straddling_bytes(dword, next, offset, width))
+    }
+
+    /// Writes the low `width` bytes of `value` at `addr` and returns the aligned doubleword's new
+    /// value; `dword` is its value before. The aligned doubleword is written at the memory
+    /// position, as an aligned store's is; a store that crosses into the next doubleword writes
+    /// that one too, at the C position, which a store leaves free.
+    fn stored(
+        &mut self,
+        opcode: Opcode,
+        addr: u64,
+        dword: u64,
+        value: u64,
+        width: u64,
+    ) -> Result<u64, EmulationError> {
+        let offset = addr % 8;
+        if !addr.is_multiple_of(width) {
+            self.misaligned(opcode, addr)?;
+        }
+        if offset + width <= 8 {
+            let new = util::splice_dword(dword, offset, width, value);
+            self.mw_cpu(align_u64(addr), new, MemoryAccessPosition::Memory);
+            return Ok(new);
+        }
+        let low = 8 - offset;
+        let next_addr = align_u64(addr) + 8;
+        let new = util::splice_dword(dword, offset, low, value);
+        let new_next =
+            util::splice_dword(self.dword(next_addr), 0, width - low, value >> (8 * low));
+        self.mw_cpu(align_u64(addr), new, MemoryAccessPosition::Memory);
+        let next = self.mw(
+            next_addr,
+            new_next,
+            self.chunk(),
+            self.timestamp(&MemoryAccessPosition::C),
+            None,
+        );
+        self.mode.set_next_dword(next.into(), &mut self.sink);
+        Ok(new)
+    }
+
+    /// [`Self::stored`] for the simple emulator.
+    fn stored_simple(
+        &mut self,
+        opcode: Opcode,
+        addr: u64,
+        dword: u64,
+        value: u64,
+        width: u64,
+    ) -> Result<u64, EmulationError> {
+        let offset = addr % 8;
+        if !addr.is_multiple_of(width) {
+            self.misaligned(opcode, addr)?;
+        }
+        if offset + width <= 8 {
+            let new = util::splice_dword(dword, offset, width, value);
+            self.mw_cpu_simple(align_u64(addr), new, MemoryAccessPosition::Memory);
+            return Ok(new);
+        }
+        let low = 8 - offset;
+        let next_addr = align_u64(addr) + 8;
+        let new = util::splice_dword(dword, offset, low, value);
+        let new_next =
+            util::splice_dword(self.dword(next_addr), 0, width - low, value >> (8 * low));
+        self.mw_cpu_simple(align_u64(addr), new, MemoryAccessPosition::Memory);
+        self.mw_simple(
+            next_addr,
+            new_next,
+            self.chunk(),
+            self.timestamp(&MemoryAccessPosition::C),
+            None,
+        );
+        Ok(new)
     }
 
     /// Fetch the input operand values for a branch instruction.
@@ -1904,6 +2078,12 @@ impl RiscvEmulator {
             registers[i] = record.value;
         }
         registers
+    }
+
+    /// [`Program::code`]: the addresses no store may touch.
+    #[inline(always)]
+    pub(crate) fn code(&self) -> &core::ops::Range<u64> {
+        &self.code
     }
 
     /// Get the current value of a register.
@@ -2700,13 +2880,13 @@ mod tests {
         assert_eq!(reused_records, fresh_records);
     }
 
-    /// Stores a dword at 0x200 and loads it back, then runs off the program's end.
+    /// Stores a dword at 0x1_0200 and loads it back, then runs off the program's end.
     fn storing_program() -> Arc<Program> {
         Arc::new(Program::new(
             vec![
-                i_type(Opcode::ADD, Register::X1, Register::X0, 0x200), // 0x1000
-                s_type(Opcode::SD, Register::X1, Register::X1, 0),      // 0x1004
-                i_type(Opcode::LD, Register::X2, Register::X1, 0),      // 0x1008
+                i_type(Opcode::ADD, Register::X1, Register::X0, 0x1_0200), // 0x1000
+                s_type(Opcode::SD, Register::X1, Register::X1, 0),         // 0x1004
+                i_type(Opcode::LD, Register::X2, Register::X1, 0),         // 0x1008
             ],
             0x1000,
             0x1000,
@@ -2739,7 +2919,7 @@ mod tests {
         );
         serial.emulate_batch(&mut |_| {}).expect("the run");
         let (addrs, registers) = tracked(&serial);
-        assert_eq!(addrs, [0x200]);
+        assert_eq!(addrs, [0x1_0200]);
         assert_ne!(registers, 0);
 
         let mut worker = RiscvEmulator::recover::<KoalaBear>(
@@ -3401,21 +3581,21 @@ mod tests {
             EmulatorOpts::default(),
         );
 
-        set_reg_raw(&mut emulator, Register::X1, 0x1000);
+        set_reg_raw(&mut emulator, Register::X1, 0x1_1000);
         set_reg_raw(&mut emulator, Register::X2, 0x1122_3344_5566_7788);
         emulator
             .emulate_instruction(&s_type(Opcode::SD, Register::X2, Register::X1, 0))
             .unwrap();
-        assert_eq!(emulator.word(0x1000), 0x5566_7788);
-        assert_eq!(emulator.word(0x1004), 0x1122_3344);
+        assert_eq!(emulator.word(0x1_1000), 0x5566_7788);
+        assert_eq!(emulator.word(0x1_1004), 0x1122_3344);
 
         emulator
             .emulate_instruction(&i_type(Opcode::LD, Register::X3, Register::X1, 0))
             .unwrap();
         assert_eq!(emulator.register(Register::X3), 0x1122_3344_5566_7788);
 
-        emulator.state.memory.write_word(0x1008, u32::MAX, 0, 0);
-        set_reg_raw(&mut emulator, Register::X1, 0x1008);
+        emulator.state.memory.write_word(0x1_1008, u32::MAX, 0, 0);
+        set_reg_raw(&mut emulator, Register::X1, 0x1_1008);
         emulator
             .emulate_instruction(&i_type(Opcode::LWU, Register::X4, Register::X1, 0))
             .unwrap();
@@ -3468,7 +3648,7 @@ mod tests {
             EmulatorOpts::default(),
         );
 
-        set_reg_raw(&mut emulator, Register::X1, 0x1000);
+        set_reg_raw(&mut emulator, Register::X1, 0x1_1000);
         set_reg_raw(&mut emulator, Register::X2, 0xCAFE_BABE_DEAD_BEEF);
 
         let sd = s_type(Opcode::SD, Register::X2, Register::X1, 0);
@@ -3574,54 +3754,385 @@ mod tests {
         assert_eq!((b, c), (0x1234_5678_FFFF_FFFE, 0xAAAA_BBBB_0000_0002));
     }
 
+    /// The loads and stores whose width is more than a byte, and that width.
+    const WIDE_ACCESSES: [(Opcode, u64); 8] = [
+        (Opcode::LH, 2),
+        (Opcode::LHU, 2),
+        (Opcode::LW, 4),
+        (Opcode::LWU, 4),
+        (Opcode::LD, 8),
+        (Opcode::SH, 2),
+        (Opcode::SW, 4),
+        (Opcode::SD, 8),
+    ];
+
+    fn is_store(opcode: Opcode) -> bool {
+        matches!(opcode, Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SD)
+    }
+
+    /// `opcode` with `x1` as its base and no offset: a load into `x4`, or a store of `x2`.
+    fn access(opcode: Opcode) -> Instruction {
+        if is_store(opcode) {
+            s_type(opcode, Register::X2, Register::X1, 0)
+        } else {
+            i_type(opcode, Register::X4, Register::X1, 0)
+        }
+    }
+
+    /// A misaligned load or store executes (Zicclsm) in a run that records a trace to prove, as in
+    /// any other, and is counted: the `MemoryUnaligned` chip proves it.
     #[test]
-    fn test_phase_3r3_lwu_ld_sd_alignment_errors() {
+    fn a_misaligned_access_executes_where_the_trace_is_proven() {
         let program = simple_fibo_program();
         let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
             program,
             Arc::new(RecordFinalPvsState::default()),
             EmulatorOpts::default(),
         );
+        assert!(emulator.mode == super::RiscvEmulatorMode::Trace);
 
-        // Use addresses in different 8-byte dwords to avoid timestamp collisions
-        // (failed instructions don't advance the clock but still touch memory metadata).
-        set_reg_raw(&mut emulator, Register::X1, 0x1002);
-        let err = emulator
-            .emulate_instruction(&i_type(Opcode::LWU, Register::X4, Register::X1, 0))
-            .unwrap_err();
+        // Each access in a dword of its own; every other one runs into the next dword.
+        for (index, (opcode, width)) in WIDE_ACCESSES.into_iter().enumerate() {
+            let offset = if index % 2 == 0 { 1 } else { 8 - width / 2 };
+            let addr = 0x1_0000 + 0x20 * index as u64 + offset;
+            set_reg_raw(&mut emulator, Register::X1, addr);
+            set_reg_raw(&mut emulator, Register::X2, 0xAABB_CCDD_EEFF_0011);
+            emulator
+                .emulate_instruction(&access(opcode))
+                .unwrap_or_else(|e| panic!("{opcode} at {addr:#x}: {e}"));
+        }
         assert_eq!(
-            err.abnormal_termination().map(|t| t.reason),
-            Some(super::TerminationReason::InvalidMemoryAccess {
-                opcode: Opcode::LWU,
-                addr: 0x1002,
-            })
+            emulator.state.misaligned_accesses,
+            WIDE_ACCESSES.len() as u64
         );
+    }
 
-        // Use 0x2004 (different 8-byte dword than 0x1002) to avoid timestamp conflict.
-        set_reg_raw(&mut emulator, Register::X1, 0x2004);
-        let err = emulator
-            .emulate_instruction(&i_type(Opcode::LD, Register::X4, Register::X1, 0))
-            .unwrap_err();
-        assert_eq!(
-            err.abnormal_termination().map(|t| t.reason),
-            Some(super::TerminationReason::InvalidMemoryAccess {
-                opcode: Opcode::LD,
-                addr: 0x2004,
-            })
+    /// Every wide load and store at every offset in a dword, against bytes read and written one at
+    /// a time, in the simple emulator and in a trace run: a misaligned access
+    /// executes (Zicclsm), and one that runs into the next dword reads or writes that one too, at
+    /// the C position. Only the misaligned ones are counted.
+    #[test]
+    fn a_misaligned_access_reads_and_writes_the_bytes_it_names() {
+        use crate::chips::chips::riscv_memory::event::MemoryRecord;
+        for trace in [false, true] {
+            let opts = EmulatorOpts::default();
+            let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
+                simple_fibo_program(),
+                Arc::new(RecordFinalPvsState::default()),
+                opts,
+            );
+            if !trace {
+                emulator.mode = super::RiscvEmulatorMode::Simple;
+                emulator.update_mode_deps();
+            }
+            let mut misaligned = 0;
+            for (case, (opcode, width)) in WIDE_ACCESSES.into_iter().enumerate() {
+                for offset in 0..8 {
+                    // Three dwords of distinct bytes, every other one with its top bit set, so
+                    // that both signs extend; the access starts in the middle one.
+                    let region = case as u64 * 8 + offset;
+                    let base = 0x1_0000 + 0x20 * region;
+                    let mut bytes: [u8; 24] = core::array::from_fn(|i| {
+                        let low = (region as u8).wrapping_mul(24).wrapping_add(i as u8) & 0x7f;
+                        low | if i % 2 == 1 { 0x80 } else { 0 }
+                    });
+                    let dword = |bytes: &[u8; 24], i: usize| {
+                        u64::from_le_bytes(bytes[8 * i..8 * i + 8].try_into().unwrap())
+                    };
+                    for i in 0..3 {
+                        let value = dword(&bytes, i);
+                        let record = MemoryRecord {
+                            value,
+                            chunk: 0,
+                            timestamp: 0,
+                        };
+                        emulator.state.memory.insert(base + 8 * i as u64, record);
+                    }
+                    let addr = base + 8 + offset;
+                    let (from, to) = (8 + offset as usize, 8 + (offset + width) as usize);
+                    set_reg_raw(&mut emulator, Register::X1, addr);
+                    let value = 0x8192_a3b4_c5d6_e7f8_u64.rotate_left(8 * region as u32);
+                    set_reg_raw(&mut emulator, Register::X2, value);
+
+                    let clk = emulator.state.clk;
+                    let instruction = access(opcode);
+                    if trace {
+                        emulator.emulate_instruction(&instruction).unwrap();
+                    } else {
+                        emulator.emulate_instruction_simple(&instruction).unwrap();
+                    }
+
+                    let at = format!("{opcode} at offset {offset}, trace {trace}");
+                    if is_store(opcode) {
+                        bytes[from..to].copy_from_slice(&value.to_le_bytes()[..width as usize]);
+                    } else {
+                        let loaded = bytes[from..to]
+                            .iter()
+                            .rev()
+                            .fold(0, |acc, &byte| (acc << 8) | u64::from(byte));
+                        let expected = match opcode {
+                            Opcode::LH => loaded as u16 as i16 as i64 as u64,
+                            Opcode::LW => loaded as u32 as i32 as i64 as u64,
+                            _ => loaded,
+                        };
+                        assert_eq!(emulator.register(Register::X4), expected, "{at}");
+                    }
+                    for i in 0..3 {
+                        let addr = base + 8 * i as u64;
+                        let value = emulator.state.memory.peek_dword(addr);
+                        assert_eq!(value, dword(&bytes, i), "{at}: the dword at {addr:#x}");
+                    }
+                    if offset % width != 0 {
+                        misaligned += 1;
+                    }
+                    assert_eq!(emulator.state.misaligned_accesses, misaligned, "{at}");
+                    // The next dword's access is at the C position, and a trace run leaves its
+                    // local event.
+                    let next = base + 16;
+                    let crosses = offset + width > 8;
+                    let (_, timestamp) = emulator.state.memory.peek_metadata(next);
+                    assert_eq!(timestamp == clk as u32 + 1, crosses, "{at}");
+                    if trace {
+                        let local = emulator.sink.local_memory_access_mut().get(&next).copied();
+                        assert_eq!(
+                            local.map(|event| event.final_mem_access.timestamp),
+                            crosses.then_some(clk as u32 + 1),
+                            "{at}: the next dword's local event"
+                        );
+                    }
+                }
+            }
+            assert_eq!(
+                misaligned, 44,
+                "the misaligned offsets of the eight accesses"
+            );
+        }
+    }
+
+    /// An unconstrained block's accesses are not proven: a misaligned one there executes in a run
+    /// that records a trace to prove, is not counted, and is rolled back with the block, the next
+    /// dword's write too.
+    #[test]
+    fn a_misaligned_access_in_an_unconstrained_block_is_rolled_back_and_not_counted() {
+        use crate::chips::chips::riscv_memory::event::MemoryRecord;
+        let program = simple_fibo_program();
+        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
+            program,
+            Arc::new(RecordFinalPvsState::default()),
+            EmulatorOpts::default(),
         );
+        let ecall = Instruction::new(Opcode::ECALL, 5, 10, 11, false, false);
+        let (low, high) = (0x1122_3344_5566_7788, 0x99aa_bbcc_ddee_ff00);
+        for (addr, value) in [(0x1_0000, low), (0x1_0008, high)] {
+            let record = MemoryRecord {
+                value,
+                chunk: 0,
+                timestamp: 0,
+            };
+            emulator.state.memory.insert(addr, record);
+        }
+        set_reg_raw(&mut emulator, Register::X1, 0x1_0005);
+        set_reg_raw(&mut emulator, Register::X2, 0xdead_beef_cafe_f00d);
 
-        set_reg_raw(&mut emulator, Register::X1, 0x3004);
-        set_reg_raw(&mut emulator, Register::X2, 0xAABB_CCDD_EEFF_0011);
-        let err = emulator
+        set_reg_raw(
+            &mut emulator,
+            Register::X5,
+            SyscallCode::ENTER_UNCONSTRAINED as u64,
+        );
+        emulator.emulate_instruction(&ecall).unwrap();
+        assert!(emulator.is_unconstrained());
+        emulator
             .emulate_instruction(&s_type(Opcode::SD, Register::X2, Register::X1, 0))
-            .unwrap_err();
+            .unwrap();
+        emulator
+            .emulate_instruction(&i_type(Opcode::LW, Register::X4, Register::X1, 0))
+            .unwrap();
+        assert_eq!(emulator.register(Register::X4), 0xffff_ffff_cafe_f00d);
         assert_eq!(
-            err.abnormal_termination().map(|t| t.reason),
-            Some(super::TerminationReason::InvalidMemoryAccess {
-                opcode: Opcode::SD,
-                addr: 0x3004,
-            })
+            emulator.state.memory.peek_dword(0x1_0008),
+            0x99aa_bbde_adbe_efca
         );
+        set_reg_raw(
+            &mut emulator,
+            Register::X5,
+            SyscallCode::EXIT_UNCONSTRAINED as u64,
+        );
+        emulator.emulate_instruction(&ecall).unwrap();
+        assert!(!emulator.is_unconstrained());
+
+        assert_eq!(emulator.state.memory.peek_dword(0x1_0000), low);
+        assert_eq!(emulator.state.memory.peek_dword(0x1_0008), high);
+        assert_eq!(emulator.state.misaligned_accesses, 0);
+    }
+
+    /// Runs `instruction` in the trace emulator or the simple one.
+    fn step(
+        emulator: &mut RiscvEmulator,
+        trace: bool,
+        instruction: &Instruction,
+    ) -> Result<(), super::EmulationError> {
+        if trace {
+            emulator.emulate_instruction(instruction)
+        } else {
+            emulator.emulate_instruction_simple(instruction)
+        }
+    }
+
+    /// The simple emulator, or the trace one.
+    fn emulator_in(trace: bool) -> RiscvEmulator {
+        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
+            simple_fibo_program(),
+            Arc::new(RecordFinalPvsState::default()),
+            EmulatorOpts::default(),
+        );
+        if !trace {
+            emulator.mode = super::RiscvEmulatorMode::Simple;
+            emulator.update_mode_deps();
+        }
+        emulator
+    }
+
+    /// The reason a run ended for, which must be an abnormal end with SIGSEGV's code.
+    fn segfault(error: super::EmulationError) -> super::TerminationReason {
+        let termination = *error
+            .abnormal_termination()
+            .unwrap_or_else(|| panic!("not an abnormal termination: {error}"));
+        assert_eq!(termination.exit_code, 139, "{termination}");
+        termination.reason
+    }
+
+    /// A load or store that lands where no guest access may ends the run, in the simple emulator
+    /// and in a trace run alike: below the lowest segment address, past the top of memory,
+    /// in the stack guard, and, for a store, in the code. An access that only runs into such a
+    /// region ends it too, and the code stays readable.
+    #[test]
+    fn an_access_where_none_may_land_ends_the_run() {
+        use super::TerminationReason;
+        use crate::primitives::layout::{HEAP_END, MEMORY_SIZE, MIN_SEGMENT_ADDR, STACK_BOTTOM};
+        type Reason = fn(Opcode, u64) -> TerminationReason;
+        let null: Reason = |opcode, addr| TerminationReason::NullAccess { opcode, addr };
+        let past: Reason = |opcode, addr| TerminationReason::InvalidMemoryAccess { opcode, addr };
+        let guard: Reason = |opcode, addr| TerminationReason::StackOverflow { opcode, addr };
+        let code_store: Reason = |opcode, addr| TerminationReason::StoreToCode { opcode, addr };
+        for trace in [false, true] {
+            let mut emulator = emulator_in(trace);
+            let code = emulator.program.code();
+            let refused = [
+                (Opcode::LW, MIN_SEGMENT_ADDR - 4, null),
+                (Opcode::SB, 0, null),
+                (Opcode::LD, MIN_SEGMENT_ADDR - 2, null),
+                (Opcode::LD, MEMORY_SIZE - 4, past),
+                (Opcode::SB, MEMORY_SIZE, past),
+                (Opcode::SD, HEAP_END - 4, guard),
+                (Opcode::LB, STACK_BOTTOM - 1, guard),
+                (Opcode::SW, code.start + 8, code_store),
+                (Opcode::SH, code.start - 1, code_store),
+                (Opcode::SD, code.end - 4, code_store),
+            ];
+            for (opcode, addr, reason) in refused {
+                // A refused instruction leaves the clock where it was: its registers set afresh.
+                set_reg_raw(&mut emulator, Register::X1, addr);
+                set_reg_raw(&mut emulator, Register::X2, 0x1234);
+                let at = format!("{opcode} at {addr:#x}, trace {trace}");
+                let err = step(&mut emulator, trace, &access(opcode)).expect_err(&at);
+                assert_eq!(segfault(err), reason(opcode, addr), "{at}");
+            }
+            let allowed = [
+                (Opcode::LW, code.start),
+                (Opcode::LD, MIN_SEGMENT_ADDR),
+                (Opcode::SD, HEAP_END - 8),
+                (Opcode::SB, STACK_BOTTOM),
+                (Opcode::SD, MEMORY_SIZE - 8),
+                (Opcode::SW, code.end),
+                (Opcode::SW, code.start - 4),
+            ];
+            for (opcode, addr) in allowed {
+                set_reg_raw(&mut emulator, Register::X1, addr);
+                set_reg_raw(&mut emulator, Register::X2, 0x1234);
+                let at = format!("{opcode} at {addr:#x}, trace {trace}");
+                step(&mut emulator, trace, &access(opcode)).expect(&at);
+            }
+        }
+    }
+
+    /// A syscall's memory access obeys the same rules as an instruction's: a precompile, `WRITE`
+    /// and `HINT_READ` that would touch a forbidden byte end the run as an `ECALL` fault, while an
+    /// empty `WRITE` or `HINT_READ`, which touches nothing, may pass a dangling pointer, as an
+    /// empty Rust slice does.
+    #[test]
+    fn a_syscall_access_where_none_may_land_ends_the_run() {
+        use super::TerminationReason::{NullAccess, StoreToCode};
+        let ecall = ecall();
+        for trace in [false, true] {
+            let call = |emulator: &mut RiscvEmulator, code: SyscallCode, a0: u64, a1: u64| {
+                set_reg_raw(emulator, Register::X5, code as u64);
+                set_reg_raw(emulator, Register::X10, a0);
+                set_reg_raw(emulator, Register::X11, a1);
+                step(emulator, trace, &ecall)
+            };
+
+            let mut emulator = emulator_in(trace);
+            set_reg_raw(&mut emulator, Register::X12, 4);
+            let err = call(&mut emulator, SyscallCode::WRITE, 1, 0x8).unwrap_err();
+            let reason = segfault(err);
+            assert_eq!(
+                reason,
+                NullAccess {
+                    opcode: Opcode::ECALL,
+                    addr: 0x8
+                },
+                "trace {trace}"
+            );
+
+            let mut emulator = emulator_in(trace);
+            set_reg_raw(&mut emulator, Register::X12, 0);
+            call(&mut emulator, SyscallCode::WRITE, 1, 0x8).expect("an empty write");
+
+            let mut emulator = emulator_in(trace);
+            emulator.state.input_stream.push(vec![7; 8]);
+            let err = call(&mut emulator, SyscallCode::HINT_READ, 0x8, 8).unwrap_err();
+            assert!(
+                matches!(
+                    segfault(err),
+                    NullAccess {
+                        opcode: Opcode::ECALL,
+                        addr: 0x8
+                    }
+                ),
+                "trace {trace}"
+            );
+
+            let mut emulator = emulator_in(trace);
+            emulator.state.input_stream.push(Vec::new());
+            call(&mut emulator, SyscallCode::HINT_READ, 0x8, 0).expect("an empty hint");
+
+            // SHA-256's message schedule, 64 words in 8-byte slots, of which it reads the first 16
+            // and writes the other 48: below the segments, and over the code, which it may read.
+            let mut emulator = emulator_in(trace);
+            let err = call(&mut emulator, SyscallCode::SHA_EXTEND, 0x100, 0).unwrap_err();
+            assert!(
+                matches!(
+                    segfault(err),
+                    NullAccess {
+                        opcode: Opcode::ECALL,
+                        ..
+                    }
+                ),
+                "trace {trace}"
+            );
+            let mut emulator = emulator_in(trace);
+            let schedule = emulator.program.code().start.next_multiple_of(8);
+            let err = call(&mut emulator, SyscallCode::SHA_EXTEND, schedule, 0).unwrap_err();
+            let reason = segfault(err);
+            assert_eq!(
+                reason,
+                StoreToCode {
+                    opcode: Opcode::ECALL,
+                    addr: schedule + 16 * 8
+                },
+                "trace {trace}: the first word it writes"
+            );
+        }
     }
 
     #[test]
@@ -3643,12 +4154,12 @@ mod tests {
         simple_emulator.mode = super::RiscvEmulatorMode::Simple;
         simple_emulator.update_mode_deps();
 
-        set_reg_raw(&mut trace_emulator, Register::X1, 0x1200);
+        set_reg_raw(&mut trace_emulator, Register::X1, 0x1_1200);
         set_reg_raw(&mut trace_emulator, Register::X2, 0xCAFE_BABE_DEAD_BEEF);
         set_reg_raw(&mut trace_emulator, Register::X5, 0xFFFF_FFFF);
         set_reg_raw(&mut trace_emulator, Register::X6, 1);
 
-        set_reg_raw(&mut simple_emulator, Register::X1, 0x1200);
+        set_reg_raw(&mut simple_emulator, Register::X1, 0x1_1200);
         set_reg_raw(&mut simple_emulator, Register::X2, 0xCAFE_BABE_DEAD_BEEF);
         set_reg_raw(&mut simple_emulator, Register::X5, 0xFFFF_FFFF);
         set_reg_raw(&mut simple_emulator, Register::X6, 1);
@@ -3673,8 +4184,14 @@ mod tests {
             trace_emulator.state.registers,
             simple_emulator.state.registers
         );
-        assert_eq!(trace_emulator.word(0x1200), simple_emulator.word(0x1200));
-        assert_eq!(trace_emulator.word(0x1204), simple_emulator.word(0x1204));
+        assert_eq!(
+            trace_emulator.word(0x1_1200),
+            simple_emulator.word(0x1_1200)
+        );
+        assert_eq!(
+            trace_emulator.word(0x1_1204),
+            simple_emulator.word(0x1_1204)
+        );
     }
 
     #[test]

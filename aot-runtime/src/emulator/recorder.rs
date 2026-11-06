@@ -16,11 +16,15 @@
 //! recorded. A load or a store accesses its dword at the clock itself through
 //! `read_and_update_metadata` or `write_and_capture_prev`, which set the accessed bit the
 //! finalisation reads; a narrow store merges into the dword `peek_dword` finds and records that
-//! dword as the value it replaced. A misaligned address fails with the emitting body's error
-//! before memory is touched.
+//! dword as the value it replaced. An access the memory guard refuses (`guard::access_fault`)
+//! fails as the emitting body's does, after the register reads and before memory is touched. A
+//! misaligned one is counted as the emitting body counts it and goes to the unaligned table rather
+//! than the memory list; when it runs into the next dword, it accesses that one at the clock plus
+//! `C`, a local event and the table's next-dword access.
 //!
 //! A direct entry skips what only the snapshot thread reads: the touched-register mark, the
-//! first-touch memory store and the chunk-split estimate (`track_chunk_split_address`). That holds
+//! first-touch memory store and the chunk-split estimate and counts (`track_chunk_split_address`,
+//! a misaligned store's next-dword write). That holds
 //! only on a replay worker, which [`AotEmulatorCore::run_record_blocks`] asserts: it hands out no
 //! snapshot, and `recover_in_place` turns its chunk split off (`ChunkSplitConfig::disabled`), so
 //! neither `can_fit_block` nor `should_split` depends on the skipped counts and the replay stops
@@ -59,6 +63,10 @@ use pico_vm::{
     emulator::riscv::{
         history::{Access, ReadAccess},
         record::AluStream,
+        riscv_emulator::{
+            guard::access_width,
+            util::{dword_bytes, splice_dword, straddling_bytes},
+        },
         sink::BlockRows,
     },
 };
@@ -69,6 +77,8 @@ enum ChipList {
     None,
     Alu(AluStream),
     Memory,
+    /// A misaligned load or store, with its next-dword access when it crosses into that dword.
+    Unaligned(Option<Access>),
     Branch,
 }
 
@@ -157,6 +167,7 @@ impl AotEmulatorCore {
         mem_rw_exact: usize,
         non_register_global_lookup_base_max: usize,
         reg_write_mask: u32,
+        memory_insns: usize,
     ) -> bool {
         let fits = self.insn_count + u64::from(insn_count) <= self.replay_target;
         debug_assert!(
@@ -167,6 +178,7 @@ impl AotEmulatorCore {
                     mem_rw_exact,
                     non_register_global_lookup_base_max,
                     reg_write_mask,
+                    memory_insns,
                     &self.chunk_split_config,
                 ),
             "the chunk split refuses a recording block of {insn_count} instruction(s) at clk {} \
@@ -312,7 +324,7 @@ impl AotEmulatorCore {
     ///
     /// # Errors
     ///
-    /// The emitting body's, on a misaligned address.
+    /// The emitting body's, on an access the memory guard refuses.
     #[inline(never)]
     pub fn load_direct_rec(
         &mut self,
@@ -345,7 +357,7 @@ impl AotEmulatorCore {
     ///
     /// # Errors
     ///
-    /// The emitting body's, on a misaligned address.
+    /// The emitting body's, on an access the memory guard refuses.
     #[inline(never)]
     pub fn store_direct_rec(
         &mut self,
@@ -359,27 +371,23 @@ impl AotEmulatorCore {
         let (a, read_a) = self.read_reg_direct(sink.as_deref_mut(), usize::from(insn.op_a), A);
         let c = insn.op_c;
         let addr = b.wrapping_add(c);
-        Self::check_alignment(insn.opcode, addr)?;
-        let dword_addr = Self::dword_addr(addr);
-        let store =
-            self.write_mem_direct(sink.as_deref_mut(), dword_addr, |dword| match insn.opcode {
-                Opcode::SB => Self::write_u8_into_word(dword, addr, a),
-                Opcode::SH => Self::write_u16_into_word(dword, addr, a),
-                Opcode::SW => Self::insert_word(dword, addr, a),
-                Opcode::SD => a,
-                other => unreachable!("{other:?} is not a store"),
-            });
+        self.check_access(insn.opcode, addr)?;
+        let (store, list) = if addr.is_multiple_of(access_width(insn.opcode)) {
+            let dword_addr = Self::dword_addr(addr);
+            let store =
+                self.write_mem_direct(sink.as_deref_mut(), dword_addr, |dword| match insn.opcode {
+                    Opcode::SB => Self::write_u8_into_word(dword, addr, a),
+                    Opcode::SH => Self::write_u16_into_word(dword, addr, a),
+                    Opcode::SW => Self::insert_word(dword, addr, a),
+                    Opcode::SD => a,
+                    other => unreachable!("{other:?} is not a store"),
+                });
+            (store, ChipList::Memory)
+        } else {
+            self.misaligned_store_direct(sink.as_deref_mut(), insn.opcode, addr, a)?
+        };
         let (reads, writes) = ([(A, read_a), (B, read_b)], [(Memory, store)]);
-        self.close_direct(
-            sink,
-            pc,
-            insn,
-            reads,
-            writes,
-            ChipList::Memory,
-            false,
-            [a, b, c],
-        );
+        self.close_direct(sink, pc, insn, reads, writes, list, false, [a, b, c]);
         Ok(())
     }
 
@@ -497,55 +505,112 @@ impl AotEmulatorCore {
         let (b, read_b) = self.read_reg_direct(sink.as_deref_mut(), insn.op_b as usize, B);
         let c = insn.op_c;
         let addr = b.wrapping_add(c);
-        Self::check_alignment(insn.opcode, addr)?;
+        self.check_access(insn.opcode, addr)?;
+        let aligned = addr.is_multiple_of(access_width(insn.opcode));
+        if !aligned {
+            self.misaligned(insn.opcode, addr)?;
+        }
         let (dword, read_memory) =
             self.read_mem_direct(sink.as_deref_mut(), Self::dword_addr(addr));
-        let a = match insn.opcode {
-            Opcode::LB => Self::read_u8_from_word(dword, addr) as i8 as i64 as u64,
-            Opcode::LBU => u64::from(Self::read_u8_from_word(dword, addr)),
-            Opcode::LH => (Self::read_u16_from_word(dword, addr) as i16) as i64 as u64,
-            Opcode::LHU => u64::from(Self::read_u16_from_word(dword, addr)),
-            Opcode::LW => (Self::extract_word(dword, addr) as u32 as i32) as i64 as u64,
-            Opcode::LWU => Self::extract_word(dword, addr),
-            Opcode::LD => dword,
-            other => unreachable!("{other:?} is not a load"),
+        let (a, list) = if aligned {
+            let a = match insn.opcode {
+                Opcode::LB => Self::read_u8_from_word(dword, addr) as i8 as i64 as u64,
+                Opcode::LBU => u64::from(Self::read_u8_from_word(dword, addr)),
+                Opcode::LH => (Self::read_u16_from_word(dword, addr) as i16) as i64 as u64,
+                Opcode::LHU => u64::from(Self::read_u16_from_word(dword, addr)),
+                Opcode::LW => (Self::extract_word(dword, addr) as u32 as i32) as i64 as u64,
+                Opcode::LWU => Self::extract_word(dword, addr),
+                Opcode::LD => dword,
+                other => unreachable!("{other:?} is not a load"),
+            };
+            (a, ChipList::Memory)
+        } else {
+            self.misaligned_load_direct(sink.as_deref_mut(), insn.opcode, addr, dword)
         };
         let write = self.write_reg_direct(sink.as_deref_mut(), usize::from(insn.op_a), a);
         let (reads, writes) = ([(B, read_b), (Memory, read_memory)], [(A, write)]);
-        self.close_direct(
-            sink,
-            pc,
-            insn,
-            reads,
-            writes,
-            ChipList::Memory,
-            x0,
-            [a, b, c],
-        );
+        self.close_direct(sink, pc, insn, reads, writes, list, x0, [a, b, c]);
         Ok(())
     }
 
-    /// The emitting bodies' alignment test and error.
-    #[inline(always)]
-    fn check_alignment(opcode: Opcode, addr: u64) -> Result<(), String> {
-        let width = match opcode {
-            Opcode::LB | Opcode::LBU | Opcode::SB => return Ok(()),
-            Opcode::LH | Opcode::LHU | Opcode::SH => 2,
-            Opcode::LW | Opcode::LWU | Opcode::SW => 4,
-            Opcode::LD | Opcode::SD => 8,
-            other => unreachable!("{other:?} does not access memory"),
-        };
-        if addr.is_multiple_of(width) {
-            Ok(())
-        } else {
-            Err(Self::unaligned(opcode, addr))
-        }
-    }
-
+    /// The value a misaligned load at `addr` puts in its register, extended as `opcode` says,
+    /// `dword` being the aligned dword it read; the next dword is read too when the load runs
+    /// into it, as the emitting body reads it.
     #[cold]
     #[inline(never)]
-    fn unaligned(opcode: Opcode, addr: u64) -> String {
-        format!("Unaligned {opcode:?} at {addr:#x}")
+    fn misaligned_load_direct(
+        &mut self,
+        sink: LentSink<'_>,
+        opcode: Opcode,
+        addr: u64,
+        dword: u64,
+    ) -> (u64, ChipList) {
+        let (offset, width) = (addr % 8, access_width(opcode));
+        let (bytes, next) = if offset + width <= 8 {
+            (dword_bytes(dword, offset, width), None)
+        } else {
+            let (next, access) = self.read_next_dword_direct(sink, Self::dword_addr(addr) + 8);
+            (straddling_bytes(dword, next, offset, width), Some(access))
+        };
+        let a = match opcode {
+            Opcode::LH => bytes as u16 as i16 as i64 as u64,
+            Opcode::LW => bytes as u32 as i32 as i64 as u64,
+            Opcode::LHU | Opcode::LWU | Opcode::LD => bytes,
+            other => unreachable!("{other:?} is not a load that can be misaligned"),
+        };
+        (a, ChipList::Unaligned(next))
+    }
+
+    /// Writes the low bytes of `value` at a misaligned `addr`, as the emitting body writes them:
+    /// the aligned dword's access, the step's memory access, and the next dword's when the store
+    /// runs into it.
+    #[cold]
+    #[inline(never)]
+    fn misaligned_store_direct(
+        &mut self,
+        mut sink: LentSink<'_>,
+        opcode: Opcode,
+        addr: u64,
+        value: u64,
+    ) -> Result<(Access, ChipList), String> {
+        self.misaligned(opcode, addr)?;
+        let (offset, width) = (addr % 8, access_width(opcode));
+        let low = width.min(8 - offset);
+        let dword_addr = Self::dword_addr(addr);
+        let store = self.write_mem_direct(sink.as_deref_mut(), dword_addr, |dword| {
+            splice_dword(dword, offset, low, value)
+        });
+        let next = (low < width).then(|| {
+            self.write_next_dword_direct(sink, dword_addr + 8, width - low, value >> (8 * low))
+        });
+        Ok((store, ChipList::Unaligned(next)))
+    }
+
+    /// Reads the dword at `addr`, the one after a misaligned load's aligned dword, at the clock
+    /// plus `C`.
+    fn read_next_dword_direct(&mut self, sink: LentSink<'_>, addr: u64) -> (u64, Access) {
+        let (value, read) = self.read_mem_direct_at(sink, addr, self.clk + 1);
+        let access = Access {
+            value,
+            prev_value: value,
+            prev_chunk: read.prev_chunk,
+            prev_timestamp: read.prev_timestamp,
+        };
+        (value, access)
+    }
+
+    /// Replaces the low `width` bytes of the dword at `addr`, the one after a misaligned store's
+    /// aligned dword, with those of `value`, at the clock plus `C`.
+    fn write_next_dword_direct(
+        &mut self,
+        sink: LentSink<'_>,
+        addr: u64,
+        width: u64,
+        value: u64,
+    ) -> Access {
+        self.write_mem_direct_at(sink, addr, self.clk + 1, |found| {
+            splice_dword(found, 0, width, value)
+        })
     }
 
     #[inline(always)]
@@ -693,7 +758,18 @@ impl AotEmulatorCore {
 
     #[inline(always)]
     fn read_mem_direct(&mut self, sink: LentSink<'_>, addr: u64) -> (u64, ReadAccess) {
-        let (chunk, timestamp) = (self.current_chunk, self.clk);
+        self.read_mem_direct_at(sink, addr, self.clk)
+    }
+
+    /// [`Self::read_mem_direct`] at `timestamp`.
+    #[inline(always)]
+    fn read_mem_direct_at(
+        &mut self,
+        sink: LentSink<'_>,
+        addr: u64,
+        timestamp: u32,
+    ) -> (u64, ReadAccess) {
+        let chunk = self.current_chunk;
         let (value, prev_chunk, prev_timestamp) =
             self.memory.read_and_update_metadata(addr, chunk, timestamp);
         if let Some(sink) = sink {
@@ -727,7 +803,19 @@ impl AotEmulatorCore {
         addr: u64,
         merge: impl FnOnce(u64) -> u64,
     ) -> Access {
-        let (chunk, timestamp) = (self.current_chunk, self.clk);
+        self.write_mem_direct_at(sink, addr, self.clk, merge)
+    }
+
+    /// [`Self::write_mem_direct`] at `timestamp`.
+    #[inline(always)]
+    fn write_mem_direct_at(
+        &mut self,
+        sink: LentSink<'_>,
+        addr: u64,
+        timestamp: u32,
+        merge: impl FnOnce(u64) -> u64,
+    ) -> Access {
+        let chunk = self.current_chunk;
         let found = self.memory.peek_dword(addr);
         let value = merge(found);
         let (_, prev_chunk, prev_timestamp) = self
@@ -789,6 +877,7 @@ impl AotEmulatorCore {
             ChipList::None => {}
             ChipList::Alu(stream) => rows.alu(stream, step),
             ChipList::Memory => rows.memory(step),
+            ChipList::Unaligned(next) => rows.unaligned(step, next),
             ChipList::Branch => rows.branch(step),
         }
         let [a, ..] = operands;
@@ -796,7 +885,9 @@ impl AotEmulatorCore {
             rows.operand_exception(step, MemoryAccessPosition::A, a);
         }
         #[cfg(feature = "recorder-check")]
-        self.check_direct(&rows, step, pc, next_pc, insn, &reads, &writes, operands);
+        self.check_direct(
+            &rows, step, pc, next_pc, insn, &reads, &writes, list, operands,
+        );
     }
 
     /// [`Self::write_direct`] for an instruction that falls through, then the pc and the clock
@@ -835,6 +926,7 @@ impl AotEmulatorCore {
         insn: Instruction,
         reads: &[(MemoryAccessPosition, ReadAccess)],
         writes: &[(MemoryAccessPosition, Access)],
+        list: ChipList,
         operands: [u64; 3],
     ) {
         use pico_vm::chips::chips::riscv_memory::event::{
@@ -870,6 +962,38 @@ impl AotEmulatorCore {
             (position, MemoryRecordEnum::from(record))
         });
         let accesses: Vec<_> = read_records.chain(write_records).collect();
+        // The next dword's access, at the clock plus `C`: a store writes it, a load reads it.
+        let next = match list {
+            ChipList::Unaligned(Some(next))
+                if matches!(
+                    fetched.opcode,
+                    Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SD
+                ) =>
+            {
+                Some(
+                    MemoryWriteRecord::new(
+                        next.value,
+                        chunk,
+                        clk + 1,
+                        next.prev_value,
+                        next.prev_chunk,
+                        next.prev_timestamp,
+                    )
+                    .into(),
+                )
+            }
+            ChipList::Unaligned(Some(next)) => Some(
+                MemoryReadRecord::new(
+                    next.value,
+                    chunk,
+                    clk + 1,
+                    next.prev_chunk,
+                    next.prev_timestamp,
+                )
+                .into(),
+            ),
+            _ => None,
+        };
         // As an ordinary helper decides it, from the program's instruction.
         let alu = fetched.is_alu_instruction() && fetched.op_a != 0;
         rows.check_step(
@@ -879,6 +1003,7 @@ impl AotEmulatorCore {
             u64::from(pc),
             u64::from(next_pc),
             &accesses,
+            next,
             alu,
             operands,
             &fetched,
@@ -916,11 +1041,11 @@ mod tests {
     };
 
     use super::Recorder;
-    use crate::{emulator::EmittedChunk, AotEmulatorCore, RecordBlockFn, RecordStep};
+    use crate::{
+        emulator::EmittedChunk, AotEmulatorCore, BlockFn, NextStep, RecordBlockFn, RecordStep,
+    };
 
     const HALT: u32 = SyscallCode::HALT as u32;
-    /// A precompile that panics on `a0 = 0`, below the memory floor.
-    const SHA_EXTEND: u32 = SyscallCode::SHA_EXTEND as u32;
     const ECALL: Instruction = Instruction::new(Opcode::ECALL, 5, 10, 11, false, false);
 
     const fn addi(rd: u8, rs1: u64, imm: u64) -> Instruction {
@@ -931,6 +1056,20 @@ mod tests {
     fn program(code: u32) -> Arc<Program> {
         Arc::new(Program::new(
             vec![addi(5, 0, u64::from(code)), addi(1, 1, 1), ECALL],
+            0x1000,
+            0x1000,
+        ))
+    }
+
+    /// `ADDI x5, x0, ED_ADD`, `ADDI x10, x0, p`, then the `ECALL`: the precompile panics on its
+    /// misaligned point `p`, where the memory guard would let it read.
+    fn unwinding_program() -> Arc<Program> {
+        Arc::new(Program::new(
+            vec![
+                addi(5, 0, SyscallCode::ED_ADD as u64),
+                addi(10, 0, BASE + 1),
+                ECALL,
+            ],
             0x1000,
             0x1000,
         ))
@@ -1020,7 +1159,7 @@ mod tests {
             .position(ends_block)
             .map_or(rest.len(), |end| end + 1)];
         let insns = block.len() as u32;
-        if !emu.can_run_record_block(insns, 0, 0, 0) {
+        if !emu.can_run_record_block(insns, 0, 0, 0, 0) {
             return emu.with_sink_on_core(rec, AotEmulatorCore::interpret_from_current_pc);
         }
         let (body, ecall) = match block.split_last() {
@@ -1061,7 +1200,7 @@ mod tests {
     ) -> Result<RecordStep, String> {
         let pc = emu.pc;
         let insn = emu.program.fetch(pc);
-        if !emu.can_run_record_block(1, 0, 0, 0) {
+        if !emu.can_run_record_block(1, 0, 0, 0, 0) {
             return emu.with_sink_on_core(rec, AotEmulatorCore::interpret_from_current_pc);
         }
         if insn.opcode == Opcode::ECALL {
@@ -1098,7 +1237,7 @@ mod tests {
     }
 
     /// Where the memory tests load and store.
-    const BASE: u64 = 0x8000;
+    const BASE: u64 = 0x2_0000;
 
     /// Every load and store width, over dwords written whole, merged into and only read; a base
     /// register the load overwrites and one the store also stores; loads into `x0` of non-zero and
@@ -1225,78 +1364,268 @@ mod tests {
         assert!(!reference.memory_finalize_events.is_empty());
     }
 
-    /// The tables hold only the rows of the instructions before the misaligned access.
-    #[test]
-    fn a_misaligned_access_fails_as_the_emitting_body_does() {
-        hold_records_unbounded();
+    /// A block of the one instruction at the core's pc as the code generator writes its plain
+    /// body, emitting: a load or a store through its `_no_count` helper, anything else through
+    /// the fallback.
+    fn emitting_block(emu: &mut AotEmulatorCore) -> Result<NextStep, String> {
         use Opcode::*;
-        for (access, error) in [
+        let (pc, insn) = (emu.pc, emu.program.fetch(emu.pc));
+        let emitting = emu.is_emitting();
+        let (a, b, c, next_pc) = (
+            usize::from(insn.op_a),
+            insn.op_b as usize,
+            insn.op_c,
+            pc + 4,
+        );
+        match insn.opcode {
+            LB => emu.lb_no_count(emitting, a, b, c, next_pc)?,
+            LBU => emu.lbu_no_count(emitting, a, b, c, next_pc)?,
+            LH => emu.lh_no_count(emitting, a, b, c, next_pc)?,
+            LHU => emu.lhu_no_count(emitting, a, b, c, next_pc)?,
+            LW => emu.lw_no_count(emitting, a, b, c, next_pc)?,
+            LWU => emu.lwu_no_count(emitting, a, b, c, next_pc)?,
+            LD => emu.ld_no_count(emitting, a, b, c, next_pc)?,
+            SB => emu.sb_no_count(emitting, a, b, c, next_pc)?,
+            SH => emu.sh_no_count(emitting, a, b, c, next_pc)?,
+            SW => emu.sw_no_count(emitting, a, b, c, next_pc)?,
+            SD => emu.sd_no_count(emitting, a, b, c, next_pc)?,
+            _ => emu.debug_interpret_single_step()?,
+        }
+        Ok(NextStep::Dynamic(emu.pc))
+    }
+
+    /// `program` run by [`emitting_block`]s: the run's result, its chunk and the core.
+    fn emitted_one_by_one(
+        program: Arc<Program>,
+    ) -> (Result<(), String>, EmittedChunk, AotEmulatorCore) {
+        let mut emu = recorder_core(program);
+        let block: BlockFn = emitting_block;
+        let ran = emu.run_blocks(|_| Some(block));
+        let emitted = cut(&mut emu);
+        (ran, emitted, emu)
+    }
+
+    /// Runs `program` through the recording blocks and through the emitting bodies, and checks
+    /// that both end the same way and leave the same rows, the unaligned table's included, the
+    /// same registers and the same count of misaligned accesses. Returns the recorded run.
+    fn recorded_as_emitted(
+        program: Arc<Program>,
+        what: &str,
+    ) -> (Result<(), String>, EmittedChunk, AotEmulatorCore) {
+        let (ran, recorded, emu) = recorded_one_by_one(program.clone());
+        let (emitted_ran, emitted, emitting) = emitted_one_by_one(program);
+        assert_eq!(ran, emitted_ran, "{what}: how the run ended");
+        assert_eq!(
+            format!("{:?}", emu.fault),
+            format!("{:?}", emitting.fault),
+            "{what}: the fault"
+        );
+        let history = |chunk: &EmittedChunk| chunk.record.history.clone().expect("a history");
+        let (recorded_history, emitted_history) = (history(&recorded), history(&emitted));
+        assert_eq!(
+            recorded_history.unaligned.as_slice(),
+            emitted_history.unaligned.as_slice(),
+            "{what}: the unaligned table"
+        );
+        assert_eq!(
+            first_difference(&emitted.record, &recorded.record),
+            None,
+            "{what}"
+        );
+        assert_eq!(emu.registers, emitting.registers, "{what}: the registers");
+        assert_eq!(
             (
-                Instruction::new(LW, 4, 1, 2, false, true),
-                "Unaligned LW at 0x8002",
+                emu.misaligned_accesses,
+                emu.chunk_split_state.num_misaligned
             ),
             (
-                Instruction::new(LHU, 4, 1, 1, false, true),
-                "Unaligned LHU at 0x8001",
+                emitting.misaligned_accesses,
+                emitting.chunk_split_state.num_misaligned
             ),
-            (
-                Instruction::new(LD, 4, 1, 4, false, true),
-                "Unaligned LD at 0x8004",
-            ),
-            (
-                Instruction::new(SH, 1, 1, 3, false, true),
-                "Unaligned SH at 0x8003",
-            ),
-            (
-                Instruction::new(SW, 1, 1, 6, false, true),
-                "Unaligned SW at 0x8006",
-            ),
-            (
-                Instruction::new(SD, 1, 1, 12, false, true),
-                "Unaligned SD at 0x800c",
-            ),
-        ] {
+            "{what}: the misaligned accesses counted"
+        );
+        (ran, recorded, emu)
+    }
+
+    /// Every load and store width at a misaligned address, within its dword and running into the
+    /// next, over dwords whose high bits are set so the sign fill shows; a crossing load into `x0`;
+    /// crossing stores into a dword written whole, one merged into and one never written; then
+    /// each dword read back whole, and a halt.
+    fn misaligned_program() -> Arc<Program> {
+        use Opcode::*;
+        let folded = |rd, value| Instruction::new(ADD, rd, value, 0, true, true);
+        let load = |opcode, rd, rs1, imm| Instruction::new(opcode, rd, rs1, imm, false, true);
+        let store = |opcode, rs2, rs1, imm| Instruction::new(opcode, rs2, rs1, imm, false, true);
+        let insns = vec![
+            addi(1, 0, BASE),
+            folded(2, 0x8899_aabb_ccdd_eeff),
+            folded(3, 0xf0e1_d2c3_b4a5_9687),
+            store(SD, 2, 1, 0),
+            store(SD, 3, 1, 8),
+            // Within the dword.
+            load(LH, 4, 1, 1),
+            load(LHU, 5, 1, 3),
+            load(LW, 6, 1, 2),
+            load(LWU, 7, 1, 1),
+            load(LB, 8, 1, 7),
+            load(LBU, 9, 1, 5),
+            // Into the next dword; `a0` and `a1` stay clear for the halt.
+            load(LH, 20, 1, 7),
+            load(LHU, 21, 1, 7),
+            load(LW, 12, 1, 5),
+            load(LWU, 13, 1, 6),
+            load(LD, 14, 1, 3),
+            load(LD, 15, 1, 9),
+            load(LW, 0, 1, 6),
+            // Stores within the dword, then into the next: one written whole, one merged into, and
+            // one never written.
+            store(SH, 3, 1, 1),
+            store(SW, 3, 1, 10),
+            store(SH, 2, 1, 7),
+            store(SW, 2, 1, 14),
+            store(SD, 3, 1, 4),
+            store(SD, 2, 1, 21),
+            store(SB, 3, 1, 3),
+            load(LD, 16, 1, 0),
+            load(LD, 17, 1, 8),
+            load(LD, 18, 1, 16),
+            load(LD, 19, 1, 24),
+            addi(5, 0, u64::from(HALT)),
+            self::ECALL,
+        ];
+        Arc::new(Program::new(insns, 0x1000, 0x1000))
+    }
+
+    /// A recording block runs a misaligned load or store natively, as the emitting body does:
+    /// the same rows, an unaligned step with its next dword's access where it crosses, the same
+    /// values and the same count. pico-vm's interpreter agrees.
+    #[test]
+    fn misaligned_accesses_record_as_the_emitting_body_does() {
+        hold_records_unbounded();
+        let program = misaligned_program();
+        let (ran, recorded, emu) = recorded_as_emitted(program.clone(), "misaligned");
+        ran.expect("the guest halts");
+        let history = recorded.record.history.as_ref().expect("a history");
+        let crossing = history
+            .unaligned
+            .iter()
+            .filter(|unaligned| unaligned.crosses != 0)
+            .count();
+        // Four loads and two stores within their dword; seven loads and four stores across.
+        assert_eq!((history.unaligned.len(), crossing), (17, 11));
+        assert_eq!(emu.misaligned_accesses, 17);
+        assert_eq!(history.operand_exceptions.len(), 1, "the crossing `LW x0`");
+        assert_eq!(
+            emu.registers[4].value, 0xffff_ffff_ffff_ddee,
+            "LH sign-extends"
+        );
+        assert_eq!(
+            emu.registers[12].value, 0xffff_ffff_8788_99aa,
+            "LW sign-extends"
+        );
+
+        let (reference, _) = interpreted(program.clone());
+        assert_eq!(first_difference(&reference, &recorded.record), None);
+        let (vm, vm_registers) =
+            vm_replayed(program, recorded.cycles).expect("pico-vm's replay halts");
+        assert_eq!(
+            differences_from_vm(&vm, &recorded.record),
+            Vec::<String>::new()
+        );
+        assert_eq!(emu.registers.0.map(|register| register.value), vm_registers);
+    }
+
+    /// The same accesses in one recording block, its rows reserved for the whole body as the code
+    /// generator reserves them: the steps land where the interpreter puts them.
+    #[test]
+    fn a_block_of_misaligned_accesses_records_as_the_interpreter_does() {
+        hold_records_unbounded();
+        let program = misaligned_program();
+        let mut emu = recorder_core(program.clone());
+        let block: RecordBlockFn = recording_block;
+        emu.run_record_blocks(|_| Some(block))
+            .expect("the guest halts");
+        // Every instruction but the closing `ECALL` ran direct, none through the fallback.
+        assert_eq!(
+            emu.recorder_direct_insns(),
+            program.instructions.len() as u64 - 1
+        );
+        let recorded = cut(&mut emu);
+        let history = recorded.record.history.as_ref().expect("a history");
+        assert_eq!(history.unaligned.len(), 17);
+        assert_eq!(emu.misaligned_accesses, 17);
+        let (reference, _) = interpreted(program);
+        assert_eq!(first_difference(&reference, &recorded.record), None);
+    }
+
+    /// A load or store the memory guard refuses ends the run where the emitting body ends it,
+    /// with the same fault, after the same register reads and before memory is touched: below the
+    /// floor, in the stack guard, into the code and past the top of memory, each width.
+    #[test]
+    fn a_refused_access_fails_as_the_emitting_body_does() {
+        use pico_vm::primitives::layout::{HEAP_END, MEMORY_SIZE};
+        use Opcode::*;
+        hold_records_unbounded();
+        // Above the floor, so its code can be stored into.
+        const CODE: u64 = 0x3_0000;
+        let (null, stack, top, code) = (
+            "null access",
+            "stack overflow",
+            "invalid memory access",
+            "store into code",
+        );
+        let accesses = [
+            (null, 0x100, [LB, LHU, LW, SB, SH, SD]),
+            (stack, HEAP_END, [LBU, LH, LD, SB, SW, SD]),
+            // Its last byte past the top.
+            (top, MEMORY_SIZE - 1, [LH, LHU, LWU, LD, SH, SW]),
+        ];
+        let mut cases: Vec<_> = accesses
+            .into_iter()
+            .flat_map(|(kind, addr, opcodes)| opcodes.map(|opcode| (kind, addr, opcode)))
+            .collect();
+        // Crossing into the stack guard from below, a byte at the top, and a store into the code.
+        cases.extend([(stack, HEAP_END - 2, LW), (stack, HEAP_END - 4, SD)]);
+        cases.extend([(top, MEMORY_SIZE, LB), (top, MEMORY_SIZE, SB)]);
+        cases.extend([SB, SH, SW, SD].map(|opcode| (code, CODE + 4, opcode)));
+        // A load from the code is no fault.
+        cases.extend([LB, LD].map(|opcode| ("", CODE + 4, opcode)));
+        for (kind, addr, opcode) in cases {
+            let access = Instruction::new(opcode, 4, 1, 0, false, true);
             let program = Arc::new(Program::new(
                 vec![
-                    addi(1, 0, BASE),
+                    Instruction::new(ADD, 1, 0, addr, true, true),
                     access,
                     addi(5, 0, u64::from(HALT)),
                     self::ECALL,
                 ],
-                0x1000,
-                0x1000,
+                CODE,
+                CODE,
             ));
-            let mut emu = recorder_core(program);
-            let block: RecordBlockFn = one_instruction_block;
-            let ran = emu.run_record_blocks(|_| Some(block));
-            assert_eq!(ran, Err(error.to_string()), "{access:?}");
-            assert!(emu.is_emitting(), "the sink is back on the core");
-            let recorded = cut(&mut emu);
+            let what = format!("{kind}: {access:?} at {addr:#x}");
+            let (ran, recorded, emu) = recorded_as_emitted(program.clone(), &what);
+            if kind.is_empty() {
+                ran.expect(&what);
+                continue;
+            }
+            let error = ran.expect_err(&what);
+            assert!(error.contains(kind), "{what}: {error}");
+            assert!(emu.is_emitting(), "{what}: the sink is back on the core");
             assert_eq!(
                 table_rows(&recorded.record),
-                (1, 1, 1, 0),
-                "{access:?}: rows past the first instruction"
+                (1, 0, 1, 0),
+                "{what}: rows past the first instruction"
             );
-
-            let mut ordinary = recorder_core(emu.program.clone());
-            ordinary.pc = 0x1004;
-            ordinary.write_reg(1, BASE);
-            ordinary.update_insn_clock();
-            let emitting = ordinary.is_emitting();
-            let (rd, rs1, imm) = (usize::from(access.op_a), access.op_b as usize, access.op_c);
-            let theirs = match access.opcode {
-                LW => ordinary.lw_no_count(emitting, rd, rs1, imm, 0x1008),
-                LHU => ordinary.lhu_no_count(emitting, rd, rs1, imm, 0x1008),
-                LD => ordinary.ld_no_count(emitting, rd, rs1, imm, 0x1008),
-                SH => ordinary.sh_no_count(emitting, rd, rs1, imm, 0x1008),
-                SW => ordinary.sw_no_count(emitting, rd, rs1, imm, 0x1008),
-                SD => ordinary.sd_no_count(emitting, rd, rs1, imm, 0x1008),
-                other => unreachable!("{other:?}"),
-            };
+            let (reference, interpreter) = interpreted(program);
             assert_eq!(
-                theirs,
-                Err(error.to_string()),
-                "the ordinary helper's error"
+                first_difference(&reference, &recorded.record),
+                None,
+                "{what}"
+            );
+            assert_eq!(
+                format!("{:?}", emu.fault),
+                format!("{:?}", interpreter.fault),
+                "{what}: the interpreter's fault"
             );
         }
     }
@@ -1520,7 +1849,7 @@ mod tests {
     #[test]
     fn a_recording_run_that_unwinds_leaves_the_sink_on_the_core() {
         hold_records_unbounded();
-        let mut emu = recorder_core(program(SHA_EXTEND));
+        let mut emu = recorder_core(unwinding_program());
         let block: RecordBlockFn = failing_block;
         let unwound = catch_unwind(AssertUnwindSafe(|| {
             emu.run_record_blocks(|pc| (pc == 0x1000).then_some(block))
@@ -1529,21 +1858,21 @@ mod tests {
         assert!(emu.is_emitting(), "the recorder gave the sink back");
         assert_eq!(table_rows(&cut(&mut emu).record), (1, 1, 1, 0));
 
-        let mut emu = recorder_core(program(SHA_EXTEND));
+        let mut emu = recorder_core(unwinding_program());
         let block: RecordBlockFn = recording_block;
         let unwound = catch_unwind(AssertUnwindSafe(|| {
             emu.run_record_blocks(|pc| (pc == 0x1000).then_some(block))
         }));
-        let message = unwound.expect_err("the precompile reads below the memory floor");
+        let message = unwound.expect_err("the precompile refuses its point");
         assert!(
             message
                 .downcast_ref::<String>()
-                .is_some_and(|m| m.contains("below floor")),
+                .is_some_and(|m| m.contains("must be 8-byte aligned")),
             "the precompile's own panic"
         );
         assert!(emu.is_emitting(), "the sink stayed on the core");
         let recorded = cut(&mut emu).record;
-        let (reference, _) = interpreted(program(SHA_EXTEND));
+        let (reference, _) = interpreted(unwinding_program());
         assert_eq!(table_rows(&recorded), (2, 2, 2, 1));
         assert_eq!(first_difference(&reference, &recorded), None);
     }
@@ -1587,7 +1916,7 @@ mod tests {
         // Two slots: a run's record and its reference held at once.
         assert_eq!(init_record_slots(2), 2);
 
-        let mut emu = recorder_core(program(SHA_EXTEND));
+        let mut emu = recorder_core(unwinding_program());
         let block: RecordBlockFn = failing_block;
         let unwound = catch_unwind(AssertUnwindSafe(|| {
             emu.run_record_blocks(|pc| (pc == 0x1000).then_some(block))
@@ -1599,17 +1928,14 @@ mod tests {
         assert_eq!(table_rows(&recorded), (1, 1, 1, 0), "rows past the first");
         drop(recorded);
 
-        let mut emu = recorder_core(program(SHA_EXTEND));
+        let mut emu = recorder_core(unwinding_program());
         let block: RecordBlockFn = recording_block;
         let unwound = catch_unwind(AssertUnwindSafe(|| {
             emu.run_record_blocks(|pc| (pc == 0x1000).then_some(block))
         }));
-        assert!(
-            unwound.is_err(),
-            "the precompile reads below the memory floor"
-        );
+        assert!(unwound.is_err(), "the precompile refuses its point");
         let recorded = cut(&mut emu).record;
-        let (reference, _) = interpreted(program(SHA_EXTEND));
+        let (reference, _) = interpreted(unwinding_program());
         assert_in_slot(&recorded, "the unwound precompile");
         assert_eq!(table_rows(&recorded), (2, 2, 2, 1));
         assert_eq!(first_difference(&reference, &recorded), None);
@@ -1775,13 +2101,16 @@ mod tests {
         let mut emu =
             AotEmulatorCore::recover(program(HALT), RiscvEmulationState::new(0x1000), 3, true);
         assert!(
-            emu.can_run_record_block(3, 0, 0, 0),
+            emu.can_run_record_block(3, 0, 0, 0, 0),
             "a block ending at the target"
         );
-        assert!(!emu.can_run_record_block(4, 0, 0, 0), "a block crossing it");
+        assert!(
+            !emu.can_run_record_block(4, 0, 0, 0, 0),
+            "a block crossing it"
+        );
         emu.enter_unconstrained_mode();
         assert!(
-            !emu.can_run_record_block(1, 0, 0, 0),
+            !emu.can_run_record_block(1, 0, 0, 0, 0),
             "a block inside an unconstrained one"
         );
     }
@@ -1794,7 +2123,7 @@ mod tests {
         hold_records_unbounded();
         let mut emu = recorder_core(program(HALT));
         emu.chunk_split_config.clk_threshold = emu.clk;
-        let _ = emu.can_run_record_block(1, 0, 0, 0);
+        let _ = emu.can_run_record_block(1, 0, 0, 0, 0);
     }
 
     /// `ADDI x1, x1, 1` twice and a `JAL` to the next block; `ADDI x2, x2, 1` twice and a halt.

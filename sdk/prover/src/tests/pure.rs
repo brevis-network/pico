@@ -163,16 +163,12 @@ fn the_guests_call_every_precompile_family() {
     }
 }
 
-/// Every ACT4 test, the known failures included: the stepping interpreter decodes and runs each
+/// Every ACT4 test: the stepping interpreter decodes and runs each
 /// instruction as the chunked emulation does.
 #[test]
 fn interpreter_agrees_with_chunked_on_act4() {
-    use super::act4::{suite, KNOWN_FAILURES, MUST_PASS};
-    let suites = MUST_PASS
-        .iter()
-        .chain([&KNOWN_FAILURES])
-        .map(|(name, _)| *name);
-    for name in suites {
+    use super::act4::{suite, MUST_PASS};
+    for (name, _) in MUST_PASS {
         for (test, path) in suite(name) {
             let elf = std::fs::read(&path).expect("ACT4 ELF");
             assert_agrees(

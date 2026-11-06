@@ -171,6 +171,7 @@ fn proof_header(proof: &Proof) -> Proof {
         committed_value_digest: proof.committed_value_digest,
         chunk_count: proof.chunk_count,
         distinct_shapes: proof.distinct_shapes,
+        misaligned_accesses: proof.misaligned_accesses,
         payload: Payload::Convert(Vec::new()),
     }
 }

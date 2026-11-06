@@ -19,7 +19,7 @@ target, RV64IM_Zicclsm, as `elfs/<suite>/<test>.elf`, one directory per ACT4 sui
 |---|---|---|
 | `I` | 51 | must pass |
 | `M` | 13 | must pass |
-| `Misalign` | 8 | known failures: Pico rejects misaligned loads and stores |
+| `Misalign` | 8 | must pass: they make misaligned loads and stores, which the memory chips prove |
 
 `pico-rv64im-zicclsm/` is the Pico configuration they were built with. zkevm-test-monitor reads it
 as `zkvms/pico/isa-configs/pico-rv64im-zicclsm/`.
@@ -33,12 +33,9 @@ as `zkvms/pico/isa-configs/pico-rv64im-zicclsm/`.
 
 ## Where they run
 
-`tests::act4` in pico-prover runs all 72:
-
-* each test of `I` and `M` executes and proves to the riscv phase, which verifies the proof, and
-  both must commit `PASS`;
-* each test of `Misalign` executes and must still fail. The first one that passes fails the module
-  instead, and the suite then moves into `MUST_PASS`, so that all 72 are required from then on.
+`tests::act4` in pico-prover runs all 72: each test executes and proves to the riscv phase, which
+verifies the proof, and both must commit `PASS`. A test of `Misalign` must also make misaligned
+loads or stores, and its proof must report as many as its execution counted.
 
 ```bash
 cargo test --release -p pico-prover -- --test-threads=1 --nocapture tests::act4::
@@ -54,7 +51,7 @@ mkdir -p /tmp/act4 && tar -xJf act4/act4-elfs-4.1.0-pico-rv64im-zicclsm.tar.xz -
 # /tmp/act4/elfs/I/I-add-00.elf, ...
 ```
 
-CI runs it on the CPU prover as `CPU · ACT4 RV64IM_Zicclsm (64 pass, 8 known failures)` in
+CI runs it on the CPU prover as `CPU · ACT4 RV64IM_Zicclsm (72 pass)` in
 `test-prover.yml`. On the GPU prover, run the same module with `--features cuda` on a machine with a
 card.
 

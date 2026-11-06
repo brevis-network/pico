@@ -6,6 +6,9 @@ pub mod sha256;
 pub mod uint256;
 pub mod weierstrass;
 
+#[cfg(test)]
+mod code_range_tests;
+
 use crate::chips::chips::riscv_memory::event::{MemoryReadRecord, MemoryWriteRecord};
 
 /// Checked u64 -> u32 narrowing at proof/FFI boundaries.

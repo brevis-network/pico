@@ -4,10 +4,10 @@ use super::{
 };
 use crate::{
     chips::gadgets::{is_zero::IsZeroGadget, lt_word_u16::LtWordU16Gadget},
-    compiler::word::Word,
+    compiler::{riscv::opcode::ByteOpcode, word::Word},
     emulator::riscv::public_values::PublicValues,
     machine::{
-        builder::{ChipBaseBuilder, ChipBuilder, ChipRangeBuilder},
+        builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
         lookup::{LookupScope, LookupType, SymbolicLookup},
     },
     primitives::consts::MAX_NUM_PVS,
@@ -43,6 +43,31 @@ where
         builder.slice_range_check_u16(&local.value.0, local.is_real);
         builder.slice_range_check_u16(&local.prev_addr, local.is_real);
         builder.slice_range_check_u16(&local.addr, local.is_real);
+
+        // ──────────────────────────────────────────────
+        // Where guest memory may be
+        // ──────────────────────────────────────────────
+        // Every address an access touches ends its chain in exactly one Finalize row (the balance
+        // `MemInit + image + fresh = MemFinal <= 1` of `local/constraints.rs`), so these bound
+        // every access at once, a precompile's as well as a load's or a store's:
+        // - below the top of memory, `0x7800_0000`: the upper limb is zero, the middle one at most
+        //   `0x77ff`;
+        // - outside the stack guard, `[0x777f_0000, 0x7780_0000)`: the middle limb is not `0x777f`.
+        // The registers, at `[0, 32)`, pass both.
+        let is_real: CB::Expr = local.is_real.into();
+        builder.when(is_real.clone()).assert_zero(local.addr[2]);
+        builder.looking_rangecheck(
+            ByteOpcode::U16Range,
+            CB::Expr::from_u32(0x77ff) - local.addr[1],
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            is_real.clone(),
+        );
+        builder.assert_eq(
+            (CB::Expr::ZERO + local.addr[1] - CB::Expr::from_u32(0x777f)) * local.guard_inv,
+            is_real,
+        );
 
         // ──────────────────────────────────────────────
         // packing: value.0[2] = value_lower + value_upper * 256

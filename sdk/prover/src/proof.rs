@@ -55,10 +55,19 @@ pub struct Proof {
     pub(crate) committed_value_digest: [u8; 32],
     pub(crate) chunk_count: Option<usize>,
     pub(crate) distinct_shapes: Option<usize>,
+    pub(crate) misaligned_accesses: Option<u64>,
     pub(crate) payload: Payload,
 }
 
 impl Proof {
+    /// This proof, produced from a run that made `misaligned` misaligned accesses.
+    pub(crate) fn counting(self, misaligned: u64) -> Self {
+        Self {
+            misaligned_accesses: Some(misaligned),
+            ..self
+        }
+    }
+
     /// The phase this proof stops at.
     pub fn phase(&self) -> Phase {
         self.phase
@@ -91,6 +100,14 @@ impl Proof {
     /// it emulated.
     pub fn chunk_count(&self) -> Option<usize> {
         self.chunk_count
+    }
+
+    /// How many misaligned loads and stores (Zicclsm) the proved run made outside unconstrained
+    /// blocks, which the standard RISC-V target asks every proof to report. `None` on a
+    /// proof that was verified rather than produced: the count is the emulation's, and a proof
+    /// file does not store it.
+    pub fn misaligned_accesses(&self) -> Option<u64> {
+        self.misaligned_accesses
     }
 
     /// How many distinct circuit shapes the prover holds for the phase this proof stops at.
@@ -366,6 +383,7 @@ impl std::fmt::Debug for Proof {
             .field("verify_keys", &self.verify_keys)
             .field("chunk_count", &self.chunk_count)
             .field("distinct_shapes", &self.distinct_shapes)
+            .field("misaligned_accesses", &self.misaligned_accesses)
             .field(
                 "committed",
                 &format_args!("{} byte(s)", self.committed.len()),

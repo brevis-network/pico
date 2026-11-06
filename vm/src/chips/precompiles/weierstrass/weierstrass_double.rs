@@ -1,4 +1,6 @@
 #[cfg(feature = "cuda")]
+use crate::chips::gadgets::code_range::{fill_on_device, NUM_CODE_RANGE_COLS};
+#[cfg(feature = "cuda")]
 use crate::mle::spans::device;
 use crate::{
     chips::{
@@ -8,6 +10,7 @@ use crate::{
         },
         gadgets::{
             addr_add::AddrAddGadget,
+            code_range::CodeRangeCols,
             curves::{weierstrass::WeierstrassParameters, AffinePoint, CurveType, EllipticCurve},
             field::{
                 field_lt::FieldLtCols,
@@ -117,6 +120,9 @@ pub struct WeierstrassDoubleAssignCols<T, P: FieldParameters + NumWords> {
     pub(crate) slope_times_p_x_minus_x: FieldOpCols<T, P>,
     pub x3_range: FieldLtCols<T, P>,
     pub y3_range: FieldLtCols<T, P>,
+
+    /// The result is written back over `p`, which may not lie on the program's code.
+    pub code_range: CodeRangeCols<T>,
 }
 
 #[derive(Default)]
@@ -287,6 +293,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
             _ => panic!("Unsupported curve"),
         };
 
+        let code = input.program.code();
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
@@ -323,6 +330,12 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                         let len = <E::BaseField as NumLimbs>::Limbs::USIZE as u64 * 2;
                         cols.p_ptr
                             .populate(&mut new_byte_lookup_events, event.p_ptr, len);
+                        cols.code_range.populate(
+                            event.p_ptr,
+                            len,
+                            &code,
+                            &mut new_byte_lookup_events,
+                        );
 
                         Self::populate_field_ops(&mut new_byte_lookup_events, cols, p_x, p_y);
 
@@ -579,6 +592,21 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> GpuChipBehavior<
         }
 
         // 6. Switch to main stream and return result
+        // The code range, the last columns of the chip's row, which the kernel leaves zero.
+        // The result is written back over `p`.
+        let writes: Vec<u64> = events.iter().map(|event| u64::from(event.p_ptr)).collect();
+        fill_on_device(
+            &mut d_trace,
+            num_cols,
+            num_cols - NUM_CODE_RANGE_COLS,
+            &writes,
+            <E::BaseField as NumLimbs>::Limbs::USIZE as u64 * 2,
+            &input.program.code(),
+            d_byte_trace,
+            mem_pool,
+            stream,
+        );
+
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
         device::launched(kernels, stream);
@@ -801,6 +829,15 @@ where
             builder,
             <E::BaseField as NumLimbs>::Limbs::USIZE as u32 * 2,
             local.p_ptr,
+            local.is_real.into(),
+        );
+        // The result is written back over `p`, which may not lie on the program's code.
+        // The third limb is zero at any address the finalize check admits.
+        CodeRangeCols::<CB::F>::eval(
+            builder,
+            &local.code_range,
+            [p_ptr[0].into(), p_ptr[1].into()],
+            CB::Expr::from_u32(<E::BaseField as NumLimbs>::Limbs::USIZE as u32 * 2),
             local.is_real.into(),
         );
 
@@ -1369,8 +1406,12 @@ mod tests {
                     continue;
                 }
 
+                // The kernel's own columns: the code range is filled after it.
+                use crate::chips::gadgets::code_range::{kernel_columns, NUM_CODE_RANGE_COLS};
+                let offset = num_cols - NUM_CODE_RANGE_COLS;
                 assert_eq!(
-                    cpu_trace, gpu_trace,
+                    kernel_columns(&cpu_trace.values, num_cols, offset),
+                    kernel_columns(&gpu_trace.values, num_cols, offset),
                     "Main trace mismatch at bench size {}",
                     num_events
                 );

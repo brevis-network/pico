@@ -5,9 +5,11 @@ use crate::{
     },
     compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program},
     emulator::riscv::{
+        emulator::guard::access_width,
         event_types::{RvAddr, RvChunk, RvClk, RvValue},
         history::{
             ruled_operands, Access, ExecutionHistory, OperandException, ReadAccess, Slots, Step,
+            UnalignedStep,
         },
         history_arena,
         public_values_compat::encode_public_value_pc_limbs,
@@ -49,6 +51,11 @@ pub trait ExecutionSink {
     /// This cycle's access in operand slot `position`: a register for `A`, `B` and `C`, memory
     /// for `Memory`.
     fn access(&mut self, position: MemoryAccessPosition, record: MemoryRecordEnum);
+
+    /// This cycle's access to the dword after the one its load or store starts in, which a
+    /// misaligned access that runs into it makes at the `C` position. It fills no slot:
+    /// a load's or a store's `c` is an immediate.
+    fn next_dword(&mut self, record: MemoryRecordEnum);
 
     fn alu(&mut self, clk: RvClk, opcode: Opcode, a: RvValue, b: RvValue, c: RvValue, is_imm: bool);
 
@@ -146,6 +153,8 @@ struct Cycle {
     accesses: [Access; 4],
     filled: u8,
     traced: bool,
+    /// The access to the next dword, of a misaligned load or store that runs into it.
+    next: Option<Access>,
 }
 
 /// `value` as the `u32` a history row stores. Checked in every build: a clock, pc or index cut
@@ -200,6 +209,7 @@ impl HistoryWriter {
     fn begin_cycle(&mut self) {
         self.cycle.filled = 0;
         self.cycle.traced = true;
+        self.cycle.next = None;
     }
 
     #[inline]
@@ -207,6 +217,12 @@ impl HistoryWriter {
         let slot = position as usize;
         self.cycle.accesses[slot] = record.into();
         self.cycle.filled |= 1 << slot;
+    }
+
+    #[inline]
+    fn next_dword(&mut self, record: MemoryRecordEnum) {
+        debug_assert!(self.cycle.next.is_none(), "a second next-dword access");
+        self.cycle.next = Some(record.into());
     }
 
     /// The step in progress writes an ALU event.
@@ -302,10 +318,31 @@ impl HistoryWriter {
             (a, b, c),
             "step {index}'s operands as the readers rebuild them"
         );
-        let chip_steps = &mut history.chip_steps;
         if instruction.is_memory_instruction() {
-            chip_steps.memory.push(index);
-        } else if instruction.is_branch_instruction() {
+            // A load or store whose address is not a multiple of its width goes to the unaligned
+            // table, with the next dword's access, which it has exactly when it runs into that
+            // dword.
+            let (addr, width) = (b.wrapping_add(c), access_width(instruction.opcode));
+            let crosses = addr % 8 + width > 8;
+            assert_eq!(
+                cycle.next.is_some(),
+                crosses,
+                "step {index}'s {:?} at 0x{addr:x} and its next dword's access",
+                instruction.opcode
+            );
+            if addr.is_multiple_of(width) {
+                history.chip_steps.memory.push(index);
+            } else {
+                history.unaligned.push(UnalignedStep {
+                    step: index,
+                    crosses: u32::from(crosses),
+                    next: cycle.next.unwrap_or_default(),
+                });
+            }
+            return;
+        }
+        let chip_steps = &mut history.chip_steps;
+        if instruction.is_branch_instruction() {
             chip_steps.branch.push(index);
         } else if instruction.is_ecall_instruction() {
             chip_steps.ecall.push(index);
@@ -477,6 +514,17 @@ impl HistoryRows<'_> {
         self.writer.history.chip_steps.branch.push(step);
     }
 
+    /// A misaligned load or store, in the unaligned table rather than the memory list, with its
+    /// access to the next dword when it runs into it.
+    #[inline(always)]
+    pub fn unaligned(&mut self, step: u32, next: Option<Access>) {
+        self.writer.history.unaligned.push(UnalignedStep {
+            step,
+            crosses: u32::from(next.is_some()),
+            next: next.unwrap_or_default(),
+        });
+    }
+
     /// Operand `slot` held `value`, which the rule does not give.
     #[inline(always)]
     pub fn operand_exception(&mut self, step: u32, slot: MemoryAccessPosition, value: RvValue) {
@@ -494,8 +542,9 @@ impl HistoryRows<'_> {
 #[cfg(any(test, feature = "test-utils"))]
 impl HistoryRows<'_> {
     /// Panics unless the step at `index`, the last written, holds exactly the rows
-    /// [`ExecutionSink::end_cycle`] writes for the cycle that made `accesses` (in the order made)
-    /// and an ALU event if `alu`. The emulator's open cycle must hold no access.
+    /// [`ExecutionSink::end_cycle`] writes for the cycle that made `accesses` (in the order made),
+    /// the next-dword access `next` and an ALU event if `alu`. The emulator's open cycle must hold
+    /// no access.
     #[allow(clippy::too_many_arguments)]
     pub fn check_step(
         &self,
@@ -505,6 +554,7 @@ impl HistoryRows<'_> {
         pc: RvAddr,
         next_pc: RvAddr,
         accesses: &[(MemoryAccessPosition, MemoryRecordEnum)],
+        next: Option<MemoryRecordEnum>,
         alu: bool,
         operands: [RvValue; 3],
         instruction: &Instruction,
@@ -522,6 +572,9 @@ impl HistoryRows<'_> {
         generic.begin_cycle();
         for &(position, record) in accesses {
             generic.access(position, record);
+        }
+        if let Some(next) = next {
+            generic.next_dword(next);
         }
         if alu {
             generic.alu(instruction.opcode);
@@ -575,6 +628,23 @@ impl HistoryRows<'_> {
             &rebased[..],
             "{}",
             what("operand exceptions")
+        );
+        let first_unaligned = written
+            .unaligned
+            .partition_point(|unaligned| unaligned.step < index);
+        let rebased: Vec<_> = expected
+            .unaligned
+            .iter()
+            .map(|unaligned| UnalignedStep {
+                step: index,
+                ..*unaligned
+            })
+            .collect();
+        assert_eq!(
+            &written.unaligned[first_unaligned..],
+            &rebased[..],
+            "{}",
+            what("unaligned steps")
         );
         let lists = written.chip_steps.all().into_iter();
         for (list, (written_list, expected_list)) in
@@ -635,6 +705,11 @@ impl ExecutionSink for HistorySink {
     #[inline]
     fn access(&mut self, position: MemoryAccessPosition, record: MemoryRecordEnum) {
         self.history.access(position, record);
+    }
+
+    #[inline]
+    fn next_dword(&mut self, record: MemoryRecordEnum) {
+        self.history.next_dword(record);
     }
 
     #[inline]
@@ -847,6 +922,10 @@ impl ExecutionSink for CountingSink {
         self.accessed[slot] = true;
     }
 
+    /// Not counted: it fills no slot.
+    #[inline]
+    fn next_dword(&mut self, _record: MemoryRecordEnum) {}
+
     #[inline]
     fn alu(
         &mut self,
@@ -1058,6 +1137,15 @@ impl ExecutionSink for Sink {
             Self::History(sink) => sink.access(position, record),
             #[cfg(any(test, feature = "test-utils"))]
             Self::Counting(sink) => sink.access(position, record),
+        }
+    }
+
+    #[inline]
+    fn next_dword(&mut self, record: MemoryRecordEnum) {
+        match self {
+            Self::History(sink) => sink.next_dword(record),
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Counting(sink) => sink.next_dword(record),
         }
     }
 
@@ -1353,12 +1441,12 @@ mod tests {
     fn history_sink_stores_each_step_and_its_accesses_in_slot_order() {
         let mut sink = HistorySink::new(EmulationRecord::default());
         add_cycle(&mut sink);
-        // `LD x4, 0(x1)` at clock 12: b, memory, a.
+        // `LD x4, 0(x1)` at clock 12, x1 holding 8: b, memory, a.
         sink.begin_cycle();
-        sink.access(MemoryAccessPosition::B, read(1, 10));
+        sink.access(MemoryAccessPosition::B, read(8, 10));
         sink.access(MemoryAccessPosition::Memory, read(0x55, 3));
         sink.access(MemoryAccessPosition::A, write(0x55, 0, 11));
-        sink.end_cycle(2, 12, 0x1004, 0x1008, 0, 0x55, 1, 0, LD, Some(0x55));
+        sink.end_cycle(2, 12, 0x1004, 0x1008, 0, 0x55, 8, 0, LD, Some(0x55));
 
         let history = &sink.history.history;
         assert_eq!(history.chunk, 2);
@@ -1400,7 +1488,7 @@ mod tests {
             history.accesses_of(1, &LD).collect::<Vec<_>>(),
             [
                 (A, access(0x55, 0, 11)),
-                (B, access(1, 1, 10)),
+                (B, access(8, 8, 10)),
                 (Memory, access(0x55, 0x55, 3))
             ]
         );
@@ -1410,7 +1498,7 @@ mod tests {
         assert_eq!(history.chip_steps.memory, [1]);
         assert!(history.operand_exceptions.is_empty());
         assert_eq!(history.operands(0, &ADD), (3, 1, 2));
-        assert_eq!(history.operands(1, &LD), (0x55, 1, 0));
+        assert_eq!(history.operands(1, &LD), (0x55, 8, 0));
 
         let record = &sink.record;
         assert!(record.add_events.is_empty());
@@ -1425,6 +1513,68 @@ mod tests {
         sink.access(MemoryAccessPosition::B, read(1, 6));
         sink.access(MemoryAccessPosition::A, write(3, 9, 7));
         sink.end_cycle(2, 8, 0x1000, 0x1004, 0, 3, 1, 2, ADD, None);
+    }
+
+    /// A load whose address is not a multiple of its width goes to the unaligned table rather than
+    /// the memory chip's list, with the next dword's access when it runs into that one;
+    /// an aligned one stays in the list.
+    #[test]
+    fn a_misaligned_load_goes_to_the_unaligned_table_with_its_next_dword() {
+        let lw = Instruction::new(Opcode::LW, 4, 1, 0, false, true);
+        let mut sink = HistorySink::new(EmulationRecord::default());
+        // `LD x4, 0(x1)` with x1 = 0x1_0005: it runs into the next dword, read at the C position.
+        let cycle = |sink: &mut HistorySink, base, instruction, next: Option<MemoryRecordEnum>| {
+            sink.begin_cycle();
+            sink.access(MemoryAccessPosition::B, read(base, 10));
+            sink.access(MemoryAccessPosition::Memory, read(0x55, 3));
+            if let Some(next) = next {
+                sink.next_dword(next);
+            }
+            sink.access(MemoryAccessPosition::A, write(0x77, 0, 11));
+            sink.end_cycle(2, 12, 0x1004, 0x1008, 0, 0x77, base, 0, instruction, None);
+        };
+        cycle(&mut sink, 0x1_0005, LD, Some(read(0x66, 4)));
+        cycle(&mut sink, 0x1_0002, lw, None);
+        cycle(&mut sink, 0x1_0008, LD, None);
+
+        let history = &sink.history.history;
+        assert_eq!(history.chip_steps.memory, [2]);
+        let next = Access {
+            value: 0x66,
+            prev_value: 0x66,
+            prev_chunk: 1,
+            prev_timestamp: 4,
+        };
+        assert_eq!(
+            history.unaligned,
+            [
+                UnalignedStep {
+                    step: 0,
+                    crosses: 1,
+                    next,
+                },
+                UnalignedStep {
+                    step: 1,
+                    crosses: 0,
+                    next: Access::default(),
+                },
+            ]
+        );
+        // The next dword's access fills no slot: the steps' rows are as an aligned load's.
+        assert_eq!(history.reads.len(), 6);
+        assert_eq!(history.writes.len(), 3);
+    }
+
+    /// A load that runs into the next dword without that dword's access was traced wrongly.
+    #[test]
+    #[should_panic(expected = "step 0's LD at 0x10005 and its next dword's access")]
+    fn a_crossing_load_without_its_next_dword_is_refused() {
+        let mut sink = HistorySink::new(EmulationRecord::default());
+        sink.begin_cycle();
+        sink.access(MemoryAccessPosition::B, read(0x1_0005, 10));
+        sink.access(MemoryAccessPosition::Memory, read(0x55, 3));
+        sink.access(MemoryAccessPosition::A, write(0x77, 0, 11));
+        sink.end_cycle(2, 12, 0x1004, 0x1008, 0, 0x77, 0x1_0005, 0, LD, None);
     }
 
     /// A store reads `a` and writes memory, and a branch writes nothing: each access goes to the
@@ -1720,6 +1870,7 @@ mod tests {
             0x1000,
             0x1004,
             &add_accesses(3),
+            None,
             true,
             [3, 1, 2],
             &ADD,
@@ -1761,6 +1912,7 @@ mod tests {
             0x1000,
             0x1004,
             &add_accesses(0),
+            None,
             false,
             [3, 1, 2],
             &add_x0,
@@ -1793,6 +1945,7 @@ mod tests {
             0x1000,
             0x1004,
             &add_accesses(3),
+            None,
             true,
             [3, 1, 2],
             &ADD,
@@ -1828,14 +1981,14 @@ mod tests {
         let bne = Instruction::new(Opcode::BNE, 4, 1, (-8_i64) as u64, false, true);
         let mut generic = HistorySink::new(EmulationRecord::default());
         generic.begin_cycle();
-        generic.access(MemoryAccessPosition::B, read(1, 10));
+        generic.access(MemoryAccessPosition::B, read(8, 10));
         generic.access(MemoryAccessPosition::Memory, read(0x55, 3));
         generic.access(MemoryAccessPosition::A, write(0x55, 0, 11));
-        generic.end_cycle(2, 12, 0x1004, 0x1008, 0, 0x55, 1, 0, LD, Some(0x55));
+        generic.end_cycle(2, 12, 0x1004, 0x1008, 0, 0x55, 8, 0, LD, Some(0x55));
         generic.begin_cycle();
-        generic.access(MemoryAccessPosition::B, read(1, 14));
+        generic.access(MemoryAccessPosition::B, read(8, 14));
         generic.access(MemoryAccessPosition::A, read(0x55, 15));
-        generic.end_cycle(2, 16, 0x1008, 0x1000, 0, 0x55, 1, bne.op_c, bne, None);
+        generic.end_cycle(2, 16, 0x1008, 0x1000, 0, 0x55, 8, bne.op_c, bne, None);
 
         let as_read = |record: MemoryRecordEnum| ReadAccess::from(Access::from(record));
         let mut direct = Sink::History(HistorySink::new(EmulationRecord::default()));
@@ -1846,7 +1999,7 @@ mod tests {
             12,
             0x1004,
             0x1008,
-            [as_read(read(1, 10)), as_read(read(0x55, 3))],
+            [as_read(read(8, 10)), as_read(read(0x55, 3))],
             [Access::from(write(0x55, 0, 11))],
         );
         rows.memory(load);
@@ -1855,7 +2008,7 @@ mod tests {
             16,
             0x1008,
             0x1000,
-            [as_read(read(0x55, 15)), as_read(read(1, 14))],
+            [as_read(read(0x55, 15)), as_read(read(8, 14))],
             [],
         );
         rows.branch(branch);
@@ -1872,11 +2025,12 @@ mod tests {
             0x1008,
             0x1000,
             &[
-                (MemoryAccessPosition::B, read(1, 14)),
+                (MemoryAccessPosition::B, read(8, 14)),
                 (MemoryAccessPosition::A, read(0x55, 15)),
             ],
+            None,
             false,
-            [0x55, 1, bne.op_c],
+            [0x55, 8, bne.op_c],
             &bne,
         );
     }

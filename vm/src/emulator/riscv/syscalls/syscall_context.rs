@@ -3,15 +3,16 @@ use crate::{
     chips::chips::riscv_memory::event::{
         MemoryLocalEvent, MemoryReadRecord, MemoryRecord, MemoryWriteRecord,
     },
-    compiler::riscv::register::Register,
+    compiler::riscv::{opcode::Opcode, register::Register},
     emulator::riscv::{
         emulator::{
-            error::EmulationError,
+            error::{AbnormalTermination, EmulationError},
+            guard::access_fault,
             util::{align_u64, dword_half},
         },
         event_types::{RvAddr, RvChunk, RvClk, RvTimestamp, RvValue},
         record::EmulationRecord,
-        riscv_emulator::{RiscvEmulator, MIN_MAIN_MEMORY_ADDR},
+        riscv_emulator::RiscvEmulator,
     },
 };
 use hashbrown::HashMap;
@@ -93,12 +94,18 @@ impl<'a> SyscallContext<'a> {
         self.rt.state.current_chunk
     }
 
+    /// Whether the syscall's `width`-byte access at `addr` may happen. One that lands
+    /// where no guest access may fails the syscall with that fault and does not happen: its
+    /// accessor hands back zero, and the dispatcher ends the run when the syscall returns.
     #[inline(always)]
-    fn validate_main_memory_addr(&self, addr: RvAddr) {
-        assert!(
-            addr >= MIN_MAIN_MEMORY_ADDR,
-            "syscall memory access below floor 0x{MIN_MAIN_MEMORY_ADDR:08x}: 0x{addr:08x}"
-        );
+    pub(crate) fn allowed(&mut self, addr: RvAddr, width: u64, store: bool) -> bool {
+        match access_fault(Opcode::ECALL, addr, width, store, self.rt.code()) {
+            None => true,
+            Some(reason) => {
+                self.fail(AbnormalTermination::fault(reason).into());
+                false
+            }
+        }
     }
 
     // TODO: remove this after poseidon2 precompile upgrade
@@ -125,7 +132,9 @@ impl<'a> SyscallContext<'a> {
     pub fn mr(&mut self, addr: RvAddr) -> (MemoryReadRecord, RvValue) {
         self.rt.chunk_split_state.num_syscall_memory_events += 1;
 
-        self.validate_main_memory_addr(addr);
+        if !self.allowed(addr, 4, false) {
+            return (MemoryReadRecord::default(), 0);
+        }
         let aligned = align_u64(addr);
 
         let record = if let Some(local_event) = self.local_memory_access.get(&aligned) {
@@ -185,7 +194,9 @@ impl<'a> SyscallContext<'a> {
     pub fn mw(&mut self, addr: RvAddr, value: RvValue) -> MemoryWriteRecord {
         self.rt.chunk_split_state.num_syscall_memory_events += 1;
 
-        self.validate_main_memory_addr(addr);
+        if !self.allowed(addr, 4, true) {
+            return MemoryWriteRecord::default();
+        }
         let aligned = align_u64(addr);
         let existing = self.rt.state.memory.peek_dword(aligned);
         let half = dword_half(addr);
@@ -254,14 +265,18 @@ impl<'a> SyscallContext<'a> {
     /// Get the current value of a byte (unconstrained).
     #[must_use]
     pub fn byte_unsafe(&mut self, addr: RvAddr) -> u8 {
-        self.validate_main_memory_addr(addr);
+        if !self.allowed(addr, 1, false) {
+            return 0;
+        }
         self.rt.byte(addr)
     }
 
     /// Get the current value of a 4-byte word (unconstrained).
     #[must_use]
     pub fn word_unsafe(&mut self, addr: RvAddr) -> RvValue {
-        self.validate_main_memory_addr(addr);
+        if !self.allowed(addr, 4, false) {
+            return 0;
+        }
         let dword = self.rt.dword(align_u64(addr));
         let half = dword_half(addr);
         if half == 0 {
@@ -289,7 +304,9 @@ impl<'a> SyscallContext<'a> {
 
     /// Read an 8-byte dword from memory (no half extraction).
     pub fn mr_dword(&mut self, addr: RvAddr) -> (MemoryReadRecord, RvValue) {
-        self.validate_main_memory_addr(addr);
+        if !self.allowed(addr, 8, false) {
+            return (MemoryReadRecord::default(), 0);
+        }
         debug_assert_eq!(addr & 7, 0, "mr_dword requires 8-byte-aligned address");
         let record = self.rt.mr(
             addr,
@@ -302,7 +319,9 @@ impl<'a> SyscallContext<'a> {
 
     /// Write an 8-byte dword to memory.
     pub fn mw_dword(&mut self, addr: RvAddr, value: RvValue) -> MemoryWriteRecord {
-        self.validate_main_memory_addr(addr);
+        if !self.allowed(addr, 8, true) {
+            return MemoryWriteRecord::default();
+        }
         debug_assert_eq!(addr & 7, 0, "mw_dword requires 8-byte-aligned address");
         self.rt.mw(
             addr,
@@ -316,7 +335,9 @@ impl<'a> SyscallContext<'a> {
     /// Read N consecutive dwords (unconstrained).
     #[must_use]
     pub fn dword_slice_unsafe(&mut self, addr: RvAddr, len: usize) -> Vec<RvValue> {
-        self.validate_main_memory_addr(addr);
+        if len > 0 && !self.allowed(addr, 8 * len as u64, false) {
+            return vec![0; len];
+        }
         debug_assert_eq!(
             addr & 7,
             0,

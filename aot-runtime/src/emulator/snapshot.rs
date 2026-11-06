@@ -155,6 +155,7 @@ impl AotEmulatorCore {
                 done,
                 cycle_tracker: None,
                 host_cycle_estimator: None,
+                misaligned_accesses: self.misaligned_accesses,
             },
         ))
     }
@@ -250,6 +251,7 @@ impl AotEmulatorCore {
             public_values_stream: Vec::new(),
             memory,
             syscall_counts: HashMap::default(),
+            misaligned_accesses: self.misaligned_accesses,
         };
         self.snapshot_stream_state(&mut snapshot);
         snapshot

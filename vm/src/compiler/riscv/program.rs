@@ -63,6 +63,13 @@ impl Program {
             .copied()
     }
 
+    /// The addresses the code occupies, `[pc_base, pc_base + 4 * instructions)`: the executable
+    /// segments, which the loader requires to be contiguous.
+    #[must_use]
+    pub fn code(&self) -> core::ops::Range<u64> {
+        self.pc_base..self.pc_base + 4 * self.instructions.len() as u64
+    }
+
     pub fn fetch(&self, pc: u64) -> Instruction {
         let idx = (pc - self.pc_base) as usize / 4;
         self.instructions[idx]

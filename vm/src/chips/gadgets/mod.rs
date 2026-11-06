@@ -5,6 +5,7 @@ pub mod addr_add;
 pub mod addw;
 pub mod bitwise;
 pub mod bitwise_u16;
+pub mod code_range;
 pub mod curves;
 pub mod field;
 pub mod field_range_check;

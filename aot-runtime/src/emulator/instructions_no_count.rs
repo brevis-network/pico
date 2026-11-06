@@ -1,4 +1,6 @@
-use pico_vm::chips::chips::riscv_memory::event::MemoryAccessPosition;
+use pico_vm::{
+    chips::chips::riscv_memory::event::MemoryAccessPosition, compiler::riscv::opcode::Opcode,
+};
 
 use super::{
     constants::BYTES_PER_WORD,
@@ -826,15 +828,18 @@ impl AotEmulatorCore {
     ) -> Result<(), String> {
         let b = self.read_reg_at::<EMIT>(sink.as_deref_mut(), rs1, MemoryAccessPosition::B);
         let addr = b.wrapping_add(c);
-        if !addr.is_multiple_of(u64::from(BYTES_PER_WORD)) {
-            return Err(format!("Unaligned LW at {:#x}", addr));
-        }
-        let dword = self.read_mem_dword_constrained_impl::<EMIT>(
-            sink.as_deref_mut(),
-            Self::dword_addr(addr),
-            Touch::Load,
-        );
-        let a = (Self::extract_word(dword, addr) as u32 as i32) as i64 as u64;
+        self.check_access(Opcode::LW, addr)?;
+        let (bytes, dword) = if addr.is_multiple_of(u64::from(BYTES_PER_WORD)) {
+            let dword = self.read_mem_dword_constrained_impl::<EMIT>(
+                sink.as_deref_mut(),
+                Self::dword_addr(addr),
+                Touch::Load,
+            );
+            (Self::extract_word(dword, addr), dword)
+        } else {
+            self.misaligned_load_no_count::<EMIT>(sink.as_deref_mut(), Opcode::LW, addr, 4)?
+        };
+        let a = (bytes as u32 as i32) as i64 as u64;
         self.set_reg::<EMIT>(sink.as_deref_mut(), rd, a);
         if EMIT {
             self.record_memory(sink, next_pc.wrapping_sub(4), a, b, c, dword);
@@ -868,15 +873,17 @@ impl AotEmulatorCore {
     ) -> Result<(), String> {
         let b = self.read_reg_at::<EMIT>(sink.as_deref_mut(), rs1, MemoryAccessPosition::B);
         let addr = b.wrapping_add(c);
-        if !addr.is_multiple_of(u64::from(BYTES_PER_WORD)) {
-            return Err(format!("Unaligned LWU at {:#x}", addr));
-        }
-        let dword = self.read_mem_dword_constrained_impl::<EMIT>(
-            sink.as_deref_mut(),
-            Self::dword_addr(addr),
-            Touch::Load,
-        );
-        let a = Self::extract_word(dword, addr);
+        self.check_access(Opcode::LWU, addr)?;
+        let (a, dword) = if addr.is_multiple_of(u64::from(BYTES_PER_WORD)) {
+            let dword = self.read_mem_dword_constrained_impl::<EMIT>(
+                sink.as_deref_mut(),
+                Self::dword_addr(addr),
+                Touch::Load,
+            );
+            (Self::extract_word(dword, addr), dword)
+        } else {
+            self.misaligned_load_no_count::<EMIT>(sink.as_deref_mut(), Opcode::LWU, addr, 4)?
+        };
         self.set_reg::<EMIT>(sink.as_deref_mut(), rd, a);
         if EMIT {
             self.record_memory(sink, next_pc.wrapping_sub(4), a, b, c, dword);
@@ -910,15 +917,17 @@ impl AotEmulatorCore {
     ) -> Result<(), String> {
         let b = self.read_reg_at::<EMIT>(sink.as_deref_mut(), rs1, MemoryAccessPosition::B);
         let addr = b.wrapping_add(c);
-        if !addr.is_multiple_of(8) {
-            return Err(format!("Unaligned LD at {:#x}", addr));
-        }
-        let dword = self.read_mem_dword_constrained_impl::<EMIT>(
-            sink.as_deref_mut(),
-            Self::dword_addr(addr),
-            Touch::Load,
-        );
-        let a = dword;
+        self.check_access(Opcode::LD, addr)?;
+        let (a, dword) = if addr.is_multiple_of(8) {
+            let dword = self.read_mem_dword_constrained_impl::<EMIT>(
+                sink.as_deref_mut(),
+                Self::dword_addr(addr),
+                Touch::Load,
+            );
+            (dword, dword)
+        } else {
+            self.misaligned_load_no_count::<EMIT>(sink.as_deref_mut(), Opcode::LD, addr, 8)?
+        };
         self.set_reg::<EMIT>(sink.as_deref_mut(), rd, a);
         if EMIT {
             self.record_memory(sink, next_pc.wrapping_sub(4), a, b, c, dword);
@@ -953,10 +962,12 @@ impl AotEmulatorCore {
         let b = self.read_reg_at::<EMIT>(sink.as_deref_mut(), rs1, MemoryAccessPosition::B);
         let a = self.read_reg_at::<EMIT>(sink.as_deref_mut(), rs2, MemoryAccessPosition::A);
         let addr = b.wrapping_add(c);
-        if !addr.is_multiple_of(u64::from(BYTES_PER_WORD)) {
-            return Err(format!("Unaligned SW at {:#x}", addr));
-        }
-        let dword = self.write_mem_word_no_count_impl::<EMIT>(sink.as_deref_mut(), addr, a);
+        self.check_access(Opcode::SW, addr)?;
+        let dword = if addr.is_multiple_of(u64::from(BYTES_PER_WORD)) {
+            self.write_mem_word_no_count_impl::<EMIT>(sink.as_deref_mut(), addr, a)
+        } else {
+            self.misaligned_store_no_count::<EMIT>(sink.as_deref_mut(), Opcode::SW, addr, a, 4)?
+        };
         if EMIT {
             self.record_memory(sink, next_pc.wrapping_sub(4), a, b, c, dword);
         }
@@ -990,12 +1001,15 @@ impl AotEmulatorCore {
         let b = self.read_reg_at::<EMIT>(sink.as_deref_mut(), rs1, MemoryAccessPosition::B);
         let a = self.read_reg_at::<EMIT>(sink.as_deref_mut(), rs2, MemoryAccessPosition::A);
         let addr = b.wrapping_add(c);
-        if !addr.is_multiple_of(8) {
-            return Err(format!("Unaligned SD at {:#x}", addr));
-        }
-        self.write_mem_dword_no_count_impl::<EMIT>(sink.as_deref_mut(), addr, a);
+        self.check_access(Opcode::SD, addr)?;
+        let dword = if addr.is_multiple_of(8) {
+            self.write_mem_dword_no_count_impl::<EMIT>(sink.as_deref_mut(), addr, a);
+            a
+        } else {
+            self.misaligned_store_no_count::<EMIT>(sink.as_deref_mut(), Opcode::SD, addr, a, 8)?
+        };
         if EMIT {
-            self.record_memory(sink, next_pc.wrapping_sub(4), a, b, c, a);
+            self.record_memory(sink, next_pc.wrapping_sub(4), a, b, c, dword);
         }
         self.pc = next_pc;
         self.update_insn_clock();
@@ -1210,15 +1224,18 @@ impl AotEmulatorCore {
     ) -> Result<(), String> {
         let b = self.read_reg_at::<EMIT>(sink.as_deref_mut(), rs1, MemoryAccessPosition::B);
         let addr = b.wrapping_add(c);
-        if !addr.is_multiple_of(2) {
-            return Err(format!("Unaligned LH at {:#x}", addr));
-        }
-        let dword = self.read_mem_dword_constrained_impl::<EMIT>(
-            sink.as_deref_mut(),
-            Self::dword_addr(addr),
-            Touch::Load,
-        );
-        let a = (Self::read_u16_from_word(dword, addr) as i16) as i64 as u64;
+        self.check_access(Opcode::LH, addr)?;
+        let (bytes, dword) = if addr.is_multiple_of(2) {
+            let dword = self.read_mem_dword_constrained_impl::<EMIT>(
+                sink.as_deref_mut(),
+                Self::dword_addr(addr),
+                Touch::Load,
+            );
+            (u64::from(Self::read_u16_from_word(dword, addr)), dword)
+        } else {
+            self.misaligned_load_no_count::<EMIT>(sink.as_deref_mut(), Opcode::LH, addr, 2)?
+        };
+        let a = (bytes as u16 as i16) as i64 as u64;
         self.set_reg::<EMIT>(sink.as_deref_mut(), rd, a);
         if EMIT {
             self.record_memory(sink, next_pc.wrapping_sub(4), a, b, c, dword);
@@ -1252,15 +1269,17 @@ impl AotEmulatorCore {
     ) -> Result<(), String> {
         let b = self.read_reg_at::<EMIT>(sink.as_deref_mut(), rs1, MemoryAccessPosition::B);
         let addr = b.wrapping_add(c);
-        if !addr.is_multiple_of(2) {
-            return Err(format!("Unaligned LHU at {:#x}", addr));
-        }
-        let dword = self.read_mem_dword_constrained_impl::<EMIT>(
-            sink.as_deref_mut(),
-            Self::dword_addr(addr),
-            Touch::Load,
-        );
-        let a = u64::from(Self::read_u16_from_word(dword, addr));
+        self.check_access(Opcode::LHU, addr)?;
+        let (a, dword) = if addr.is_multiple_of(2) {
+            let dword = self.read_mem_dword_constrained_impl::<EMIT>(
+                sink.as_deref_mut(),
+                Self::dword_addr(addr),
+                Touch::Load,
+            );
+            (u64::from(Self::read_u16_from_word(dword, addr)), dword)
+        } else {
+            self.misaligned_load_no_count::<EMIT>(sink.as_deref_mut(), Opcode::LHU, addr, 2)?
+        };
         self.set_reg::<EMIT>(sink.as_deref_mut(), rd, a);
         if EMIT {
             self.record_memory(sink, next_pc.wrapping_sub(4), a, b, c, dword);
@@ -1295,14 +1314,16 @@ impl AotEmulatorCore {
         let b = self.read_reg_at::<EMIT>(sink.as_deref_mut(), rs1, MemoryAccessPosition::B);
         let a = self.read_reg_at::<EMIT>(sink.as_deref_mut(), rs2, MemoryAccessPosition::A);
         let addr = b.wrapping_add(c);
-        if !addr.is_multiple_of(2) {
-            return Err(format!("Unaligned SH at {:#x}", addr));
-        }
-        let dword = self.write_mem_dword_merged_no_count::<EMIT>(
-            sink.as_deref_mut(),
-            Self::dword_addr(addr),
-            |word| Self::write_u16_into_word(word, addr, a),
-        );
+        self.check_access(Opcode::SH, addr)?;
+        let dword = if addr.is_multiple_of(2) {
+            self.write_mem_dword_merged_no_count::<EMIT>(
+                sink.as_deref_mut(),
+                Self::dword_addr(addr),
+                |word| Self::write_u16_into_word(word, addr, a),
+            )
+        } else {
+            self.misaligned_store_no_count::<EMIT>(sink.as_deref_mut(), Opcode::SH, addr, a, 2)?
+        };
         if EMIT {
             self.record_memory(sink, next_pc.wrapping_sub(4), a, b, c, dword);
         }
@@ -1313,7 +1334,14 @@ impl AotEmulatorCore {
 
     /// Load byte signed (no-count): rd = sign_ext(mem_byte[rs1 + imm]); pc = next_pc
     #[inline(always)]
-    pub fn lb_no_count(&mut self, emitting: bool, rd: usize, rs1: usize, imm: u64, next_pc: u64) {
+    pub fn lb_no_count(
+        &mut self,
+        emitting: bool,
+        rd: usize,
+        rs1: usize,
+        imm: u64,
+        next_pc: u64,
+    ) -> Result<(), String> {
         by_sink!(emitting, self.lb(rd, rs1, imm, next_pc))
     }
 
@@ -1325,9 +1353,10 @@ impl AotEmulatorCore {
         rs1: usize,
         c: u64,
         next_pc: u64,
-    ) {
+    ) -> Result<(), String> {
         let b = self.read_reg_at::<EMIT>(sink.as_deref_mut(), rs1, MemoryAccessPosition::B);
         let addr = b.wrapping_add(c);
+        self.check_access(Opcode::LB, addr)?;
         let dword = self.read_mem_dword_constrained_impl::<EMIT>(
             sink.as_deref_mut(),
             Self::dword_addr(addr),
@@ -1340,11 +1369,19 @@ impl AotEmulatorCore {
         }
         self.pc = next_pc;
         self.update_insn_clock();
+        Ok(())
     }
 
     /// Load byte unsigned (no-count): rd = zero_ext(mem_byte[rs1 + imm]); pc = next_pc
     #[inline(always)]
-    pub fn lbu_no_count(&mut self, emitting: bool, rd: usize, rs1: usize, imm: u64, next_pc: u64) {
+    pub fn lbu_no_count(
+        &mut self,
+        emitting: bool,
+        rd: usize,
+        rs1: usize,
+        imm: u64,
+        next_pc: u64,
+    ) -> Result<(), String> {
         by_sink!(emitting, self.lbu(rd, rs1, imm, next_pc))
     }
 
@@ -1356,9 +1393,10 @@ impl AotEmulatorCore {
         rs1: usize,
         c: u64,
         next_pc: u64,
-    ) {
+    ) -> Result<(), String> {
         let b = self.read_reg_at::<EMIT>(sink.as_deref_mut(), rs1, MemoryAccessPosition::B);
         let addr = b.wrapping_add(c);
+        self.check_access(Opcode::LBU, addr)?;
         let dword = self.read_mem_dword_constrained_impl::<EMIT>(
             sink.as_deref_mut(),
             Self::dword_addr(addr),
@@ -1371,11 +1409,19 @@ impl AotEmulatorCore {
         }
         self.pc = next_pc;
         self.update_insn_clock();
+        Ok(())
     }
 
     /// Store byte (no-count): mem_byte[rs1 + imm] = rs2; pc = next_pc
     #[inline(always)]
-    pub fn sb_no_count(&mut self, emitting: bool, rs2: usize, rs1: usize, imm: u64, next_pc: u64) {
+    pub fn sb_no_count(
+        &mut self,
+        emitting: bool,
+        rs2: usize,
+        rs1: usize,
+        imm: u64,
+        next_pc: u64,
+    ) -> Result<(), String> {
         by_sink!(emitting, self.sb(rs2, rs1, imm, next_pc))
     }
 
@@ -1387,10 +1433,11 @@ impl AotEmulatorCore {
         rs1: usize,
         c: u64,
         next_pc: u64,
-    ) {
+    ) -> Result<(), String> {
         let b = self.read_reg_at::<EMIT>(sink.as_deref_mut(), rs1, MemoryAccessPosition::B);
         let a = self.read_reg_at::<EMIT>(sink.as_deref_mut(), rs2, MemoryAccessPosition::A);
         let addr = b.wrapping_add(c);
+        self.check_access(Opcode::SB, addr)?;
         let dword = self.write_mem_dword_merged_no_count::<EMIT>(
             sink.as_deref_mut(),
             Self::dword_addr(addr),
@@ -1401,6 +1448,7 @@ impl AotEmulatorCore {
         }
         self.pc = next_pc;
         self.update_insn_clock();
+        Ok(())
     }
 
     /// Multiply (no-count): rd = rs1 * rs2; pc = next_pc

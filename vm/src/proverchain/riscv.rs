@@ -705,6 +705,7 @@ fn run_snapshot_main_loop<E, NextBatch, Cycles, Counters, PvStream>(
         info!(
             %batch_idx,
             cycles = emu_cycles,
+            misaligned_accesses = report.misaligned_accesses,
             emulate_ms = batch_dur.as_secs_f64() * 1e3,
             send_ms    = send_dur.as_secs_f64() * 1e3,
             "snapshot batch finished"

@@ -60,7 +60,7 @@ where
         record: &C::Record,
         prepared_gpu_events: &PreparedGpuEvents,
     ) -> Vec<(String, TraceData<'a, SC::Val>)> {
-        // Processing order: Batch 1, Divrem, Add, Sub, Addw, Subw, Lt, Mul, Batch 2, Global, Poseidon2, Batch 3, Precompiles, Ecall, Host-tracegen precompiles, Byte.
+        // Processing order: Batch 1, Divrem, Add, Sub, Addw, Subw, Lt, Mul, Batch 2, Global, Poseidon2, Batch 3, Precompiles, Ecall, Host-tracegen precompiles, MemoryUnaligned, Byte.
         // The RISC-V chips read the chunk's execution history, whose upload is enqueued before
         // Batch 1 and not waited for: each chip that reads it makes its own streams wait on the
         // copies it reads (`HistoryReader`), so the CPU chip's slice kernels start as their slices
@@ -110,6 +110,10 @@ where
         // Ecall for the same reason. Each adds its own byte lookups to the device byte table, so
         // they have to run before it is finalized.
         const HOST_TRACEGEN_PRECOMPILE_INDICES: RangeInclusive<usize> = 47..=49;
+
+        // MemoryUnaligned: host tracegen, appended after them; its byte lookups go to the
+        // device table the same way, so it runs before the table is finalized too.
+        const MEMORY_UNALIGNED_CHIP_INDEX: usize = 50;
 
         let durations = DashMap::new();
         let mut chip_names_traces = Vec::new();
@@ -293,7 +297,7 @@ where
         // Host-tracegen precompile chips. Their byte-table update is a read-modify-write through
         // the host (`gpu_add_host_byte_lookups`), which is sound only because the chips run one
         // at a time and each one synchronizes its streams before returning -- keep it that way.
-        for chip_index in HOST_TRACEGEN_PRECOMPILE_INDICES {
+        for chip_index in HOST_TRACEGEN_PRECOMPILE_INDICES.chain([MEMORY_UNALIGNED_CHIP_INDEX]) {
             run_chip(chip_index, &mut preallocated_gpu_memory);
             snap_after!(chip_index);
         }

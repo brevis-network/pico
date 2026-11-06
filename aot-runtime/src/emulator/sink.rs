@@ -470,6 +470,49 @@ impl AotEmulatorCore {
         );
     }
 
+    /// An access of the dword at `addr` at `timestamp` that is not the instruction's memory
+    /// access: the next dword of a misaligned load or store, a store's when `write`. It
+    /// leaves a local memory event and the step's next-dword access, which fills no slot, in
+    /// `sink`.
+    #[inline(never)]
+    pub(crate) fn record_next_dword(
+        &mut self,
+        sink: LentSink<'_>,
+        addr: u64,
+        value: u64,
+        prev: MemoryRecord,
+        timestamp: u32,
+        write: bool,
+    ) {
+        let chunk = self.current_chunk;
+        let Some(sink) = sink else {
+            return;
+        };
+        let record = if write {
+            MemoryWriteRecord::new(
+                value,
+                chunk,
+                timestamp,
+                prev.value,
+                prev.chunk,
+                prev.timestamp,
+            )
+            .into()
+        } else {
+            MemoryReadRecord::new(value, chunk, timestamp, prev.chunk, prev.timestamp).into()
+        };
+        sink.events.next_dword(record);
+        sink.local_event(
+            addr,
+            prev,
+            MemoryRecord {
+                value,
+                chunk,
+                timestamp,
+            },
+        );
+    }
+
     /// [`Self::record_mem_write`] when the sink is on.
     #[inline(always)]
     pub(crate) fn emit_mem_write(&mut self, addr: u64, value: u64, prev: MemoryRecord) {

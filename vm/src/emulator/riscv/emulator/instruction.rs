@@ -6,12 +6,6 @@ use crate::{
 };
 use tracing::debug;
 
-#[inline(always)]
-fn invalid_memory_addr_u64(addr: u64, context: &str) -> u64 {
-    let _ = context;
-    addr
-}
-
 impl RiscvEmulator {
     #[inline(always)]
     fn w_alu_rr(&mut self, instruction: &Instruction) -> (Register, u64, u64) {
@@ -210,90 +204,55 @@ impl RiscvEmulator {
 
             // Load instructions.
             Opcode::LB => {
-                (rd, b, c, addr, memory_read_value) = self.load_rr(instruction);
+                (rd, b, c, addr, memory_read_value) = self.load_rr(instruction)?;
                 let value = memory_read_value.to_le_bytes()[(addr % 8) as usize];
                 a = ((value as i8) as i64) as u64;
                 memory_store_value = Some(memory_read_value);
                 self.rw(rd, a);
             }
             Opcode::LH => {
-                (rd, b, c, addr, memory_read_value) = self.load_rr(instruction);
-                if addr % 2 != 0 {
-                    return Err(EmulationError::invalid_memory_access(
-                        Opcode::LH,
-                        invalid_memory_addr_u64(addr, "lh"),
-                    ));
-                }
-                let shift = ((addr / 2) % 4) * 16;
-                let value = ((memory_read_value >> shift) & 0xFFFF) as u16;
+                (rd, b, c, addr, memory_read_value) = self.load_rr(instruction)?;
+                let value = self.loaded(Opcode::LH, addr, memory_read_value, 2)? as u16;
                 a = ((value as i16) as i64) as u64;
                 memory_store_value = Some(memory_read_value);
                 self.rw(rd, a);
             }
             Opcode::LW => {
-                (rd, b, c, addr, memory_read_value) = self.load_rr(instruction);
-                if addr % 4 != 0 {
-                    return Err(EmulationError::invalid_memory_access(
-                        Opcode::LW,
-                        invalid_memory_addr_u64(addr, "lw"),
-                    ));
-                }
-                let shift = ((addr / 4) % 2) * 32;
-                let value = ((memory_read_value >> shift) & 0xFFFF_FFFF) as u32;
+                (rd, b, c, addr, memory_read_value) = self.load_rr(instruction)?;
+                let value = self.loaded(Opcode::LW, addr, memory_read_value, 4)? as u32;
                 a = (value as i32 as i64) as u64;
                 memory_store_value = Some(memory_read_value);
                 self.rw(rd, a);
             }
             Opcode::LBU => {
-                (rd, b, c, addr, memory_read_value) = self.load_rr(instruction);
+                (rd, b, c, addr, memory_read_value) = self.load_rr(instruction)?;
                 let value = memory_read_value.to_le_bytes()[(addr % 8) as usize];
                 a = u64::from(value);
                 memory_store_value = Some(memory_read_value);
                 self.rw(rd, a);
             }
             Opcode::LHU => {
-                (rd, b, c, addr, memory_read_value) = self.load_rr(instruction);
-                if addr % 2 != 0 {
-                    return Err(EmulationError::invalid_memory_access(
-                        Opcode::LHU,
-                        invalid_memory_addr_u64(addr, "lhu"),
-                    ));
-                }
-                let shift = ((addr / 2) % 4) * 16;
-                let value = ((memory_read_value >> shift) & 0xFFFF) as u16;
-                a = u64::from(value);
+                (rd, b, c, addr, memory_read_value) = self.load_rr(instruction)?;
+                a = self.loaded(Opcode::LHU, addr, memory_read_value, 2)?;
                 memory_store_value = Some(memory_read_value);
                 self.rw(rd, a);
             }
             Opcode::LWU => {
-                (rd, b, c, addr, memory_read_value) = self.load_rr(instruction);
-                if addr % 4 != 0 {
-                    return Err(EmulationError::invalid_memory_access(
-                        Opcode::LWU,
-                        invalid_memory_addr_u64(addr, "lwu"),
-                    ));
-                }
-                let shift = ((addr / 4) % 2) * 32;
-                a = ((memory_read_value >> shift) & 0xFFFF_FFFF) as u32 as u64;
+                (rd, b, c, addr, memory_read_value) = self.load_rr(instruction)?;
+                a = self.loaded(Opcode::LWU, addr, memory_read_value, 4)?;
                 memory_store_value = Some(memory_read_value);
                 self.rw(rd, a);
             }
             Opcode::LD => {
-                (rd, b, c, addr, memory_read_value) = self.load_rr(instruction);
-                if addr % 8 != 0 {
-                    return Err(EmulationError::invalid_memory_access(
-                        Opcode::LD,
-                        invalid_memory_addr_u64(addr, "ld"),
-                    ));
-                }
-                a = memory_read_value;
+                (rd, b, c, addr, memory_read_value) = self.load_rr(instruction)?;
+                a = self.loaded(Opcode::LD, addr, memory_read_value, 8)?;
                 memory_store_value = Some(memory_read_value);
                 self.rw(rd, a);
             }
 
             // Store instructions.
             Opcode::SB => {
-                (a, b, c, addr, memory_read_value) = self.store_rr(instruction);
+                (a, b, c, addr, memory_read_value) = self.store_rr(instruction)?;
                 let shift = (addr % 8) * 8;
                 let mask = 0xFFu64 << shift;
                 let value = (memory_read_value & !mask) | ((a & 0xFF) << shift);
@@ -307,42 +266,25 @@ impl RiscvEmulator {
                 let store_value = self.rr(rs1, MemoryAccessPosition::A);
                 a = store_value;
                 addr = b.wrapping_add(c);
-                if addr % 8 != 0 {
-                    return Err(EmulationError::invalid_memory_access(
-                        Opcode::SD,
-                        invalid_memory_addr_u64(addr, "sd"),
-                    ));
+                self.check_access(Opcode::SD, addr)?;
+                if addr.is_multiple_of(8) {
+                    memory_store_value = Some(store_value);
+                    self.mw_cpu(align_u64(addr), store_value, MemoryAccessPosition::Memory);
+                } else {
+                    let dword = self.dword(align_u64(addr));
+                    memory_store_value =
+                        Some(self.stored(Opcode::SD, addr, dword, store_value, 8)?);
                 }
-                memory_store_value = Some(store_value);
-                self.mw_cpu(align_u64(addr), store_value, MemoryAccessPosition::Memory);
             }
             Opcode::SH => {
-                (a, b, c, addr, memory_read_value) = self.store_rr(instruction);
-                if addr % 2 != 0 {
-                    return Err(EmulationError::invalid_memory_access(
-                        Opcode::SH,
-                        invalid_memory_addr_u64(addr, "sh"),
-                    ));
-                }
-                let shift = ((addr / 2) % 4) * 16;
-                let mask = 0xFFFFu64 << shift;
-                let value = (memory_read_value & !mask) | ((a & 0xFFFF) << shift);
-                memory_store_value = Some(value);
-                self.mw_cpu(align_u64(addr), value, MemoryAccessPosition::Memory);
+                (a, b, c, addr, memory_read_value) = self.store_rr(instruction)?;
+                memory_store_value =
+                    Some(self.stored(Opcode::SH, addr, memory_read_value, a, 2)?);
             }
             Opcode::SW => {
-                (a, b, c, addr, memory_read_value) = self.store_rr(instruction);
-                if addr % 4 != 0 {
-                    return Err(EmulationError::invalid_memory_access(
-                        Opcode::SW,
-                        invalid_memory_addr_u64(addr, "sw"),
-                    ));
-                }
-                let shift = ((addr / 4) % 2) * 32;
-                let mask = 0xFFFF_FFFFu64 << shift;
-                let value = (memory_read_value & !mask) | ((a & 0xFFFF_FFFF) << shift);
-                memory_store_value = Some(value);
-                self.mw_cpu(align_u64(addr), value, MemoryAccessPosition::Memory);
+                (a, b, c, addr, memory_read_value) = self.store_rr(instruction)?;
+                memory_store_value =
+                    Some(self.stored(Opcode::SW, addr, memory_read_value, a, 4)?);
             }
 
             // B-type instructions.

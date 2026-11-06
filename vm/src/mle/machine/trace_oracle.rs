@@ -440,7 +440,7 @@ impl HostSide {
     /// whitelist mode iff the record carries a shape, so the host pads to the shape the device did.
     pub fn build(chips: &Chips, record: &EmulationRecord) -> Self {
         let augmented = super::riscv::augmented_record(chips, record);
-        let census = (0..=air_id::ED_DECOMPRESS)
+        let census = (0..=air_id::MEM_UNALIGNED)
             .filter_map(|air| census(air, &augmented).map(|n| (air, n)))
             .collect();
         let ctx = super::riscv::build_ctx_augmented(chips, augmented, record.shape.is_some());
@@ -1025,7 +1025,7 @@ mod tests {
     #[test]
     fn every_air_has_a_policy_and_every_flagged_air_a_census() {
         let record = EmulationRecord::default();
-        for air in 0..=air_id::ED_DECOMPRESS {
+        for air in 0..=air_id::MEM_UNALIGNED {
             let name = air_name(air).unwrap_or_else(|| panic!("air {air} has no name"));
             let policy = air_policy(air).unwrap_or_else(|| panic!("{name} has no policy"));
             assert_eq!(
@@ -1034,12 +1034,12 @@ mod tests {
                 "{name}: classified by flags iff counted"
             );
         }
-        assert!(air_policy(air_id::ED_DECOMPRESS + 1).is_none());
+        assert!(air_policy(air_id::MEM_UNALIGNED + 1).is_none());
     }
 
     #[test]
     fn the_multiset_airs_are_the_ones_the_plan_lists() {
-        let multiset: Vec<&str> = (0..=air_id::ED_DECOMPRESS)
+        let multiset: Vec<&str> = (0..=air_id::MEM_UNALIGNED)
             .filter(|&air| air_policy(air).unwrap().order == Order::Multiset)
             .map(|air| air_name(air).unwrap())
             .collect();

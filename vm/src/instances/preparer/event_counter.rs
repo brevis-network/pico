@@ -167,6 +167,9 @@ pub struct EventCounter {
     pub num_poseidon2_events: usize,
     pub num_global_lookup_events: usize,
     pub num_memory_read_writes: usize,
+    /// The misaligned loads and stores: the `MemoryUnaligned` chip's rows, which the host
+    /// generates.
+    pub num_memory_unaligned: usize,
 
     pub start_indices: StartIndices,
 
@@ -556,6 +559,7 @@ impl Traced<'_> {
         if rows > 0 {
             counter.num_memory_read_writes = rows;
         }
+        counter.num_memory_unaligned = self.history.unaligned.len();
     }
 
     /// The div/rem chip's rows and the ADD rows it derives, which the add chip proves after its

@@ -47,7 +47,7 @@ fn fp_op_secp256k1(
     let mut x_buf = [0u64; 4];
     let mut y_buf = [0u64; 4];
 
-    core.read_mem_dword_span_snapshot(x_ptr, &mut x_buf[..num_dwords]);
+    core.read_mem_dword_span_snapshot_syscall(x_ptr, &mut x_buf[..num_dwords]);
     core.read_mem_dword_span_at_clk(y_ptr, &mut y_buf[..num_dwords], clk);
 
     let a_bytes = dwords_to_bytes(&x_buf[..num_dwords]);
@@ -80,7 +80,7 @@ fn fp_op_bn254(
     let mut x_buf = [0u64; 4];
     let mut y_buf = [0u64; 4];
 
-    core.read_mem_dword_span_snapshot(x_ptr, &mut x_buf[..num_dwords]);
+    core.read_mem_dword_span_snapshot_syscall(x_ptr, &mut x_buf[..num_dwords]);
     core.read_mem_dword_span_at_clk(y_ptr, &mut y_buf[..num_dwords], clk);
 
     let a_bytes = dwords_to_bytes(&x_buf[..num_dwords]);
@@ -114,7 +114,7 @@ fn fp_op_bls381(
     let mut x_buf = [0u64; 6];
     let mut y_buf = [0u64; 6];
 
-    core.read_mem_dword_span_snapshot(x_ptr, &mut x_buf[..num_dwords]);
+    core.read_mem_dword_span_snapshot_syscall(x_ptr, &mut x_buf[..num_dwords]);
     core.read_mem_dword_span_at_clk(y_ptr, &mut y_buf[..num_dwords], clk);
 
     let a_bytes = dwords_to_bytes(&x_buf[..num_dwords]);
@@ -183,7 +183,7 @@ fn fp2_addsub_bn254(
     let mut x_buf = [0u64; 8];
     let mut y_buf = [0u64; 8];
 
-    core.read_mem_dword_span_snapshot(x_ptr, &mut x_buf[..num_dwords]);
+    core.read_mem_dword_span_snapshot_syscall(x_ptr, &mut x_buf[..num_dwords]);
     core.read_mem_dword_span_at_clk(y_ptr, &mut y_buf[..num_dwords], clk);
 
     let half = num_dwords / 2;
@@ -253,7 +253,7 @@ fn fp2_mul_bn254(
     let mut x_buf = [0u64; 8];
     let mut y_buf = [0u64; 8];
 
-    core.read_mem_dword_span_snapshot(x_ptr, &mut x_buf[..num_dwords]);
+    core.read_mem_dword_span_snapshot_syscall(x_ptr, &mut x_buf[..num_dwords]);
     core.read_mem_dword_span_at_clk(y_ptr, &mut y_buf[..num_dwords], clk);
 
     let half = num_dwords / 2;
@@ -290,7 +290,7 @@ fn fp2_addsub_bls381(
     let mut x_buf = [0u64; 12];
     let mut y_buf = [0u64; 12];
 
-    core.read_mem_dword_span_snapshot(x_ptr, &mut x_buf[..num_dwords]);
+    core.read_mem_dword_span_snapshot_syscall(x_ptr, &mut x_buf[..num_dwords]);
     core.read_mem_dword_span_at_clk(y_ptr, &mut y_buf[..num_dwords], clk);
 
     let half = num_dwords / 2;
@@ -330,7 +330,7 @@ fn fp2_mul_bls381(
     let mut x_buf = [0u64; 12];
     let mut y_buf = [0u64; 12];
 
-    core.read_mem_dword_span_snapshot(x_ptr, &mut x_buf[..num_dwords]);
+    core.read_mem_dword_span_snapshot_syscall(x_ptr, &mut x_buf[..num_dwords]);
     core.read_mem_dword_span_at_clk(y_ptr, &mut y_buf[..num_dwords], clk);
 
     let half = num_dwords / 2;

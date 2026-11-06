@@ -4,6 +4,9 @@ pub mod columns;
 pub mod constraints;
 pub mod traces;
 
+#[cfg(test)]
+mod guard_tests;
+
 /// The type of memory chip that is being initialized.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryChipType {

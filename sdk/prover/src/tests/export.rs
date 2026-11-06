@@ -25,6 +25,7 @@ fn proof(verify_keys: bool, phase: Phase, payload: Payload) -> Proof {
         committed_value_digest: [0; 32],
         chunk_count: None,
         distinct_shapes: None,
+        misaligned_accesses: None,
         payload,
     }
 }

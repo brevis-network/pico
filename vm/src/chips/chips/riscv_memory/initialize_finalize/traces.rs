@@ -94,6 +94,10 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
                 cols.addr[0] = F::from_u16((addr & 0xFFFF) as u16);
                 cols.addr[1] = F::from_u16(((addr >> 16) & 0xFFFF) as u16);
                 cols.addr[2] = F::from_u16(((addr >> 32) & 0xFFFF) as u16);
+                // No inverse in the stack guard: zero leaves the row unsatisfiable.
+                cols.guard_inv = (cols.addr[1] - F::from_u16(0x777f))
+                    .try_inverse()
+                    .unwrap_or(F::ZERO);
 
                 // Chunk and timestamp
                 cols.chunk = F::from_u32(chunk);
@@ -197,6 +201,8 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
             // Range check: addr as 3×u16 limbs
             let addr_limbs = u64_to_u16_limbs(addr);
             blu_events.add_u16_range_checks(&addr_limbs[0..3]);
+            // Below the top of memory: wraps, and so fails the lookup, above it.
+            blu_events.add_u16_range_check(0x77ffu16.wrapping_sub(addr_limbs[1]));
 
             // Range check: prev_addr as 3×u16 limbs
             let prev_addr = if i == 0 {

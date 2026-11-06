@@ -46,6 +46,7 @@ const UNBUILDABLE_LOG_STACKED_HEIGHT: &str = "64";
 /// What `prove` prints on stdout, each line by its start.
 const PROVE_RESULTS: &[&str] = &[
     "proved and verified to ",
+    "misaligned accesses: ",
     "committed (",
     "committed_value_digest: ",
     "program id (",
@@ -304,7 +305,12 @@ fn logs_go_to_stderr_and_leave_stdout_to_the_results() {
         .env("RUST_LOGGER", logger));
         assert!(out.status.success(), "{logger}:\n{stdout}\n{stderr}");
         assert_logs_leave_stdout_to(
-            &["executed: ", "committed (", "precompiles: "],
+            &[
+                "executed: ",
+                "misaligned accesses: ",
+                "committed (",
+                "precompiles: ",
+            ],
             &stdout,
             &stderr,
         );

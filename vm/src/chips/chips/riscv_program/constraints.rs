@@ -1,12 +1,17 @@
 use crate::{
-    chips::chips::{
-        riscv_cpu::{
-            instruction::columns::InstructionCols, opcode_selector::columns::OpcodeSelectorCols,
+    chips::{
+        chips::{
+            riscv_cpu::{
+                instruction::columns::InstructionCols, opcode_selector::columns::OpcodeSelectorCols,
+            },
+            riscv_program::{
+                columns::{
+                    ProgramMultiplicityCols, ProgramPreprocessedCols, NUM_PROGRAM_MULT_COLS,
+                },
+                ProgramChip,
+            },
         },
-        riscv_program::{
-            columns::{ProgramMultiplicityCols, ProgramPreprocessedCols, NUM_PROGRAM_MULT_COLS},
-            ProgramChip,
-        },
+        gadgets::code_range::code_range_message,
     },
     compiler::addr::Pc,
     machine::{
@@ -46,6 +51,19 @@ where
             prep_local.pc_carry,
             mult_local.multiplicity,
         );
+
+        // The code's range, for the store rows and precompile rows that prove what they write
+        // misses it. Four elements against the instruction message's 26, so the two never
+        // meet on the bus.
+        builder.looked(SymbolicLookup::new(
+            code_range_message(prep_local.code_start, prep_local.code_end)
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            mult_local.code_range_multiplicity.into(),
+            LookupType::Program,
+            LookupScope::Regional,
+        ));
     }
 }
 

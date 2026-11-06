@@ -95,10 +95,10 @@ ranges both ways; `sdk/prover/src/tests/memory_functions.rs` runs it.
 
 | address | region |
 |---|---|
-| `0x0000_0000`–`0x0001_0000` | unusable: the register file, and no access below `2^16` is provable |
-| `0x0020_0800` | code, then read-only data, then `.data` / `.bss` |
+| `0x0000_0000`–`0x0001_0000` | unusable: no access below `2^16` is provable, and one ends the run (`NullAccess`). The registers' event addresses, `[0, 32)`, are not guest memory and do not count as using it |
+| `0x0020_0800` | code, which a store may not touch (`StoreToCode`), then read-only data, then `.data` / `.bss` |
 | `_heap_start` | heap, growing up: the first 16-byte-aligned address after `.bss` |
-| `_heap_end` = `0x777f_0000` | stack guard, 64 KiB: nothing valid is stored here |
+| `_heap_end` = `0x777f_0000` | stack guard, 64 KiB: an access ends the run (`StackOverflow`) |
 | `0x7780_0000` | stack, 8 MiB, growing down |
 | `0x7800_0000` | `_stack_top`, the end of guest memory |
 
@@ -193,15 +193,19 @@ same way in the interpreter and the AOT emulator:
 | heap exhausted | `OutOfMemory` | 134 (128 + SIGABRT) |
 | `unimp`, which is also what Rust's `std::process::abort` and a panic with a non-string payload end in | `IllegalInstruction { pc }` | 132 (128 + SIGILL) |
 | `ebreak` | `Breakpoint { pc }` | 133 (128 + SIGTRAP) |
-| a load or store the emulator does not allow | `InvalidMemoryAccess { opcode, addr }` | 139 (128 + SIGSEGV) |
+| a load or store below `0x1_0000`, as through a null pointer | `NullAccess { opcode, addr }` | 139 (128 + SIGSEGV) |
+| a load or store in the stack guard: the stack ran past its 8 MiB, or the heap past `_heap_end` | `StackOverflow { opcode, addr }` | 139 (128 + SIGSEGV) |
+| a store into the code | `StoreToCode { opcode, addr }` | 139 (128 + SIGSEGV) |
+| a load or store past the top of memory, `0x7800_0000` | `InvalidMemoryAccess { opcode, addr }` | 139 (128 + SIGSEGV) |
 | a jump or taken branch to an address that is not 4-aligned (after `JALR` clears bit 0) | `MisalignedJumpTarget { pc, target }`, at the jump | 135 (128 + SIGBUS) |
 | a jump or taken branch out of the program, 0 included, or running past its last instruction | `OutsideProgram { pc }` | 139 (128 + SIGSEGV) |
 
-Faults the emulator detects take the code a native process gets for the same signal. A run ends
-only at `HALT`: a jump to 0 is not one, and neither is running off the end of the program. A
-misaligned target is never rounded down (zkevm-standards: instruction-address-misaligned
-exception semantics). A runtime
-failure passes its reason to `HALT` in `a1` (`error::halt_reason`); a guest's own non-zero exit
-leaves it `0`. The tags carry a prefix, so whatever an older runtime left in `a1` reads as a
-plain `Exit`.
+Faults the emulator detects take the code a native process gets for the same signal. An access
+faults if any of its bytes lands in a forbidden range, and a syscall's access faults the same way,
+with `ecall` as its opcode; a syscall that reads or writes nothing, such as an empty `WRITE`, may
+pass any pointer. A run ends only at `HALT`: a jump to 0 is not one, and neither is running off
+the end of the program. A misaligned target is never rounded down (zkevm-standards:
+instruction-address-misaligned exception semantics). A runtime failure passes its reason to `HALT`
+in `a1` (`error::halt_reason`); a guest's own non-zero exit leaves it `0`. The tags carry a prefix,
+so whatever an older runtime left in `a1` reads as a plain `Exit`.
 

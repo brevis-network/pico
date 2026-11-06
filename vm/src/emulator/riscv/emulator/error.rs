@@ -64,8 +64,16 @@ pub enum TerminationReason {
     Abort,
     /// The heap is exhausted.
     OutOfMemory,
-    /// An access the emulator does not allow.
+    /// An access past the top of guest memory.
     InvalidMemoryAccess { opcode: Opcode, addr: u64 },
+    /// An access below the lowest segment address: no segment loads there, and no access there is
+    /// provable.
+    NullAccess { opcode: Opcode, addr: u64 },
+    /// An access into the stack guard, the gap between the heap and the stack: the stack ran past
+    /// its bottom, or the heap past its end.
+    StackOverflow { opcode: Opcode, addr: u64 },
+    /// A store into the program's code.
+    StoreToCode { opcode: Opcode, addr: u64 },
     /// `unimp` at `pc`, which is also what `core::intrinsics::abort` and `std::process::abort`
     /// emit.
     IllegalInstruction { pc: u64 },
@@ -95,11 +103,14 @@ impl TerminationReason {
             Self::Exit => 1,
             Self::Panic => exit_code::PANIC,
             Self::Abort | Self::OutOfMemory => exit_code::ABORT,
-            Self::InvalidMemoryAccess { .. } => 128 + 11, // SIGSEGV
-            Self::IllegalInstruction { .. } => 128 + 4,   // SIGILL
-            Self::Breakpoint { .. } => 128 + 5,           // SIGTRAP
+            Self::InvalidMemoryAccess { .. }
+            | Self::NullAccess { .. }
+            | Self::StackOverflow { .. }
+            | Self::StoreToCode { .. }
+            | Self::OutsideProgram { .. } => 128 + 11, // SIGSEGV
+            Self::IllegalInstruction { .. } => 128 + 4, // SIGILL
+            Self::Breakpoint { .. } => 128 + 5,         // SIGTRAP
             Self::MisalignedJumpTarget { .. } => 128 + 7, // SIGBUS
-            Self::OutsideProgram { .. } => 128 + 11,      // SIGSEGV
         }
     }
 }
@@ -113,6 +124,18 @@ impl fmt::Display for TerminationReason {
             Self::OutOfMemory => f.write_str("the guest ran out of heap"),
             Self::InvalidMemoryAccess { opcode, addr } => {
                 write!(f, "invalid memory access: {opcode} at {addr:#x}")
+            }
+            Self::NullAccess { opcode, addr } => {
+                write!(f, "null access: {opcode} at {addr:#x}")
+            }
+            Self::StackOverflow { opcode, addr } => {
+                write!(
+                    f,
+                    "stack overflow: {opcode} at {addr:#x}, in the stack guard"
+                )
+            }
+            Self::StoreToCode { opcode, addr } => {
+                write!(f, "store into code: {opcode} at {addr:#x}")
             }
             Self::IllegalInstruction { pc } => write!(f, "illegal instruction at {pc:#x}"),
             Self::Breakpoint { pc } => write!(f, "breakpoint at {pc:#x}"),

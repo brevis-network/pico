@@ -67,6 +67,7 @@ impl AotEmulatorCore {
     ) -> ContiguousRiscvMemory {
         self.pc = state.pc;
         self.insn_count = state.global_clk;
+        self.misaligned_accesses = state.misaligned_accesses;
         self.current_batch = state.current_batch;
         self.current_chunk = state.current_chunk;
         self.clk = u32::try_from(state.clk).expect("a chunk's clock fits in u32");
@@ -153,6 +154,7 @@ impl AotEmulatorCore {
                 done,
                 cycle_tracker: None,
                 host_cycle_estimator: None,
+                misaligned_accesses: self.misaligned_accesses,
             },
         ))
     }
@@ -213,7 +215,7 @@ mod tests {
 
     /// Stands in for the generated block at 0x1000, which runs only if it fits.
     fn block(emu: &mut AotEmulatorCore) -> Result<NextStep, String> {
-        if !emu.can_fit_block(3, 0, 0, 1 << 1) {
+        if !emu.can_fit_block(3, 0, 0, 1 << 1, 0) {
             return emu.interpret_from_current_pc();
         }
         addis(emu);
@@ -385,11 +387,11 @@ mod tests {
         assert_eq!(boundary(&reused.record), boundary(&built.record));
     }
 
-    /// `ADDI x1, x0, 0x200`, a store of x1 to 0x200 and a load back, then the halt.
+    /// `ADDI x1, x0, 0x1_0200`, a store of x1 to 0x1_0200 and a load back, then the halt.
     fn storing() -> Arc<Program> {
         Arc::new(Program::new(
             vec![
-                Instruction::new(Opcode::ADD, 1, 0, 0x200, false, true),
+                Instruction::new(Opcode::ADD, 1, 0, 0x1_0200, false, true),
                 Instruction::new(Opcode::SD, 1, 1, 0, false, true),
                 Instruction::new(Opcode::LD, 2, 1, 0, false, true),
                 Instruction::new(Opcode::ECALL, 5, 10, 11, false, false),
@@ -410,7 +412,7 @@ mod tests {
 
         let mut serial = AotEmulatorCore::new(storing(), Vec::new());
         interpreted(&mut serial).expect("the run");
-        assert_eq!(tracked(&serial), [0x200]);
+        assert_eq!(tracked(&serial), [0x1_0200]);
 
         let mut worker = AotEmulatorCore::recover(storing(), start(), 4, true);
         worker.replay(interpreted).expect("the replay");

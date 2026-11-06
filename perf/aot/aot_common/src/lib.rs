@@ -81,6 +81,7 @@ pub fn next_state_batch_impl(
         done,
         cycle_tracker: None,
         host_cycle_estimator: None,
+        misaligned_accesses: emu.misaligned_accesses,
     };
 
     if !done && emu.insn_count == start_cycle && emu.batch_chunk_target > 0 {

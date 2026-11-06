@@ -12,6 +12,7 @@ use crate::{
         },
         gadgets::{
             addr_add::AddrAddGadget,
+            code_range::CodeRangeCols,
             curves::{
                 edwards::{
                     ed25519::Ed25519BaseField, EdwardsParameters, WordsCurvePoint, NUM_LIMBS,
@@ -57,6 +58,7 @@ use crate::{
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
+    ops::Range,
 };
 use hybrid_array::Array;
 use num::{BigUint, Zero};
@@ -102,6 +104,9 @@ pub struct EdAddAssignCols<T> {
     /// written back to guest memory. Matches `x3_range`/`y3_range` in `weierstrass_add.rs`.
     pub(crate) x3_range: FieldLtCols<T, Ed25519BaseField>,
     pub(crate) y3_range: FieldLtCols<T, Ed25519BaseField>,
+
+    /// The sum is written back over `p`, which may not lie on the program's code.
+    pub code_range: CodeRangeCols<T>,
 }
 
 #[derive(Default)]
@@ -190,13 +195,14 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
             events.len()
         );
 
+        let code = input.program.code();
         let mut blu_events = Vec::new();
         let mut rows: Vec<[F; NUM_ED_ADD_COLS]> = events
             .iter()
             .map(|event| {
                 let mut row = [F::ZERO; NUM_ED_ADD_COLS];
                 let cols: &mut EdAddAssignCols<F> = row.as_mut_slice().borrow_mut();
-                Self::event_to_row(event, cols, &mut blu_events);
+                Self::event_to_row(event, &code, cols, &mut blu_events);
                 row
             })
             .collect();
@@ -251,11 +257,12 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
             })
             .collect();
 
+        let code = input.program.code();
         let mut blu_events = Vec::new();
         for event in events {
             let mut row = [F::ZERO; NUM_ED_ADD_COLS];
             let cols: &mut EdAddAssignCols<F> = row.as_mut_slice().borrow_mut();
-            Self::event_to_row(event, cols, &mut blu_events);
+            Self::event_to_row(event, &code, cols, &mut blu_events);
         }
 
         output.add_byte_lookup_events(blu_events);
@@ -318,6 +325,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> EdAddAssignChip<F, E
     /// Create a row from an event.
     fn event_to_row(
         event: &EllipticCurveAddEvent,
+        code: &Range<u64>,
         cols: &mut EdAddAssignCols<F>,
         blu: &mut impl ByteRecordBehavior,
     ) {
@@ -334,6 +342,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> EdAddAssignChip<F, E
         let len = NUM_LIMBS as u64 * 2;
         cols.p_ptr.populate(blu, event.p_ptr, len);
         cols.q_ptr.populate(blu, event.q_ptr, len);
+        cols.code_range.populate(event.p_ptr, len, code, blu);
 
         Self::populate_field_ops(blu, cols, p_x, p_y, q_x, q_y);
 
@@ -511,6 +520,15 @@ where
             builder,
             NUM_LIMBS as u32 * 2,
             local.p_ptr,
+            local.is_real.into(),
+        );
+        // The sum is written back over `p`, which may not lie on the program's code.
+        // The third limb is zero at any address the finalize check admits.
+        CodeRangeCols::<CB::F>::eval(
+            builder,
+            &local.code_range,
+            [p_ptr[0].into(), p_ptr[1].into()],
+            CB::Expr::from_u32(NUM_LIMBS as u32 * 2),
             local.is_real.into(),
         );
         let q_ptr = SyscallAddrGadget::<CB::F>::eval(

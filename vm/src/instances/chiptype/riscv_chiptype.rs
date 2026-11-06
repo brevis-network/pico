@@ -26,6 +26,7 @@ use crate::{
                 },
                 local::MemoryLocalChip,
                 read_write::MemoryReadWriteChip,
+                unaligned::MemoryUnalignedChip,
             },
             riscv_poseidon2::FieldSpecificPoseidon2Chip,
             riscv_program::ProgramChip,
@@ -60,6 +61,7 @@ use crate::{
     compiler::riscv::program::Program,
     define_chip_type,
     emulator::riscv::{
+        history_view::unaligned_len,
         record::{AluStream, EmulationRecord},
         syscalls::precompiles::PrecompileLocalMemory,
     },
@@ -126,6 +128,7 @@ define_chip_type!(
         (MemoryFinalize, MemoryInitializeFinalizeChip),
         (MemoryLocal, MemoryLocalChip),
         (MemoryReadWrite, MemoryReadWriteChip),
+        (MemoryUnaligned, MemoryUnalignedChip),
         (DivRem, DivRemChip),
         (Mul, MulChip),
         (Lt, LtChip),
@@ -216,6 +219,9 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::MemoryFinalize(MemoryInitializeFinalizeChip::new(MemoryChipType::Finalize)),
             Self::MemoryLocal(Default::default()),
             Self::MemoryReadWrite(Default::default()),
+            // The misaligned loads and stores: air id 50, appended after the Ed25519
+            // pair, so no existing id moves; like them it changes every convert VK.
+            Self::MemoryUnaligned(Default::default()),
             Self::DivRem(Default::default()),
             Self::Mul(Default::default()),
             Self::Lt(Default::default()),
@@ -326,6 +332,9 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::Poseidon2P(Default::default()),
             Self::Ed25519Add(Default::default()),
             Self::Ed25519Decompress(Default::default()),
+            // The misaligned loads and stores: host tracegen too, its rows few; appended
+            // last for the same reason.
+            Self::MemoryUnaligned(Default::default()),
         ]
         .map(MetaChip::<F, RiscvChipType<F>>::new)
         .into()
@@ -413,6 +422,10 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
                 Self::MemoryReadWrite(Default::default()).name(),
                 steps.memory().len().div_ceil(MEMORY_RW_DATAPAR),
             ),
+            (
+                Self::MemoryUnaligned(Default::default()).name(),
+                unaligned_len(record),
+            ),
             // `+ 1`: the Global trace always ends with one padding row (its accumulation
             // constraints require it); Poseidon2 follows so the log-height gap stays 2.
             (
@@ -498,6 +511,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::Lt(Default::default()),
             Self::MemoryLocal(Default::default()),
             Self::MemoryReadWrite(Default::default()),
+            Self::MemoryUnaligned(Default::default()),
             Self::Global(Default::default()),
             Self::SyscallRiscv(SyscallChip::riscv()),
             Self::Poseidon2(Default::default()),

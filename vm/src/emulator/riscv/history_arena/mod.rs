@@ -591,6 +591,9 @@ fn in_slot(
         },
         operand_exceptions: region(Table::OperandExceptions).rows(policy, &lease),
         syscalls: region(Table::Syscalls).rows(policy, &lease),
+        // The misaligned accesses: at most `1 << MLE_MEMORY_UNALIGNED_LOG_HEIGHT` a chunk,
+        // read on the host alone, so on the heap rather than in a region of the slot.
+        unaligned: Rows::new(),
     }
 }
 

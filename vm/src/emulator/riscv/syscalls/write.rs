@@ -40,10 +40,14 @@ impl Syscall for WriteSyscall {
         arg2: RvValue,
     ) -> Option<RvValue> {
         let a2 = Register::X12;
-        let rt = &mut ctx.rt;
         let fd = u32::try_from(arg1).unwrap_or_else(|_| panic!("write fd overflow: {}", arg1));
         let write_buf = arg2;
-        let nbytes = Self::decode_len_usize(rt.register(a2));
+        let nbytes = Self::decode_len_usize(ctx.rt.register(a2));
+        // An empty write reads nothing, so its pointer may dangle, as an empty Rust slice's does.
+        if nbytes > 0 && !ctx.allowed(write_buf, nbytes as u64, false) {
+            return None;
+        }
+        let rt = &mut ctx.rt;
         // Read nbytes from memory starting at write_buf.
         let bytes = (0..nbytes)
             .map(|i| {

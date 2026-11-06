@@ -18,6 +18,11 @@
 //! carries that one's clock, pc and reads. The sink fills the table by comparing what it is handed
 //! with the rule, so the rule can only be incomplete, never wrong.
 //!
+//! A load or store whose address is not a multiple of its width is not in the memory chip's list:
+//! it is in [`ExecutionHistory::unaligned`], with the access to the next dword when it runs into
+//! that one. That access is made at the C position, which a load or store leaves free, and
+//! is no slot of the step's.
+//!
 //! Every row is `#[repr(C)]` plain data with no padding, so a table moves to a device as one
 //! buffer; the sizes are asserted below. Clocks, pcs and indices are stored as `u32`, and the sink
 //! writing them checks every narrowing in every build.
@@ -53,6 +58,11 @@ pub struct ExecutionHistory {
     pub operand_exceptions: Rows<OperandException>,
     /// One per ECALL whose syscall is sent to the syscall chip.
     pub syscalls: Rows<SyscallEvent>,
+    /// The loads and stores whose address is not a multiple of their width, in step order,
+    /// which [`ChipSteps::memory`] leaves out. They are read on the host alone, so the table never
+    /// takes a region of the arena's slot.
+    #[serde(default)]
+    pub unaligned: Rows<UnalignedStep>,
 }
 
 impl ExecutionHistory {
@@ -144,7 +154,7 @@ impl ExecutionHistory {
 
     /// The bytes each table holds in place, by name.
     #[must_use]
-    pub fn table_bytes(&self) -> [(&'static str, usize); 6] {
+    pub fn table_bytes(&self) -> [(&'static str, usize); 7] {
         let Self {
             chunk: _,
             steps,
@@ -153,6 +163,7 @@ impl ExecutionHistory {
             chip_steps,
             operand_exceptions,
             syscalls,
+            unaligned,
         } = self;
         [
             ("steps", size_of_val(steps.as_slice())),
@@ -167,6 +178,7 @@ impl ExecutionHistory {
                 size_of_val(operand_exceptions.as_slice()),
             ),
             ("syscalls", size_of_val(syscalls.as_slice())),
+            ("unaligned", size_of_val(unaligned.as_slice())),
         ]
     }
 
@@ -191,9 +203,9 @@ impl ExecutionHistory {
     /// Appends `later`, the history of the stretch of the same chunk that runs on from this one's
     /// last step, leaving it empty: the history one replay of both stretches would have written.
     /// `later`'s indices point into its own tables, so each moves past the rows already here:
-    /// every `first_read` by the reads, every `first_write` by the writes, every chip list entry
-    /// and exception by the steps. Rows are moved, never reordered. Syscalls and access rows hold
-    /// clocks and memory state, not indices.
+    /// every `first_read` by the reads, every `first_write` by the writes, every chip list entry,
+    /// exception and unaligned step by the steps. Rows are moved, never reordered. Syscalls and
+    /// access rows hold clocks and memory state, not indices.
     ///
     /// # Panics
     ///
@@ -208,6 +220,7 @@ impl ExecutionHistory {
             chip_steps,
             operand_exceptions,
             syscalls,
+            unaligned,
         } = later;
         if self.steps.is_empty() {
             self.chunk = *chunk;
@@ -236,10 +249,17 @@ impl ExecutionHistory {
             }));
         operand_exceptions.clear();
         self.syscalls.append(syscalls);
+        self.unaligned
+            .extend(unaligned.iter().map(|unaligned| UnalignedStep {
+                step: moved(unaligned.step, step_base, "step index"),
+                ..*unaligned
+            }));
+        unaligned.clear();
     }
 
     /// Every stored fact as 32-bit words, each table behind its length so a row cannot move from
-    /// one table to the next unseen.
+    /// one table to the next unseen. The unaligned steps come last and only when there are some, so
+    /// a history without one keeps the digest it had before the table existed.
     fn words(&self) -> impl Iterator<Item = u32> + '_ {
         let Self {
             chunk,
@@ -249,6 +269,7 @@ impl ExecutionHistory {
             chip_steps,
             operand_exceptions,
             syscalls,
+            unaligned,
         } = self;
         let wide = |value: u64| [value as u32, (value >> 32) as u32];
         let lists = chip_steps.all();
@@ -297,6 +318,22 @@ impl ExecutionHistory {
             let ([k0, k1], [x0, x1], [y0, y1]) = (wide(clk), wide(arg1), wide(arg2));
             [chunk, k0, k1, syscall_id, x0, x1, y0, y1]
         });
+        let unaligned_words = unaligned.iter().flat_map(move |unaligned| {
+            let UnalignedStep {
+                step,
+                crosses,
+                next:
+                    Access {
+                        value,
+                        prev_value,
+                        prev_chunk,
+                        prev_timestamp,
+                    },
+            } = *unaligned;
+            let ([v0, v1], [p0, p1]) = (wide(value), wide(prev_value));
+            [step, crosses, v0, v1, p0, p1, prev_chunk, prev_timestamp]
+        });
+        let unaligned_len = (!unaligned.is_empty()).then(|| wide(unaligned.len() as u64));
         std::iter::once(*chunk)
             .chain(wide(steps.len() as u64))
             .chain(step_words)
@@ -313,6 +350,8 @@ impl ExecutionHistory {
             }))
             .chain(wide(syscalls.len() as u64))
             .chain(syscall_words)
+            .chain(unaligned_len.into_iter().flatten())
+            .chain(unaligned_words)
     }
 }
 
@@ -483,6 +522,20 @@ impl OperandException {
     }
 }
 
+/// A load or store whose address is not a multiple of its width: the step, and the access
+/// to the dword after the one its first byte is in, which the step makes at its clock plus `C`
+/// when it runs into that dword. A store writes it, a load reads it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(C)]
+pub struct UnalignedStep {
+    pub step: u32,
+    /// 1 if the access runs into the next dword, and `next` is its access; 0 if `next` is zero.
+    pub crosses: u32,
+    pub next: Access,
+}
+
+const _: () = assert!(size_of::<UnalignedStep>() == 32);
+
 /// For each chip that proves some of the steps, the indices of those steps in execution order; the
 /// chip's height follows from the length. The CPU and program chips read every step.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -496,7 +549,8 @@ pub struct ChipSteps {
     pub shift_right: Rows<u32>,
     pub lt: Rows<u32>,
     pub divrem: Rows<u32>,
-    /// Loads and stores.
+    /// The loads and stores whose address is a multiple of their width; the others are in
+    /// [`ExecutionHistory::unaligned`].
     pub memory: Rows<u32>,
     pub ecall: Rows<u32>,
     /// Branches, whose comparisons the Lt chip proves beside its own steps.
@@ -1064,7 +1118,8 @@ mod tests {
                 "writes",
                 "chip_steps",
                 "operand_exceptions",
-                "syscalls"
+                "syscalls",
+                "unaligned"
             ]
         );
         assert_eq!(

@@ -64,6 +64,10 @@ pub struct RiscvEmulationState {
 
     /// Keeps track of how many times a certain syscall has been called.
     pub syscall_counts: HashMap<SyscallCode, u64>,
+
+    /// Loads and stores whose address is not a multiple of their width (Zicclsm), outside
+    /// unconstrained blocks: the count a proof reports.
+    pub misaligned_accesses: u64,
 }
 
 impl RiscvEmulationState {
@@ -140,6 +144,7 @@ impl RiscvEmulationState {
             public_values_stream,
             memory,
             syscall_counts,
+            misaligned_accesses: self.misaligned_accesses,
         }
     }
 }

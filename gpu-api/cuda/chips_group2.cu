@@ -22,6 +22,7 @@
 #include "tracegen/precompiles/keccak_control.cuh"
 #include "tracegen/precompiles/keccak_round.cuh"
 #include "tracegen/riscv/memory_initialize_finalize.cuh"
+#include "tracegen/common/code_range.cuh"
 #include "tracegen/precompiles/precompile_ed_add_ed25519.cuh"
 #include "tracegen/precompiles/precompile_ed_decompress.cuh"
 #include "tracegen/precompiles/precompile_fp2_add_sub_bls12381.cuh"
@@ -535,6 +536,27 @@ namespace pico_gpu {
       return generate_control_extra_record_and_main(events, events_len, trace, total_rows, num_cols, byte_trace, stream);
     } // cuda_precompile_keccak_control_generate_extra_record_and_main
   } // namespace keccak
+
+  namespace code_range_fill {
+    // A precompile's code range, filled after its kernel: row i's `CodeRangeCols` at
+    // column `offset`, for the write of `width` bytes from `writes[i]`.
+    PICO_FFI
+    RustError::by_value cuda_code_range_fill(
+      field_t* trace,
+      size_t num_cols,
+      size_t offset,
+      const uint64_t* writes,
+      size_t rows,
+      uint64_t width,
+      uint64_t code_start,
+      uint64_t code_end,
+      field_t* byte_trace,
+      cudaStream_t stream)
+    {
+      return code_range::fill<field_t>(
+        trace, num_cols, offset, writes, rows, width, code_start, code_end, byte_trace, stream);
+    }
+  } // namespace code_range_fill
 
   namespace precompile_uint256_mul {
     PICO_FFI

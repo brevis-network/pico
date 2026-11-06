@@ -110,6 +110,9 @@ pub fn table_sizes(history: &ExecutionHistory) -> [TableSize; TABLES.len()] {
         chip_steps,
         operand_exceptions,
         syscalls,
+        // The misaligned steps are read on the host alone, at most 1024 rows a chunk, and take no
+        // region of a slot.
+        unaligned: _,
     } = history;
     let ChipSteps {
         add,

@@ -30,7 +30,7 @@ use crate::{
         utils::next_power_of_two,
     },
     compiler::riscv::{opcode::Opcode, program::Program},
-    emulator::riscv::record::EmulationRecord,
+    emulator::riscv::{emulator::guard::access_width, record::EmulationRecord},
     iter::{IndexedPicoIterator, PicoIterator, PicoSliceMut},
     machine::{
         chip::ChipBehavior,
@@ -81,6 +81,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
 
         // Pre-allocate with parallel initialization
         let mut values = vec![F::ZERO; padded_nrows * NUM_MEMORY_CHIP_COLS];
+        let code = input.program.code();
 
         // Calculate actual population length and handle type conversion
         let populate_len = steps.len() * NUM_MEMORY_CHIP_VALUE_COLS;
@@ -90,7 +91,9 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
             .enumerate()
             .for_each(|(index, row)| {
                 let cols: &mut MemoryChipValueCols<_> = row.borrow_mut();
-                self.event_to_row(&steps.get(index), cols, &mut vec![]);
+                let event = steps.get(index);
+                self.event_to_row(&event, cols, &mut vec![]);
+                Self::code_range_to_row(&event, cols, &code, &mut vec![]);
             });
 
         RowMajorMatrix::new(values, NUM_MEMORY_CHIP_COLS)
@@ -99,6 +102,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         // Generate the trace rows for each event. The only extra records are byte lookups: the
         // address addition is proven in-chip, so no ALU ADD event is dispatched.
+        let code = input.program.code();
         let blu_events =
             input
                 .cpu_steps()
@@ -107,6 +111,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
                     let mut row = [F::ZERO; NUM_MEMORY_CHIP_VALUE_COLS];
                     let cols: &mut MemoryChipValueCols<F> = row.as_mut_slice().borrow_mut();
                     self.event_to_row(op, cols, blu);
+                    Self::code_range_to_row(op, cols, &code, blu);
                 });
         for blu_events_chunk in blu_events {
             extra.add_byte_lookup_events(blu_events_chunk);
@@ -226,6 +231,21 @@ impl<F: PrimeField32> MemoryReadWriteChip<F> {
 }
 
 impl<F: Field> MemoryReadWriteChip<F> {
+    /// A store's check that it misses the program's `code`; a load leaves the columns zero.
+    fn code_range_to_row(
+        event: &CpuEvent,
+        cols: &mut MemoryChipValueCols<F>,
+        code: &core::ops::Range<u64>,
+        blu_events: &mut impl ByteRecordBehavior,
+    ) {
+        let opcode = event.instruction.opcode;
+        if matches!(opcode, Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SD) {
+            let addr = event.b.wrapping_add(event.c);
+            cols.code_range
+                .populate(addr, access_width(opcode), code, blu_events);
+        }
+    }
+
     fn event_to_row(
         &self,
         event: &CpuEvent,
@@ -1082,5 +1102,143 @@ mod tests {
                 .count()
         };
         assert_eq!(u16_count(&lb_events), u16_count(&lbu_events) + 1);
+    }
+
+    /// A store's row holds it off the program's code: one that ends where the code starts,
+    /// or starts where it ends, satisfies the AIR, and one with any byte inside fails it, at every
+    /// width; a load of the code satisfies it. Each row is an access the emulator makes, in the
+    /// chip's first slot, the others padding, evaluated through the debug constraint folder (which
+    /// leaves the lookups, the distance's range checks among them, to the end-to-end proof).
+    #[test]
+    fn a_store_into_the_code_fails_the_air() {
+        use super::super::columns::{MemoryChipCols, NUM_MEMORY_CHIP_COLS};
+        use crate::{
+            emulator::riscv::emulator::{
+                guard::access_width,
+                util::{dword_bytes, splice_dword},
+            },
+            machine::{debug_folder::DebugConstraintFolder, septic::SepticDigest},
+        };
+        use core::borrow::BorrowMut;
+        use p3_air::{Air, RowWindow};
+        use p3_field::extension::QuinticTrinomialExtensionField;
+
+        type F = KoalaBear;
+        type EF = QuinticTrinomialExtensionField<KoalaBear>;
+        const CODE: core::ops::Range<u64> = 0x20_0800..0x20_1000;
+        const PREV: u64 = 0x1122_3344_5566_7788;
+        const VALUE: u64 = 0xA1B2_C3D4_E5F6_0718;
+
+        // `opcode` at `addr`: a store of VALUE's low bytes over PREV, or a load from PREV.
+        let row_of = |opcode: Opcode, addr: u64| {
+            let (dword, offset) = (addr & !7, addr % 8);
+            let store = matches!(opcode, Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SD);
+            let (a, record) = if store {
+                let new = splice_dword(PREV, offset, access_width(opcode), VALUE);
+                let write = MemoryWriteRecord {
+                    value: new,
+                    chunk: 1,
+                    timestamp: 9,
+                    prev_value: PREV,
+                    prev_chunk: 0,
+                    prev_timestamp: 0,
+                };
+                (VALUE, MemoryRecordEnum::Write(write))
+            } else {
+                // What the load writes to `a`: its bytes, sign-extended but for LBU, LHU and LWU.
+                let width = access_width(opcode);
+                let bytes = dword_bytes(PREV, offset, width);
+                let shift = 64 - 8 * width;
+                let loaded = match opcode {
+                    Opcode::LB | Opcode::LH | Opcode::LW => {
+                        (((bytes << shift) as i64) >> shift) as u64
+                    }
+                    _ => bytes,
+                };
+                let read = MemoryReadRecord {
+                    value: PREV,
+                    chunk: 1,
+                    timestamp: 9,
+                    prev_chunk: 0,
+                    prev_timestamp: 0,
+                };
+                (loaded, MemoryRecordEnum::Read(read))
+            };
+            let event = CpuEvent {
+                chunk: 1,
+                clk: 9,
+                instruction: Instruction::new(opcode, 11, 10, offset, false, true),
+                a,
+                b: dword,
+                c: offset,
+                memory: FfiOption::Some(record.value()),
+                memory_record: FfiOption::Some(record),
+                ..Default::default()
+            };
+            let mut row = vec![F::ZERO; NUM_MEMORY_CHIP_COLS];
+            let cols: &mut MemoryChipCols<F> = row.as_mut_slice().borrow_mut();
+            let mut blu = Vec::<ByteLookupEvent>::new();
+            let chip = MemoryReadWriteChip::<F>::default();
+            chip.event_to_row(&event, &mut cols.values[0], &mut blu);
+            MemoryReadWriteChip::<F>::code_range_to_row(
+                &event,
+                &mut cols.values[0],
+                &CODE,
+                &mut blu,
+            );
+            row
+        };
+        let failures = |row: &[F]| {
+            let dummy = [F::ZERO];
+            let mut folder = DebugConstraintFolder::<F, EF> {
+                preprocessed: RowWindow::from_two_rows(&dummy, &dummy),
+                main: RowWindow::from_two_rows(row, row),
+                global_cumulative_sum: SepticDigest::<F>::zero(),
+                is_first_row: F::ZERO,
+                is_last_row: F::ZERO,
+                is_transition: F::ONE,
+                public_values: &[],
+                failures: Vec::new(),
+                scopes: Vec::new(),
+                constraint_count: 0,
+            };
+            MemoryReadWriteChip::<F>::default().eval(&mut folder);
+            folder
+                .failures
+                .iter()
+                .map(|(scopes, failure)| format!("{scopes:?} {failure:?}"))
+                .collect::<Vec<_>>()
+        };
+
+        let off_the_code = [
+            (Opcode::SD, CODE.start - 8),
+            (Opcode::SW, CODE.start - 4),
+            (Opcode::SB, CODE.start - 1),
+            (Opcode::SH, CODE.end),
+            (Opcode::SB, CODE.end),
+            (Opcode::LD, CODE.start),
+            (Opcode::LW, CODE.end - 4),
+        ];
+        for (opcode, addr) in off_the_code {
+            let failures = failures(&row_of(opcode, addr));
+            assert!(
+                failures.is_empty(),
+                "{opcode:?} at 0x{addr:x}: {failures:?}"
+            );
+        }
+        let into_the_code = [
+            (Opcode::SD, CODE.start),
+            (Opcode::SD, CODE.end - 8),
+            (Opcode::SB, CODE.start),
+            (Opcode::SB, CODE.end - 1),
+            (Opcode::SH, CODE.start + 0x10),
+            (Opcode::SW, CODE.end - 4),
+        ];
+        for (opcode, addr) in into_the_code {
+            assert!(
+                !failures(&row_of(opcode, addr)).is_empty(),
+                "{opcode:?} at 0x{addr:x} satisfies the AIR"
+            );
+        }
     }
 }

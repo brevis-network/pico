@@ -1338,6 +1338,7 @@ fn copy_state(state: &RiscvEmulationState) -> RiscvEmulationState {
         public_values_stream: state.public_values_stream.clone(),
         memory,
         syscall_counts: state.syscall_counts.clone(),
+        misaligned_accesses: state.misaligned_accesses,
     }
 }
 

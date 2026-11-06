@@ -177,6 +177,14 @@ impl RiscvEmulatorMode {
         }
     }
 
+    /// The access to the next dword of a misaligned load or store that runs into it, which fills
+    /// no slot of the step.
+    pub fn set_next_dword(&self, input: MemoryRecordEnum, sink: &mut impl ExecutionSink) {
+        if let Self::Trace = self {
+            sink.next_dword(input);
+        }
+    }
+
     /// Add an unconstrained memory record.
     pub fn add_unconstrained_memory_record(&mut self, addr: RvAddr, record: Option<&MemoryRecord>) {
         if let Self::Unconstrained(state) = self {

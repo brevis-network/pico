@@ -44,6 +44,7 @@ use crate::{
                 initialize_finalize::{MemoryChipType, MemoryInitializeFinalizeChip},
                 local::MemoryLocalChip,
                 read_write::MemoryReadWriteChip,
+                unaligned::MemoryUnalignedChip,
             },
             riscv_poseidon2::FieldSpecificPoseidon2Chip,
             riscv_program::ProgramChip,
@@ -424,6 +425,9 @@ pub mod air_id {
     /// after the poseidon2 precompile, in the order the three came back.
     pub const ED_ADD: usize = 48;
     pub const ED_DECOMPRESS: usize = 49;
+    /// The loads and stores whose address is not a multiple of their width; appended last
+    /// for the same reason.
+    pub const MEM_UNALIGNED: usize = 50;
 }
 
 /// Maps brevis chip `name()` → AIR id for the core set. Chips not listed are excluded from both
@@ -481,6 +485,7 @@ const INCLUDED: &[(&str, usize)] = &[
     ("Poseidon2Permute", air_id::POSEIDON2_PERMUTE),
     ("EdAddAssign", air_id::ED_ADD),
     ("EdDecompress", air_id::ED_DECOMPRESS),
+    ("MemoryUnaligned", air_id::MEM_UNALIGNED),
 ];
 
 pub fn air_id_for(name: &str) -> Option<usize> {
@@ -799,6 +804,7 @@ pub fn mle_riscv_air_refs(program: Arc<Program>, bucket: bool) -> Vec<AirRef<Sc>
         Arc::new(FieldSpecificPrecompilePoseidon2Chip::<Kb>::default()), // 47
         Arc::new(EdAddAssignChip::<Kb, Ed25519>::default()),            // 48
         Arc::new(EdDecompressChip::<Kb, Ed25519Parameters>::default()), // 49
+        Arc::new(MemoryUnalignedChip::<Kb>::default()),                 // 50
     ]
 }
 
@@ -3193,7 +3199,8 @@ mod tests {
             "GPU-generated chips with no MLE RISC-V air: {unplaceable:?}"
         );
 
-        // `BYTE_CHIP_INDEX`, `ECALL_CHIP_INDEX` and `HOST_TRACEGEN_PRECOMPILE_INDICES`.
+        // `BYTE_CHIP_INDEX`, `ECALL_CHIP_INDEX`, `HOST_TRACEGEN_PRECOMPILE_INDICES` and
+        // `MEMORY_UNALIGNED_CHIP_INDEX`.
         assert_eq!(
             listed[45..],
             [
@@ -3201,7 +3208,8 @@ mod tests {
                 "Ecall",
                 "Poseidon2Permute",
                 "EdAddAssign",
-                "EdDecompress"
+                "EdDecompress",
+                "MemoryUnaligned"
             ],
             "the orchestrator's positional tail moved"
         );
