@@ -245,8 +245,8 @@ memcpy:                                 # @memcpy
 .LBBmemcpy0_12:
 	addi	a4, a4, -1
 	slli	a4, a4, 2
-	lui	a5, %hi(.LJTI0_0)
-	addi	a5, a5, %lo(.LJTI0_0)
+	lui	a5, %hi(.LJTImemcpy0_0)
+	addi	a5, a5, %lo(.LJTImemcpy0_0)
 	add	a4, a4, a5
 	lw	a5, 0(a4)
 	ld	a4, 0(a1)
@@ -762,11 +762,11 @@ memcpy:                                 # @memcpy
 	lbu	a1, 0(a1)
 	sb	a1, 0(a3)
 	ret
-.Lfunc_end0:
-	.size	memcpy, .Lfunc_end0-memcpy
+.Lfunc_end0memcpy:
+	.size	memcpy, .Lfunc_end0memcpy-memcpy
 	.section	.rodata,"a",@progbits
 	.p2align	2, 0x0
-.LJTI0_0:
+.LJTImemcpy0_0:
 	.word	.LBBmemcpy0_13
 	.word	.LBBmemcpy0_35
 	.word	.LBBmemcpy0_29

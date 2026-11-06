@@ -12,6 +12,7 @@ host's `verify` accepts the RISC-V proof file the CLI writes.
 | `tendermint/` | a light-client update between two real blocks: inputs the host encodes from JSON fixtures, an emulation checked before proving, a proof of the whole run, and an oracle that recomputes all three committed values on the host; `lib/` holds the verification the guest and the oracle share. **Needs a large machine** |
 | `c-guest/` | a guest in C and C++, compiled with clang and linked, with LLD and with GNU ld, against only `libpico_zkvm.a` and `pico.ld` (`cargo pico lib`): IO, exit codes, `abort` / `assert`, and C++ global constructors and destructors |
 | `aggregator/` | a guest that claims other programs' proofs (`verify_pico_proof`) and recursion that closes those claims. `prover/` proves fibonacci twice, then the aggregator claiming both, and verifies the result in the same process |
+| `c-accelerators/` | a C guest with no C library, linked against `libpico_zkvm.a` alone, that calls every `zkvm_*` precompile of zkevm-standards' `zkvm_accelerators.h` on a known answer |
 
 The AOT emulation harnesses for fibonacci and reth are in `perf/aot/`, beside the fixtures they run.
 

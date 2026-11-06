@@ -23,6 +23,13 @@ pub use io::*;
 pub(crate) use memory::sbrk;
 pub use sys::*;
 pub use uint256_mul::*;
+// For the accelerators' hashes.
+#[cfg(target_os = "zkvm")]
+pub(crate) use keccak_permute::syscall_keccak_permute;
+#[cfg(target_os = "zkvm")]
+pub(crate) use sha_compress::syscall_sha256_compress;
+#[cfg(target_os = "zkvm")]
+pub(crate) use sha_extend::syscall_sha256_extend;
 
 // These codes MUST match the codes in `core/src/runtime/syscall.rs`. There is a derived test
 // that checks that the enum is consistent with the syscalls.

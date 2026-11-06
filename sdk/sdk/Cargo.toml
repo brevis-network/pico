@@ -24,7 +24,7 @@ getrandom = { version = "0.2.15", features = ["custom"] }
 # Reached through p3's `rand`; needs its own backend, registered differently from 0.2.
 getrandom_v04 = { package = "getrandom", version = "0.4" }
 libm = { version = "0.2.8", optional = true }
-sha2 = { version = "0.10.8" }
+sha2 = { version = "0.10.8", features = ["compress"] }
 # The zkCoprocessor input commitment is a Poseidon2 Merkle root computed through
 # `syscall_poseidon2_permute`. That repository's `main` predates the syscall's alignment and
 # canonicality checks; this revision, on its `pico-3.0-rv64` branch, hands it 8-byte-aligned
@@ -32,6 +32,14 @@ sha2 = { version = "0.10.8" }
 # crate that depends on this one resolves it without our lock, and would take whatever the branch
 # held that day -- the input commitment its guest produces included.
 coprocessor-sdk = { git = "https://github.com/brevis-network/Pico-zkCoprocessor", rev = "0c5a781fd0bc73f2706748a04d4cccf167a19654", optional = true }
+# The `zkvm_*` accelerators (`zkvm_accelerators`). The curve crates are Pico's patched forks, the
+# ones rsp uses: inside the zkVM they reach the curve and field syscalls.
+aurora-engine-modexp = { version = "1.2.0", default-features = false }
+bls12_381 = { git = "https://github.com/brevis-network/bls12_381", rev = "79fbbface08629528c9ef6e326d98e38901c39bf", default-features = false, features = ["groups", "pairings", "alloc", "experimental"] } # patch-v1.0.1-rv64
+k256 = { git = "https://github.com/brevis-network/elliptic-curves", rev = "d0c56392e728fd0df321820fb0cb495272d38673", default-features = false, features = ["ecdsa", "alloc"] } # k256-0.13.4-rv64
+p256 = { git = "https://github.com/brevis-network/elliptic-curves", rev = "94ffb195ad1d91a0d6678dfbc3432f83e25162b4", default-features = false, features = ["ecdsa", "alloc"] } # p256-0.13.2-rv64
+ripemd = { version = "0.1.3", default-features = false }
+substrate-bn = { git = "https://github.com/brevis-network/bn", rev = "1455d63953ba9f7231043c57c7077cee6a10dc89" } # patch-v1.0.2-rv64
 hex.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
@@ -42,10 +50,15 @@ tracing-subscriber.workspace = true
 [target.'cfg(not(target_os = "zkvm"))'.dependencies]
 # TODO(onchain): back to `pico-vm.workspace = true` once `multi-field-transcript` is unconditional.
 pico-vm = { path = "../../vm", default-features = false, features = ["rayon", "strict"] }
+# The Keccak permutation the accelerators run on the host, where there is no syscall.
+keccak = "0.1.5"
 
 [features]
 prover = ["pico-vm/jemalloc"]
 libm = ["dep:libm"]
 coprocessor = ["dep:coprocessor-sdk"]
+# `memmove`, `memcmp`, `bcmp` and `strlen` from the runtime, for a build without
+# `compiler-builtins-mem`: the static library (`cargo pico lib`).
+c-memory-functions = []
 # No-op: KoalaBear is the only field. Kept so guests that still select it keep building.
 kb = []

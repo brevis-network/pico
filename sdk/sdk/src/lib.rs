@@ -56,6 +56,7 @@ pub mod poseidon2_hash;
 pub mod riscv_ecalls;
 
 pub mod verify;
+pub mod zkvm_accelerators;
 
 /// The number of 32 bit words that the public values digest is composed of.
 pub const PV_DIGEST_NUM_WORDS: usize = 8;
@@ -129,8 +130,12 @@ mod zkvm {
     // cost of 5 % of its instructions. `cargo pico build` checks the outcome through the
     // `__pico_memcpy` / `__pico_memset` aliases. `_stack_top` and `__global_pointer$` come from
     // `pico.ld`.
-    core::arch::global_asm!(
-        r#"
+    // With `c-memory-functions`, the static library's build, `memmove`, `memcmp`, `bcmp` and
+    // `strlen` join them: that build has no `compiler_builtins` copies of the family.
+    macro_rules! start_and_memory_functions {
+        ($($more:tt)*) => {
+            core::arch::global_asm!(
+                r#"
     .section .text._start;
     .globl _start;
     _start:
@@ -141,16 +146,33 @@ mod zkvm {
         la sp, _stack_top;
         call __start;
     "#,
-        include_str!("memcpy.s"),
-        // `memset.s` names no section, and `memcpy.s` ends in `.note.GNU-stack`.
-        ".text",
-        include_str!("memset.s"),
-        r#"
+                include_str!("memcpy.s"),
+                // `memset.s` names no section, and `memcpy.s` ends in `.note.GNU-stack`.
+                ".text",
+                include_str!("memset.s"),
+                $($more)*
+                r#"
     .globl __pico_memcpy;
     .set __pico_memcpy, memcpy;
     .globl __pico_memset;
     .set __pico_memset, memset;
     "#
+            );
+        };
+    }
+    #[cfg(not(feature = "c-memory-functions"))]
+    start_and_memory_functions!();
+    // Each file ends in another section, so `.text` before the next.
+    #[cfg(feature = "c-memory-functions")]
+    start_and_memory_functions!(
+        ".text",
+        include_str!("memmove.s"),
+        ".text",
+        include_str!("memcmp.s"),
+        ".text",
+        include_str!("strlen.s"),
+        ".text",
+        ".globl bcmp\n.set bcmp, memcmp\n",
     );
 
     pub fn zkvm_getrandom(_s: &mut [u8]) -> Result<(), getrandom::Error> {

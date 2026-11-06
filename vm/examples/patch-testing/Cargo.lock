@@ -627,6 +627,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
+name = "aurora-engine-modexp"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5188e264926edbd2e90d61bf8b33aa3471db8acdf427fa37946f9c82898fe502"
+dependencies = [
+ "hex",
+ "num",
+]
+
+[[package]]
 name = "auto_impl"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -807,11 +817,13 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.8.0"
-source = "git+https://github.com/brevis-network/bls12_381.git?rev=79fbbface08629528c9ef6e326d98e38901c39bf#79fbbface08629528c9ef6e326d98e38901c39bf"
+source = "git+https://github.com/brevis-network/bls12_381?rev=79fbbface08629528c9ef6e326d98e38901c39bf#79fbbface08629528c9ef6e326d98e38901c39bf"
 dependencies = [
  "cfg-if",
+ "digest 0.10.7",
  "ff 0.13.1",
  "group 0.13.0",
+ "hex",
  "pairing 0.23.0",
  "pico-patch-libs",
  "rand_core 0.6.4",
@@ -2608,7 +2620,21 @@ checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
 dependencies = [
  "ecdsa 0.16.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "elliptic-curve",
- "primeorder",
+ "primeorder 0.13.6",
+ "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "p256"
+version = "0.13.2"
+source = "git+https://github.com/brevis-network/elliptic-curves?rev=94ffb195ad1d91a0d6678dfbc3432f83e25162b4#94ffb195ad1d91a0d6678dfbc3432f83e25162b4"
+dependencies = [
+ "ecdsa 0.16.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "elliptic-curve",
+ "getrandom 0.2.17",
+ "hex",
+ "pico-patch-libs",
+ "primeorder 0.13.1",
  "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -3127,7 +3153,7 @@ name = "patch-test-substate-bn"
 version = "1.0.0"
 dependencies = [
  "pico-sdk",
- "substrate-bn",
+ "substrate-bn 0.6.0 (git+https://github.com/brevis-network/bn.git?rev=1ab1d69cac23bc2b55d29b22ffcea51ff8f72391)",
 ]
 
 [[package]]
@@ -3180,7 +3206,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "once_cell",
- "p256",
+ "p256 0.13.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "p3-field",
  "p3-koala-bear",
  "p3-symmetric",
@@ -3279,14 +3305,19 @@ name = "pico-sdk"
 version = "3.1.1"
 dependencies = [
  "anyhow",
+ "aurora-engine-modexp",
  "bincode",
+ "bls12_381 0.8.0",
  "cfg-if",
  "coprocessor-sdk",
  "env_logger",
  "getrandom 0.2.17",
  "getrandom 0.4.2",
  "hex",
+ "k256 0.13.4",
+ "keccak",
  "lazy_static",
+ "p256 0.13.2 (git+https://github.com/brevis-network/elliptic-curves?rev=94ffb195ad1d91a0d6678dfbc3432f83e25162b4)",
  "p3-challenger",
  "p3-field",
  "p3-koala-bear",
@@ -3294,9 +3325,11 @@ dependencies = [
  "pico-patch-libs",
  "pico-vm",
  "rand 0.10.2",
+ "ripemd",
  "serde",
  "serde_json",
  "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "substrate-bn 0.6.0 (git+https://github.com/brevis-network/bn?rev=1455d63953ba9f7231043c57c7077cee6a10dc89)",
  "tracing",
  "tracing-forest",
  "tracing-subscriber",
@@ -3357,7 +3390,7 @@ dependencies = [
  "num-traits",
  "num_cpus",
  "once_cell",
- "p256",
+ "p256 0.13.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "p3-air",
  "p3-bn254",
  "p3-field",
@@ -3472,6 +3505,14 @@ checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "primeorder"
+version = "0.13.1"
+source = "git+https://github.com/brevis-network/elliptic-curves?rev=94ffb195ad1d91a0d6678dfbc3432f83e25162b4#94ffb195ad1d91a0d6678dfbc3432f83e25162b4"
+dependencies = [
+ "elliptic-curve",
 ]
 
 [[package]]
@@ -3800,6 +3841,15 @@ source = "git+https://github.com/brevis-network/signatures?branch=patch-v1.1.0-r
 dependencies = [
  "hmac",
  "subtle",
+]
+
+[[package]]
+name = "ripemd"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd124222d17ad93a644ed9d011a40f4fb64aa54275c08cc216524a9ea82fb09f"
+dependencies = [
+ "digest 0.10.7",
 ]
 
 [[package]]
@@ -4306,6 +4356,22 @@ dependencies = [
  "quote",
  "rustversion",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "substrate-bn"
+version = "0.6.0"
+source = "git+https://github.com/brevis-network/bn?rev=1455d63953ba9f7231043c57c7077cee6a10dc89#1455d63953ba9f7231043c57c7077cee6a10dc89"
+dependencies = [
+ "bytemuck",
+ "byteorder",
+ "cfg-if",
+ "crunchy",
+ "lazy_static",
+ "num-bigint",
+ "pico-patch-libs",
+ "rand 0.8.5",
+ "rustc-hex",
 ]
 
 [[package]]

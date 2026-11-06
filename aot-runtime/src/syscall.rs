@@ -148,7 +148,10 @@ impl AotEmulatorCore {
         }
 
         if fd == 4 {
-            self.input_stream.push(slice.to_vec());
+            // A hint is read next, ahead of any input the guest has not read yet; hints written
+            // before one read come out newest first.
+            self.input_stream
+                .insert(self.input_stream_ptr, slice.to_vec());
             return Ok(());
         }
 
@@ -929,6 +932,22 @@ mod tests {
         assert_eq!(emu.input_stream_ptr, 2);
         assert_eq!(emu.memory.get(0x100).value, 0x0000_0000_0403_0201);
         assert_eq!(emu.memory.get(0x108).value, 0x0000_0000_0007_0809);
+    }
+
+    #[test]
+    fn phase5_hint_write_goes_ahead_of_unread_input() {
+        let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
+        install_write_bytes(&mut emu, 0x200, &[9, 8, 7]);
+
+        emu.write_reg(12, 3);
+        emu.handle_write(4, 0x200)
+            .expect("write to fd 4 should succeed");
+
+        assert_eq!(emu.input_stream, vec![vec![9, 8, 7], vec![1, 2, 3, 4]]);
+        assert_eq!(emu.input_stream_ptr, 0);
+        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 3)
+            .expect("hint read should succeed");
+        assert_eq!(emu.memory.get(0x100).value, 0x0000_0000_0007_0809);
     }
 
     #[test]

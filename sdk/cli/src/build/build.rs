@@ -55,7 +55,7 @@ pub fn build_program(args: &BuildArgs, program_dir: Option<PathBuf>) -> Result<P
         )
         .collect();
 
-    let mut build_command: Command = create_cargo_build_command("build", &rust_flags);
+    let mut build_command: Command = create_cargo_build_command("build", &rust_flags, true);
     build_command.args(cargo_build_args(args, &pkg, &target_dir));
 
     log_command(&build_command);
@@ -99,8 +99,15 @@ fn cargo_build_args(args: &BuildArgs, pkg: &Package, target_dir: &Path) -> Vec<S
     cargo_args
 }
 
-pub fn create_cargo_build_command(subcmd: &str, rust_flags: &[&str]) -> Command {
+/// A `cargo` command that builds for the guest target. `std_mem` builds `compiler_builtins` with
+/// its `memcpy` family, which a Rust guest takes; the static library brings its own instead.
+pub fn create_cargo_build_command(subcmd: &str, rust_flags: &[&str], std_mem: bool) -> Command {
     let toolchain = format!("+{RUSTUP_TOOLCHAIN_NAME}");
+    let std_features = if std_mem {
+        "build-std-features=compiler-builtins-mem"
+    } else {
+        "build-std-features="
+    };
 
     let mut cmd = clean_command_env("cargo");
     let args = vec![
@@ -112,7 +119,7 @@ pub fn create_cargo_build_command(subcmd: &str, rust_flags: &[&str]) -> Command 
         "-Z",
         "build-std=alloc,core,proc_macro,panic_abort,std",
         "-Z",
-        "build-std-features=compiler-builtins-mem",
+        std_features,
         // Panic locations and `file!()` are string data in the ELF, and its memory image is the
         // program id. Trimmed, the toolchain, the cargo home and every dependency outside the
         // workspace appear by name and version, not by where this machine keeps them.

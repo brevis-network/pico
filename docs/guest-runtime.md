@@ -22,8 +22,11 @@ compiled as a static library, so a Rust guest and a C guest get the same symbols
 
 - `_start`;
 - `read_input` / `write_output` (`zkvm_io.h` in zkevm-standards);
-- the accelerators (`syscall_*`);
-- `memcpy` / `memset` (see [Memory functions](#memory-functions));
+- the precompiles of `zkvm_accelerators.h` in zkevm-standards (`zkvm_keccak256`,
+  `zkvm_bn254_pairing`, ...; `sdk/sdk/src/zkvm_accelerators`), and Pico's own syscalls
+  (`syscall_*`) beneath them;
+- `memcpy` / `memset`, and in the static library also `memmove`, `memcmp`, `bcmp` and `strlen`
+  (see [Memory functions](#memory-functions));
 - `abort`, and `__assert_func` / `__assert_fail`, which a failed `assert()` calls in newlib /
   picolibc and in glibc / musl;
 - `atexit`, `__cxa_atexit` and `__dso_handle`, through which C++ registers its static
@@ -70,6 +73,13 @@ weak. So a Rust guest needs no linker flag, and a C guest needs no `--whole-arch
 linked into the guest that defines its own `memcpy` strongly fails the link with a duplicate
 symbol rather than silently replacing Pico's; put `libpico_zkvm.a` before it on the command line,
 so that its object is taken first and the C library's `memcpy` is never pulled in.
+
+**The static library.** `cargo pico lib` builds without `compiler-builtins-mem`, and the runtime
+adds `memmove` (compiler-builtins' algorithm, in C: `memmove.c`), musl's `memcmp` (with `bcmp`)
+and `strlen` to the same object, no slower than `compiler_builtins`' copies. `compiler_builtins`'
+copies are hidden, and a C guest takes them in with the other builtins it needs; the linker would
+then make the library's `memcpy` and `memset` hidden too, local symbols in the guest, which
+zkevm-test-monitor's link check (`mem-link-*`) rejects.
 
 **The check.** The runtime puts an alias on each, `__pico_memcpy` / `__pico_memset`, and
 `cargo pico build` fails if the ELF's `memcpy` or `memset` is anywhere but at its alias. An ELF

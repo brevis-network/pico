@@ -26,7 +26,7 @@ impl Syscall for WriteSyscall {
     /// - Update the public value stream.
     ///
     /// If fd = 4:
-    /// - Update the input stream.
+    /// - Put a hint into the input stream, as its next element.
     ///
     /// If the fd matches a hook in the hook registry, invoke the hook.
     ///
@@ -60,7 +60,10 @@ impl Syscall for WriteSyscall {
         } else if fd == 3 {
             rt.state.public_values_stream.extend_from_slice(slice);
         } else if fd == 4 {
-            rt.state.input_stream.push(slice.to_vec());
+            // A hint is read next, ahead of any input the guest has not read yet; hints written
+            // before one read come out newest first.
+            let ptr = rt.state.input_stream_ptr;
+            rt.state.input_stream.insert(ptr, slice.to_vec());
         } else if let Some(hook) = rt.hook_map.get(&fd) {
             let result = hook(rt, slice);
             let ptr = rt.state.input_stream_ptr;
