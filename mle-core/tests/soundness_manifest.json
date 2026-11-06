@@ -1,19 +1,19 @@
 {
   "generated_by": "cargo run --release -p pico-vm --example mle_soundness_manifest",
-  "commit": "45b85345e7136bdc5a623f5dd6e9036424d412bf",
+  "commit": "484014401b31f7221bc2e808fdb5248b15dfc066",
   "dirty": false,
   "dirty_paths": [],
   "calculator": "closed-form",
   "program": "perf/bench_data/rv64/fib-elf, n = 10",
   "shipped_whitelist": "vm/src/mle/shape_vk_bins/mle_vk_map_kb.bin",
   "apex": {"vk_root": [7401248, 1378841253, 217190209, 139491452, 1880453402, 830082898, 1671207302, 73583244], "riscv_vk_pre_hash": [526606680, 796254389, 1946763541, 811179115, 1276913488, 805227194, 316907711, 1118535596]},
-  "onchain_test_keys": {"source": "contracts/test/dev/manifest.json", "vk_root": [1216878882, 1112908309, 718797239, 1060637411, 22230319, 902859945, 1600756132, 39358577], "circuit_sha256": "8666c4fca488cc8239069daf3b0e58473566019dac04261e0acf9874f8ad0766", "nb_constraints": 7243820, "gnark": "v0.14.0", "note": "test keys from a single-process Groth16 setup (contracts/README.md); a deployment needs a setup ceremony"},
+  "onchain_test_keys": {"source": "contracts/test/dev/manifest.json", "vk_root": [7401248, 1378841253, 217190209, 139491452, 1880453402, 830082898, 1671207302, 73583244], "circuit_sha256": "99bafc7b42a4364c7cab7edd7ab0ea93ce80ed0ef39510ab30e16ce812927e08", "nb_constraints": 7243820, "gnark": "v0.14.0", "note": "test keys from a single-process Groth16 setup (contracts/README.md); a deployment needs a setup ceremony"},
   "not_generated": [],
   "proof_shapes": {
     "riscv": {
-      "shapes": 1191,
-      "max": {"num_airs_present": 19, "max_constraints_per_air": 2989, "max_interactions_per_air": 1843, "num_trace_columns": 3877, "max_log_height": 23, "stacked_width": 640},
-      "largest": {"name": "core:catch-all", "bytes": 11580555, "shape": {"num_airs":50,"num_airs_present":19,"max_log_height":23,"num_column_openings":1624,"num_opening_parts":21,"num_cached_commitments":0,"num_public_values":261,"num_gkr_rounds":31,"stacking_widths":[635,4,1],"num_trace_columns":1450,"max_constraints_per_air":556,"max_interactions_per_air":121}}
+      "shapes": 1186,
+      "max": {"num_airs_present": 20, "max_constraints_per_air": 2989, "max_interactions_per_air": 1846, "num_trace_columns": 3890, "max_log_height": 23, "stacked_width": 648},
+      "largest": {"name": "core:catch-all", "bytes": 11716407, "shape": {"num_airs":51,"num_airs_present":20,"max_log_height":23,"num_column_openings":1724,"num_opening_parts":22,"num_cached_commitments":0,"num_public_values":261,"num_gkr_rounds":31,"stacking_widths":[643,4,1],"num_trace_columns":1550,"max_constraints_per_air":556,"max_interactions_per_air":121}}
     },
     "convert": {
       "shapes": 3,
