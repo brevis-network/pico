@@ -29,7 +29,13 @@ compiled as a static library, so a Rust guest and a C guest get the same symbols
 - `atexit`, `__cxa_atexit` and `__dso_handle`, through which C++ registers its static
   destructors; `_start` runs the handlers after `main`, latest first, before `.fini_array`.
 
-The C-library ones (`abort` through `__dso_handle`) are weak, so a C library linked into the
+- `sbrk` / `_sbrk`, through which a C library's `malloc` grows its heap: newlib's, built for
+  `rv64im` / `lp64`, works unchanged (`examples/c-guest/malloc.c`). They take the heap from the
+  same bump pointer as the Rust allocator and `read_input`'s buffer, between `_heap_start` and
+  `_heap_end`, so the two never overlap; a negative increment is refused, as is growth past
+  `_heap_end`.
+
+The C-library ones (`abort` through `_sbrk`) are weak, so a C library linked into the
 guest that brings its own takes precedence instead of clashing.
 
 The library carries the Rust standard library it is written against; `main` is left for the

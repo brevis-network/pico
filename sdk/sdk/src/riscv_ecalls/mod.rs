@@ -19,6 +19,8 @@ mod verify;
 
 pub use halt::*;
 pub use io::*;
+#[cfg(target_os = "zkvm")]
+pub(crate) use memory::sbrk;
 pub use sys::*;
 pub use uint256_mul::*;
 

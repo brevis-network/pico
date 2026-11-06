@@ -1,6 +1,7 @@
 //! What a C or C++ guest needs from the C library's startup and exit, for a guest that links no C
 //! library: the failure entry points, `abort()` and the two names a failed `assert()` calls, and
 //! the exit handlers, `atexit` and `__cxa_atexit`, through which C++ runs its static destructors.
+//! For a guest that does link one, `sbrk` / `_sbrk`, which newlib's `malloc` grows its heap with.
 //!
 //! The failure entry points end the run abnormally with [`TerminationReason::Abort`] and exit
 //! code 134, the code a native process gets from `SIGABRT`.
@@ -177,4 +178,24 @@ pub(crate) fn run_exit_handlers() {
             }
         }
     }
+}
+
+/// `void *sbrk(intptr_t increment)`: grows the heap by `increment` bytes and returns the old break,
+/// or `(void *)-1` if it cannot. newlib's `malloc` calls it through `_sbrk`. It takes the same bump
+/// pointer as the Rust allocator, so a C library's heap and `read_input`'s buffer never overlap;
+/// see `riscv_ecalls::memory`.
+#[no_mangle]
+#[linkage = "weak"]
+pub extern "C" fn sbrk(increment: isize) -> *mut c_void {
+    match crate::riscv_ecalls::sbrk(increment) {
+        Some(old_break) => old_break.cast(),
+        None => usize::MAX as *mut c_void,
+    }
+}
+
+/// newlib's name for [`sbrk`], which its `_sbrk_r` calls.
+#[no_mangle]
+#[linkage = "weak"]
+pub extern "C" fn _sbrk(increment: isize) -> *mut c_void {
+    sbrk(increment)
 }

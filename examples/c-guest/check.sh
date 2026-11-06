@@ -3,7 +3,23 @@
 # then proves the successful case to the combine root. Needs `cargo pico` on PATH.
 #
 #   ./check.sh guest-lld.elf
+#   ./check.sh --malloc guest-newlib.elf     the malloc.c build instead
 set -euo pipefail
+
+if [ "$1" = --malloc ]; then
+    ELF=$2
+    # The input, then "malloc ok" (6d616c6c6f63206f6b).
+    out=$(cargo pico execute --elf "$ELF" --input 0x0102030405060708 2>&1) || {
+        echo "FAIL $ELF: $out" >&2
+        exit 1
+    }
+    grep -qF "committed (17 byte(s), not proved): 01020304050607086d616c6c6f63206f6b" <<<"$out" || {
+        echo "FAIL $ELF: expected the input and \"malloc ok\": $out" >&2
+        exit 1
+    }
+    echo "ok   $ELF: newlib's malloc / realloc / calloc / free, input intact"
+    exit 0
+fi
 
 ELF=$1
 
