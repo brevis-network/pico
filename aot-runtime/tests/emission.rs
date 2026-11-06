@@ -45,9 +45,11 @@ fn s(opcode: Opcode, value: u8, base: u64, imm: i64) -> Instruction {
     Instruction::new(opcode, value, base, imm as u64, false, true)
 }
 
-/// A program at `PC_BASE` that runs `body` and halts: `JALR x0, x0, 0` jumps to pc 0.
+/// A program at `PC_BASE` that runs `body` and halts: `a0 = 0`, then `HALT`. (A jump to pc 0 no
+/// longer halts; it ends the run abnormally.)
 fn program(mut body: Vec<Instruction>) -> Arc<Program> {
-    body.push(i(Opcode::JALR, 0, 0, 0));
+    body.push(i(Opcode::ADD, 10, 0, 0));
+    body.extend(syscall(0));
     Arc::new(Program::new(body, PC_BASE, PC_BASE))
 }
 
@@ -471,7 +473,7 @@ fn word_immediate(emu: &mut AotEmulatorCore, pc: u64, inst: &Instruction) {
 }
 
 /// Runs `program` through the `_no_count` helpers, one call per instruction as the code generator
-/// writes them, and its closing `JALR` as the generator inlines it.
+/// writes them, and its `JALR`s and closing `HALT` as the generator inlines them.
 fn run_helpers(emu: &mut AotEmulatorCore, program: &Program) {
     run_helpers_from(emu, &program.instructions, PC_BASE);
 }
@@ -480,10 +482,10 @@ fn run_helpers(emu: &mut AotEmulatorCore, program: &Program) {
 fn run_helpers_from(emu: &mut AotEmulatorCore, instructions: &[Instruction], pc_base: u64) {
     for (index, inst) in instructions.iter().enumerate() {
         let pc = pc_base + 4 * index as u64;
-        if inst.opcode == Opcode::JALR {
-            jalr(emu, pc, inst);
-        } else {
-            helper(emu, pc, inst);
+        match inst.opcode {
+            Opcode::JALR => jalr(emu, pc, inst),
+            Opcode::ECALL => ecall(emu, pc),
+            _ => helper(emu, pc, inst),
         }
     }
 }

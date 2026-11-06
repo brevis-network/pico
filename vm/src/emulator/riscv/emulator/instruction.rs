@@ -349,37 +349,37 @@ impl RiscvEmulator {
             Opcode::BEQ => {
                 (a, b, c) = self.branch_rr(instruction);
                 if a == b {
-                    next_pc = self.state.pc.wrapping_add(c);
+                    next_pc = self.jump_target(self.state.pc.wrapping_add(c))?;
                 }
             }
             Opcode::BNE => {
                 (a, b, c) = self.branch_rr(instruction);
                 if a != b {
-                    next_pc = self.state.pc.wrapping_add(c);
+                    next_pc = self.jump_target(self.state.pc.wrapping_add(c))?;
                 }
             }
             Opcode::BLT => {
                 (a, b, c) = self.branch_rr(instruction);
                 if (a as i64) < (b as i64) {
-                    next_pc = self.state.pc.wrapping_add(c);
+                    next_pc = self.jump_target(self.state.pc.wrapping_add(c))?;
                 }
             }
             Opcode::BGE => {
                 (a, b, c) = self.branch_rr(instruction);
                 if (a as i64) >= (b as i64) {
-                    next_pc = self.state.pc.wrapping_add(c);
+                    next_pc = self.jump_target(self.state.pc.wrapping_add(c))?;
                 }
             }
             Opcode::BLTU => {
                 (a, b, c) = self.branch_rr(instruction);
                 if a < b {
-                    next_pc = self.state.pc.wrapping_add(c);
+                    next_pc = self.jump_target(self.state.pc.wrapping_add(c))?;
                 }
             }
             Opcode::BGEU => {
                 (a, b, c) = self.branch_rr(instruction);
                 if a >= b {
-                    next_pc = self.state.pc.wrapping_add(c);
+                    next_pc = self.jump_target(self.state.pc.wrapping_add(c))?;
                 }
             }
 
@@ -387,16 +387,17 @@ impl RiscvEmulator {
             Opcode::JAL => {
                 let (rd, imm) = instruction.j_type();
                 (b, c) = (imm, 0);
+                next_pc = self.jump_target(self.state.pc.wrapping_add(imm))?;
                 a = self.state.pc.wrapping_add(4);
                 self.rw(rd, a);
-                next_pc = self.state.pc.wrapping_add(imm);
             }
             Opcode::JALR => {
                 let (rd, rs1, imm) = instruction.i_type();
                 (b, c) = (self.rr(rs1, MemoryAccessPosition::B), imm);
+                // Bit 0 is cleared, as the ISA says; bit 1 left set is a misaligned target.
+                next_pc = self.jump_target(b.wrapping_add(c) & !1_u64)?;
                 a = self.state.pc.wrapping_add(4);
                 self.rw(rd, a);
-                next_pc = b.wrapping_add(c) & !1_u64;
             }
 
             // Upper immediate instructions.

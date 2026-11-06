@@ -738,8 +738,12 @@ impl RiscvEmulator {
     where
         F: FnMut(bool, EmulationRecord),
     {
-        // Fetch the instruction at the current program counter.
-        let instruction = self.program.fetch(self.state.pc);
+        // Fetch the instruction at the current program counter. Jumps are checked where they are
+        // taken (`jump_target`); what reaches here outside the program is a fall-through past its
+        // last instruction.
+        let Some(instruction) = self.program.try_fetch(self.state.pc) else {
+            return Err(EmulationError::outside_program(self.state.pc));
+        };
 
         // Emulate the instruction.
         (self.emu_fn)(self, &instruction)?;
@@ -758,9 +762,9 @@ impl RiscvEmulator {
             }
         }
 
-        let done = self.state.pc == 0
-            || self.state.pc.wrapping_sub(self.program.pc_base)
-                >= (self.program.instructions.len() * 4) as u64;
+        // Only `HALT` sets the pc to 0: a jump there is refused by `jump_target`, and a pc
+        // elsewhere outside the program is refused at the next fetch.
+        let done = self.state.pc == 0;
         if done && self.is_unconstrained() {
             error!(
                 "program ended in unconstrained mode at clk {}",
@@ -843,7 +847,9 @@ impl RiscvEmulator {
         self.mode = RiscvEmulatorMode::Simple;
         self.update_mode_deps();
 
-        let instruction = self.program.fetch(self.state.pc);
+        let Some(instruction) = self.program.try_fetch(self.state.pc) else {
+            return Err(EmulationError::outside_program(self.state.pc));
+        };
         Self::emulate_instruction_simple(self, &instruction)?;
         if self.target_global_clk.is_none() && !self.is_unconstrained() {
             self.chunk_split_state.count_insn(instruction.opcode);
@@ -1614,6 +1620,21 @@ impl RiscvEmulator {
         }
     }
 
+    /// `target` for a jump or taken branch at the current pc: 4-aligned and one of the program's
+    /// instructions, or an abnormal termination here. RISC-V raises a misaligned target on the
+    /// jump itself, and nothing rounds it down; a target outside the program, 0 included, is
+    /// refused here too, so that only `HALT` ends a run.
+    #[inline(always)]
+    pub(crate) fn jump_target(&self, target: u64) -> Result<u64, EmulationError> {
+        if !target.is_multiple_of(4) {
+            return Err(EmulationError::misaligned_jump(self.state.pc, target));
+        }
+        if !self.program.contains_pc(target) {
+            return Err(EmulationError::outside_program(target));
+        }
+        Ok(target)
+    }
+
     /// Read from a register.
     #[inline]
     pub fn rr(&mut self, register: Register, position: MemoryAccessPosition) -> RvValue {
@@ -1995,14 +2016,11 @@ mod tests {
         ParkingMutex, Program, RiscvEmulationState, RiscvEmulator, CHUNK_CLK_START,
     };
     use crate::{
-        compiler::{
-            addr::Pc,
-            riscv::{
-                compiler::{Compiler, SourceType},
-                instruction::Instruction,
-                opcode::Opcode,
-                register::Register,
-            },
+        compiler::riscv::{
+            compiler::{Compiler, SourceType},
+            instruction::Instruction,
+            opcode::Opcode,
+            register::Register,
         },
         configs::stark_config::KoalaBearPoseidon2,
         emulator::{
@@ -2237,8 +2255,17 @@ mod tests {
             max_cycles: Some(64),
             ..EmulatorOpts::default()
         };
+        // A `nop`, then `HALT`: the run ends at the target, on its second instruction.
+        let program = Arc::new(Program::new(
+            vec![
+                r_type(Opcode::ADD, Register::X0, Register::X0, Register::X0),
+                ecall(),
+            ],
+            0x1000,
+            0x1000,
+        ));
         let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
-            tiny_program(),
+            program,
             Arc::new(RecordFinalPvsState::default()),
             opts,
         );
@@ -2258,7 +2285,7 @@ mod tests {
         assert_eq!(emulator.state.global_clk, 2);
         assert_eq!(emulator.state.current_chunk, 2);
         assert_eq!(emulator.state.clk, u64::from(CHUNK_CLK_START));
-        assert_eq!(emulator.state.pc, 0x1008);
+        assert_eq!(emulator.state.pc, 0);
         assert!(records >= 1);
     }
 
@@ -2613,6 +2640,8 @@ mod tests {
                 i_type(Opcode::ADD, Register::X6, Register::X6, 2),  // 0x1014
                 i_type(Opcode::ADD, Register::X6, Register::X6, 3),  // 0x1018
                 i_type(Opcode::ADD, Register::X6, Register::X6, 4),  // 0x101c
+                i_type(Opcode::ADD, Register::X5, Register::X0, 0),  // 0x1020, t0 = HALT
+                ecall(),                                             // 0x1024
             ],
             0x1000,
             0x1000,
@@ -2654,7 +2683,7 @@ mod tests {
             RiscvEmulationState::new(0x1000),
             replay_opts(),
             shared_ds(),
-            8,
+            10,
             true,
         );
         replay(&mut reused);
@@ -2787,43 +2816,24 @@ mod tests {
         ]
     }
 
-    /// A run that ends on a jump to a pc the CPU trace cannot hold has a final `next_pc` no proof
-    /// can state. Both modes report it as an error where the run ends, before a cut tries to
-    /// encode it.
+    /// A jump out of the program fails at the jump, in both modes, before a cut tries to encode
+    /// its target: at addresses the CPU trace cannot hold (`1 << 32`, `1 << 48`) and at the last
+    /// one it can (`(1 << 32) - 4`). None is an instruction, so none ends the run.
     #[test]
-    fn a_run_ending_beyond_the_proof_address_range_is_an_error() {
-        for shift in [32, 48] {
+    fn a_jump_out_of_the_program_ends_the_run_abnormally() {
+        for (shift, offset) in [(32, 0), (48, 0), (32, -4)] {
+            let target = (1u64 << shift).wrapping_add(offset as i64 as u64);
             for mode in modes() {
-                let (ended, _) = run_to_end(jump_to(shift, 0), mode);
-                assert!(
-                    matches!(
-                        ended,
-                        Err(super::EmulationError::EndPcBeyondProofAddress(pc)) if pc == 1 << shift
-                    ),
+                let (ended, _) = run_to_end(jump_to(shift, offset), mode);
+                assert_eq!(
+                    ended
+                        .as_ref()
+                        .err()
+                        .and_then(super::EmulationError::abnormal_termination)
+                        .map(|t| t.reason),
+                    Some(super::TerminationReason::OutsideProgram { pc: target }),
                     "{ended:?}"
                 );
-            }
-        }
-    }
-
-    /// The last pc the CPU trace can hold ends a run as any pc past the program does.
-    #[test]
-    fn a_run_ending_at_the_last_proof_pc_is_no_error() {
-        let end_pc = (1u64 << 32) - 4;
-        for mode in modes() {
-            let trace = mode == super::RiscvEmulatorMode::Trace;
-            let (ended, records) = run_to_end(jump_to(32, -4), mode);
-            assert!(matches!(ended, Ok(true)), "{ended:?}");
-            if trace {
-                let [record] = records.as_slice() else {
-                    panic!("{} records", records.len());
-                };
-                let steps: Vec<_> = record.cpu_steps().iter().collect();
-                assert_eq!(steps.last().map(|e| e.next_pc), Some(end_pc));
-                for event in &steps {
-                    assert!(Pc::<KoalaBear>::try_from(event.pc).is_ok());
-                    assert!(Pc::<KoalaBear>::try_from(event.next_pc).is_ok());
-                }
             }
         }
     }
@@ -3119,6 +3129,152 @@ mod tests {
             false,
             true,
         )
+    }
+
+    // ── misaligned or out-of-range jump targets end the run abnormally, at the jump ──
+
+    /// Four `nop`s at 0x1000: the targets below are relative to them.
+    fn jump_program() -> Arc<Program> {
+        let nop = r_type(Opcode::ADD, Register::X0, Register::X0, Register::X0);
+        Arc::new(Program::new(vec![nop; 4], 0x1000, 0x1000))
+    }
+
+    fn branch(opcode: Opcode, rs1: Register, rs2: Register, offset: i64) -> Instruction {
+        Instruction::new(opcode, rs1 as u8, rs2 as u64, offset as u64, false, true)
+    }
+
+    /// `instruction` at 0x1000 with `x5 = x5_value`, in the full and the simple path: the
+    /// termination reason (or `None`), the pc after, and `x1`, which the jumps link into.
+    fn jump_in_both_paths(
+        instruction: Instruction,
+        x5_value: u64,
+    ) -> [(Option<super::TerminationReason>, u64, u64); 2] {
+        [false, true].map(|simple| {
+            let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
+                jump_program(),
+                Arc::new(RecordFinalPvsState::default()),
+                EmulatorOpts::default(),
+            );
+            emulator.mode = if simple {
+                super::RiscvEmulatorMode::Simple
+            } else {
+                super::RiscvEmulatorMode::Trace
+            };
+            emulator.update_mode_deps();
+            emulator.state.pc = 0x1000;
+            set_reg_raw(&mut emulator, Register::X5, x5_value);
+            let result = if simple {
+                emulator.emulate_instruction_simple(&instruction)
+            } else {
+                emulator.emulate_instruction(&instruction)
+            };
+            let reason = result.err().map(|e| {
+                e.abnormal_termination()
+                    .expect("an abnormal termination")
+                    .reason
+            });
+            (reason, emulator.state.pc, emulator.register(Register::X1))
+        })
+    }
+
+    fn assert_fault(instruction: Instruction, x5: u64, want: super::TerminationReason) {
+        for (path, (reason, _, link)) in ["full", "simple"]
+            .iter()
+            .zip(jump_in_both_paths(instruction, x5))
+        {
+            assert_eq!(reason, Some(want), "{path} path");
+            assert_eq!(
+                link, 0,
+                "{path} path: the faulting jump wrote its link register"
+            );
+        }
+    }
+
+    fn assert_lands(instruction: Instruction, x5: u64, pc: u64) {
+        for (path, (reason, at, _)) in ["full", "simple"]
+            .iter()
+            .zip(jump_in_both_paths(instruction, x5))
+        {
+            assert_eq!(reason, None, "{path} path");
+            assert_eq!(at, pc, "{path} path");
+        }
+    }
+
+    #[test]
+    fn a_jump_to_a_misaligned_target_terminates_at_the_jump() {
+        let misaligned =
+            |target| super::TerminationReason::MisalignedJumpTarget { pc: 0x1000, target };
+        assert_fault(jal(Register::X1, 6), 0, misaligned(0x1006));
+        assert_fault(
+            branch(Opcode::BEQ, Register::X0, Register::X0, 2),
+            0,
+            misaligned(0x1002),
+        );
+        // JALR clears bit 0 only; bit 1 left set is misaligned, not rounded down.
+        assert_fault(
+            i_type(Opcode::JALR, Register::X1, Register::X5, 0),
+            0x1006,
+            misaligned(0x1006),
+        );
+    }
+
+    #[test]
+    fn jalr_clears_bit_zero_before_the_alignment_check() {
+        assert_lands(
+            i_type(Opcode::JALR, Register::X1, Register::X5, 0),
+            0x1005,
+            0x1004,
+        );
+        assert_lands(
+            i_type(Opcode::JALR, Register::X1, Register::X5, 1),
+            0x1008,
+            0x1008,
+        );
+    }
+
+    /// A branch not taken goes on to the next instruction, whatever its target.
+    #[test]
+    fn a_branch_not_taken_does_not_check_its_target() {
+        assert_lands(
+            branch(Opcode::BNE, Register::X0, Register::X0, 2),
+            0,
+            0x1004,
+        );
+    }
+
+    #[test]
+    fn a_jump_out_of_the_program_terminates_at_the_jump() {
+        let outside = |pc| super::TerminationReason::OutsideProgram { pc };
+        assert_fault(jal(Register::X1, 0x100), 0, outside(0x1100));
+        assert_fault(jal(Register::X1, -8), 0, outside(0xff8));
+        assert_fault(
+            branch(Opcode::BEQ, Register::X0, Register::X0, 16),
+            0,
+            outside(0x1010),
+        );
+        // A jump to 0 is not a halt: only HALT ends a run there.
+        assert_fault(
+            i_type(Opcode::JALR, Register::X1, Register::X0, 0),
+            0,
+            outside(0),
+        );
+    }
+
+    /// Running past the last instruction used to end the run as if it had halted.
+    #[test]
+    fn falling_off_the_end_of_the_program_terminates_abnormally() {
+        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
+            jump_program(),
+            Arc::new(RecordFinalPvsState::default()),
+            EmulatorOpts::default(),
+        );
+        let err = emulator
+            .run(None)
+            .expect_err("a program without HALT must not succeed");
+        assert_eq!(
+            err.abnormal_termination().map(|t| t.reason),
+            Some(super::TerminationReason::OutsideProgram { pc: 0x1010 })
+        );
     }
 
     fn set_reg_raw(emulator: &mut RiscvEmulator, register: Register, value: u64) {
@@ -3715,41 +3871,36 @@ mod tests {
         println!("block {block}: cycles = {}", emulator.state.global_clk);
     }
 
-    fn single_instruction_program(instruction: Instruction) -> Arc<Program> {
-        Arc::new(Program::new(vec![instruction], 0x1000, 0x1000))
+    /// The jump alone: a run would also count the `HALT` it needs to end, now that running off
+    /// the program's end is an abnormal termination.
+    fn chunk_split_events_of_one_jump(jump: Instruction, x1: u64) -> usize {
+        let nop = r_type(Opcode::ADD, Register::X0, Register::X0, Register::X0);
+        let program = Arc::new(Program::new(vec![jump, nop], 0x1000, 0x1000));
+        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
+            program,
+            Arc::new(RecordFinalPvsState::default()),
+            EmulatorOpts::default(),
+        );
+        emulator.initialize_if_needed();
+        emulator.state.registers[1] = RuntimeRegisterRecord {
+            value: x1,
+            chunk: 0,
+            timestamp: 0,
+        };
+        emulator.emulate_instruction(&jump).unwrap();
+        emulator.chunk_split_state.num_memory_read_write_events as usize
     }
 
     #[test]
     fn jal_to_x0_counts_chunk_split_event() {
-        let program =
-            single_instruction_program(Instruction::new(Opcode::JAL, 0, 4, 0, false, true));
-        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
-            program,
-            Arc::new(RecordFinalPvsState::default()),
-            EmulatorOpts::default(),
-        );
-        emulator.run(None).unwrap();
-
-        assert_eq!(emulator.chunk_split_state.num_memory_read_write_events, 1);
+        let jal = Instruction::new(Opcode::JAL, 0, 4, 0, false, true);
+        assert_eq!(chunk_split_events_of_one_jump(jal, 0), 1);
     }
 
     #[test]
     fn jalr_to_x0_counts_chunk_split_event() {
-        let program =
-            single_instruction_program(Instruction::new(Opcode::JALR, 0, 1, 0, false, true));
-        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
-            program,
-            Arc::new(RecordFinalPvsState::default()),
-            EmulatorOpts::default(),
-        );
-        emulator.state.registers[1] = RuntimeRegisterRecord {
-            value: 0,
-            chunk: 0,
-            timestamp: 0,
-        };
-        emulator.run(None).unwrap();
-
-        assert_eq!(emulator.chunk_split_state.num_memory_read_write_events, 1);
+        let jalr = Instruction::new(Opcode::JALR, 0, 1, 0, false, true);
+        assert_eq!(chunk_split_events_of_one_jump(jalr, 0x1004), 1);
     }
 
     /// Run: cargo test --release -p pico-vm test_rv64_reth_17106222 -- --ignored --nocapture

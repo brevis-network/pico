@@ -14,7 +14,7 @@
 use super::{emulator::AotEmulatorCore, NextStep};
 use pico_vm::{
     compiler::riscv::{instruction::Instruction, opcode::Opcode},
-    emulator::riscv::memory::VALUES_SIZE,
+    emulator::riscv::{memory::VALUES_SIZE, riscv_emulator::EmulationError},
 };
 
 impl AotEmulatorCore {
@@ -32,7 +32,11 @@ impl AotEmulatorCore {
                 return Ok(NextStep::Halt);
             }
             let pc = self.pc;
-            let inst = self.fetch_instruction(pc)?;
+            // Jumps are checked where they are taken; what reaches here outside the program is a
+            // fall-through past its last instruction.
+            let Ok(inst) = self.fetch_instruction(pc) else {
+                return Err(self.fail(EmulationError::outside_program(pc)));
+            };
             if let Some(step) = self.execute_interpreter_instruction(pc, inst)? {
                 return Ok(step);
             }
@@ -48,7 +52,9 @@ impl AotEmulatorCore {
             return Ok(());
         }
         let pc = self.pc;
-        let inst = self.fetch_instruction(pc)?;
+        let Ok(inst) = self.fetch_instruction(pc) else {
+            return Err(self.fail(EmulationError::outside_program(pc)));
+        };
         let _ = self.execute_interpreter_instruction(pc, inst)?;
         Ok(())
     }
@@ -303,6 +309,7 @@ impl AotEmulatorCore {
         let (rd, imm) = inst.j_type();
         let return_addr = pc.wrapping_add(4);
         let target = pc.wrapping_add(imm);
+        self.check_jump_target(pc, target)?;
         self.write_reg(rd as usize, return_addr);
         self.emit_cpu(pc, target, return_addr, imm, 0);
         self.pc = target;
@@ -319,6 +326,7 @@ impl AotEmulatorCore {
         let return_addr = pc.wrapping_add(4);
         let base = self.read_reg_b(rs1 as usize);
         let target = base.wrapping_add(imm) & !1_u64;
+        self.check_jump_target(pc, target)?;
         self.write_reg(rd as usize, return_addr);
         self.emit_cpu(pc, target, return_addr, base, imm);
         self.pc = target;
@@ -345,6 +353,9 @@ impl AotEmulatorCore {
             Opcode::BGEU => lhs >= rhs,
             _ => false,
         };
+        if cond {
+            self.check_jump_target(pc, target)?;
+        }
         let next_pc = if cond { target } else { fallthrough };
         self.emit_cpu(pc, next_pc, lhs, rhs, imm);
         self.pc = next_pc;

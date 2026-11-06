@@ -194,8 +194,13 @@ same way in the interpreter and the AOT emulator:
 | `unimp`, which is also what Rust's `std::process::abort` and a panic with a non-string payload end in | `IllegalInstruction { pc }` | 132 (128 + SIGILL) |
 | `ebreak` | `Breakpoint { pc }` | 133 (128 + SIGTRAP) |
 | a load or store the emulator does not allow | `InvalidMemoryAccess { opcode, addr }` | 139 (128 + SIGSEGV) |
+| a jump or taken branch to an address that is not 4-aligned (after `JALR` clears bit 0) | `MisalignedJumpTarget { pc, target }`, at the jump | 135 (128 + SIGBUS) |
+| a jump or taken branch out of the program, 0 included, or running past its last instruction | `OutsideProgram { pc }` | 139 (128 + SIGSEGV) |
 
-Faults the emulator detects take the code a native process gets for the same signal. A runtime
+Faults the emulator detects take the code a native process gets for the same signal. A run ends
+only at `HALT`: a jump to 0 is not one, and neither is running off the end of the program. A
+misaligned target is never rounded down (zkevm-standards: instruction-address-misaligned
+exception semantics). A runtime
 failure passes its reason to `HALT` in `a1` (`error::halt_reason`); a guest's own non-zero exit
 leaves it `0`. The tags carry a prefix, so whatever an older runtime left in `a1` reads as a
 plain `Exit`.

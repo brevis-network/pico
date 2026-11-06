@@ -280,6 +280,20 @@ impl AotEmulatorCore {
         message
     }
 
+    /// A jump or taken branch at `pc` to `target`, checked as the interpreter checks it
+    /// (`RiscvEmulator::jump_target`): a misaligned target, or one outside the program, 0
+    /// included, ends the run with the same abnormal termination.
+    #[inline(always)]
+    pub fn check_jump_target(&mut self, pc: u64, target: u64) -> Result<(), String> {
+        if !target.is_multiple_of(4) {
+            return Err(self.fail(EmulationError::misaligned_jump(pc, target)));
+        }
+        if !self.program.contains_pc(target) {
+            return Err(self.fail(EmulationError::outside_program(target)));
+        }
+        Ok(())
+    }
+
     /// `ebreak` at `pc`, failed the way the interpreter fails it.
     #[cold]
     pub fn breakpoint(&mut self, pc: u64) -> String {
@@ -579,7 +593,7 @@ mod tests {
             0x1000,
             vec![
                 Instruction::new(Opcode::SLL, 3, 1, 2, false, false),
-                Instruction::new(Opcode::JALR, 0, 0, 0, false, true),
+                Instruction::new(Opcode::JALR, 0, 0, 0x1000, false, true),
             ],
         );
         let mut emu = AotEmulatorCore::new(sll_program, Vec::new());
@@ -593,7 +607,7 @@ mod tests {
             0x1000,
             vec![
                 Instruction::new(Opcode::SRA, 5, 4, 63, false, true),
-                Instruction::new(Opcode::JALR, 0, 0, 0, false, true),
+                Instruction::new(Opcode::JALR, 0, 0, 0x1000, false, true),
             ],
         );
         let mut emu = AotEmulatorCore::new(sra_program, Vec::new());
@@ -607,23 +621,21 @@ mod tests {
         let program = test_program_with_instructions(
             0x1000,
             0x1000,
-            vec![Instruction::new(
-                Opcode::JALR,
-                2,
-                1,
-                2_i64 as u64,
-                false,
-                true,
-            )],
+            vec![
+                Instruction::new(Opcode::JALR, 2, 1, 2_i64 as u64, false, true),
+                Instruction::new(Opcode::ADD, 0, 0, 0, false, false),
+            ],
         );
         let mut emu = AotEmulatorCore::new(program, Vec::new());
-        emu.write_reg(1, 0x1235);
+        // 0x1003 + 2 = 0x1005: bit 0 cleared lands on the second instruction. (A target with bit 1
+        // set is misaligned and ends the run; see `check_jump_target`.)
+        emu.write_reg(1, 0x1003);
 
         match emu.interpret_from_current_pc().unwrap() {
-            NextStep::Dynamic(pc) => assert_eq!(pc, 0x1236),
+            NextStep::Dynamic(pc) => assert_eq!(pc, 0x1004),
             _ => unreachable!(),
         }
-        assert_eq!(emu.pc, 0x1236);
+        assert_eq!(emu.pc, 0x1004);
         assert_eq!(emu.read_reg_unsafe(2), 0x1004);
     }
 
@@ -688,7 +700,7 @@ mod tests {
                 Instruction::new(Opcode::DIVUW, 17, 8, 0, false, false),
                 Instruction::new(Opcode::REMW, 18, 8, 9, false, false),
                 Instruction::new(Opcode::REMUW, 19, 8, 0, false, false),
-                Instruction::new(Opcode::JALR, 0, 0, 0, false, true),
+                Instruction::new(Opcode::JALR, 0, 0, 0x1000, false, true),
             ],
         );
         let mut emu = AotEmulatorCore::new(program, Vec::new());
@@ -699,7 +711,7 @@ mod tests {
         emu.write_reg(9, u64::MAX);
 
         match emu.interpret_from_current_pc().unwrap() {
-            NextStep::Dynamic(pc) => assert_eq!(pc, 0),
+            NextStep::Dynamic(pc) => assert_eq!(pc, 0x1000),
             _ => unreachable!(),
         }
 
@@ -824,6 +836,95 @@ mod tests {
                 counts.first_touch_full_stores,
             ),
             (1, 5, 1)
+        );
+    }
+
+    // ── the same outcomes as the interpreter's `jump_target` tests ──
+
+    /// Runs `instructions` at 0x1000 with `x5 = x5`: the termination reason it fails with, and
+    /// `x1`, which the jumps link into.
+    fn aot_fault(
+        instructions: Vec<Instruction>,
+        x5: u64,
+    ) -> (
+        Option<pico_vm::emulator::riscv::riscv_emulator::TerminationReason>,
+        u64,
+    ) {
+        let program = test_program_with_instructions(0x1000, 0x1000, instructions);
+        let mut emu = AotEmulatorCore::new(program, Vec::new());
+        emu.write_reg(5, x5);
+        assert!(
+            emu.interpret_from_current_pc().is_err(),
+            "the run must fail"
+        );
+        let reason = emu
+            .fault
+            .take()
+            .and_then(|e| e.abnormal_termination().map(|t| t.reason));
+        (reason, emu.read_reg_unsafe(1))
+    }
+
+    #[test]
+    fn a_misaligned_or_outside_jump_fails_as_in_the_interpreter() {
+        use pico_vm::emulator::riscv::riscv_emulator::TerminationReason::{
+            MisalignedJumpTarget, OutsideProgram,
+        };
+        let nop = Instruction::new(Opcode::ADD, 0, 0, 0, false, false);
+        let program = |first: Instruction| vec![first, nop, nop, nop];
+        let jal = |offset: i64| Instruction::new(Opcode::JAL, 1, offset as u64, 0, true, true);
+        let beq = |offset: i64| Instruction::new(Opcode::BEQ, 0, 0, offset as u64, false, true);
+        let jalr = Instruction::new(Opcode::JALR, 1, 5, 0, false, true);
+        for (first, x5, want) in [
+            (
+                jal(6),
+                0,
+                MisalignedJumpTarget {
+                    pc: 0x1000,
+                    target: 0x1006,
+                },
+            ),
+            (
+                beq(2),
+                0,
+                MisalignedJumpTarget {
+                    pc: 0x1000,
+                    target: 0x1002,
+                },
+            ),
+            (
+                jalr,
+                0x1006,
+                MisalignedJumpTarget {
+                    pc: 0x1000,
+                    target: 0x1006,
+                },
+            ),
+            (jal(0x100), 0, OutsideProgram { pc: 0x1100 }),
+            (jal(-8), 0, OutsideProgram { pc: 0xff8 }),
+            // A jump to 0 is not a halt.
+            (jalr, 0, OutsideProgram { pc: 0 }),
+        ] {
+            let (reason, x1) = aot_fault(program(first), x5);
+            assert_eq!(reason, Some(want), "{first:?}");
+            assert_eq!(
+                x1, 0,
+                "{first:?}: the faulting jump wrote its link register"
+            );
+        }
+    }
+
+    /// Running past the last instruction used to end the run as if it had halted.
+    #[test]
+    fn falling_off_the_end_fails_as_in_the_interpreter() {
+        let nop = Instruction::new(Opcode::ADD, 0, 0, 0, false, false);
+        let (reason, _) = aot_fault(vec![nop, nop], 0);
+        assert_eq!(
+            reason,
+            Some(
+                pico_vm::emulator::riscv::riscv_emulator::TerminationReason::OutsideProgram {
+                    pc: 0x1008
+                }
+            )
         );
     }
 }

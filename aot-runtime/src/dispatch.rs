@@ -70,13 +70,13 @@ mod tests {
 
     use crate::{AotEmulatorCore, AotProgram, BlockFn, NextStep};
 
-    /// Two `ADD`s, then a `JALR` to pc 0, which halts.
+    /// Two `ADD`s, then `HALT` (an `ECALL` with `t0 = 0`).
     fn program() -> Arc<Program> {
         Arc::new(Program::new(
             vec![
                 Instruction::new(Opcode::ADD, 1, 0, 0, false, false),
                 Instruction::new(Opcode::ADD, 2, 0, 0, false, false),
-                Instruction::new(Opcode::JALR, 0, 0, 0, false, true),
+                Instruction::new(Opcode::ECALL, 5, 10, 11, false, false),
             ],
             0x1000,
             0x1000,

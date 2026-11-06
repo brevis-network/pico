@@ -320,7 +320,7 @@ impl AotCompiler {
 
     /// Generate all basic blocks from the program
     fn generate_blocks(&self, leaders: &HashSet<u64>) -> Result<Vec<BlockInfo>, String> {
-        let translator = InstructionTranslator::new();
+        let translator = InstructionTranslator::for_program(&self.program);
         let mut blocks = Vec::new();
 
         let mut current_block_name = format_ident!("block_0x{:08x}", self.program.pc_start);

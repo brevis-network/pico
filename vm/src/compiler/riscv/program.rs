@@ -67,6 +67,20 @@ impl Program {
         let idx = (pc - self.pc_base) as usize / 4;
         self.instructions[idx]
     }
+
+    /// Whether `pc` is the address of one of the program's instructions: 4-aligned and inside
+    /// `[pc_base, pc_base + 4 * len)`.
+    #[inline(always)]
+    pub fn contains_pc(&self, pc: u64) -> bool {
+        // Below `pc_base` the subtraction wraps to a value no program length reaches.
+        pc.is_multiple_of(4) && pc.wrapping_sub(self.pc_base) < (self.instructions.len() as u64) * 4
+    }
+
+    /// The instruction at `pc`, or `None` where [`Self::contains_pc`] does not hold.
+    #[inline(always)]
+    pub fn try_fetch(&self, pc: u64) -> Option<Instruction> {
+        self.contains_pc(pc).then(|| self.fetch(pc))
+    }
 }
 
 impl<F: PrimeField32> ProgramBehavior<F> for Program {

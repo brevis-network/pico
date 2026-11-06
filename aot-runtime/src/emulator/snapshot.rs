@@ -43,11 +43,12 @@ impl AotEmulatorCore {
         snapshot.public_values_stream = self.public_values_stream.clone();
     }
 
+    /// Only `HALT` sets the pc to 0: a jump there, or anywhere outside the program, fails where
+    /// it is taken (`check_jump_target`), and a fall-through past the last instruction fails at
+    /// the fetch, as in the interpreter.
     #[inline(always)]
     pub fn is_program_done(&self) -> bool {
         self.pc == 0
-            || self.pc.wrapping_sub(self.program_pc_base()).wrapping_div(4)
-                >= self.program_len() as u64
     }
 
     /// The interpreter's error for a run that ends here, where it raises it: inside an
@@ -381,7 +382,7 @@ mod tests {
             riscv::{
                 memory::{memory_pool_size, GLOBAL_MEMORY_RECYCLER},
                 record_slots::hold_records_unbounded,
-                riscv_emulator::EmulationError,
+                riscv_emulator::{EmulationError, TerminationReason},
                 state::RiscvEmulationState,
             },
         },
@@ -395,7 +396,7 @@ mod tests {
             vec![
                 Instruction::new(Opcode::ADD, 1, 0, 0, false, false),
                 Instruction::new(Opcode::ADD, 2, 0, 0, false, false),
-                Instruction::new(Opcode::JALR, 0, 0, 0, false, true),
+                Instruction::new(Opcode::ECALL, 5, 10, 11, false, false),
             ],
             0x1000,
             0x1000,
@@ -503,31 +504,26 @@ mod tests {
         })
     }
 
-    /// A jump to a pc the CPU trace cannot hold, crossing a chunk boundary as it ends the batch,
-    /// ends the run there, as the interpreter's error: no record is cut for an end no proof can
-    /// state.
+    /// A jump out of the program, as it crosses a chunk boundary, ends the run abnormally there,
+    /// as in the interpreter: no record is cut for it. The addresses are those the CPU trace
+    /// cannot hold (`1 << 32`, `1 << 48`) and the last one it can (`(1 << 32) - 4`); none is
+    /// an instruction, so all three fail the same way.
     #[test]
-    fn a_run_ending_beyond_the_proof_address_range_is_the_interpreters_error() {
+    fn a_jump_out_of_the_program_ends_the_run_abnormally() {
         hold_records_unbounded();
-        for shift in [32, 48] {
-            for ended in run_ending_at(shift, 0) {
-                assert!(
-                    matches!(
-                        ended,
-                        Err(EmulationError::EndPcBeyondProofAddress(pc)) if pc == 1 << shift
-                    ),
+        for (shift, offset) in [(32, 0), (48, 0), (32, -4)] {
+            let target = (1u64 << shift).wrapping_add(offset as u64);
+            for ended in run_ending_at(shift, offset) {
+                assert_eq!(
+                    ended
+                        .as_ref()
+                        .err()
+                        .and_then(EmulationError::abnormal_termination)
+                        .map(|t| t.reason),
+                    Some(TerminationReason::OutsideProgram { pc: target }),
                     "{ended:?}"
                 );
             }
-        }
-    }
-
-    /// The last pc the CPU trace can hold ends a run as the interpreter's does.
-    #[test]
-    fn a_run_ending_at_the_last_proof_pc_is_no_error() {
-        hold_records_unbounded();
-        for ended in run_ending_at(32, -4) {
-            assert!(ended.is_ok(), "{ended:?}");
         }
     }
 

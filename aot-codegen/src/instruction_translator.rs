@@ -35,7 +35,7 @@
 //! A jump or a branch leaves only the pc, the clock and the block's exit to the code here.
 //! `ECALL` ends its instruction through the core, which tests the sink itself.
 
-use crate::types::{sign_extend_imm32_to_u64, Instruction, Opcode};
+use crate::types::{sign_extend_imm32_to_u64, Instruction, Opcode, ProgramInfo};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::collections::HashSet;
@@ -55,12 +55,41 @@ use std::collections::HashSet;
 ///     translator.translate(pc, &instruction, &leaders);
 /// ```
 #[derive(Default)]
-pub struct InstructionTranslator;
+pub struct InstructionTranslator {
+    /// The program's instruction addresses, `[pc_base, pc_base + 4 * len)`, when known: a
+    /// statically known jump or branch target inside them needs no check at run time.
+    code: Option<core::ops::Range<u64>>,
+}
 
 impl InstructionTranslator {
-    /// Creates a new instruction translator.
+    /// Creates a new instruction translator that does not know the program's extent: every jump
+    /// and taken branch is checked at run time.
     pub fn new() -> Self {
-        Self
+        Self { code: None }
+    }
+
+    /// A translator for `program`, which checks a statically known target at generation time.
+    pub fn for_program(program: &ProgramInfo) -> Self {
+        let end = program.pc_base + 4 * program.instructions.len() as u64;
+        Self {
+            code: Some(program.pc_base..end),
+        }
+    }
+
+    /// The check for a jump or taken branch at `pc` to the statically known `target`: nothing when
+    /// it is one of the program's instructions, else the run-time check, which then fails as the
+    /// interpreter's does (`AotEmulatorCore::check_jump_target`).
+    fn static_jump_check(&self, pc: u64, target: u64) -> TokenStream {
+        let valid = target.is_multiple_of(4)
+            && self
+                .code
+                .as_ref()
+                .is_some_and(|code| code.contains(&target));
+        if valid {
+            quote! {}
+        } else {
+            quote! { emu.check_jump_target(#pc, #target)?; }
+        }
     }
 
     /// Translates a RISC-V instruction into Rust code.
@@ -179,7 +208,9 @@ impl InstructionTranslator {
             quote! { crate::NextStep::Dynamic(#target) }
         };
 
+        let check = self.static_jump_check(pc, target);
         let code = quote! {
+            #check
             emu.jal_no_count(emitting, #rd, #pc, u64::from(#imm));
             emu.pc = #target;
             emu.update_insn_clock();
@@ -203,6 +234,7 @@ impl InstructionTranslator {
 
         let code = quote! {
             let target = emu.jalr_no_count(emitting, #rd, #rs1, #pc, u64::from(#imm));
+            emu.check_jump_target(#pc, target)?;
             emu.pc = target;
             emu.update_insn_clock();
             emu.check_chunk_boundary_fast();
@@ -256,9 +288,11 @@ impl InstructionTranslator {
             quote! { crate::NextStep::Dynamic(#fallthrough) }
         };
 
+        let check = self.static_jump_check(pc, target);
         let code = quote! {
             let taken = emu.#helper(emitting, #rs1, #rs2, #pc, u64::from(#imm));
             if taken {
+                #check
                 emu.pc = #target;
                 emu.update_insn_clock();
                 emu.check_chunk_boundary_fast();
@@ -589,5 +623,53 @@ fn decode_rr_imm(inst: &Instruction) -> (usize, usize, usize, u32, bool) {
         // I-type
         let (rd, rs1, imm) = inst.i_type();
         (rd as usize, rs1 as usize, 0, imm, true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::InstructionTranslator;
+    use crate::types::{Instruction, Opcode, ProgramInfo};
+    use std::collections::HashSet;
+
+    /// Four instructions at 0x1000: a statically known target inside them needs no check.
+    fn translator() -> InstructionTranslator {
+        let nop = Instruction::new(Opcode::ADD, 0, 0, 0, false, false);
+        InstructionTranslator::for_program(&ProgramInfo::new(vec![nop; 4], 0x1000, 0x1000))
+    }
+
+    fn checks(translator: &InstructionTranslator, inst: Instruction) -> bool {
+        let (code, ..) = translator.translate(0x1000, &inst, &HashSet::new());
+        code.to_string().contains("check_jump_target")
+    }
+
+    /// The generated code checks a jump or branch exactly when its static target is not one of
+    /// the program's instructions, as the interpreter does at run time.
+    #[test]
+    fn a_static_target_is_checked_only_when_it_is_not_an_instruction() {
+        let t = translator();
+        let jal = |offset: i32| Instruction::new(Opcode::JAL, 0, offset as u32, 0, true, true);
+        let beq = |offset: i32| Instruction::new(Opcode::BEQ, 0, 0, offset as u32, false, true);
+        for (inst, checked) in [
+            (jal(8), false),    // 0x1008, an instruction
+            (jal(6), true),     // misaligned
+            (jal(16), true),    // 0x1010, one past the end
+            (jal(-8), true),    // below the program
+            (beq(12), false),   // 0x100c, the last instruction
+            (beq(2), true),     // misaligned
+            (beq(0x100), true), // outside
+        ] {
+            assert_eq!(checks(&t, inst), checked, "{inst:?}");
+        }
+    }
+
+    /// A JALR's target is known only at run time, so it is always checked; and a translator that
+    /// does not know the program checks every static target.
+    #[test]
+    fn dynamic_or_unknown_targets_are_always_checked() {
+        let jalr = Instruction::new(Opcode::JALR, 0, 1, 0, false, true);
+        assert!(checks(&translator(), jalr));
+        let jal = Instruction::new(Opcode::JAL, 0, 8, 0, true, true);
+        assert!(checks(&InstructionTranslator::new(), jal));
     }
 }

@@ -71,6 +71,12 @@ pub enum TerminationReason {
     IllegalInstruction { pc: u64 },
     /// `ebreak` at `pc`.
     Breakpoint { pc: u64 },
+    /// A jump or taken branch at `pc` to `target`, which is not 4-aligned: RISC-V's
+    /// instruction-address-misaligned exception, raised on the jump. Never rounded down.
+    MisalignedJumpTarget { pc: u64, target: u64 },
+    /// Execution would continue at `pc`, which holds none of the program's instructions: a jump
+    /// or branch out of the code, or a fall-through past its last instruction.
+    OutsideProgram { pc: u64 },
 }
 
 impl TerminationReason {
@@ -92,6 +98,8 @@ impl TerminationReason {
             Self::InvalidMemoryAccess { .. } => 128 + 11, // SIGSEGV
             Self::IllegalInstruction { .. } => 128 + 4,   // SIGILL
             Self::Breakpoint { .. } => 128 + 5,           // SIGTRAP
+            Self::MisalignedJumpTarget { .. } => 128 + 7, // SIGBUS
+            Self::OutsideProgram { .. } => 128 + 11,      // SIGSEGV
         }
     }
 }
@@ -108,6 +116,12 @@ impl fmt::Display for TerminationReason {
             }
             Self::IllegalInstruction { pc } => write!(f, "illegal instruction at {pc:#x}"),
             Self::Breakpoint { pc } => write!(f, "breakpoint at {pc:#x}"),
+            Self::MisalignedJumpTarget { pc, target } => {
+                write!(f, "jump at {pc:#x} to the misaligned address {target:#x}")
+            }
+            Self::OutsideProgram { pc } => {
+                write!(f, "execution reached {pc:#x}, outside the program")
+            }
         }
     }
 }
@@ -215,6 +229,16 @@ impl EmulationError {
         AbnormalTermination::fault(TerminationReason::InvalidMemoryAccess { opcode, addr }).into()
     }
 
+    /// A jump or taken branch at `pc` to a `target` that is not 4-aligned.
+    pub fn misaligned_jump(pc: u64, target: u64) -> Self {
+        AbnormalTermination::fault(TerminationReason::MisalignedJumpTarget { pc, target }).into()
+    }
+
+    /// Execution reaching `pc`, outside the program's instructions.
+    pub fn outside_program(pc: u64) -> Self {
+        AbnormalTermination::fault(TerminationReason::OutsideProgram { pc }).into()
+    }
+
     /// An `unimp` at `pc`.
     pub fn illegal_instruction(pc: u64) -> Self {
         AbnormalTermination::fault(TerminationReason::IllegalInstruction { pc }).into()
@@ -267,6 +291,9 @@ mod tests {
         assert_eq!(code(TerminationReason::IllegalInstruction { pc: 0 }), 132);
         assert_eq!(code(TerminationReason::Breakpoint { pc: 0 }), 133);
         assert_eq!(code(TerminationReason::OutOfMemory), 134);
+        let misaligned = TerminationReason::MisalignedJumpTarget { pc: 0, target: 2 };
+        assert_eq!(code(misaligned), 135);
+        assert_eq!(code(TerminationReason::OutsideProgram { pc: 0 }), 139);
         let access = TerminationReason::InvalidMemoryAccess {
             opcode: Opcode::LW,
             addr: 0x10,

@@ -195,14 +195,14 @@ mod tests {
 
     use crate::{AotEmulatorCore, BlockFn, NextStep};
 
-    /// Three `ADDI x1, x1, 1`, then a `JALR` to pc 0, which halts: a run of four cycles.
+    /// Three `ADDI x1, x1, 1`, then `HALT` (an `ECALL` with `t0 = 0`): a run of four cycles.
     fn program() -> Arc<Program> {
         Arc::new(Program::new(
             vec![
                 Instruction::new(Opcode::ADD, 1, 1, 1, false, true),
                 Instruction::new(Opcode::ADD, 1, 1, 1, false, true),
                 Instruction::new(Opcode::ADD, 1, 1, 1, false, true),
-                Instruction::new(Opcode::JALR, 0, 0, 0, false, true),
+                Instruction::new(Opcode::ECALL, 5, 10, 11, false, false),
             ],
             0x1000,
             0x1000,
@@ -327,7 +327,7 @@ mod tests {
     }
 
     /// A replay that ends the run hands its final state to `postprocess`: x0 first, and every
-    /// register the run used.
+    /// register the run used, `HALT`'s `t0`, `a0` and `a1` included.
     #[test]
     fn the_last_replay_postprocesses_its_final_state() {
         hold_records_unbounded();
@@ -341,7 +341,7 @@ mod tests {
             .iter()
             .map(|event| (event.addr, event.value))
             .collect();
-        assert_eq!(finalized, [(0, 0), (1, 3)]);
+        assert_eq!(finalized, [(0, 0), (1, 3), (5, 0), (10, 0), (11, 0)]);
     }
 
     /// A reused core replays the next snapshot as a fresh one would, and hands back the memory
@@ -388,7 +388,7 @@ mod tests {
                 Instruction::new(Opcode::ADD, 1, 0, 0x200, false, true),
                 Instruction::new(Opcode::SD, 1, 1, 0, false, true),
                 Instruction::new(Opcode::LD, 2, 1, 0, false, true),
-                Instruction::new(Opcode::JALR, 0, 0, 0, false, true),
+                Instruction::new(Opcode::ECALL, 5, 10, 11, false, false),
             ],
             0x1000,
             0x1000,
