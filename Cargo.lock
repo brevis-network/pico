@@ -3809,6 +3809,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "pico-aot-pure"
+version = "3.1.1"
+
+[[package]]
 name = "pico-aot-runtime"
 version = "3.1.1"
 dependencies = [
@@ -3833,6 +3837,7 @@ dependencies = [
  "p3-field",
  "p3-koala-bear",
  "p3-symmetric",
+ "pico-aot-pure",
  "pico-vm",
  "tiny-keccak",
  "typenum",
@@ -3981,6 +3986,10 @@ version = "3.1.1"
 dependencies = [
  "bincode",
  "distributed-vm",
+ "libloading",
+ "log",
+ "pico-aot-codegen",
+ "pico-aot-pure",
  "pico-aot-runtime",
  "pico-mle-core",
  "pico-verifier",

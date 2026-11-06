@@ -13,6 +13,7 @@ categories.workspace = true
 # `--no-default-features`. `rayon` and `strict` because `pico-vm` without `rayon` fails clippy.
 pico-vm = { path = "../vm", default-features = false, features = ["aot-emulator", "rayon", "strict"] }
 hashbrown = { workspace = true }
+pico-aot-pure.workspace = true
 p3-koala-bear = { workspace = true }
 log = { workspace = true }
 tiny-keccak.workspace = true

@@ -30,8 +30,12 @@ use sha2::{Digest, Sha256};
 ///
 /// Panics if the ELF binary cannot be parsed or contains invalid RISC-V instructions
 pub fn parse_elf(elf_bytes: &[u8]) -> ProgramInfo {
-    let compiler = Compiler::new(SourceType::RISCV, elf_bytes)
-        .expect("Failed to parse ELF through pico-vm compiler frontend");
+    try_parse_elf(elf_bytes).expect("Failed to parse ELF through pico-vm compiler frontend")
+}
+
+/// [`parse_elf`], returning the front end's error for bytes it cannot parse as an ELF.
+pub fn try_parse_elf(elf_bytes: &[u8]) -> Result<ProgramInfo, String> {
+    let compiler = Compiler::new(SourceType::RISCV, elf_bytes).map_err(|e| e.to_string())?;
     let program = compiler.compile();
     let instructions = program
         .instructions
@@ -40,10 +44,10 @@ pub fn parse_elf(elf_bytes: &[u8]) -> ProgramInfo {
         .map(convert_vm_instruction)
         .collect();
 
-    ProgramInfo {
+    Ok(ProgramInfo {
         elf_sha256: Sha256::digest(elf_bytes).into(),
         ..ProgramInfo::new(instructions, program.pc_base, program.pc_start)
-    }
+    })
 }
 
 fn convert_vm_instruction(inst: VmInstruction) -> Instruction {

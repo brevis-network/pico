@@ -61,7 +61,7 @@ fn full_chunks_prove_with_chunk_size_unset() {
     );
     let mut prover = whitelist_prover(&elf);
     assert!(prover.chunk_size() > 1 << 22);
-    let executed = prover.execute(stdin.clone()).expect("execute");
+    let executed = prover.execute_chunked(stdin.clone()).expect("execute");
     assert!(executed.chunks > 1, "{} chunk(s)", executed.chunks);
     let proof = prover.prove(stdin).expect("GPU combine");
     assert!(proof.binds_complete_execution());
@@ -101,8 +101,8 @@ fn the_interpreted_aot_runtime_matches_the_interpreter() {
         };
         let (aot, plain) = (builder(true), builder(false));
 
-        let executed = aot.execute(stdin()).expect("execute");
-        let expected = plain.execute(stdin()).expect("execute");
+        let executed = aot.execute_chunked(stdin()).expect("execute");
+        let expected = plain.execute_chunked(stdin()).expect("execute");
         assert!(
             !executed.precompile_calls.is_empty(),
             "{guest}: no precompile"
@@ -222,7 +222,7 @@ fn build_latches_the_cards_memory_tier_before_any_execute() {
     use pico_vm::emulator::riscv::record::{get_prover_hardware_config, gpu_memory_tier_from_env};
 
     let prover = whitelist_prover(FIB_ELF);
-    prover.execute(Stdin::from(&N)).expect("execute");
+    prover.execute_chunked(Stdin::from(&N)).expect("execute");
     let cards = distributed_vm::mle::embed::gpu_resources().expect("cards");
     let expected = gpu_memory_tier_from_env().unwrap_or(cards.memory_tier());
     println!("[gpu] {cards:?}: tier {expected:?}");
@@ -313,7 +313,7 @@ fn an_execute_before_a_gpu_prove_leaves_its_slots_bounded() {
         .vk_map(map)
         .trusted_vk_root(root)
         .gpu_event_pool_size(NonZeroUsize::new(POOL).unwrap());
-    builder.execute(Stdin::from(&N)).expect("execute");
+    builder.execute_chunked(Stdin::from(&N)).expect("execute");
     // The emulation pinned nothing.
     assert_eq!(slots_outstanding(), None);
 
@@ -324,7 +324,7 @@ fn an_execute_before_a_gpu_prove_leaves_its_slots_bounded() {
 
     // The execute after the prove lifts the bound only while it runs.
     prover
-        .execute(Stdin::from(&N))
+        .execute_chunked(Stdin::from(&N))
         .expect("execute after the prove");
     assert_eq!(bound_in_force(), Ok(NonZeroUsize::new(POOL)));
     let again = prover.prove(Stdin::from(&N)).expect("second GPU combine");

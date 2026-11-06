@@ -93,7 +93,7 @@ fn an_input_element_that_would_not_serialize_is_reported_by_execute() {
     stdin.write(&Unserializable);
 
     let err = small_builder()
-        .execute(stdin)
+        .execute_chunked(stdin)
         .expect_err("an unserializable element must stop the run");
     assert!(
         matches!(err, ProveError::InvalidInput { index: 0, .. }),
@@ -318,7 +318,7 @@ fn an_invalid_elf_is_an_error() {
 #[test]
 fn missing_stdin_is_an_error() {
     let err = small_builder()
-        .execute(crate::Stdin::new())
+        .execute_chunked(crate::Stdin::new())
         .expect_err("the fib guest reads one element");
     assert!(
         format!("{err}").contains("read past the end of stdin"),

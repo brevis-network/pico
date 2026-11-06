@@ -5,7 +5,7 @@ use std::{
     num::NonZeroUsize,
     panic::AssertUnwindSafe,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use pico_mle_core::{
@@ -63,8 +63,10 @@ use crate::{
     error::ProveError,
     phase::Phase,
     proof::{digest_words, Payload, Proof},
+    pure::{elf_sha256, PureOptions},
     stdin::Stdin,
     types::{Kb, Sc, VerifyingKey},
+    ExecuteEngine, PureExecution, PureLibrary, PureProgram,
 };
 
 /// The one stacked height whitelist mode proves at. Its shapes pad `Cpu`, `MemoryReadWrite` and
@@ -266,6 +268,11 @@ pub struct ProverBuilder {
     gpu_event_pool_size: Option<NonZeroUsize>,
     #[cfg(feature = "cuda")]
     interpreted_aot_runtime: bool,
+    pure: PureOptions,
+    /// The decoded ELF and its SHA-256, for [`Self::execute`]: a host keeps one builder and
+    /// executes many inputs, and a large ELF takes a noticeable share of each run to decode and
+    /// hash.
+    pure_program: OnceLock<(Arc<Program>, [u8; 32])>,
 }
 
 impl ProverBuilder {
@@ -288,6 +295,8 @@ impl ProverBuilder {
             gpu_event_pool_size: None,
             #[cfg(feature = "cuda")]
             interpreted_aot_runtime: true,
+            pure: PureOptions::default(),
+            pure_program: OnceLock::new(),
         }
     }
 
@@ -376,7 +385,7 @@ impl ProverBuilder {
     ///
     /// [`Self::build`] refuses the bootstrap stub ([`ProveError::AotNotGenerated`]), code
     /// generated from another ELF ([`ProveError::AotElfMismatch`]), and a program the process
-    /// cannot register ([`ProveError::AotRegistration`]). [`Self::execute`] checks the same.
+    /// cannot register ([`ProveError::AotRegistration`]). [`Self::execute_chunked`] checks the same.
     ///
     /// **One AOT program per process.** The registry is process-wide and keeps the first program
     /// a `build` or an `execute` registers, so a builder given a different one is refused for as
@@ -395,7 +404,7 @@ impl ProverBuilder {
 
     /// Replay the snapshot pipeline's chunks on [`Self::aot`]'s program too, rather than on
     /// interpreters: the replay workers run the AOT core, which writes the records the interpreter
-    /// would. Needs `aot`; [`Self::build`] and [`Self::execute`] refuse it without.
+    /// would. Needs `aot`; [`Self::build`] and [`Self::execute_chunked`] refuse it without.
     #[cfg(feature = "aot")]
     pub fn aot_workers(mut self) -> Self {
         self.aot_workers = true;
@@ -453,11 +462,75 @@ impl ProverBuilder {
     /// pipeline. For a machine the pipeline's workers do not fit, and for comparing the two paths,
     /// whose records are equal.
     ///
-    /// Refused by [`Self::build`] and [`Self::execute`] together with [`Self::emulation_workers`]
+    /// Refused by [`Self::build`] and [`Self::execute_chunked`] together with [`Self::emulation_workers`]
     /// or `aot`, which both need the pipeline.
     pub fn serial_emulation(mut self) -> Self {
         self.serial_emulation = true;
         self
+    }
+
+    /// Run [`Self::execute`] on `program`, the guest's pure-mode AOT code linked into this build:
+    /// the generated dispatch crate's `PURE`.
+    pub fn pure_aot(mut self, program: &'static PureProgram) -> Self {
+        self.pure.set_static(program);
+        self
+    }
+
+    /// Run [`Self::execute`] on the guest's pure-mode AOT code from a dynamic library, as
+    /// [`PureLibrary::load`] loads one. Several builders, for several guests, may hold libraries
+    /// at once.
+    pub fn pure_aot_library(mut self, library: Arc<PureLibrary>) -> Self {
+        self.pure.set_library(library);
+        self
+    }
+
+    /// Have [`Self::execute`] refuse to run without pure-mode AOT code
+    /// ([`ProveError::PureAotRequired`]) rather than fall back to the stepping interpreter, so that
+    /// a measurement cannot silently take the slow path.
+    pub fn require_pure_aot(mut self, on: bool) -> Self {
+        self.pure.require_aot(on);
+        self
+    }
+
+    /// Record why the guest has no pure-mode AOT code, say a library that would not build; logs it
+    /// as a warning now, and [`Self::execute_fallback_reason`] reports it.
+    pub fn pure_aot_unavailable(mut self, reason: impl Into<String>) -> Self {
+        self.pure.unavailable(reason.into());
+        self
+    }
+
+    /// What [`Self::execute`] runs on.
+    pub fn execute_engine(&self) -> ExecuteEngine {
+        self.pure.engine()
+    }
+
+    /// Why [`Self::execute`] runs the interpreter, if it does and a reason was recorded.
+    pub fn execute_fallback_reason(&self) -> Option<&str> {
+        self.pure.fallback_reason()
+    }
+
+    /// Run the guest to its halt, and report what it committed and how many instructions it ran:
+    /// none of what proving needs, so no chunks, records or keygen. On the guest's pure-mode AOT
+    /// code when it has some ([`Self::pure_aot`], [`Self::pure_aot_library`]), else on the stepping
+    /// interpreter, with a warning. [`Self::execute_chunked`] emulates as proving does.
+    ///
+    /// A run past the cycle limit [`Self::execute_chunked`] applies fails the same way.
+    ///
+    /// A run that passes is not necessarily provable. Pure execution keeps plain memory, so it
+    /// cannot tell a dword the guest wrote as zero from one it never wrote: a `HINT_READ` into the
+    /// former passes here and fails [`Self::execute_chunked`] with `InvalidHintRead`. Only a guest
+    /// bug reads a hint into memory it already wrote.
+    pub fn execute(&self, stdin: Stdin) -> Result<PureExecution, ProveError> {
+        check_stdin(&stdin)?;
+        let max_cycles = emulator_opts(self.checked_chunk_size()?).max_cycles;
+        let (program, sha) = match self.pure_program.get() {
+            Some(cached) => cached.clone(),
+            None => {
+                let parsed = (compile(&self.elf)?, elf_sha256(&self.elf));
+                self.pure_program.get_or_init(|| parsed).clone()
+            }
+        };
+        self.pure.execute(program, sha, stdin, max_cycles)
     }
 
     /// Emulate without proving: no keygen, no whitelist. Chunks exactly as the built prover would.
@@ -465,7 +538,7 @@ impl ProverBuilder {
     /// On the snapshot pipeline, each record is dropped as soon as its counts are read.
     ///
     /// The whitelist options go unchecked: they bind proving only.
-    pub fn execute(&self, stdin: Stdin) -> Result<Execution, ProveError> {
+    pub fn execute_chunked(&self, stdin: Stdin) -> Result<Execution, ProveError> {
         let (program, opts, path) = self.emulation_setup()?;
         execute_program(program, opts, path, stdin)
     }
@@ -476,14 +549,14 @@ impl ProverBuilder {
         self.emulate(stdin).map(CostEstimate::from_emulation)
     }
 
-    /// The emulation behind [`Self::execute`] and [`Self::estimate_cost`], with the options
+    /// The emulation behind [`Self::execute_chunked`] and [`Self::estimate_cost`], with the options
     /// [`Self::build`] would give the prover.
     fn emulate(&self, stdin: Stdin) -> Result<Emulation, ProveError> {
         let (program, opts, path) = self.emulation_setup()?;
         emulate_program(program, opts, path, stdin)
     }
 
-    /// What an emulation of [`Self::execute`] or [`Self::emulate`] runs with.
+    /// What an emulation of [`Self::execute_chunked`] or [`Self::emulate`] runs with.
     fn emulation_setup(&self) -> Result<(Arc<Program>, EmulatorOpts, EmulationPath), ProveError> {
         let chunk_size = self.resolved_chunk_size()?;
         let opts = emulator_opts(chunk_size);
@@ -609,6 +682,8 @@ impl ProverBuilder {
         self.register_aot()?;
 
         Ok(Prover {
+            pure: self.pure.clone(),
+            elf_sha256: elf_sha256(&self.elf),
             program,
             opts: emulator_opts(chunk_size),
             emulation,
@@ -646,8 +721,37 @@ impl ProverBuilder {
 
     /// The chunk size these options resolve to, checked against the stacked height and the chunk
     /// clock, with the chunk-split variables that would void the height check refused. Shared by
-    /// [`Self::build`] and [`Self::execute`], so the two cannot chunk differently.
+    /// [`Self::build`] and [`Self::execute_chunked`], so the two cannot chunk differently.
     pub(crate) fn resolved_chunk_size(&self) -> Result<u32, ProveError> {
+        let chunk_size = self.checked_chunk_size()?;
+
+        // The height check holds only with the memory-event limit on at scale 1. Without it,
+        // whether a chunk's memory events outgrow the stacked height depends on the guest's data,
+        // so it cannot be checked here and would fail mid-proof. Read through the VM's own readers,
+        // which resolve each variable once per process, so what is refused is what the emulator
+        // uses.
+        if event_limits_off() {
+            return Err(ProveError::InconsistentOptions(format!(
+                "CHUNK_EVENT_LIMITS_OFF=1 removes the memory-event limit on a chunk, so its memory \
+                 events can outgrow 2^{} and fail proving; unset it",
+                self.log_stacked_height
+            )));
+        }
+        let scale = event_limit_scale();
+        if scale > 1.0 {
+            return Err(ProveError::InconsistentOptions(format!(
+                "CHUNK_EVENT_LIMIT_SCALE={scale} raises the memory-event limit on a chunk, so its \
+                 memory events can outgrow 2^{} and fail proving; unset it",
+                self.log_stacked_height
+            )));
+        }
+        Ok(chunk_size)
+    }
+
+    /// The chunk size checked against the stacked height and the chunk clock, without the
+    /// chunk-split variables: pure [`Self::execute`] chunks nothing and only takes its cycle limit
+    /// from it.
+    fn checked_chunk_size(&self) -> Result<u32, ProveError> {
         try_riscv_params_with_128_bits_security(self.log_stacked_height).map_err(|err| {
             ProveError::InconsistentOptions(format!(
                 "log_stacked_height {} is not a height the backend can prove (maximum \
@@ -678,31 +782,11 @@ impl ProverBuilder {
                 self.log_stacked_height
             )));
         }
-
-        // The check above holds only with the memory-event limit on at scale 1. Without it, whether
-        // a chunk's memory events outgrow the stacked height depends on the guest's data, so it
-        // cannot be checked here and would fail mid-proof. Read through the VM's own readers, which
-        // resolve each variable once per process, so what is refused is what the emulator uses.
-        if event_limits_off() {
-            return Err(ProveError::InconsistentOptions(format!(
-                "CHUNK_EVENT_LIMITS_OFF=1 removes the memory-event limit on a chunk, so its memory \
-                 events can outgrow 2^{} and fail proving; unset it",
-                self.log_stacked_height
-            )));
-        }
-        let scale = event_limit_scale();
-        if scale > 1.0 {
-            return Err(ProveError::InconsistentOptions(format!(
-                "CHUNK_EVENT_LIMIT_SCALE={scale} raises the memory-event limit on a chunk, so its \
-                 memory events can outgrow 2^{} and fail proving; unset it",
-                self.log_stacked_height
-            )));
-        }
         Ok(chunk_size)
     }
 
     /// The emulator these options resolve to, with an AOT program checked against the ELF and the
-    /// pipeline against this machine. Shared by [`Self::build`] and [`Self::execute`], so the two
+    /// pipeline against this machine. Shared by [`Self::build`] and [`Self::execute_chunked`], so the two
     /// emulate alike; neither registers the program before its last fallible step.
     fn resolved_emulation(&self, chunk_size: u32) -> Result<EmulationPath, ProveError> {
         #[cfg(feature = "aot")]
@@ -1062,6 +1146,8 @@ pub(crate) fn emulator_opts(chunk_size: u32) -> EmulatorOpts {
 /// again, which is why the proving methods take `&mut self`.
 pub struct Prover {
     program: Arc<Program>,
+    pure: PureOptions,
+    elf_sha256: [u8; 32],
     opts: EmulatorOpts,
     emulation: EmulationPath,
     log_stacked_height: usize,
@@ -1198,8 +1284,24 @@ impl Prover {
         )
     }
 
-    /// Emulate without proving. [`ProverBuilder::execute`] does the same without keygen.
-    pub fn execute(&self, stdin: Stdin) -> Result<Execution, ProveError> {
+    /// [`ProverBuilder::execute`] with this prover's program and pure-execution options.
+    pub fn execute(&self, stdin: Stdin) -> Result<PureExecution, ProveError> {
+        check_stdin(&stdin)?;
+        self.pure.execute(
+            self.program.clone(),
+            self.elf_sha256,
+            stdin,
+            self.opts.max_cycles,
+        )
+    }
+
+    /// What [`Self::execute`] runs on.
+    pub fn execute_engine(&self) -> ExecuteEngine {
+        self.pure.engine()
+    }
+
+    /// Emulate without proving. [`ProverBuilder::execute_chunked`] does the same without keygen.
+    pub fn execute_chunked(&self, stdin: Stdin) -> Result<Execution, ProveError> {
         execute_program(self.program.clone(), self.opts, self.emulation, stdin)
     }
 

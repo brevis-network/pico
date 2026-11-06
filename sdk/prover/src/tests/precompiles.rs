@@ -51,7 +51,7 @@ fn assert_proves(guest: &str, elf: &[u8], stdin: Stdin, calls: &[SyscallCode]) {
         .build()
         .expect("prover");
     let made = prover
-        .execute(stdin.clone())
+        .execute_chunked(stdin.clone())
         .expect("the guest emulates")
         .precompile_calls;
     for code in calls {

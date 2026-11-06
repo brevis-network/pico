@@ -15,8 +15,14 @@ pico-vm = { path = "../../vm", default-features = false, features = ["rayon", "s
 pico-mle-core = { path = "../../mle-core", default-features = false }
 # The committed-value binding is the stable verifier's, so the two cannot disagree.
 pico-verifier = { workspace = true, features = ["codec"] }
-# The AOT program registry, for `aot`, and the interpreted AOT runtime `cuda` emulates with.
-pico-aot-runtime = { path = "../../aot-runtime", default-features = false, optional = true }
+# Pure execution's host, which `execute` always runs on; also the AOT program registry, for `aot`,
+# and the interpreted AOT runtime `cuda` emulates with.
+pico-aot-runtime = { path = "../../aot-runtime", default-features = false }
+# The interface of pure-mode AOT programs, and the loader for those built as dynamic libraries.
+pico-aot-pure.workspace = true
+libloading = "0.8"
+# Generates and builds pure-mode libraries, for `pure-build`.
+pico-aot-codegen = { workspace = true, optional = true }
 # The multi-card GPU pipeline, for `cuda`.
 distributed-vm = { path = "../../distributed-vm", optional = true }
 
@@ -26,6 +32,8 @@ serde = { workspace = true, features = ["derive"] }
 # committed-value digest with the same crate, and the two have to agree.
 sha2 = "0.10.8"
 thiserror.workspace = true
+# The warning `execute` logs when it falls back to the interpreter.
+log.workspace = true
 
 [dev-dependencies]
 # The soundness manifest, read by the test that holds the embed key against it.
@@ -33,12 +41,15 @@ serde_json.workspace = true
 
 [features]
 default = ["multi-field-transcript"]
+# `build_pure_library`: generates a guest's pure-mode AOT code and builds it into a dynamic library
+# with cargo, for a host that only receives the ELF at run time.
+pure-build = ["dep:pico-aot-codegen"]
 # Forwards to `pico-vm`'s. On by default, so every build reaches the on-chain proof. Off
 # (`default-features = false`) builds without the embed and wrap machines: `Phase::Embed` and
 # `Phase::Wrap` are then named but unimplemented, and return `ProveError::FeatureMissing`.
 multi-field-transcript = ["pico-vm/multi-field-transcript"]
 # Emulates through the snapshot pipeline with a guest's AOT-compiled code: `ProverBuilder::aot`.
-aot = ["pico-vm/aot-emulator", "dep:pico-aot-runtime"]
+aot = ["pico-vm/aot-emulator"]
 # Build-time speed-ups of the emulator, forwarded from `pico-vm`; none changes a proof. The GPU
 # benchmark builds with all three. `bigint-rug` runs the curve precompiles' big-integer arithmetic
 # on GMP, which bounds emulating a block heavy in them; `tcmalloc` makes it the global allocator;
@@ -56,7 +67,6 @@ cuda = [
     "dep:distributed-vm",
     "distributed-vm/cuda",
     "pico-vm/aot-emulator",
-    "dep:pico-aot-runtime",
 ]
 # Forwards to `pico-vm`'s: the stage ledger and span recorder that `MLE_LEDGER` and `MLE_SPANS`
 # write. Without it both compile to nothing.

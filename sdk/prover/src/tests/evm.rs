@@ -159,7 +159,7 @@ fn prove_evm_refuses_outside_whitelist_mode_before_emulating() {
     let mut prover = small_builder().build().expect("dev-mode prover");
 
     let emulated = prover
-        .execute(Stdin::new())
+        .execute_chunked(Stdin::new())
         .expect_err("the fib guest reads one element");
     assert!(
         format!("{emulated}").contains("read past the end of stdin"),

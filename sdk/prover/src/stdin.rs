@@ -36,7 +36,7 @@ impl Stdin {
     /// Serialize `value` as one element the guest reads with `read_as::<T>()`.
     ///
     /// A `Serialize` impl that fails leaves this element out and is reported by the next
-    /// [`crate::Prover::prove`] or [`crate::Prover::execute`] as
+    /// [`crate::Prover::prove`] or [`crate::Prover::execute_chunked`] as
     /// [`crate::ProveError::InvalidInput`] — nothing in this crate aborts on caller input.
     pub fn write<T: Serialize>(&mut self, value: &T) -> &mut Self {
         let mut bytes = Vec::new();

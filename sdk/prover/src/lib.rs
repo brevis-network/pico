@@ -35,10 +35,12 @@
 //! `prove` stops at [`Phase::Combine`]: the complete root, which a deferred-proof node verifies
 //! (`docs/deferred.md`). `Prover::prove_evm` proves to [`Phase::Wrap`] in whitelist mode only, and
 //! returns an `EvmBundle`: the gnark inputs and the wrap circuit's two public inputs.
-//! [`Prover::execute`] emulates without proving, and returns an [`Execution`] whose bytes are
-//! explicitly *not* authenticated. [`ProverBuilder::execute`] does the same without keygen.
-//! [`ProverBuilder::estimate_cost`] emulates and reports the trace rows proving would fill, per
-//! RISC-V AIR.
+//! [`Prover::execute`] runs the guest without proving, on its pure-mode AOT code when it has some,
+//! and returns a [`PureExecution`]: the committed bytes, explicitly *not* authenticated, and the
+//! cycle count. [`Prover::execute_chunked`] emulates as proving does, chunk by chunk, and returns an
+//! [`Execution`] that also counts chunks and precompile calls. Both are on [`ProverBuilder`] too,
+//! without keygen. [`ProverBuilder::estimate_cost`] emulates and reports the trace rows proving
+//! would fill, per RISC-V AIR.
 //!
 //! # Verifying outside this crate
 //!
@@ -73,7 +75,7 @@
 //! | `CHUNK_BATCH_SIZE` | `EmulatorOpts::default` | **no** — stated as 1, the VM's own pin |
 //! | `PROVE_CONCURRENCY` | `RiscvMachine::prove` | **no** — superseded by [`ProverBuilder::concurrency`] |
 //! | `MLE_VK_ROOT` | `MleVkMap::try_load` | **no** — the whitelist is loaded without it, and [`ProverBuilder::trusted_vk_root`] pins the root |
-//! | `CHUNK_EVENT_LIMITS_OFF`, `CHUNK_EVENT_LIMIT_SCALE` | chunk splitting | **yes, and refused by [`ProverBuilder::build`]**: switched off, or scaled above 1, the event limits let a chunk's memory events outgrow `2^log_stacked_height`, which depends on the guest's data and so cannot be checked before proving. [`ProverBuilder::execute`] refuses them too, so it chunks as a built prover would. A scale the VM does not parse, or outside 1 to 16, it reads as 1, and so does the check |
+//! | `CHUNK_EVENT_LIMITS_OFF`, `CHUNK_EVENT_LIMIT_SCALE` | chunk splitting | **yes, and refused by [`ProverBuilder::build`]**: switched off, or scaled above 1, the event limits let a chunk's memory events outgrow `2^log_stacked_height`, which depends on the guest's data and so cannot be checked before proving. [`ProverBuilder::execute_chunked`] refuses them too, so it chunks as a built prover would. A scale the VM does not parse, or outside 1 to 16, it reads as 1, and so does the check |
 //! | `CHUNK_COMMIT_TAIL_HOLD_OFF` | chunk splitting | **yes, and it breaks proving**: `1` lets a chunk end inside the guest's commit tail, which the recursion rejects; it exists for tests that need such a cut |
 //! | `DEFERRED_TAIL_MERGE` | the deferred memory split | **yes, and it changes the proof**: `0` gives every deferred bucket its own record |
 //! | `MLE_FORCE_CATCH_ALL` | whitelist-mode shape selection | **yes, and it changes the proof**: every chunk takes the catch-all shape |
@@ -156,6 +158,7 @@ mod evm;
 mod phase;
 mod proof;
 mod prover;
+mod pure;
 mod stdin;
 mod types;
 
@@ -166,10 +169,16 @@ pub use error::{ProveError, ReadError};
 #[cfg(feature = "multi-field-transcript")]
 pub use evm::EvmBundle;
 pub use phase::Phase;
+/// The pure-mode program type a guest's generated dispatch crate exports, for
+/// [`ProverBuilder::pure_aot`].
+pub use pico_aot_pure::PureProgram;
 pub use proof::Proof;
 #[cfg(feature = "multi-field-transcript")]
 pub use proof::{WRAP_CONSTRAINTS_FILE, WRAP_WITNESS_FILE};
 pub use prover::{Execution, ProgramId, Prover, ProverBuilder};
+#[cfg(feature = "pure-build")]
+pub use pure::{build_pure_library, PureBuildOptions};
+pub use pure::{ExecuteEngine, PureExecution, PureLibrary};
 pub use stdin::Stdin;
 
 /// The proof wire-format version this build reads and writes. A container recording a different

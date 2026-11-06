@@ -29,7 +29,7 @@ impl ExecuteCmd {
     pub fn run(&self) -> Result<()> {
         let options = self.prover.resolve_for_execute()?;
         let elf = self.guest.read_elf()?;
-        let execution = options.builder(&elf).execute(self.guest.stdin())?;
+        let execution = options.builder(&elf).execute_chunked(self.guest.stdin())?;
         println!(
             "executed: {} cycle(s), {} chunk(s)",
             execution.cycles, execution.chunks

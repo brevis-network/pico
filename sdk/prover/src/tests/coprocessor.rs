@@ -38,7 +38,7 @@ const KOALABEAR_P: u32 = 0x7f00_0001;
 fn the_coprocessor_guest_commits_its_inputs_and_its_volume() {
     let execution = Prover::builder(COPROCESSOR_ELF)
         .log_stacked_height(SMALL_LOG_STACKED_HEIGHT)
-        .execute(Stdin::new())
+        .execute_chunked(Stdin::new())
         .expect("the coprocessor guest emulates");
 
     // Eight permutations per receipt leaf (106 elements at 15 a block, the last one padded) and two

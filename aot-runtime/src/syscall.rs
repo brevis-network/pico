@@ -3,7 +3,7 @@
 //! This module provides syscall execution support tailored to the AOT runtime.
 
 use super::emulator::AotEmulatorCore;
-use crate::precompiles;
+use crate::precompiles::{self, PrecompileMemory};
 use p3_koala_bear::KoalaBear;
 use pico_vm::{
     chips::{
@@ -114,72 +114,8 @@ impl Drop for SyscallGuard {
 // execution only. If needed for future trace/proof features, it can be added.
 
 impl AotEmulatorCore {
-    #[inline(always)]
-    fn syscall_leaf_u32(value: u64, context: &str) -> Result<u32, String> {
-        u32::try_from(value).map_err(|_| format!("{context} overflow: {value}"))
-    }
-
-    #[inline(always)]
-    fn decode_syscall_id_u32(value: u64) -> Result<u32, String> {
-        let low_byte = value as u8;
-        let sign_ext_byte = (low_byte as i8 as i64) as u64;
-        if value == sign_ext_byte {
-            return Ok(u32::from(low_byte));
-        }
-
-        let low = value as u32;
-        let zero_ext = u64::from(low);
-        let sign_ext = (low as i32 as i64) as u64;
-
-        if value == zero_ext || value == sign_ext {
-            return Ok(low);
-        }
-
-        Err(format!(
-            "invalid rv64 syscall number encoding: 0x{value:016x}"
-        ))
-    }
-
-    #[inline(always)]
-    fn decode_u32_abi_word(value: u64, context: &str) -> Result<u32, String> {
-        let low = value as u32;
-        let zero_ext = u64::from(low);
-        let sign_ext = (low as i32 as i64) as u64;
-
-        if value == zero_ext || value == sign_ext {
-            Ok(low)
-        } else {
-            Err(format!(
-                "{context} invalid 32-bit ABI encoding: 0x{value:016x}"
-            ))
-        }
-    }
-
-    #[inline(always)]
-    fn decode_u32_abi_index(value: u64, bound: usize, context: &str) -> Result<usize, String> {
-        let low = value as u32;
-        let zero_ext = u64::from(low);
-        if value != zero_ext {
-            return Err(format!(
-                "{context} invalid unsigned index encoding: 0x{value:016x}"
-            ));
-        }
-
-        let index =
-            usize::try_from(low).map_err(|_| format!("{context} index overflow: {value}"))?;
-        if index >= bound {
-            return Err(format!("{context} index out of range: {index} >= {bound}"));
-        }
-        Ok(index)
-    }
-
-    #[inline(always)]
-    fn digest_leaf_word_u32(value: u64, context: &str) -> Result<u32, String> {
-        Self::decode_u32_abi_word(value, context)
-    }
-
     fn handle_write(&mut self, fd: u64, write_buf: u64) -> Result<(), String> {
-        let fd = Self::syscall_leaf_u32(fd, "write fd")?;
+        let fd = syscall_leaf_u32(fd, "write fd")?;
         let nbytes = usize::try_from(self.read_reg_snapshot(Register::X12 as usize))
             .map_err(|_| "write syscall byte count does not fit usize".to_string())?;
 
@@ -218,7 +154,7 @@ impl AotEmulatorCore {
 
         let hook = self.hook_map.get(&fd).copied();
         if let Some(hook) = hook {
-            let result = hook(self, slice);
+            let result = hook(slice);
             let ptr = self.input_stream_ptr;
             self.input_stream.splice(ptr..ptr, result);
         } else {
@@ -326,12 +262,12 @@ impl AotEmulatorCore {
 
     #[inline(always)]
     fn handle_commit(&mut self, word_idx: u64, word: u64) -> Result<(), String> {
-        let idx = Self::decode_u32_abi_index(
+        let idx = decode_u32_abi_index(
             word_idx,
             self.committed_value_digest.len(),
             "commit word_idx",
         )?;
-        let word = Self::digest_leaf_word_u32(word, "commit digest word")?;
+        let word = digest_leaf_word_u32(word, "commit digest word")?;
         self.committed_value_digest[idx] = word;
         if let Some(record) = self.emitting_record_mut() {
             record.public_values.committed_value_digest[idx] = word;
@@ -343,12 +279,12 @@ impl AotEmulatorCore {
 
     #[inline(always)]
     fn handle_commit_deferred(&mut self, word_idx: u64, word: u64) -> Result<(), String> {
-        let idx = Self::decode_u32_abi_index(
+        let idx = decode_u32_abi_index(
             word_idx,
             self.deferred_proofs_digest.len(),
             "deferred word_idx",
         )?;
-        let word = Self::digest_leaf_word_u32(word, "deferred digest word")?;
+        let word = digest_leaf_word_u32(word, "deferred digest word")?;
         self.deferred_proofs_digest[idx] = word;
         // Into the record too, as the interpreter's COMMIT_DEFERRED_PROOFS writes it: the pipeline
         // takes a chunk's deferred digest from its record.
@@ -376,7 +312,7 @@ impl AotEmulatorCore {
         arg1: u64,
         arg2: u64,
     ) -> Result<(u64, u64, u32, bool), String> {
-        let syscall_id_u32 = Self::decode_syscall_id_u32(syscall_id)?;
+        let syscall_id_u32 = decode_syscall_id_u32(syscall_id)?;
         let Some(syscall_code) = SyscallCode::try_from_u32(syscall_id_u32) else {
             return Err(self.fail(EmulationError::UnsupportedSyscall(syscall_id_u32)));
         };
@@ -424,273 +360,54 @@ impl AotEmulatorCore {
         }
 
         let start = ledger::precompile_start(syscall_code);
-        let result = match syscall_id_u32 {
-            id if id == SyscallCode::SHA_EXTEND as u32 => {
-                precompiles::sha256::sha256_extend(self, arg1);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::SHA_COMPRESS as u32 => {
-                precompiles::sha256::sha256_compress(self, arg1, arg2);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::KECCAK_PERMUTE as u32 => {
-                precompiles::keccak256::keccak_permute(self, arg1);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::POSEIDON2_PERMUTE as u32 => {
-                // KoalaBear is not a default here, it is the only choice: the MLE backend that
-                // consumes these events is KoalaBear-only (`mle::machine::riscv::Kb`), so there
-                // is no other field whose permutation could be proved. If a second field ever
-                // ships, this is the site that has to thread it -- `AotEmulatorCore` carries no
-                // field parameter, which is why the concrete type appears here rather than in
-                // `poseidon2_permute`'s signature.
-                precompiles::poseidon2::poseidon2_permute::<KoalaBear>(
-                    self,
-                    Self::syscall_leaf_u32(arg1, "poseidon2 input_ptr")?,
-                    Self::syscall_leaf_u32(arg2, "poseidon2 output_ptr")?,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::ED_ADD as u32 => {
-                precompiles::ec::edwards_add::<Ed25519>(self, arg1, arg2);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::ED_DECOMPRESS as u32 => {
-                precompiles::ec::edwards_decompress::<Ed25519Parameters>(
-                    self,
-                    arg1,
-                    Self::syscall_leaf_u32(arg2, "edwards decompress sign")?,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::UINT256_MUL as u32 => {
-                precompiles::uint256::uint256_mul(self, arg1, arg2);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::SECP256K1_ADD as u32 => {
-                precompiles::ec::secp256k1_add_optimized(self, arg1, arg2);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::SECP256K1_DOUBLE as u32 => {
-                precompiles::ec::secp256k1_double_optimized(self, arg1);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::SECP256K1_DECOMPRESS as u32 => {
-                precompiles::ec::weierstrass_decompress::<Secp256k1>(
-                    self,
-                    arg1,
-                    Self::syscall_leaf_u32(arg2, "secp256k1 decompress sign")?,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::SECP256R1_ADD as u32 => {
-                precompiles::ec::secp256r1_add_optimized(self, arg1, arg2);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::SECP256R1_DOUBLE as u32 => {
-                precompiles::ec::secp256r1_double_optimized(self, arg1);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::SECP256R1_DECOMPRESS as u32 => {
-                precompiles::ec::weierstrass_decompress::<Secp256r1>(
-                    self,
-                    arg1,
-                    Self::syscall_leaf_u32(arg2, "secp256r1 decompress sign")?,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BN254_ADD as u32 => {
-                precompiles::ec::bn254_add_optimized(self, arg1, arg2);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BN254_DOUBLE as u32 => {
-                precompiles::ec::bn254_double_optimized(self, arg1);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BLS12381_ADD as u32 => {
-                precompiles::ec::bls12381_add_optimized(self, arg1, arg2);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BLS12381_DOUBLE as u32 => {
-                precompiles::ec::bls12381_double_optimized(self, arg1);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BLS12381_DECOMPRESS as u32 => {
-                precompiles::ec::weierstrass_decompress::<Bls12381>(
-                    self,
-                    arg1,
-                    Self::syscall_leaf_u32(arg2, "bls12381 decompress sign")?,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BLS12381_FP_ADD as u32 => {
-                precompiles::fptower::fp_op::<Bls381BaseField>(
-                    self,
-                    FieldOperation::Add,
-                    arg1,
-                    arg2,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BLS12381_FP_SUB as u32 => {
-                precompiles::fptower::fp_op::<Bls381BaseField>(
-                    self,
-                    FieldOperation::Sub,
-                    arg1,
-                    arg2,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BLS12381_FP_MUL as u32 => {
-                precompiles::fptower::fp_op::<Bls381BaseField>(
-                    self,
-                    FieldOperation::Mul,
-                    arg1,
-                    arg2,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BLS12381_FP2_ADD as u32 => {
-                precompiles::fptower::fp2_addsub::<Bls381BaseField>(
-                    self,
-                    FieldOperation::Add,
-                    arg1,
-                    arg2,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BLS12381_FP2_SUB as u32 => {
-                precompiles::fptower::fp2_addsub::<Bls381BaseField>(
-                    self,
-                    FieldOperation::Sub,
-                    arg1,
-                    arg2,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BLS12381_FP2_MUL as u32 => {
-                precompiles::fptower::fp2_mul::<Bls381BaseField>(self, arg1, arg2);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BN254_FP_ADD as u32 => {
-                precompiles::fptower::fp_op::<Bn254BaseField>(
-                    self,
-                    FieldOperation::Add,
-                    arg1,
-                    arg2,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BN254_FP_SUB as u32 => {
-                precompiles::fptower::fp_op::<Bn254BaseField>(
-                    self,
-                    FieldOperation::Sub,
-                    arg1,
-                    arg2,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BN254_FP_MUL as u32 => {
-                precompiles::fptower::fp_op::<Bn254BaseField>(
-                    self,
-                    FieldOperation::Mul,
-                    arg1,
-                    arg2,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BN254_FP2_ADD as u32 => {
-                precompiles::fptower::fp2_addsub::<Bn254BaseField>(
-                    self,
-                    FieldOperation::Add,
-                    arg1,
-                    arg2,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BN254_FP2_SUB as u32 => {
-                precompiles::fptower::fp2_addsub::<Bn254BaseField>(
-                    self,
-                    FieldOperation::Sub,
-                    arg1,
-                    arg2,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::BN254_FP2_MUL as u32 => {
-                precompiles::fptower::fp2_mul::<Bn254BaseField>(self, arg1, arg2);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::SECP256K1_FP_ADD as u32 => {
-                precompiles::fptower::fp_op::<Secp256k1BaseField>(
-                    self,
-                    FieldOperation::Add,
-                    arg1,
-                    arg2,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::SECP256K1_FP_SUB as u32 => {
-                precompiles::fptower::fp_op::<Secp256k1BaseField>(
-                    self,
-                    FieldOperation::Sub,
-                    arg1,
-                    arg2,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::SECP256K1_FP_MUL as u32 => {
-                precompiles::fptower::fp_op::<Secp256k1BaseField>(
-                    self,
-                    FieldOperation::Mul,
-                    arg1,
-                    arg2,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::WRITE as u32 => {
-                self.handle_write(arg1, arg2)?;
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::HINT_LEN as u32 => Ok((
-                self.handle_hint_len(syscall_id)?,
-                next_pc,
-                extra_cycles,
-                false,
-            )),
-            id if id == SyscallCode::HINT_READ as u32 => {
-                self.handle_hint_read(syscall_id, arg1, arg2)?;
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::COMMIT as u32 => {
-                self.handle_commit(arg1, arg2)?;
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::COMMIT_DEFERRED_PROOFS as u32 => {
-                self.handle_commit_deferred(arg1, arg2)?;
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::VERIFY_PICO_PROOF as u32 => {
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::ENTER_UNCONSTRAINED as u32 => {
-                self.enter_unconstrained_mode();
-                Ok((1, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::EXIT_UNCONSTRAINED as u32 => {
-                let restored_pc = self.exit_unconstrained_mode();
-                let next_pc = restored_pc.unwrap_or(next_pc);
-                Ok((0, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::HALT as u32 => {
-                let exit_code = Self::decode_u32_abi_word(arg1, "halt exit_code")?;
-                if exit_code != 0 {
-                    // `arg2` is the reason tag the runtime passes in `a1`, as for the interpreter.
-                    return Err(self.fail(AbnormalTermination::halt(exit_code, arg2).into()));
+        let result = match dispatch_precompile(self, syscall_id_u32, arg1, arg2) {
+            Ok(true) => Ok((syscall_return, next_pc, extra_cycles, false)),
+            Err(e) => Err(e),
+            Ok(false) => match syscall_id_u32 {
+                id if id == SyscallCode::WRITE as u32 => {
+                    self.handle_write(arg1, arg2)?;
+                    Ok((syscall_return, next_pc, extra_cycles, false))
                 }
-                Ok((syscall_return, 0, extra_cycles, true))
-            }
-            _ => Err(self.fail(EmulationError::UnsupportedSyscall(syscall_id_u32))),
+                id if id == SyscallCode::HINT_LEN as u32 => Ok((
+                    self.handle_hint_len(syscall_id)?,
+                    next_pc,
+                    extra_cycles,
+                    false,
+                )),
+                id if id == SyscallCode::HINT_READ as u32 => {
+                    self.handle_hint_read(syscall_id, arg1, arg2)?;
+                    Ok((syscall_return, next_pc, extra_cycles, false))
+                }
+                id if id == SyscallCode::COMMIT as u32 => {
+                    self.handle_commit(arg1, arg2)?;
+                    Ok((syscall_return, next_pc, extra_cycles, false))
+                }
+                id if id == SyscallCode::COMMIT_DEFERRED_PROOFS as u32 => {
+                    self.handle_commit_deferred(arg1, arg2)?;
+                    Ok((syscall_return, next_pc, extra_cycles, false))
+                }
+                id if id == SyscallCode::VERIFY_PICO_PROOF as u32 => {
+                    Ok((syscall_return, next_pc, extra_cycles, false))
+                }
+                id if id == SyscallCode::ENTER_UNCONSTRAINED as u32 => {
+                    self.enter_unconstrained_mode();
+                    Ok((1, next_pc, extra_cycles, false))
+                }
+                id if id == SyscallCode::EXIT_UNCONSTRAINED as u32 => {
+                    let restored_pc = self.exit_unconstrained_mode();
+                    let next_pc = restored_pc.unwrap_or(next_pc);
+                    Ok((0, next_pc, extra_cycles, false))
+                }
+                id if id == SyscallCode::HALT as u32 => {
+                    let exit_code = decode_u32_abi_word(arg1, "halt exit_code")?;
+                    if exit_code != 0 {
+                        // `arg2` is the reason tag the runtime passes in `a1`, as for the interpreter.
+                        return Err(self.fail(AbnormalTermination::halt(exit_code, arg2).into()));
+                    }
+                    Ok((syscall_return, 0, extra_cycles, true))
+                }
+                _ => Err(self.fail(EmulationError::UnsupportedSyscall(syscall_id_u32))),
+            },
         };
         ledger::precompile_compute(start, self.role, syscall_code);
         result
@@ -717,6 +434,265 @@ fn process_output(fd: u32, rt: &mut AotEmulatorCore, s: &str) {
         2 => core::mem::replace(&mut rt.stderr, remaining),
         _ => unreachable!(),
     };
+}
+
+// The 32-bit ABI words syscalls take, decoded as the interpreter decodes them; free functions,
+// so the AOT core and pure execution share them.
+
+#[inline(always)]
+pub(crate) fn syscall_leaf_u32(value: u64, context: &str) -> Result<u32, String> {
+    u32::try_from(value).map_err(|_| format!("{context} overflow: {value}"))
+}
+
+#[inline(always)]
+pub(crate) fn decode_syscall_id_u32(value: u64) -> Result<u32, String> {
+    let low_byte = value as u8;
+    let sign_ext_byte = (low_byte as i8 as i64) as u64;
+    if value == sign_ext_byte {
+        return Ok(u32::from(low_byte));
+    }
+
+    let low = value as u32;
+    let zero_ext = u64::from(low);
+    let sign_ext = (low as i32 as i64) as u64;
+
+    if value == zero_ext || value == sign_ext {
+        return Ok(low);
+    }
+
+    Err(format!(
+        "invalid rv64 syscall number encoding: 0x{value:016x}"
+    ))
+}
+
+#[inline(always)]
+pub(crate) fn decode_u32_abi_word(value: u64, context: &str) -> Result<u32, String> {
+    let low = value as u32;
+    let zero_ext = u64::from(low);
+    let sign_ext = (low as i32 as i64) as u64;
+
+    if value == zero_ext || value == sign_ext {
+        Ok(low)
+    } else {
+        Err(format!(
+            "{context} invalid 32-bit ABI encoding: 0x{value:016x}"
+        ))
+    }
+}
+
+#[inline(always)]
+pub(crate) fn decode_u32_abi_index(
+    value: u64,
+    bound: usize,
+    context: &str,
+) -> Result<usize, String> {
+    let low = value as u32;
+    let zero_ext = u64::from(low);
+    if value != zero_ext {
+        return Err(format!(
+            "{context} invalid unsigned index encoding: 0x{value:016x}"
+        ));
+    }
+
+    let index = usize::try_from(low).map_err(|_| format!("{context} index overflow: {value}"))?;
+    if index >= bound {
+        return Err(format!("{context} index out of range: {index} >= {bound}"));
+    }
+    Ok(index)
+}
+
+#[inline(always)]
+pub(crate) fn digest_leaf_word_u32(value: u64, context: &str) -> Result<u32, String> {
+    decode_u32_abi_word(value, context)
+}
+
+/// Runs the precompile `syscall_id_u32` names on `mem`; `Ok(false)` if it names no precompile.
+///
+/// The compute-only implementations, shared by the AOT core (for a core that writes no events) and
+/// by pure execution, so a precompile added here reaches both.
+pub(crate) fn dispatch_precompile(
+    mem: &mut impl PrecompileMemory,
+    syscall_id_u32: u32,
+    arg1: u64,
+    arg2: u64,
+) -> Result<bool, String> {
+    match syscall_id_u32 {
+        id if id == SyscallCode::SHA_EXTEND as u32 => {
+            precompiles::sha256::sha256_extend(mem, arg1);
+            Ok(true)
+        }
+        id if id == SyscallCode::SHA_COMPRESS as u32 => {
+            precompiles::sha256::sha256_compress(mem, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::KECCAK_PERMUTE as u32 => {
+            precompiles::keccak256::keccak_permute(mem, arg1);
+            Ok(true)
+        }
+        id if id == SyscallCode::POSEIDON2_PERMUTE as u32 => {
+            // KoalaBear only: the MLE backend these events feed is KoalaBear-only
+            // (`mle::machine::riscv::Kb`). A second field would be threaded from here.
+            precompiles::poseidon2::poseidon2_permute::<KoalaBear>(
+                mem,
+                syscall_leaf_u32(arg1, "poseidon2 input_ptr")?,
+                syscall_leaf_u32(arg2, "poseidon2 output_ptr")?,
+            );
+            Ok(true)
+        }
+        id if id == SyscallCode::ED_ADD as u32 => {
+            precompiles::ec::edwards_add::<Ed25519>(mem, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::ED_DECOMPRESS as u32 => {
+            precompiles::ec::edwards_decompress::<Ed25519Parameters>(
+                mem,
+                arg1,
+                syscall_leaf_u32(arg2, "edwards decompress sign")?,
+            );
+            Ok(true)
+        }
+        id if id == SyscallCode::UINT256_MUL as u32 => {
+            precompiles::uint256::uint256_mul(mem, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::SECP256K1_ADD as u32 => {
+            precompiles::ec::secp256k1_add_optimized(mem, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::SECP256K1_DOUBLE as u32 => {
+            precompiles::ec::secp256k1_double_optimized(mem, arg1);
+            Ok(true)
+        }
+        id if id == SyscallCode::SECP256K1_DECOMPRESS as u32 => {
+            precompiles::ec::weierstrass_decompress::<Secp256k1>(
+                mem,
+                arg1,
+                syscall_leaf_u32(arg2, "secp256k1 decompress sign")?,
+            );
+            Ok(true)
+        }
+        id if id == SyscallCode::SECP256R1_ADD as u32 => {
+            precompiles::ec::secp256r1_add_optimized(mem, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::SECP256R1_DOUBLE as u32 => {
+            precompiles::ec::secp256r1_double_optimized(mem, arg1);
+            Ok(true)
+        }
+        id if id == SyscallCode::SECP256R1_DECOMPRESS as u32 => {
+            precompiles::ec::weierstrass_decompress::<Secp256r1>(
+                mem,
+                arg1,
+                syscall_leaf_u32(arg2, "secp256r1 decompress sign")?,
+            );
+            Ok(true)
+        }
+        id if id == SyscallCode::BN254_ADD as u32 => {
+            precompiles::ec::bn254_add_optimized(mem, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::BN254_DOUBLE as u32 => {
+            precompiles::ec::bn254_double_optimized(mem, arg1);
+            Ok(true)
+        }
+        id if id == SyscallCode::BLS12381_ADD as u32 => {
+            precompiles::ec::bls12381_add_optimized(mem, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::BLS12381_DOUBLE as u32 => {
+            precompiles::ec::bls12381_double_optimized(mem, arg1);
+            Ok(true)
+        }
+        id if id == SyscallCode::BLS12381_DECOMPRESS as u32 => {
+            precompiles::ec::weierstrass_decompress::<Bls12381>(
+                mem,
+                arg1,
+                syscall_leaf_u32(arg2, "bls12381 decompress sign")?,
+            );
+            Ok(true)
+        }
+        id if id == SyscallCode::BLS12381_FP_ADD as u32 => {
+            precompiles::fptower::fp_op::<Bls381BaseField>(mem, FieldOperation::Add, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::BLS12381_FP_SUB as u32 => {
+            precompiles::fptower::fp_op::<Bls381BaseField>(mem, FieldOperation::Sub, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::BLS12381_FP_MUL as u32 => {
+            precompiles::fptower::fp_op::<Bls381BaseField>(mem, FieldOperation::Mul, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::BLS12381_FP2_ADD as u32 => {
+            precompiles::fptower::fp2_addsub::<Bls381BaseField>(
+                mem,
+                FieldOperation::Add,
+                arg1,
+                arg2,
+            );
+            Ok(true)
+        }
+        id if id == SyscallCode::BLS12381_FP2_SUB as u32 => {
+            precompiles::fptower::fp2_addsub::<Bls381BaseField>(
+                mem,
+                FieldOperation::Sub,
+                arg1,
+                arg2,
+            );
+            Ok(true)
+        }
+        id if id == SyscallCode::BLS12381_FP2_MUL as u32 => {
+            precompiles::fptower::fp2_mul::<Bls381BaseField>(mem, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::BN254_FP_ADD as u32 => {
+            precompiles::fptower::fp_op::<Bn254BaseField>(mem, FieldOperation::Add, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::BN254_FP_SUB as u32 => {
+            precompiles::fptower::fp_op::<Bn254BaseField>(mem, FieldOperation::Sub, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::BN254_FP_MUL as u32 => {
+            precompiles::fptower::fp_op::<Bn254BaseField>(mem, FieldOperation::Mul, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::BN254_FP2_ADD as u32 => {
+            precompiles::fptower::fp2_addsub::<Bn254BaseField>(
+                mem,
+                FieldOperation::Add,
+                arg1,
+                arg2,
+            );
+            Ok(true)
+        }
+        id if id == SyscallCode::BN254_FP2_SUB as u32 => {
+            precompiles::fptower::fp2_addsub::<Bn254BaseField>(
+                mem,
+                FieldOperation::Sub,
+                arg1,
+                arg2,
+            );
+            Ok(true)
+        }
+        id if id == SyscallCode::BN254_FP2_MUL as u32 => {
+            precompiles::fptower::fp2_mul::<Bn254BaseField>(mem, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::SECP256K1_FP_ADD as u32 => {
+            precompiles::fptower::fp_op::<Secp256k1BaseField>(mem, FieldOperation::Add, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::SECP256K1_FP_SUB as u32 => {
+            precompiles::fptower::fp_op::<Secp256k1BaseField>(mem, FieldOperation::Sub, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::SECP256K1_FP_MUL as u32 => {
+            precompiles::fptower::fp_op::<Secp256k1BaseField>(mem, FieldOperation::Mul, arg1, arg2);
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
 }
 
 #[cfg(test)]
@@ -752,7 +728,7 @@ mod tests {
         }
     }
 
-    fn test_hook(_: &AotEmulatorCore, _: &[u8]) -> Vec<Vec<u8>> {
+    fn test_hook(_: &[u8]) -> Vec<Vec<u8>> {
         vec![vec![0x11, 0x22], vec![0x33]]
     }
 
@@ -1027,11 +1003,11 @@ mod tests {
     #[test]
     fn phase5_commit_digest_word_accepts_sign_extended_payload() {
         assert_eq!(
-            AotEmulatorCore::digest_leaf_word_u32(0xffff_ffff_ffff_ffff, "digest").unwrap(),
+            super::digest_leaf_word_u32(0xffff_ffff_ffff_ffff, "digest").unwrap(),
             u32::MAX
         );
         assert_eq!(
-            AotEmulatorCore::digest_leaf_word_u32(0x0000_0000_8000_0001, "digest").unwrap(),
+            super::digest_leaf_word_u32(0x0000_0000_8000_0001, "digest").unwrap(),
             0x8000_0001
         );
     }

@@ -12,7 +12,7 @@ use crate::{binding, phase::Phase, proof::Payload, prover::emulator_opts, Stdin}
 fn a_multi_chunk_run_reads_the_digest_from_the_chunk_that_carries_it() {
     let mut prover = builder().chunk_size(SMALL_CHUNK).build().expect("prover");
 
-    let execution = prover.execute(Stdin::from(&N)).expect("emulate");
+    let execution = prover.execute_chunked(Stdin::from(&N)).expect("emulate");
     assert!(
         execution.chunks > 1,
         "a {SMALL_CHUNK}-instruction chunk must split this run, or the test asserts nothing: {} \

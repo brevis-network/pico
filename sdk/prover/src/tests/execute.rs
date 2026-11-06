@@ -32,11 +32,13 @@ const BLS12381_FP_ELF: &[u8] = include_bytes!(concat!(
 #[test]
 fn the_builder_executes_the_run_the_built_prover_executes() {
     let builder = small_builder().chunk_size(CHUNK);
-    let from_builder = builder.execute(Stdin::from(&N)).expect("builder execute");
+    let from_builder = builder
+        .execute_chunked(Stdin::from(&N))
+        .expect("builder execute");
     let from_prover = builder
         .build()
         .expect("prover")
-        .execute(Stdin::from(&N))
+        .execute_chunked(Stdin::from(&N))
         .expect("prover execute");
     assert!(
         from_builder.chunks > 1,
@@ -60,7 +62,7 @@ fn execute_reports_the_run_proving_emulates() {
             .chunk_size(CHUNK)
             .build()
             .expect("prover");
-        let executed = prover.execute(stdin.clone()).expect("execute");
+        let executed = prover.execute_chunked(stdin.clone()).expect("execute");
         let emulated = prover.emulate(stdin).expect("emulate").execution;
         assert!(
             executed.chunks > 1,
@@ -89,7 +91,7 @@ fn execute_reports_the_run_proving_emulates() {
 fn the_builder_executes_without_the_whitelist_build_requires() {
     let builder = whitelist_builder().verify_keys(true);
     builder
-        .execute(Stdin::from(&N))
+        .execute_chunked(Stdin::from(&N))
         .expect("execute needs no whitelist");
     let err = builder
         .build()
@@ -107,7 +109,7 @@ fn the_builder_refuses_the_chunk_sizes_build_refuses() {
         let err = Prover::builder(FIB_ELF)
             .log_stacked_height(height)
             .chunk_size(chunk)
-            .execute(Stdin::from(&N))
+            .execute_chunked(Stdin::from(&N))
             .expect_err("an option build refuses");
         assert!(
             matches!(&err, ProveError::InconsistentOptions(m) if m.contains("chunk_size")),
@@ -156,7 +158,7 @@ fn assert_counts_match_the_emulator(guest: &str, elf: &[u8]) {
     let calls = Prover::builder(elf)
         .log_stacked_height(SMALL_LOG_STACKED_HEIGHT)
         .chunk_size(PRECOMPILE_CHUNK)
-        .execute(Stdin::new())
+        .execute_chunked(Stdin::new())
         .expect("execute")
         .precompile_calls;
 

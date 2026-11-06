@@ -49,9 +49,11 @@ pub mod thread;
 /// it: the generator writes it into every program, and the runtime refuses a program carrying any
 /// other. Bump it whenever generated code has to change for the runtime to run it correctly.
 ///
-/// Here because both crates take this one and neither takes the other: the generator taking the
-/// runtime would turn on `aot-emulator` in every build of the CLI, and the runtime taking the
-/// generator would compile `syn` into every generated crate.
+/// Here because both crates take this one and neither takes the other: the runtime taking the
+/// generator would compile `syn` into every generated crate, and the generator taking the runtime
+/// would make every `generate_crates` build compile the runtime. `aot-emulator` is on in every
+/// `pico-prover` build regardless, since pure `execute` runs on the runtime. Until an AOT program is
+/// registered it changes only what the stage ledger records for the snapshot split.
 pub const AOT_CODEGEN_STAMP: u32 = 3;
 
 #[cfg(feature = "tcmalloc")]

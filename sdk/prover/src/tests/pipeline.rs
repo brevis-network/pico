@@ -83,7 +83,7 @@ fn workers_beyond_the_core_count_are_refused() {
         );
         refused(
             beyond()
-                .execute(Stdin::from(&N))
+                .execute_chunked(Stdin::from(&N))
                 .expect_err("execute must refuse"),
             &format!("{path}: execute"),
         );
@@ -103,7 +103,7 @@ fn serial_emulation_is_refused_beside_a_worker_count() {
         (
             "execute",
             builder()
-                .execute(Stdin::from(&N))
+                .execute_chunked(Stdin::from(&N))
                 .expect_err("execute must refuse"),
         ),
     ] {
@@ -122,7 +122,7 @@ fn the_pipeline_executes_the_run_the_serial_interpreter_executes() {
     let serial = small_builder()
         .chunk_size(SMALL_CHUNK)
         .serial_emulation()
-        .execute(Stdin::from(&N))
+        .execute_chunked(Stdin::from(&N))
         .expect("serial execute");
     assert!(
         serial.chunks > 1,
@@ -139,7 +139,9 @@ fn the_pipeline_executes_the_run_the_serial_interpreter_executes() {
         if let Some(workers) = workers {
             builder = builder.emulation_workers(workers);
         }
-        let pipeline = builder.execute(Stdin::from(&N)).expect("pipeline execute");
+        let pipeline = builder
+            .execute_chunked(Stdin::from(&N))
+            .expect("pipeline execute");
         assert_same_run(&pipeline, &serial);
     }
 }
@@ -167,12 +169,12 @@ fn a_default_execute_runs_the_pipeline_and_a_serial_one_does_not() {
     pico_vm::machine::logger::setup_logger();
     small_builder()
         .chunk_size(SMALL_CHUNK)
-        .execute(Stdin::from(&N))
+        .execute_chunked(Stdin::from(&N))
         .expect("default execute");
     small_builder()
         .chunk_size(SMALL_CHUNK)
         .serial_emulation()
-        .execute(Stdin::from(&N))
+        .execute_chunked(Stdin::from(&N))
         .expect("serial execute");
     println!("{MARKER}");
 }
@@ -203,13 +205,13 @@ fn a_memory_pool_that_can_never_serve_the_run_is_refused() {
     for (path, builder) in pipeline_builders() {
         refused(builder().build().map(drop), &format!("{path}: build"));
         refused(
-            builder().execute(Stdin::from(&N)).map(drop),
+            builder().execute_chunked(Stdin::from(&N)).map(drop),
             &format!("{path}: execute"),
         );
     }
     small_builder()
         .serial_emulation()
-        .execute(Stdin::from(&N))
+        .execute_chunked(Stdin::from(&N))
         .expect("the serial path meets no pool");
     println!("{MARKER}");
 }
@@ -240,7 +242,7 @@ fn failed_default_runs_leave_the_memory_pool_whole() {
     let builder =
         || Prover::builder(COMMIT_OUT_OF_RANGE_ELF).log_stacked_height(SMALL_LOG_STACKED_HEIGHT);
     for run in 0..=POOL {
-        match builder().execute(Stdin::new()) {
+        match builder().execute_chunked(Stdin::new()) {
             Err(ProveError::Emulate(EmulateError::Emulation(
                 EmulationError::InsufficientInput { .. },
             ))) => {}
@@ -249,7 +251,7 @@ fn failed_default_runs_leave_the_memory_pool_whole() {
         }
     }
     for run in 0..=POOL {
-        match builder().execute(Stdin::from(&Some(8u32))) {
+        match builder().execute_chunked(Stdin::from(&Some(8u32))) {
             Err(ProveError::EmulationAborted(message)) => assert!(
                 message.contains("out of range: 8 >= 8"),
                 "abort {run}: {message}"
@@ -259,7 +261,7 @@ fn failed_default_runs_leave_the_memory_pool_whole() {
         }
     }
     builder()
-        .execute(Stdin::from(&None::<u32>))
+        .execute_chunked(Stdin::from(&None::<u32>))
         .expect("the run after the failures halts");
     println!("{MARKER}");
 }

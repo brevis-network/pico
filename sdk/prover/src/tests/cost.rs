@@ -7,7 +7,7 @@ use crate::{CostComponent, Prover, Stdin};
 fn fib_costs_the_instruction_set_and_the_system_tables() {
     let builder = small_builder().chunk_size(SMALL_CHUNK);
     let cost = builder.estimate_cost(Stdin::from(&N)).expect("estimate");
-    let execution = builder.execute(Stdin::from(&N)).expect("execute");
+    let execution = builder.execute_chunked(Stdin::from(&N)).expect("execute");
     assert_eq!(cost.cycles, execution.cycles);
     assert!(cost.records > 1, "{} record(s)", cost.records);
 

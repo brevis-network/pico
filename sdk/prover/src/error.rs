@@ -18,7 +18,7 @@ use crate::phase::Phase;
 #[non_exhaustive]
 pub enum ProveError {
     /// The ELF handed to the builder is not a program this VM can run. Reported by
-    /// [`crate::ProverBuilder::build`] and [`crate::ProverBuilder::execute`].
+    /// [`crate::ProverBuilder::build`] and [`crate::ProverBuilder::execute_chunked`].
     #[error("invalid ELF: {0}")]
     InvalidElf(String),
 
@@ -77,6 +77,31 @@ pub enum ProveError {
     #[cfg(any(feature = "aot", feature = "cuda"))]
     #[error("cannot register the AOT program: {0}")]
     AotRegistration(#[source] pico_aot_runtime::AotError),
+
+    /// `execute` was told to require a pure-mode AOT program
+    /// ([`crate::ProverBuilder::require_pure_aot`]), and none is set.
+    #[error("execute requires a pure-mode AOT program for this guest, and none is set")]
+    PureAotRequired,
+
+    /// The pure-mode AOT program was generated from another ELF than the prover's.
+    #[error(
+        "the pure-mode AOT program was generated from the ELF with SHA-256 {}, and the prover's \
+         ELF has SHA-256 {}",
+        hex(.generated_from),
+        hex(.elf)
+    )]
+    PureAotElfMismatch {
+        generated_from: [u8; 32],
+        elf: [u8; 32],
+    },
+
+    /// A pure-mode AOT library would not load, or speaks another interface.
+    #[error("pure-mode AOT library: {0}")]
+    PureAotLoad(String),
+
+    /// A pure-mode AOT library would not build.
+    #[error("pure-mode AOT build: {0}")]
+    PureAotBuild(String),
 
     /// An element of [`crate::Stdin`] could not be serialized, so the guest would not read what
     /// the caller wrote. Recorded where it happened and reported here, because the setter that
@@ -324,8 +349,7 @@ fn not_whitelisted_cause(phase: &Phase) -> &'static str {
     }
 }
 
-#[cfg(feature = "aot")]
-fn hex(bytes: &[u8; 32]) -> String {
+pub(crate) fn hex(bytes: &[u8; 32]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 

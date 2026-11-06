@@ -35,7 +35,7 @@ fn inputs() -> Vec<Vec<u8>> {
 fn one_block_in_and_every_written_byte_out() {
     for input in inputs() {
         let execution = Prover::builder(STANDARD_IO_ELF)
-            .execute(Stdin::from_input(&input))
+            .execute_chunked(Stdin::from_input(&input))
             .expect("the guest runs to a successful halt");
         assert_eq!(
             execution.committed_bytes,

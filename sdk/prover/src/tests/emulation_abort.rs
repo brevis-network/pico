@@ -27,7 +27,7 @@ fn an_emulator_abort_is_an_error_and_the_prover_still_proves() {
         .expect("prover");
     let out_of_range = Stdin::from(&Some(8u32));
 
-    assert_aborted(prover.execute(out_of_range.clone()), "execute");
+    assert_aborted(prover.execute_chunked(out_of_range.clone()), "execute");
     assert_aborted(prover.prove(out_of_range), "prove");
 
     let proof = prover

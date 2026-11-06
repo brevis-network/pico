@@ -101,7 +101,7 @@ fn the_bootstrap_stub_is_refused_as_not_generated() {
 
     let err = small_builder()
         .aot(&AotProgram::STUB)
-        .execute(Stdin::from(&N))
+        .execute_chunked(Stdin::from(&N))
         .expect_err("execute must refuse the stub");
     assert!(matches!(err, ProveError::AotNotGenerated), "execute: {err}");
 }
@@ -150,7 +150,7 @@ fn a_failed_build_registers_nothing_and_a_second_program_is_refused() {
     assert!(matches!(err, ProveError::InconsistentOptions(_)), "{err}");
     small_builder()
         .aot(fib_program())
-        .execute(Stdin::from(&N))
+        .execute_chunked(Stdin::from(&N))
         .expect("the first program registers and runs");
     let again = small_builder()
         .aot(fib_program())
@@ -306,7 +306,7 @@ fn an_aot_run_proves_and_verifies_to_combine() {
     assert_is_fib_output(proof.committed().as_bytes(), N);
     assert_eq!(proof.committed().as_bytes(), interpreted.committed_bytes);
 
-    let execution = prover.execute(Stdin::from(&N)).expect("execute");
+    let execution = prover.execute_chunked(Stdin::from(&N)).expect("execute");
     assert_eq!(execution.committed_bytes, interpreted.committed_bytes);
     assert_eq!(execution.chunks, interpreted.chunks);
     assert_eq!(
@@ -378,7 +378,7 @@ fn aot_workers_prove_and_verify_to_combine() {
         interpreted.chunks
     );
 
-    let execution = prover.execute(Stdin::from(&N)).expect("execute");
+    let execution = prover.execute_chunked(Stdin::from(&N)).expect("execute");
     assert_eq!(execution.committed_bytes, interpreted.committed_bytes);
     assert_eq!(execution.chunks, interpreted.chunks);
     let executed = EMITTING_RUNS.load(Ordering::Relaxed) - proved;
@@ -420,16 +420,21 @@ fn an_emulator_failure_on_the_aot_path_is_an_error_and_the_prover_still_proves()
         Err(other) => panic!("{path}: expected InsufficientInput, got {other}"),
         Ok(_) => panic!("{path}: a guest that read no input halted"),
     };
-    short_input(prover.execute(Stdin::new()), "aot");
+    short_input(prover.execute_chunked(Stdin::new()), "aot");
     let interpreter =
         || Prover::builder(COMMIT_OUT_OF_RANGE_ELF).log_stacked_height(SMALL_LOG_STACKED_HEIGHT);
-    short_input(interpreter().execute(Stdin::new()), "interpreter pipeline");
     short_input(
-        interpreter().serial_emulation().execute(Stdin::new()),
+        interpreter().execute_chunked(Stdin::new()),
+        "interpreter pipeline",
+    );
+    short_input(
+        interpreter()
+            .serial_emulation()
+            .execute_chunked(Stdin::new()),
         "serial interpreter",
     );
 
-    assert_aot_failed(prover.execute(out_of_range.clone()), "execute");
+    assert_aot_failed(prover.execute_chunked(out_of_range.clone()), "execute");
     assert_aot_failed(prover.prove(out_of_range), "prove");
 
     let proof = prover
@@ -469,12 +474,12 @@ fn failed_aot_runs_leave_the_memory_pool_whole() {
     };
     for run in 0..=POOL {
         assert_aot_failed(
-            builder().execute(Stdin::from(&Some(8u32))),
+            builder().execute_chunked(Stdin::from(&Some(8u32))),
             &format!("failed run {run}"),
         );
     }
     builder()
-        .execute(Stdin::from(&None::<u32>))
+        .execute_chunked(Stdin::from(&None::<u32>))
         .expect("the run after the failures halts");
     println!("{MARKER}");
 }

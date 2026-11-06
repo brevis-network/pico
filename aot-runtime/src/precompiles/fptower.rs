@@ -1,4 +1,4 @@
-use crate::emulator::AotEmulatorCore;
+use super::PrecompileMemory;
 use ark_bls12_381::{Fq as Bls381Fq, Fq2 as Bls381Fq2};
 use ark_bn254::{Fq as Bn254Fq, Fq2 as Bn254Fq2};
 use ark_ff::{BigInt, PrimeField};
@@ -11,13 +11,18 @@ use pico_vm::chips::gadgets::{
 
 /// Field operation (Fp) syscall implementation with span memory operations.
 #[inline(always)]
-pub fn fp_op<P: FpOpField>(core: &mut AotEmulatorCore, op: FieldOperation, x_ptr: u64, y_ptr: u64) {
+pub fn fp_op<P: FpOpField>(
+    core: &mut impl PrecompileMemory,
+    op: FieldOperation,
+    x_ptr: u64,
+    y_ptr: u64,
+) {
     assert!(x_ptr.is_multiple_of(4), "x_ptr is unaligned");
     assert!(y_ptr.is_multiple_of(4), "y_ptr is unaligned");
 
     use pico_vm::chips::gadgets::utils::field_params::FieldType;
 
-    let clk = core.clk;
+    let clk = core.clk();
     let num_words = <P as NumWords>::WordsFieldElement::USIZE;
 
     // Dispatch based on field type to use appropriate limb size
@@ -29,7 +34,7 @@ pub fn fp_op<P: FpOpField>(core: &mut AotEmulatorCore, op: FieldOperation, x_ptr
 }
 
 fn fp_op_secp256k1(
-    core: &mut AotEmulatorCore,
+    core: &mut impl PrecompileMemory,
     op: FieldOperation,
     x_ptr: u64,
     y_ptr: u64,
@@ -62,7 +67,7 @@ fn fp_op_secp256k1(
 }
 
 fn fp_op_bn254(
-    core: &mut AotEmulatorCore,
+    core: &mut impl PrecompileMemory,
     op: FieldOperation,
     x_ptr: u64,
     y_ptr: u64,
@@ -96,7 +101,7 @@ fn fp_op_bn254(
 }
 
 fn fp_op_bls381(
-    core: &mut AotEmulatorCore,
+    core: &mut impl PrecompileMemory,
     op: FieldOperation,
     x_ptr: u64,
     y_ptr: u64,
@@ -132,7 +137,7 @@ fn fp_op_bls381(
 /// Field operation (Fp2 Add/Sub) syscall implementation with span operations.
 #[inline(always)]
 pub fn fp2_addsub<P: FpOpField>(
-    core: &mut AotEmulatorCore,
+    core: &mut impl PrecompileMemory,
     op: FieldOperation,
     x_ptr: u64,
     y_ptr: u64,
@@ -142,7 +147,7 @@ pub fn fp2_addsub<P: FpOpField>(
 
     use pico_vm::chips::gadgets::utils::field_params::FieldType;
 
-    let clk = core.clk;
+    let clk = core.clk();
     let num_words = <P as NumWords>::WordsCurvePoint::USIZE;
 
     // Dispatch based on field type
@@ -154,7 +159,7 @@ pub fn fp2_addsub<P: FpOpField>(
 }
 
 fn fp2_addsub_secp256k1(
-    _core: &mut AotEmulatorCore,
+    _core: &mut impl PrecompileMemory,
     _op: FieldOperation,
     _x_ptr: u64,
     _y_ptr: u64,
@@ -165,7 +170,7 @@ fn fp2_addsub_secp256k1(
 }
 
 fn fp2_addsub_bn254(
-    core: &mut AotEmulatorCore,
+    core: &mut impl PrecompileMemory,
     op: FieldOperation,
     x_ptr: u64,
     y_ptr: u64,
@@ -208,13 +213,13 @@ fn fp2_addsub_bn254(
 
 /// Field operation (Fp2 Mul) syscall implementation with span operations.
 #[inline(always)]
-pub fn fp2_mul<P: FpOpField>(core: &mut AotEmulatorCore, x_ptr: u64, y_ptr: u64) {
+pub fn fp2_mul<P: FpOpField>(core: &mut impl PrecompileMemory, x_ptr: u64, y_ptr: u64) {
     assert!(x_ptr.is_multiple_of(4), "x_ptr is unaligned");
     assert!(y_ptr.is_multiple_of(4), "y_ptr is unaligned");
 
     use pico_vm::chips::gadgets::utils::field_params::FieldType;
 
-    let clk = core.clk;
+    let clk = core.clk();
     let num_words = <P as NumWords>::WordsCurvePoint::USIZE;
 
     // Dispatch based on field type
@@ -226,7 +231,7 @@ pub fn fp2_mul<P: FpOpField>(core: &mut AotEmulatorCore, x_ptr: u64, y_ptr: u64)
 }
 
 fn fp2_mul_secp256k1(
-    _core: &mut AotEmulatorCore,
+    _core: &mut impl PrecompileMemory,
     _x_ptr: u64,
     _y_ptr: u64,
     _clk: u32,
@@ -235,7 +240,13 @@ fn fp2_mul_secp256k1(
     panic!("secp256k1 does not use Fp2");
 }
 
-fn fp2_mul_bn254(core: &mut AotEmulatorCore, x_ptr: u64, y_ptr: u64, clk: u32, num_words: usize) {
+fn fp2_mul_bn254(
+    core: &mut impl PrecompileMemory,
+    x_ptr: u64,
+    y_ptr: u64,
+    clk: u32,
+    num_words: usize,
+) {
     assert!(x_ptr.is_multiple_of(8), "x_ptr is unaligned");
     assert!(y_ptr.is_multiple_of(8), "y_ptr is unaligned");
     let num_dwords = num_words;
@@ -266,7 +277,7 @@ fn fp2_mul_bn254(core: &mut AotEmulatorCore, x_ptr: u64, y_ptr: u64, clk: u32, n
 }
 
 fn fp2_addsub_bls381(
-    core: &mut AotEmulatorCore,
+    core: &mut impl PrecompileMemory,
     op: FieldOperation,
     x_ptr: u64,
     y_ptr: u64,
@@ -306,7 +317,13 @@ fn fp2_addsub_bls381(
     core.write_mem_dword_span_at_clk(x_ptr, &result_buf[..num_dwords], clk + 1);
 }
 
-fn fp2_mul_bls381(core: &mut AotEmulatorCore, x_ptr: u64, y_ptr: u64, clk: u32, num_words: usize) {
+fn fp2_mul_bls381(
+    core: &mut impl PrecompileMemory,
+    x_ptr: u64,
+    y_ptr: u64,
+    clk: u32,
+    num_words: usize,
+) {
     assert!(x_ptr.is_multiple_of(8), "x_ptr is unaligned");
     assert!(y_ptr.is_multiple_of(8), "y_ptr is unaligned");
     let num_dwords = num_words;
