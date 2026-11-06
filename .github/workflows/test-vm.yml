@@ -122,6 +122,17 @@ jobs:
           set -o pipefail
           cargo test --release -p pico-vm --lib -- emulator::riscv::emulator::tests:: | tee emulator-tests.log
           grep -qE "test result: ok\. [1-9][0-9]* passed" emulator-tests.log
+      - name: Memory guards, misaligned accesses and code-range checks
+        run: |
+          # Where an access may land, the misaligned-access chip, the finalize row's bounds and every
+          # precompile's code-range columns, and the history arena that holds the misaligned steps.
+          # The greps fail a filter a rename left matching nothing.
+          set -o pipefail
+          filters=(emulator::riscv::emulator::guard:: emulator::riscv::history_arena::
+            chips::chips::riscv_memory::unaligned:: chips::chips::riscv_memory::initialize_finalize::guard_tests
+            chips::precompiles::code_range_tests)
+          cargo test --release -p pico-vm --lib -- "${filters[@]}" | tee guard-tests.log
+          for f in "${filters[@]}"; do grep -qE "^test ${f}.* \.\.\. ok$" guard-tests.log; done
       - name: Trace generation reaches every CPU chunk
         run: |
           # Every CPU chunk of a split run reaches trace generation, across more records than one
@@ -209,6 +220,10 @@ jobs:
           else
             grep -qE "test result: ok\. [1-9][0-9]* passed" pipeline-parity.log
           fi
+      - name: Chunk cuts, the pipeline against the one-interpreter path
+        if: matrix.sink
+        run: |
+          cargo test --release -p pico-vm --test chunk_cut_parity
       - name: Byte trace written by lookup against the row scan
         run: |
           # The byte chip's trace, written lookup by lookup, against the per-row scan it replaced.

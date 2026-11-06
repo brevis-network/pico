@@ -100,12 +100,12 @@ jobs:
           grep -qE "test result: ok\. [1-9][0-9]* passed" precompiles-test.log
 
   # The RISC-V architectural tests (ACT4) of Pico's RV64IM_Zicclsm target, 72 in all (act4/README.md).
-  # Each checks its own results and commits `PASS` or `FAIL`. The 64 of the I and M suites must
-  # execute, prove and verify, committing `PASS`; the 8 Misalign tests must still fail until
-  # misaligned access is supported, and the first that passes fails the job. Its own job: 64 keygens
-  # and proofs, beside the other proving lanes.
+  # Each checks its own results and commits `PASS` or `FAIL`. All 72 must execute, prove and
+  # verify, committing `PASS`, and the proof of each of the 8 Misalign tests must report the
+  # misaligned accesses its execution counted. Its own job: 72 keygens and proofs, beside the other
+  # proving lanes.
   act4:
-    name: CPU · ACT4 RV64IM_Zicclsm (64 pass, 8 known failures)
+    name: CPU · ACT4 RV64IM_Zicclsm (72 pass)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -117,7 +117,7 @@ jobs:
           # otherwise run nothing and pass.
           set -o pipefail
           cargo test --release -p pico-prover -- --test-threads=1 --nocapture tests::act4:: | tee act4-test.log
-          grep -q "test result: ok. 3 passed" act4-test.log
+          grep -q "test result: ok. 2 passed" act4-test.log
 
   cli:
     name: CPU · CLI prove and verify
