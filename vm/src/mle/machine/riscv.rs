@@ -2304,6 +2304,11 @@ impl RiscvMachine {
             records,
             resolved_concurrency(self.concurrency),
             |idx, record| {
+                // One span per chunk, around its context build and prove: under
+                // `RUST_LOGGER=forest` it is the chunk's proving time, the prover's phases below it.
+                // With chunks proved concurrently, a worker can interleave two chunks' work.
+                let _span = tracing::info_span!("riscv_chunk_prove", chunk = idx).entered();
+                let started = Instant::now();
                 // Only the GPU staging needs the record owned; the CPU build proves it borrowed.
                 // The shape choice is part of the record's prove job, so its stage lands in the
                 // slot too.
@@ -2317,7 +2322,10 @@ impl RiscvMachine {
                     record.public_values.chunk,
                     false,
                 )?;
-                tracing::info!("chunk {idx}: MLE prove OK");
+                tracing::info!(
+                    "chunk {idx}: MLE prove OK ({} ms)",
+                    started.elapsed().as_millis()
+                );
                 Ok(proof)
             },
         )?;
