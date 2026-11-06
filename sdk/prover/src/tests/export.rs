@@ -184,11 +184,6 @@ fn a_shipped_whitelist_compress_proof_verifies_with_pico_verifier() {
         envelope.len(),
         envelope.len() as f64 / 1024.0
     );
-    assert!(
-        envelope.len() <= 300 * 1024,
-        "the compress envelope is over 300 KiB"
-    );
-
     pico_verifier::verify_compress(&bundle, &envelope, &committed).expect("compress verifies");
 
     let mut tampered = committed.clone();
@@ -213,4 +208,11 @@ fn a_shipped_whitelist_compress_proof_verifies_with_pico_verifier() {
         "{err}"
     );
     println!("[export] the compress proof verified with pico_verifier, and only as one");
+    // Last, so a proof over the target still has its checks above run. The size follows the root's
+    // shape, which the GPU pipeline's combine tree changes.
+    assert!(
+        envelope.len() <= 300 * 1024,
+        "the compress envelope is {} B, over 300 KiB",
+        envelope.len()
+    );
 }
