@@ -133,9 +133,8 @@ impl<'a> SyscallContext<'a> {
             // Reuse the existing metadata instead of calling rt.mr() again
             // (which would fail the timestamp monotonicity check).
             //
-            // Chunk splitting still needs to see the repeated syscall-local
-            // access. AOT counts every syscall memory access even when it hits
-            // the same dword multiple times within one syscall invocation.
+            // Counted all the same: AOT counts every syscall memory access,
+            // repeats included, and the parity checks compare the two counts.
             self.rt.chunk_split_state.add_syscall_memory_events(1);
             let value = self.rt.state.memory.peek_dword(aligned);
             let initial = &local_event.initial_mem_access;
@@ -202,9 +201,8 @@ impl<'a> SyscallContext<'a> {
             // Write directly to memory and update the local event's final state,
             // without calling rt.mw() (which would fail the monotonicity check).
             //
-            // Keep chunk-split accounting aligned with AOT: repeated accesses
-            // to the same dword inside a syscall still contribute syscall
-            // memory events even though the metadata update is coalesced here.
+            // Counted all the same: AOT counts every syscall memory access,
+            // repeats included, and the parity checks compare the two counts.
             self.rt.chunk_split_state.add_syscall_memory_events(1);
             let prev_value = existing;
             self.rt

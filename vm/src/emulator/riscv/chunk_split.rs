@@ -413,6 +413,19 @@ impl SimpleBitSet {
         is_new
     }
 
+    #[inline(always)]
+    fn remove_dword_index(&mut self, dword_index: usize) -> bool {
+        let word_index = dword_index >> 6;
+        if word_index >= BITMAP_WORDS {
+            return false;
+        }
+        let mask = 1u64 << (dword_index & 63);
+        let word = &mut self.words_mut()[word_index];
+        let was_set = (*word & mask) != 0;
+        *word &= !mask;
+        was_set
+    }
+
     fn clear(&mut self) {
         #[cfg(target_os = "linux")]
         // SAFETY: madvise covers the full mmap region and does not outlive the mapping.
@@ -488,6 +501,21 @@ impl SimpleBitSet {
         is_new
     }
 
+    /// The word stays on the dirty list, so `clear` still visits it; an insert that refills it lists
+    /// it again, which `clear` only zeroes twice.
+    #[inline(always)]
+    fn remove_dword_index(&mut self, dword_index: usize) -> bool {
+        let word_index = dword_index >> 6;
+        if word_index >= self.words.len() {
+            return false;
+        }
+        let mask = 1u64 << (dword_index & 63);
+        let word = &mut self.words[word_index];
+        let was_set = (*word & mask) != 0;
+        *word &= !mask;
+        was_set
+    }
+
     fn clear(&mut self) {
         for idx in self.dirty_words.drain(..) {
             self.words[idx as usize] = 0;
@@ -505,11 +533,20 @@ impl Default for SimpleBitSet {
 #[derive(Debug, Clone, Default)]
 pub struct ChunkSplitState {
     pub num_syscall_events: usize,
+    /// Memory accesses inside syscalls, repeats included. No split condition reads it; the
+    /// interpreter-vs-AOT parity checks compare it.
     pub num_syscall_memory_events: usize,
     pub num_memory_read_write_events: usize,
     pub num_global_lookup_base: usize,
     memory_access_addrs: SimpleBitSet,
     unique_memory_addrs: usize,
+    /// Dwords with a CPU memory window open in this chunk. A precompile touching one closes the
+    /// window into the chunk's record (`SyscallContext::postprocess`), and the CPU's next access
+    /// opens another: one more MemoryLocal row and Global lookup that `memory_access_addrs`,
+    /// counting each address once, does not see.
+    cpu_windows: SimpleBitSet,
+    /// Windows closed that way, counted as reopened whether or not the CPU comes back.
+    reopened_windows: usize,
     reg_write_mask: u32,
     unique_reg_writes: usize,
     syscall_depth: u32,
@@ -676,6 +713,13 @@ impl ChunkSplitState {
             self.num_global_lookup_base += 1;
             self.grow_leaves(2);
         }
+        if !self.in_syscall() {
+            self.cpu_windows.insert_dword_index(dword_index);
+        } else if self.cpu_windows.remove_dword_index(dword_index) {
+            self.reopened_windows += 1;
+            self.num_global_lookup_base += 1;
+            self.grow_leaves(2);
+        }
     }
 
     #[inline(always)]
@@ -690,11 +734,12 @@ impl ChunkSplitState {
         self.grow_leaves(2);
     }
 
+    /// Not a global lookup of this chunk: a precompile's memory events travel with it to its own
+    /// record. What it costs this chunk, each address once and each CPU window it closes, is
+    /// counted by `track_address`.
     #[inline(always)]
     pub fn add_syscall_memory_events(&mut self, count: usize) {
         self.num_syscall_memory_events += count;
-        self.num_global_lookup_base += count;
-        self.grow_leaves(2 * count as u64);
     }
 
     #[inline(always)]
@@ -743,7 +788,7 @@ impl ChunkSplitState {
             leaves += interactions * lifted_rows(grown);
         }
         let memory_rw = self.num_memory_read_write_events as u64;
-        let local = (self.unique_address_count() + self.num_syscall_memory_events) as u64;
+        let local = (self.unique_address_count() + self.reopened_windows) as u64;
         let global = self.num_global_lookup_events() as u64;
         leaves += LEAF_MEMORY_RW_INTERACTIONS
             * lifted_rows((memory_rw + growth).min(max_memory_rw.max(memory_rw)));
@@ -861,12 +906,14 @@ impl ChunkSplitState {
         self.num_memory_read_write_events = 0;
         self.num_global_lookup_base = 0;
         self.unique_memory_addrs = 0;
+        self.reopened_windows = 0;
         self.reg_write_mask = 0;
         self.unique_reg_writes = 0;
         self.syscall_depth = 0;
         self.commit_in_flight = false;
         self.commits = 0;
         self.memory_access_addrs.clear();
+        self.cpu_windows.clear();
         self.leaf_rows = [0; LEAF_INSN_CHIPS];
         self.leaf_growth.set(0);
         self.leaf_allowance.set(0);
@@ -944,8 +991,8 @@ mod tests {
         state.add_syscall_memory_events(2);
 
         assert_eq!(state.unique_address_count(), 2);
-        assert_eq!(state.num_global_lookup_base, 5);
-        assert_eq!(state.num_global_lookup_events(), 10);
+        assert_eq!(state.num_global_lookup_base, 3);
+        assert_eq!(state.num_global_lookup_events(), 6);
     }
 
     #[test]
@@ -959,7 +1006,52 @@ mod tests {
 
         assert_eq!(state.unique_address_count(), 1);
         assert_eq!(state.num_syscall_memory_events, 2);
+        assert_eq!(state.num_global_lookup_base, 1);
+    }
+
+    #[test]
+    fn a_precompile_closing_a_cpu_window_counts_its_reopening() {
+        let mut state = ChunkSplitState::default();
+
+        // The CPU opens a window on the dword; a precompile then touches it twice.
+        state.track_address(0x100);
+        state.enter_syscall();
+        state.track_address(0x100);
+        state.track_address(0x104);
+        state.exit_syscall();
+        assert_eq!(state.unique_address_count(), 1);
+        assert_eq!(state.reopened_windows, 1);
+        assert_eq!(state.num_global_lookup_base, 2);
+
+        // Each time the CPU comes back and a precompile follows, one more.
+        state.track_address(0x100);
+        state.enter_syscall();
+        state.track_address(0x100);
+        state.exit_syscall();
+        assert_eq!(state.reopened_windows, 2);
         assert_eq!(state.num_global_lookup_base, 3);
+    }
+
+    #[test]
+    fn a_precompile_alone_opens_no_cpu_window() {
+        let mut state = ChunkSplitState::default();
+
+        state.enter_syscall();
+        state.track_address(0x100);
+        state.track_address(0x100);
+        state.exit_syscall();
+        assert_eq!(state.reopened_windows, 0);
+        assert_eq!(state.num_global_lookup_base, 1);
+
+        // The window the CPU opens afterwards is the address's first, already counted.
+        state.track_address(0x100);
+        assert_eq!(state.num_global_lookup_base, 1);
+
+        state.clear();
+        state.enter_syscall();
+        state.track_address(0x100);
+        state.exit_syscall();
+        assert_eq!(state.reopened_windows, 0, "clear forgets the windows");
     }
 
     #[test]

@@ -49,7 +49,7 @@ const ED25519_ELF: &[u8] = include_bytes!("../../../perf/bench_data/rv64/ed25519
 /// Hashes through the Poseidon2 precompile; reads its round count.
 const POSEIDON2_ELF: &[u8] = include_bytes!("../../../perf/bench_data/rv64/poseidon2-elf");
 /// BLS12-381 field arithmetic, enough of it that its field additions fill a full deferred block
-/// after its third chunk of `WHOLE`, long before its last.
+/// after its second chunk of `WHOLE`, long before its last.
 pub const BLS12381_FP_ELF: &[u8] = include_bytes!("../../../perf/bench_data/rv64/bls12381-fp-elf");
 /// Claims one deferred proof per `(program id, output)` pair it reads, then commits both lists.
 const AGGREGATOR_ELF: &[u8] = include_bytes!("../../../perf/bench_data/rv64/aggregator-elf");
@@ -77,11 +77,9 @@ const COMMIT_SPLITTING_CHUNK: u32 = 9500;
 /// Many more chunks than workers, so the workers finish out of order and their reports have to
 /// be put back in order.
 const MANY_CHUNKS: u32 = 17;
-/// A size at which the event limit closes six of the Poseidon2 guest's chunks right after a
-/// `POSEIDON2_PERMUTE`, each only because the permute topped the chunk's split budget up by the
-/// words it reads and writes beyond the dwords covering them (`add_syscall_memory_events`, 8 + 8):
-/// without the top-up those cuts land later. Two of them, late in the run, leave the global-lookup
-/// count exactly at its threshold, so a top-up short by one event moves them.
+/// A size at which some of the Poseidon2 guest's CPU chunks close right after a
+/// `POSEIDON2_PERMUTE` (`permute_at_cut`), so the two arms have to agree on the split counts the
+/// permute leaves behind.
 const POSEIDON2_BUDGET_CHUNK: u32 = 952;
 
 /// A guest both suites compare on. `name` is `perf/aot/record_parity.sh`'s argument, and the ELF
@@ -271,7 +269,7 @@ fn aggregator_runs() -> Vec<Run> {
     ]
 }
 
-/// Eight chunks, with full deferred blocks out after the third and the fifth: the candidate has
+/// Six chunks, with full deferred blocks out after the second and the fourth: the candidate has
 /// to emit them there too, split from the pool mid-run, not held to the end.
 fn bls12381_fp_runs() -> Vec<Run> {
     vec![Run {
@@ -280,13 +278,13 @@ fn bls12381_fp_runs() -> Vec<Run> {
     }]
 }
 
-/// One run: at `WHOLE` its 66 000 rounds already cut into many more chunks than workers, with
-/// full deferred blocks out mid-run, and a second, smaller size would emulate all of them again
-/// for no shape this one lacks.
+/// One run: at `1 << 21` its 66 000 rounds cut into many more chunks than workers, with full
+/// deferred blocks out mid-run, and a second, smaller size would emulate all of them again for no
+/// shape this one lacks.
 fn sha2_runs() -> Vec<Run> {
     vec![Run {
         early_block: true,
-        ..run(sha_input(), WHOLE, MANY_CHUNKS)
+        ..run(sha_input(), 1 << 21, MANY_CHUNKS)
     }]
 }
 
