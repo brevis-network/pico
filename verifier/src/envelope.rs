@@ -15,6 +15,9 @@ use crate::{ProofWithVk, Sc, VerifyError};
 
 pub const PROOF_MAGIC: [u8; 8] = *b"PICOMLE\0";
 pub const ENVELOPE_V3: u32 = 3;
+/// The envelope of a compress proof: the v3 layout under its own version, so that neither kind
+/// decodes as the other.
+pub const ENVELOPE_V4_COMPRESS: u32 = 4;
 
 /// zstd level for the v3 body. This runs inside the reported proving time, so a fast level: on a
 /// fib root under the earlier 100-bit parameters -3 gave 480 KB in 1.3 ms, -19 gave 459 KB in
@@ -65,26 +68,44 @@ fn bincode_options() -> impl Options {
 
 /// Encode a v3 envelope.
 pub fn encode_v3(body: &MleRootProofV3) -> Result<Vec<u8>, VerifyError> {
+    encode_versioned(ENVELOPE_V3, body)
+}
+
+/// Encode a compress proof and its vk, in the v3 layout under [`ENVELOPE_V4_COMPRESS`].
+pub fn encode_compress_v4(body: &MleRootProofV3) -> Result<Vec<u8>, VerifyError> {
+    encode_versioned(ENVELOPE_V4_COMPRESS, body)
+}
+
+fn encode_versioned(version: u32, body: &MleRootProofV3) -> Result<Vec<u8>, VerifyError> {
     let err = |e: &dyn std::fmt::Display| VerifyError::Envelope(e.to_string());
     let raw = bincode::serialize(body).map_err(|e| err(&e))?;
     let zstd = zstd::encode_all(raw.as_slice(), PROOF_ZSTD_LEVEL).map_err(|e| err(&e))?;
     let mut out = Vec::with_capacity(PROOF_MAGIC.len() + 4 + zstd.len());
     out.extend_from_slice(&PROOF_MAGIC);
-    out.extend_from_slice(&ENVELOPE_V3.to_le_bytes());
+    out.extend_from_slice(&version.to_le_bytes());
     out.extend_from_slice(&zstd);
     Ok(out)
 }
 
 /// Decode a v3 envelope, bounded against hostile input.
 pub fn decode_v3(bytes: &[u8]) -> Result<MleRootProofV3, VerifyError> {
+    decode_versioned(bytes, ENVELOPE_V3)
+}
+
+/// Decode a compress envelope ([`encode_compress_v4`]); a v3 root envelope is refused.
+pub fn decode_compress_v4(bytes: &[u8]) -> Result<MleRootProofV3, VerifyError> {
+    decode_versioned(bytes, ENVELOPE_V4_COMPRESS)
+}
+
+fn decode_versioned(bytes: &[u8], expected: u32) -> Result<MleRootProofV3, VerifyError> {
     let err = |m: String| VerifyError::Envelope(m);
     if bytes.len() < 12 || bytes[..8] != PROOF_MAGIC {
         return Err(err("not an MLE proof envelope (magic)".into()));
     }
     let version = u32::from_le_bytes(bytes[8..12].try_into().expect("4 bytes"));
-    if version != ENVELOPE_V3 {
+    if version != expected {
         return Err(err(format!(
-            "MLE proof envelope version {version}, expected {ENVELOPE_V3}"
+            "MLE proof envelope version {version}, expected {expected}"
         )));
     }
     let mut raw = Vec::new();
@@ -104,6 +125,11 @@ pub fn decode_v3(bytes: &[u8]) -> Result<MleRootProofV3, VerifyError> {
 /// [`decode_v3`] then [`MleRootProofV3::to_root`].
 pub fn decode_root_proof_v3(bytes: &[u8]) -> Result<ProofWithVk, VerifyError> {
     decode_v3(bytes)?.to_root()
+}
+
+/// [`decode_compress_v4`] then the proof and vk it carries.
+pub fn decode_compress_proof_v4(bytes: &[u8]) -> Result<ProofWithVk, VerifyError> {
+    decode_compress_v4(bytes)?.to_root()
 }
 
 #[cfg(test)]

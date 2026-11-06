@@ -4,11 +4,12 @@
 //! Merkle tree it authenticates keys against ([`whitelist`]), the exe identity ([`vm_vk`]), the
 //! recursion public-value checks ([`public_values`]), and the two wire formats a verifier is
 //! handed ([`bundle`], [`envelope`]). `pico-vm` builds on the whitelist, exe identity,
-//! public-value checks and bundle here, but keeps its own apex, which also verifies compress proofs
-//! (`TODO(compress-apex)` in [`apex`]).
+//! public-value checks and bundle here, but keeps its own apex (`TODO(compress-apex)` in
+//! [`apex`]).
 //!
 //! [`verify`] is the one-call entry point: VK bundle + v3 envelope + committed bytes, under the
-//! shipped whitelist root; [`verify_with_root`] takes another.
+//! shipped whitelist root; [`verify_with_root`] takes another. [`verify_compress`] is the same for
+//! a compress proof, the final proof Pico hands out.
 //!
 //! The wire formats and the entry points that take their bytes need the default `codec` feature,
 //! which pulls in zstd; without it the crate builds for a zkVM guest.
@@ -73,6 +74,44 @@ pub fn verify_with_root(
     verify_with(&apex, envelope, committed)
 }
 
+/// Verify a compress proof (a [`envelope::ENVELOPE_V4_COMPRESS`] envelope) and the bytes it commits
+/// to, under the shipped whitelist root, with the checks of [`verify`]. A v3 root envelope is
+/// refused.
+#[cfg(feature = "codec")]
+pub fn verify_compress(
+    vk_bundle: &[u8],
+    envelope: &[u8],
+    committed: &[u8],
+) -> Result<(), VerifyError> {
+    let bundle = bundle::decode_vk_bundle_v2(vk_bundle)?;
+    let apex = bundle::apex_from_bundle(&bundle, shipped_vk_root())?;
+    verify_compress_with(&apex, envelope, committed)
+}
+
+/// [`verify_compress`] with an apex already built.
+#[cfg(feature = "codec")]
+pub fn verify_compress_with(
+    apex: &MleApexVerifier,
+    envelope: &[u8],
+    committed: &[u8],
+) -> Result<(), VerifyError> {
+    let proof = envelope::decode_compress_proof_v4(envelope)?;
+    apex.verify_compress(&proof)?;
+    bound(&proof, committed)
+}
+
+/// Whether `committed` is what the proof's public values bind.
+#[cfg(feature = "codec")]
+fn bound(proof: &ProofWithVk, committed: &[u8]) -> Result<(), VerifyError> {
+    let pvs = public_values::recursion_public_values(&proof.0.public_values)?;
+    let digest = public_values::committed_value_digest(pvs)?;
+    if public_values::committed_values_bound(committed, &digest) {
+        Ok(())
+    } else {
+        Err(VerifyError::CommittedValuesUnbound)
+    }
+}
+
 /// [`verify`] with an apex already built, for a caller verifying many proofs of one guest.
 #[cfg(feature = "codec")]
 pub fn verify_with(
@@ -82,13 +121,7 @@ pub fn verify_with(
 ) -> Result<(), VerifyError> {
     let root = envelope::decode_root_proof_v3(envelope)?;
     apex.verify(&root)?;
-    let pvs = public_values::recursion_public_values(&root.0.public_values)?;
-    let digest = public_values::committed_value_digest(pvs)?;
-    if public_values::committed_values_bound(committed, &digest) {
-        Ok(())
-    } else {
-        Err(VerifyError::CommittedValuesUnbound)
-    }
+    bound(&root, committed)
 }
 
 /// End to end over a real STARK proof: a tiny AIR whose public values are the recursion layout,
@@ -261,6 +294,37 @@ mod tests {
         let b = decode_vk_bundle_v2(bundle)?;
         let apex = MleApexVerifier::with_members(params(), b.members, b.vm_vk, b.vk_root)?;
         verify_with(&apex, envelope, committed)
+    }
+
+    /// The fixture's proof, made under the test params, as a compress proof: the compress engine
+    /// set to those params verifies it from a v4 envelope, and each entry point refuses the other
+    /// kind's envelope.
+    #[test]
+    fn a_compress_envelope_verifies_only_as_one() {
+        let f = fixture();
+        let b = decode_vk_bundle_v2(&f.bundle).unwrap();
+        let apex = MleApexVerifier::with_members(params(), b.members, b.vm_vk, b.vk_root)
+            .unwrap()
+            .with_compress_params(params());
+        let body = envelope::decode_v3(&f.envelope).unwrap();
+        let compress = envelope::encode_compress_v4(&body).unwrap();
+
+        verify_compress_with(&apex, &compress, COMMITTED).expect("the compress envelope verifies");
+        let err = verify_compress_with(&apex, &compress, &[]).unwrap_err();
+        assert!(matches!(err, VerifyError::CommittedValuesUnbound), "{err}");
+        let err = verify_compress_with(&apex, &f.envelope, COMMITTED).unwrap_err();
+        assert!(matches!(err, VerifyError::Envelope(_)), "{err}");
+        let err = verify_with(&apex, &compress, COMMITTED).unwrap_err();
+        assert!(matches!(err, VerifyError::Envelope(_)), "{err}");
+
+        // Under the 128-bit compress preset, a proof made under other params does not verify.
+        let strict =
+            MleApexVerifier::with_members(params(), b_members(&f), b.vm_vk, b.vk_root).unwrap();
+        assert!(verify_compress_with(&strict, &compress, COMMITTED).is_err());
+    }
+
+    fn b_members(f: &Fixture) -> Vec<crate::whitelist::VkMembership> {
+        decode_vk_bundle_v2(&f.bundle).unwrap().members
     }
 
     #[test]

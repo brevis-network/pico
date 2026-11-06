@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use pico_mle_core::{codec::Encode, p3_field::PrimeField32};
-use pico_verifier::envelope::{encode_v3, MleRootProofV3};
+use pico_verifier::envelope::{encode_compress_v4, encode_v3, MleRootProofV3};
 use pico_vm::mle::machine::{convert::ProofWithVk, riscv::RiscvProof};
 
 use crate::{
@@ -197,6 +197,24 @@ impl Proof {
         let envelope = MleRootProofV3::from_root(root)
             .and_then(|body| encode_v3(&body))
             .map_err(|e| ProveError::Format(format!("cannot encode the v3 envelope: {e}")))?;
+        Ok((envelope, self.committed.clone()))
+    }
+
+    /// A whitelist-mode compress proof as a v4 envelope, and the committed bytes:
+    /// `pico_verifier::verify_compress(bundle, envelope, committed)` checks them, with the bundle
+    /// from [`crate::Prover::vk_bundle`].
+    pub fn export_compress_v4(&self) -> Result<(Vec<u8>, Vec<u8>), ProveError> {
+        if !self.verify_keys {
+            return Err(ProveError::WhitelistModeRequired {
+                what: "a compress envelope",
+            });
+        }
+        let Payload::Compress(compress) = &self.payload else {
+            return Err(ProveError::NotACompressProof { phase: self.phase });
+        };
+        let envelope = MleRootProofV3::from_root(compress)
+            .and_then(|body| encode_compress_v4(&body))
+            .map_err(|e| ProveError::Format(format!("cannot encode the compress envelope: {e}")))?;
         Ok((envelope, self.committed.clone()))
     }
 

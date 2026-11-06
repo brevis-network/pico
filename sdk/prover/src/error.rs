@@ -267,6 +267,10 @@ pub enum ProveError {
     #[error("only a Combine root exports as a v3 envelope; this proof stops at {phase:?}")]
     NotARootProof { phase: Phase },
 
+    /// [`crate::Proof::export_compress_v4`] on a proof that does not stop at [`Phase::Compress`].
+    #[error("only a Compress proof exports as a compress envelope; this proof stops at {phase:?}")]
+    NotACompressProof { phase: Phase },
+
     /// The phase has no verification path that works from a container alone, in any configuration.
     #[error("a {phase:?} proof cannot be verified from a file in a fresh process")]
     UnverifiableInFreshProcess { phase: Phase },
