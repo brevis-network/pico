@@ -37,6 +37,9 @@ pub struct PureExecution {
     pub committed_bytes: Vec<u8>,
     /// Instructions the guest ran, as [`crate::Execution::cycles`] counts them.
     pub cycles: u64,
+    /// Loads and stores whose address is not a multiple of their width, as
+    /// [`crate::Execution::misaligned_accesses`] counts them.
+    pub misaligned_accesses: u64,
     /// What ran it.
     pub engine: ExecuteEngine,
 }
@@ -201,6 +204,7 @@ impl PureOptions {
         Ok(PureExecution {
             committed_bytes: run.committed_bytes().to_vec(),
             cycles: run.cycles(),
+            misaligned_accesses: run.misaligned_accesses(),
             engine,
         })
     }

@@ -552,20 +552,22 @@ impl AotCompiler {
     /// [`Self::generate_blocks`] for pure mode: the same block boundaries, with code from
     /// [`crate::pure_translator`] and no event accounting.
     fn generate_blocks_pure(&self, leaders: &HashSet<u64>) -> Vec<BlockInfo> {
-        let block =
-            |pc: u64, insn_count: u32, code: proc_macro2::TokenStream, _terminal: bool| BlockInfo {
-                pc,
-                name: format_ident!("block_0x{:08x}", pc),
-                insn_count,
-                mem_rw_events: 0,
-                non_register_global_lookup_base_max: 0,
-                reg_write_mask: 0,
-                code,
-                rec_code: proc_macro2::TokenStream::new(),
-                direct_insns: 0,
-                direct_rows: BlockRows::default(),
-            };
+        let block = |pc: u64, insn_count: u32, code: proc_macro2::TokenStream| BlockInfo {
+            pc,
+            name: format_ident!("block_0x{:08x}", pc),
+            insn_count,
+            mem_rw_events: 0,
+            non_register_global_lookup_base_max: 0,
+            reg_write_mask: 0,
+            code,
+            rec_code: proc_macro2::TokenStream::new(),
+            direct_insns: 0,
+            direct_rows: BlockRows::default(),
+            memory_insns: 0,
+        };
         let max_block_instructions = self.config.max_block_instructions;
+        let program_code =
+            self.program.pc_base..self.program.pc_base + 4 * self.program.instructions.len() as u64;
         let mut blocks = Vec::new();
         // (start pc, instructions so far, code so far) of the block being built.
         let mut open: Option<(u64, u32, proc_macro2::TokenStream)> = None;
@@ -577,7 +579,7 @@ impl AotCompiler {
                 if let Some((start, count, mut code)) = open.take() {
                     let next = format_ident!("block_0x{:08x}", pc);
                     code.extend(quote! { Ok(crate::NextStep::Direct(#next)) });
-                    blocks.push(block(start, count, code, false));
+                    blocks.push(block(start, count, code));
                 }
                 open = Some((pc, 0, proc_macro2::TokenStream::new()));
                 force_new_block = false;
@@ -585,21 +587,24 @@ impl AotCompiler {
             let Some((start, count, code)) = open.as_mut() else {
                 continue;
             };
-            let (body, terminal) = crate::pure_translator::translate(pc, inst, leaders);
+            let (body, terminal) =
+                crate::pure_translator::translate(pc, inst, leaders, &program_code);
             code.extend(body);
             *count += 1;
             if terminal {
                 let (start, count, code) = (*start, *count, std::mem::take(code));
-                blocks.push(block(start, count, code, true));
+                blocks.push(block(start, count, code));
                 open = None;
                 force_new_block = true;
             } else if max_block_instructions > 0 && *count >= max_block_instructions {
                 force_new_block = true;
             }
         }
+        // Running off the end leaves the code: the host's step refuses that pc.
         if let Some((start, count, mut code)) = open {
-            code.extend(quote! { Ok(crate::NextStep::Halt) });
-            blocks.push(block(start, count, code, false));
+            let end = program_code.end;
+            code.extend(quote! { Ok(crate::NextStep::Dynamic(#end)) });
+            blocks.push(block(start, count, code));
         }
         blocks
     }

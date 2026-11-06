@@ -8,22 +8,34 @@
 use crate::types::{Instruction, Opcode};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Range};
 
-/// Translates one instruction. Returns the code and whether it ends the block.
-pub fn translate(pc: u64, inst: &Instruction, leaders: &HashSet<u64>) -> (TokenStream, bool) {
+/// Translates one instruction of a program whose code is `code`. Returns the code and whether it
+/// ends the block.
+pub fn translate(
+    pc: u64,
+    inst: &Instruction,
+    leaders: &HashSet<u64>,
+    code: &Range<u64>,
+) -> (TokenStream, bool) {
     match inst.opcode {
         Opcode::JAL => {
             let (rd, imm) = (inst.op_a as usize, inst.op_b);
             let target = pc.wrapping_add(imm);
-            let step = step_to(target, leaders);
-            (quote! { emu.link(#rd, #pc); Ok(#step) }, true)
+            let step = match jump_fault(pc, target, code) {
+                Some(fault) => fault,
+                None => {
+                    let step = step_to(target, leaders);
+                    quote! { emu.link(#rd, #pc); Ok(#step) }
+                }
+            };
+            (step, true)
         }
         Opcode::JALR => {
             let (rd, rs1, imm) = (inst.op_a as usize, inst.op_b as usize, inst.op_c);
             (
                 quote! {
-                    let target = emu.jalr(#rd, #rs1, #pc, #imm);
+                    let target = emu.jalr(#rd, #rs1, #pc, #imm)?;
                     Ok(crate::NextStep::Dynamic(target))
                 },
                 true,
@@ -32,7 +44,13 @@ pub fn translate(pc: u64, inst: &Instruction, leaders: &HashSet<u64>) -> (TokenS
         Opcode::BEQ | Opcode::BNE | Opcode::BLT | Opcode::BGE | Opcode::BLTU | Opcode::BGEU => {
             let (rs1, rs2, imm) = (inst.op_a as usize, inst.op_b as usize, inst.op_c);
             let target = pc.wrapping_add(imm);
-            let taken = step_to(target, leaders);
+            let taken = match jump_fault(pc, target, code) {
+                Some(fault) => fault,
+                None => {
+                    let step = step_to(target, leaders);
+                    quote! { Ok(#step) }
+                }
+            };
             let fallthrough = step_to(pc.wrapping_add(4), leaders);
             let cond = match inst.opcode {
                 Opcode::BEQ => quote! { a == b },
@@ -46,7 +64,7 @@ pub fn translate(pc: u64, inst: &Instruction, leaders: &HashSet<u64>) -> (TokenS
                 quote! {
                     let a = emu.r(#rs1);
                     let b = emu.r(#rs2);
-                    if #cond { Ok(#taken) } else { Ok(#fallthrough) }
+                    if #cond { #taken } else { Ok(#fallthrough) }
                 },
                 true,
             )
@@ -67,6 +85,20 @@ pub fn translate(pc: u64, inst: &Instruction, leaders: &HashSet<u64>) -> (TokenS
         ),
         _ => (normal(pc, inst), false),
     }
+}
+
+/// The fault a jump at `pc` to the constant `target` ends the run with, as
+/// `PureState::check_jump` would raise it, or `None` for a valid target; decided here, so a valid
+/// jump costs nothing at run time.
+fn jump_fault(pc: u64, target: u64, code: &Range<u64>) -> Option<TokenStream> {
+    let (kind, detail) = if !target.is_multiple_of(4) {
+        (quote! { pico_aot_pure::FAULT_MISALIGNED_JUMP }, pc)
+    } else if !code.contains(&target) {
+        (quote! { pico_aot_pure::FAULT_OUTSIDE_PROGRAM }, 0)
+    } else {
+        return None;
+    };
+    Some(quote! { Err(Fault::Guest { kind: #kind, value: #target, detail: #detail }) })
 }
 
 fn step_to(target: u64, leaders: &HashSet<u64>) -> TokenStream {
@@ -161,5 +193,40 @@ fn normal(pc: u64, inst: &Instruction) -> TokenStream {
         let rs1 = inst.op_b as usize;
         let rs2 = inst.op_c as usize;
         quote! { { let b = emu.r(#rs1); let c = emu.r(#rs2); emu.w(#rd, pico_aot_pure::#f(b, c)); } }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::{translate, Instruction, Opcode};
+
+    const CODE: std::ops::Range<u64> = 0x1000..0x1010;
+
+    fn code_of(inst: Instruction) -> String {
+        translate(0x1000, &inst, &HashSet::new(), &CODE)
+            .0
+            .to_string()
+    }
+
+    /// A static jump to a misaligned target, or out of the program, faults at the jump without
+    /// writing the link register; a valid one carries no check.
+    #[test]
+    fn static_jump_targets_are_decided_when_generating() {
+        let jal = |imm| Instruction::new(Opcode::JAL, 1, imm, 0, true, true);
+        let misaligned = code_of(jal(2));
+        assert!(misaligned.contains("FAULT_MISALIGNED_JUMP"), "{misaligned}");
+        assert!(!misaligned.contains("link"), "{misaligned}");
+        let outside = code_of(jal(0x10));
+        assert!(outside.contains("FAULT_OUTSIDE_PROGRAM"), "{outside}");
+        let valid = code_of(jal(8));
+        assert!(!valid.contains("FAULT"), "{valid}");
+        assert!(valid.contains("link"), "{valid}");
+
+        // A branch faults only when taken; the fall-through stays a plain step.
+        let beq = code_of(Instruction::new(Opcode::BEQ, 1, 2, 6, false, true));
+        assert!(beq.contains("FAULT_MISALIGNED_JUMP"), "{beq}");
+        assert!(beq.contains("Dynamic"), "{beq}");
     }
 }

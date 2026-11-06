@@ -95,6 +95,16 @@ fn guests() -> Vec<(&'static str, &'static [u8], Stdin)> {
     ]
 }
 
+/// The abnormal termination behind a failed run, if that is what failed it.
+fn termination(error: &ProveError) -> Option<String> {
+    match error {
+        ProveError::Emulate(pico_vm::mle::machine::riscv::EmulateError::Emulation(e)) => {
+            e.abnormal_termination().map(|t| format!("{t:?}"))
+        }
+        _ => None,
+    }
+}
+
 /// `pure`'s `execute` agrees with `execute_chunked` on `stdin`.
 fn assert_agrees(name: &str, elf: &[u8], pure: &ProverBuilder, stdin: Stdin) {
     let chunked = Prover::builder(elf).execute_chunked(stdin.clone());
@@ -106,12 +116,22 @@ fn assert_agrees(name: &str, elf: &[u8], pure: &ProverBuilder, stdin: Stdin) {
                 "{name}: the committed bytes differ"
             );
             assert_eq!(executed.cycles, chunked.cycles, "{name}: the cycles differ");
+            assert_eq!(
+                executed.misaligned_accesses, chunked.misaligned_accesses,
+                "{name}: the misaligned-access counts differ"
+            );
         }
-        (Err(chunked), Err(executed)) => assert_eq!(
-            discriminant(&executed),
-            discriminant(&chunked),
-            "{name}: the failures differ: execute {executed}, execute_chunked {chunked}"
-        ),
+        (Err(chunked), Err(executed)) => {
+            assert_eq!(
+                discriminant(&executed),
+                discriminant(&chunked),
+                "{name}: the failures differ: execute {executed}, execute_chunked {chunked}"
+            );
+            // An abnormal termination is held to its reason, pc and address included.
+            if let (Some(e), Some(c)) = (termination(&executed), termination(&chunked)) {
+                assert_eq!(e, c, "{name}: the terminations differ");
+            }
+        }
         (chunked, executed) => panic!(
             "{name}: only one completes: execute_chunked {:?}, execute {:?}",
             chunked.map(|e| e.cycles),

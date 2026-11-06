@@ -7,13 +7,15 @@
 //! built into a dynamic library and loaded by a host built separately.
 //!
 //! Every guest memory access is checked against [`PureState::mem_len`], and control only moves to
-//! a compiled block or back to the host, so a guest cannot reach host memory.
+//! a compiled block or back to the host, so a guest cannot reach host memory. The checks also end
+//! the run where the interpreter ends it: an access that lands where no guest access may, and a
+//! jump to a misaligned target or one outside the program.
 
 use core::ffi::c_void;
 
 /// The layout of [`PureState`] and [`PureProgram`] and the meaning of the callbacks' returns. A
 /// host refuses a program built against another.
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 
 /// The symbol a pure-mode dynamic library exports: `extern "C" fn() -> *const PureProgram`.
 pub const ENTRY_SYMBOL: &str = "pico_pure_program";
@@ -37,14 +39,27 @@ pub const EXIT_CYCLE_LIMIT: u32 = 3;
 // that caches libraries keys them by it.
 include!(concat!(env!("OUT_DIR"), "/fingerprint.rs"));
 
-/// [`PureState::fault`] values (0 is none). An access outside guest memory; the value is the address, the detail the access's `ACCESS_*`.
+/// [`PureState::fault`] values (0 is none). For a memory fault the value is the address and the
+/// detail the access's `ACCESS_*`; the regions are the interpreter's memory guard's, which
+/// [`PureState::check`] tests null first, then the top of memory, the stack guard and the code.
+///
+/// An access that runs past the top of memory.
 pub const FAULT_OUT_OF_RANGE: u32 = 1;
-/// A misaligned load or store; the value is the address, the detail the access's `ACCESS_*`.
-pub const FAULT_MISALIGNED: u32 = 2;
+/// An access below [`PureState::mem_floor`].
+pub const FAULT_NULL_ACCESS: u32 = 2;
 /// An `EBREAK`; the value is its pc.
 pub const FAULT_BREAKPOINT: u32 = 3;
 /// An `UNIMP`; the value is its pc.
 pub const FAULT_ILLEGAL: u32 = 4;
+/// An access in the stack guard, `[guard_start, guard_end)`.
+pub const FAULT_STACK_OVERFLOW: u32 = 5;
+/// A store into the program's code, `[code_start, code_end)`.
+pub const FAULT_STORE_TO_CODE: u32 = 6;
+/// A jump or taken branch to a target that is not 4-aligned; the value is the target, the detail
+/// the jump's pc.
+pub const FAULT_MISALIGNED_JUMP: u32 = 7;
+/// Execution reaching a pc outside the program's code; the value is that pc.
+pub const FAULT_OUTSIDE_PROGRAM: u32 = 8;
 
 /// [`PureState::fault_detail`] for a memory fault: the access, by its instruction.
 pub const ACCESS_LB: u32 = 0;
@@ -69,10 +84,17 @@ pub struct PureState {
     /// after each block and each host step, so a run may pass it by one block.
     pub max_insns: u64,
     /// Guest memory, `mem_len` bytes from guest address 0. The guest may access `mem_floor` and
-    /// up.
+    /// up, outside the stack guard `[guard_start, guard_end)`, and may not store into the code.
     pub mem: *mut u8,
     pub mem_len: u64,
     pub mem_floor: u64,
+    pub guard_start: u64,
+    pub guard_end: u64,
+    /// The program's code, `[code_start, code_end)`: the only pcs a jump may reach.
+    pub code_start: u64,
+    pub code_end: u64,
+    /// Loads and stores whose address is not a multiple of their width.
+    pub misaligned: u64,
     /// The host's own state, for its callbacks.
     pub host: *mut c_void,
     /// Runs the `ECALL` at `pc`; returns the next pc, [`NEXT_HALT`] or [`NEXT_HOST_ERROR`].
@@ -81,7 +103,7 @@ pub struct PureState {
     pub step: unsafe extern "C" fn(state: *mut PureState, pc: u64) -> u64,
     pub fault: u32,
     pub fault_value: u64,
-    pub fault_detail: u32,
+    pub fault_detail: u64,
 }
 
 /// A pure-mode program, exported by its dispatch crate.
@@ -109,7 +131,7 @@ pub enum Step {
 /// Why a block stopped short; see the `FAULT_*` and `NEXT_HOST_ERROR` values.
 #[derive(Clone, Copy, Debug)]
 pub enum Fault {
-    Guest { kind: u32, value: u64, detail: u32 },
+    Guest { kind: u32, value: u64, detail: u64 },
     Host,
 }
 
@@ -126,7 +148,7 @@ pub fn run(state: &mut PureState, pc: u64, lookup: impl Fn(u64) -> Option<BlockF
                 Ok(step) => step,
                 Err(fault) => return state.exit_with(fault),
             },
-            Step::Dynamic(0) | Step::Halt => return EXIT_HALT,
+            Step::Halt => return EXIT_HALT,
             Step::Dynamic(pc) => match lookup(pc) {
                 Some(block) => Step::Direct(block),
                 None => {
@@ -195,25 +217,49 @@ impl PureState {
         self.regs[rs1].wrapping_add(sext32(imm))
     }
 
-    /// Checks an access of `width` bytes at `addr` by the instruction `access`: aligned to its
-    /// width, and inside memory.
+    /// Checks an access of `width` bytes at `addr` by the instruction `access`, as the
+    /// interpreter's memory guard does, and counts it if it is misaligned.
     #[inline(always)]
-    fn check(&self, addr: u64, width: u64, access: u32) -> Result<(), Fault> {
-        if width > 1 && addr & (width - 1) != 0 {
+    fn check(&mut self, addr: u64, width: u64, access: u32, store: bool) -> Result<(), Fault> {
+        let end = addr.wrapping_add(width);
+        let kind = if addr < self.mem_floor {
+            FAULT_NULL_ACCESS
+        } else if end > self.mem_len || end < addr {
+            FAULT_OUT_OF_RANGE
+        } else if addr < self.guard_end && end > self.guard_start {
+            FAULT_STACK_OVERFLOW
+        } else if store && addr < self.code_end && end > self.code_start {
+            FAULT_STORE_TO_CODE
+        } else {
+            self.misaligned += u64::from(addr & (width - 1) != 0);
+            return Ok(());
+        };
+        Err(Fault::Guest {
+            kind,
+            value: addr,
+            detail: u64::from(access),
+        })
+    }
+
+    /// Checks the target of a jump or taken branch at `pc`, as the interpreter does: 4-aligned and
+    /// inside the program's code.
+    #[inline(always)]
+    pub fn check_jump(&self, pc: u64, target: u64) -> Result<(), Fault> {
+        if !target.is_multiple_of(4) {
             return Err(Fault::Guest {
-                kind: FAULT_MISALIGNED,
-                value: addr,
-                detail: access,
+                kind: FAULT_MISALIGNED_JUMP,
+                value: target,
+                detail: pc,
             });
         }
-        match addr.checked_add(width) {
-            Some(end) if addr >= self.mem_floor && end <= self.mem_len => Ok(()),
-            _ => Err(Fault::Guest {
-                kind: FAULT_OUT_OF_RANGE,
-                value: addr,
-                detail: access,
-            }),
+        if target < self.code_start || target >= self.code_end {
+            return Err(Fault::Guest {
+                kind: FAULT_OUTSIDE_PROGRAM,
+                value: target,
+                detail: 0,
+            });
         }
+        Ok(())
     }
 
     #[inline(always)]
@@ -231,7 +277,7 @@ impl PureState {
     #[inline(always)]
     pub fn lb(&mut self, rd: usize, rs1: usize, imm: u64) -> Result<(), Fault> {
         let addr = self.ea(rs1, imm);
-        self.check(addr, 1, ACCESS_LB)?;
+        self.check(addr, 1, ACCESS_LB, false)?;
         self.w(rd, self.load::<u8>(addr) as i8 as i64 as u64);
         Ok(())
     }
@@ -239,7 +285,7 @@ impl PureState {
     #[inline(always)]
     pub fn lbu(&mut self, rd: usize, rs1: usize, imm: u64) -> Result<(), Fault> {
         let addr = self.ea(rs1, imm);
-        self.check(addr, 1, ACCESS_LBU)?;
+        self.check(addr, 1, ACCESS_LBU, false)?;
         self.w(rd, u64::from(self.load::<u8>(addr)));
         Ok(())
     }
@@ -247,7 +293,7 @@ impl PureState {
     #[inline(always)]
     pub fn lh(&mut self, rd: usize, rs1: usize, imm: u64) -> Result<(), Fault> {
         let addr = self.ea(rs1, imm);
-        self.check(addr, 2, ACCESS_LH)?;
+        self.check(addr, 2, ACCESS_LH, false)?;
         self.w(rd, self.load::<u16>(addr) as i16 as i64 as u64);
         Ok(())
     }
@@ -255,7 +301,7 @@ impl PureState {
     #[inline(always)]
     pub fn lhu(&mut self, rd: usize, rs1: usize, imm: u64) -> Result<(), Fault> {
         let addr = self.ea(rs1, imm);
-        self.check(addr, 2, ACCESS_LHU)?;
+        self.check(addr, 2, ACCESS_LHU, false)?;
         self.w(rd, u64::from(self.load::<u16>(addr)));
         Ok(())
     }
@@ -263,7 +309,7 @@ impl PureState {
     #[inline(always)]
     pub fn lw(&mut self, rd: usize, rs1: usize, imm: u64) -> Result<(), Fault> {
         let addr = self.ea(rs1, imm);
-        self.check(addr, 4, ACCESS_LW)?;
+        self.check(addr, 4, ACCESS_LW, false)?;
         self.w(rd, self.load::<u32>(addr) as i32 as i64 as u64);
         Ok(())
     }
@@ -271,7 +317,7 @@ impl PureState {
     #[inline(always)]
     pub fn lwu(&mut self, rd: usize, rs1: usize, imm: u64) -> Result<(), Fault> {
         let addr = self.ea(rs1, imm);
-        self.check(addr, 4, ACCESS_LWU)?;
+        self.check(addr, 4, ACCESS_LWU, false)?;
         self.w(rd, u64::from(self.load::<u32>(addr)));
         Ok(())
     }
@@ -279,7 +325,7 @@ impl PureState {
     #[inline(always)]
     pub fn ld(&mut self, rd: usize, rs1: usize, imm: u64) -> Result<(), Fault> {
         let addr = self.ea(rs1, imm);
-        self.check(addr, 8, ACCESS_LD)?;
+        self.check(addr, 8, ACCESS_LD, false)?;
         self.w(rd, self.load::<u64>(addr));
         Ok(())
     }
@@ -287,7 +333,7 @@ impl PureState {
     #[inline(always)]
     pub fn sb(&mut self, rs2: usize, rs1: usize, imm: u64) -> Result<(), Fault> {
         let addr = self.ea(rs1, imm);
-        self.check(addr, 1, ACCESS_SB)?;
+        self.check(addr, 1, ACCESS_SB, true)?;
         self.store(addr, self.regs[rs2] as u8);
         Ok(())
     }
@@ -295,7 +341,7 @@ impl PureState {
     #[inline(always)]
     pub fn sh(&mut self, rs2: usize, rs1: usize, imm: u64) -> Result<(), Fault> {
         let addr = self.ea(rs1, imm);
-        self.check(addr, 2, ACCESS_SH)?;
+        self.check(addr, 2, ACCESS_SH, true)?;
         self.store(addr, self.regs[rs2] as u16);
         Ok(())
     }
@@ -303,7 +349,7 @@ impl PureState {
     #[inline(always)]
     pub fn sw(&mut self, rs2: usize, rs1: usize, imm: u64) -> Result<(), Fault> {
         let addr = self.ea(rs1, imm);
-        self.check(addr, 4, ACCESS_SW)?;
+        self.check(addr, 4, ACCESS_SW, true)?;
         self.store(addr, self.regs[rs2] as u32);
         Ok(())
     }
@@ -311,7 +357,7 @@ impl PureState {
     #[inline(always)]
     pub fn sd(&mut self, rs2: usize, rs1: usize, imm: u64) -> Result<(), Fault> {
         let addr = self.ea(rs1, imm);
-        self.check(addr, 8, ACCESS_SD)?;
+        self.check(addr, 8, ACCESS_SD, true)?;
         self.store(addr, self.regs[rs2]);
         Ok(())
     }
@@ -324,10 +370,12 @@ impl PureState {
 
     /// `JALR`: `rd = pc + 4`, reading rs1 first; returns `(rs1 + imm) & !1`.
     #[inline(always)]
-    pub fn jalr(&mut self, rd: usize, rs1: usize, pc: u64, imm: u64) -> u64 {
-        let base = self.regs[rs1];
+    pub fn jalr(&mut self, rd: usize, rs1: usize, pc: u64, imm: u64) -> Result<u64, Fault> {
+        let target = self.regs[rs1].wrapping_add(sext32(imm)) & !1;
+        // Checked before the link register is written, as the interpreter does.
+        self.check_jump(pc, target)?;
         self.w(rd, pc.wrapping_add(4));
-        base.wrapping_add(sext32(imm)) & !1
+        Ok(target)
     }
 }
 
@@ -491,6 +539,11 @@ mod tests {
             mem: core::ptr::null_mut(),
             mem_len: 0,
             mem_floor: 0,
+            guard_start: 0,
+            guard_end: 0,
+            code_start: 0,
+            code_end: 0,
+            misaligned: 0,
             host: core::ptr::null_mut(),
             ecall: no_ecall,
             step: spin,
