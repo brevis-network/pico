@@ -3810,7 +3810,7 @@ dependencies = [
 
 [[package]]
 name = "pico-aot-pure"
-version = "3.1.0"
+version = "3.1.1"
 
 [[package]]
 name = "pico-aot-runtime"

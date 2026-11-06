@@ -1,14 +1,12 @@
 [package]
 name = "pico-aot-pure"
 description = "The ABI shared by Pico's generated pure-execution code and the host that runs it (pico-aot-runtime)"
-# Spelled out rather than inherited from the workspace: a host outside a Pico checkout builds
-# generated crates against this crate alone, by path or git.
-version = "3.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-keywords = ["zkvm", "plonky3", "stark", "whir"]
-categories = ["cryptography"]
-repository = "https://github.com/brevis-network/pico"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true
 
-# No dependencies: pure-mode code links only this crate, so a host builds it with no Pico sources.
+# No dependencies: pure-mode code links only this crate, so building it compiles nothing else of Pico.
 [dependencies]

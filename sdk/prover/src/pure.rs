@@ -264,7 +264,9 @@ mod build {
         /// absolute `path = "..."`. `None` takes this build's own source, by a path fixed when
         /// `pico-prover` was compiled, so it only works on a machine that has that checkout. A
         /// host elsewhere, such as a container image, names the same `pico-aot-pure` version
-        /// here: a `rev` of the Pico commit it was built from, or a path to a copy of `aot-pure/`.
+        /// here: a `rev` of the Pico commit it was built from, or a path into a full Pico checkout
+        /// of that commit. `aot-pure/` takes its package fields from Pico's workspace, so a copy
+        /// of that directory alone does not build.
         pub runtime: Option<String>,
         /// Pass `--offline` to cargo: every dependency must already be in its cache. For a host
         /// without network access, fetch `runtime` once when the host is set up (for a `git`
