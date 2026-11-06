@@ -159,8 +159,8 @@ fn only_a_whitelist_mode_compress_proof_exports_as_one() {
 
 /// A whitelist-mode compress proof, exported and verified by the stable verifier alone. Each entry
 /// point takes only its own kind: the root's envelope is refused by `verify_compress`, the compress
-/// envelope by `verify`, and a compress envelope re-labelled as a root one fails the root's STARK
-/// verify. Changed committed bytes are refused.
+/// envelope by `verify`, and a compress envelope re-labelled as a root one is refused for its key's
+/// preset. Changed committed bytes are refused.
 ///
 /// Run with `cargo test --release -p pico-prover -- --ignored --nocapture tests::export`.
 #[test]
@@ -203,10 +203,7 @@ fn a_shipped_whitelist_compress_proof_verifies_with_pico_verifier() {
         pico_verifier::envelope::encode_v3(&body).expect("encodes")
     };
     let err = pico_verifier::verify(&bundle, &relabelled, &committed).unwrap_err();
-    assert!(
-        matches!(err, VerifyError::Stark(_) | VerifyError::VkBodyMismatch),
-        "{err}"
-    );
+    assert!(matches!(err, VerifyError::WrongPreset { .. }), "{err}");
     println!("[export] the compress proof verified with pico_verifier, and only as one");
     // Last, so a proof over the target still has its checks above run. The size follows the root's
     // shape, which the GPU pipeline's combine tree changes.
