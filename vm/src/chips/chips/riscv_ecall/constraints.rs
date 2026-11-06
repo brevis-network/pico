@@ -228,45 +228,49 @@ where
             public_values.exit_code.clone(),
         );
 
-        // ── COMMIT_DEFERRED_PROOFS tally ──────────────────────────────────────────────────
-        // The digest is bound only on these rows, so the recursion needs to know which chunk ran
-        // all eight of them. A running count and `Σ 2^word_index` down the whole trace, padding
-        // rows adding nothing, end on the pair the chunk publishes.
+        // ── Commit tally ──────────────────────────────────────────────────────────────────
+        // Each digest is bound only on its own COMMIT / COMMIT_DEFERRED_PROOFS rows, a word on
+        // its row, so the recursion needs to know which chunk ran all eight words of it. A
+        // running count and mask down the whole trace, padding rows adding nothing, end on the
+        // pair the chunk publishes: a COMMIT row adds `2^(8 + word_index)` to the mask, a
+        // COMMIT_DEFERRED_PROOFS row `2^word_index`.
         builder.assert_eq(
             local.deferred_commit_mul,
             is_real.clone() * is_commit_deferred_proofs,
         );
-        let weight = |cols: &EcallChipCols<CB::Var>| -> CB::Expr {
-            cols.ecall
+        let mul = |cols: &EcallChipCols<CB::Var>| -> CB::Expr {
+            cols.commit_mul.into() + cols.deferred_commit_mul.into()
+        };
+        let share = |cols: &EcallChipCols<CB::Var>| -> CB::Expr {
+            let weight: CB::Expr = cols
+                .ecall
                 .index_bitmap
                 .iter()
                 .enumerate()
                 .map(|(i, &b)| b.into() * CB::Expr::from_u32(1 << i))
-                .sum()
+                .sum();
+            weight
+                * (cols.commit_mul.into() * CB::Expr::from_u32(1 << 8)
+                    + cols.deferred_commit_mul.into())
         };
         builder
             .when_first_row()
-            .assert_eq(local.deferred_commits, local.deferred_commit_mul);
-        builder.when_first_row().assert_eq(
-            local.deferred_commit_mask,
-            weight(local) * local.deferred_commit_mul,
-        );
-        builder.when_transition().assert_eq(
-            next.deferred_commits,
-            local.deferred_commits + next.deferred_commit_mul,
-        );
-        builder.when_transition().assert_eq(
-            next.deferred_commit_mask,
-            weight(next) * next.deferred_commit_mul + local.deferred_commit_mask,
-        );
-        builder.when_last_row().assert_eq(
-            local.deferred_commits,
-            public_values.deferred_commits.clone(),
-        );
-        builder.when_last_row().assert_eq(
-            local.deferred_commit_mask,
-            public_values.deferred_commit_mask.clone(),
-        );
+            .assert_eq(local.commits, mul(local));
+        builder
+            .when_first_row()
+            .assert_eq(local.commit_mask, share(local));
+        builder
+            .when_transition()
+            .assert_eq(next.commits, local.commits + mul(next));
+        builder
+            .when_transition()
+            .assert_eq(next.commit_mask, local.commit_mask + share(next));
+        builder
+            .when_last_row()
+            .assert_eq(local.commits, public_values.commits.clone());
+        builder
+            .when_last_row()
+            .assert_eq(local.commit_mask, public_values.commit_mask.clone());
 
         // ── COMMIT / COMMIT_DEFERRED_PROOFS public values (moved from eval_commit) ────────
         self.eval_commit(

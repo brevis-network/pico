@@ -62,13 +62,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{config::riscv_params_with_100_bits_security, StarkProtocolConfig};
+    use crate::{config::riscv_params_with_128_bits_security, StarkProtocolConfig};
 
     /// A production KoalaBear `SystemParams` value initializes the reference engine, and the params
     /// survive the round-trip through it.
     #[test]
     fn kb_ref_engine_initializes_from_app_params() {
-        let params = riscv_params_with_100_bits_security(20);
+        let params = riscv_params_with_128_bits_security(20);
 
         let engine = KoalaBearPoseidon2RefEngine::<DuplexSponge>::new(params.clone());
         assert_eq!(engine.config().params(), &params);

@@ -19,7 +19,7 @@
 //! height-neutral rest to the ledger's `KNOBS`, so a variable the VM starts to read is sorted
 //! before it can slip past the key.
 //!
-//! The `height-witness` feature, off by default and implying `cuda-mle`, fills two hooks.
+//! The `height-witness` feature, off by default and implying `cuda`, fills two hooks.
 //! [`begin_pipeline`] reads the key where the snapshot pipeline starts. [`chunk`], where
 //! `prepare_chunk_shaped` has just run the GPU preparer's event counter, asserts the counter's
 //! heights equal those of the augmented record's history and, with `MLE_HEIGHTS=<file>` set,
@@ -46,7 +46,7 @@ use crate::{
 };
 
 /// What a line's key holds, in the order it holds them.
-pub const KEY_FIELDS: [&str; 14] = [
+pub const KEY_FIELDS: [&str; 15] = [
     "program",
     "input",
     "segmentation",
@@ -56,6 +56,7 @@ pub const KEY_FIELDS: [&str; 14] = [
     "commit_tail_overrun",
     "event_limit_scale",
     "event_limits_off",
+    "leaf_cap",
     "commit_tail_hold_off",
     "deferred_tail_merge",
     "precompile_local_mem_merge",
@@ -74,6 +75,7 @@ pub const KEYED: &[&str] = &[
     // Through their readers.
     "CHUNK_EVENT_LIMIT_SCALE",
     "CHUNK_EVENT_LIMITS_OFF",
+    "CHUNK_LEAF_CAP",
     "CHUNK_COMMIT_TAIL_HOLD_OFF",
     "MLE_PRECOMPILE_LOCAL_MEM_MERGE",
     "DEFERRED_TAIL_MERGE",
@@ -508,6 +510,7 @@ mod live {
             ("commit_tail_overrun", split.commit_tail_overrun.to_string()),
             ("event_limit_scale", event_limit_scale().to_string()),
             ("event_limits_off", event_limits_off().to_string()),
+            ("leaf_cap", split.leaf_cap.to_string()),
             ("commit_tail_hold_off", commit_tail_hold_off().to_string()),
             ("deferred_tail_merge", deferred_tail_merge().to_string()),
             (
@@ -625,9 +628,11 @@ mod tests {
         // Negative tests that tamper with values, not counts.
         "CVD_FORGE_K",
         "CORRUPT_MEMORY",
+        "N11_TAMPER_PACKED_LANE",
         // The recursion layers, which run after the records exist.
         "RECURSION_EARLY_EXIT_TS",
         "MLE_REC_PARALLEL_CHILDREN",
+        "MLE_REC_WAVEFRONT",
         "MLE_WITNESS_HASH",
         "MLE_TRANSCRIPT_PROF",
         "MLE_WALKER_XCHECK",
@@ -693,12 +698,15 @@ mod tests {
         "MLE_DEBUG_GKR_FRACS",
         "MLE_DEBUG_ROUND0",
         "MLE_DUMP_ZCR0",
+        "MLE_GKR_VIRTUAL_PADDING",
+        "MLE_GKR_ZC_BUDGET_LOG",
         "MLE_GPU_ZC",
         "MLE_JIT_CACHE_DIR",
         "MLE_JIT_DUMP_DIR",
         "MLE_JIT_MAX_RULES",
         "MLE_JIT_OFAST",
         "MLE_KEYGEN_TIMING_SYNC",
+        "MLE_MEMINFO_LAZY",
         "MLE_MONO_PATH",
         "MLE_OOM_WAIT_MS",
         "MLE_POOL_RETAIN",

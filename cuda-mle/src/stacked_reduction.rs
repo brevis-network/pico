@@ -29,6 +29,7 @@ use crate::{
     gpu_backend::GenericGpuBackend,
     hash_scheme::GpuHashScheme,
     poly::EqEvalSegments,
+    prelude::D_EF,
     sponge::GpuFiatShamirTranscript,
     stacked_pcs::StackedPcsDataGpu,
     utils::compute_barycentric_inv_lagrange_denoms,
@@ -535,12 +536,12 @@ impl<FK: FieldKernels, D: Copy + Clone + Send + Sync + 'static> StackedReduction
         } else {
             DeviceBuffer::with_capacity(stacked_per_commit.len())
         };
-        // Each window gets its own slot of 4 u64 accumulators (one per extension coordinate) per
-        // sumcheck evaluation point, so an entire multilinear round accumulates on the device
+        // Each window gets its own slot of D_EF u64 accumulators (one per extension coordinate)
+        // per sumcheck evaluation point, so an entire multilinear round accumulates on the device
         // with no readback in between (see `batch_sumcheck_poly_eval`).
         let num_windows = mle_col_bounds.len().saturating_sub(1).max(1);
         let d_window_accums =
-            DeviceBuffer::<u64>::with_capacity(num_windows * STACKED_REDUCTION_S_DEG * 4);
+            DeviceBuffer::<u64>::with_capacity(num_windows * STACKED_REDUCTION_S_DEG * D_EF);
         // eq_ub for every column at once, uploaded a single time per multilinear round; a
         // degenerate window reads it starting at its first column.
         let d_eq_ub = if unstacked_cols.is_empty() {
@@ -994,12 +995,13 @@ impl<FK: FieldKernels, D: Copy + Clone + Send + Sync + 'static> StackedReduction
                 self.settled_k_rot.push(scalar_host[0]);
             }
         }
-        // Every window owns 8 u64 accumulators. All of them are cleared by one memset, the
-        // windows' kernels are queued back to back, and a single D2H copy (one stream sync)
-        // brings everything back for the host-side reduction. Doing memset -> kernel -> D2H sync ->
-        // host reduce separately for each window (~12 windows x ~19 rounds per chunk) left the GPU
-        // waiting on every readback and the host waiting on every kernel.
-        const ACCUM_LEN_PER_WINDOW: usize = STACKED_REDUCTION_S_DEG * 4;
+        // Every window owns STACKED_REDUCTION_S_DEG * D_EF u64 accumulators. All of them are
+        // cleared by one memset, the windows' kernels are queued back to back, and a single D2H
+        // copy (one stream sync) brings everything back for the host-side reduction. Doing
+        // memset -> kernel -> D2H sync -> host reduce separately for each window (~12 windows x
+        // ~19 rounds per chunk) left the GPU waiting on every readback and the host waiting on
+        // every kernel.
+        const ACCUM_LEN_PER_WINDOW: usize = STACKED_REDUCTION_S_DEG * D_EF;
         let num_windows = self.mle_col_bounds.len() - 1;
         debug_assert!(self.d_window_accums.len() >= num_windows * ACCUM_LEN_PER_WINDOW);
         self.d_window_accums
@@ -1210,20 +1212,24 @@ impl<FK: FieldKernels, D: Copy + Clone + Send + Sync + 'static> StackedReduction
 
 /// Turns raw u64 accumulators (which may exceed the modulus) into extension field elements.
 ///
-/// Once taken modulo `p`, each u64 is the Montgomery representation of an `FVal` element.
-/// `FExt` must be a degree-4 extension of `FVal`, i.e. four consecutive values per element.
+/// Once taken modulo `p`, each u64 is the Montgomery representation of an `FVal` element, and
+/// `FExt::DIMENSION` consecutive values make one extension element.
+///
+/// The degree is read from `FExt` rather than written down: it was a literal 4, which at degree 5
+/// chunks the values by 4 and then reads a fifth limb -- a panic in the stacked reduction on the
+/// GPU proving path, with nothing for the compiler to object to.
 #[inline]
 fn accums_to_ext_elems<FVal, FExt>(raw_accums: &[u64]) -> Vec<FExt>
 where
     FVal: PrimeField32,
     FExt: BasedVectorSpace<FVal>,
 {
-    // Base-field coordinates per extension element.
-    const EXT_DEGREE: usize = 4;
-    debug_assert_eq!(raw_accums.len() % EXT_DEGREE, 0);
+    // Base-field coordinates per extension element, from the type.
+    let ext_degree = <FExt as BasedVectorSpace<FVal>>::DIMENSION;
+    debug_assert_eq!(raw_accums.len() % ext_degree, 0);
     debug_assert_eq!(size_of::<FVal>(), size_of::<u32>());
     raw_accums
-        .chunks_exact(EXT_DEGREE)
+        .chunks_exact(ext_degree)
         .map(|limbs| {
             FExt::from_basis_coefficients_fn(|i| {
                 let reduced = (limbs[i] % FVal::ORDER_U64) as u32;
@@ -1281,4 +1287,47 @@ fn convolve_schoolbook<FExt: PrimeCharacteristicRing + Copy + PartialEq>(
         }
     }
     product
+}
+
+#[cfg(test)]
+mod reduce_raw_tests {
+    use p3_field::{
+        extension::{BinomialExtensionField, QuinticTrinomialExtensionField},
+        BasedVectorSpace, PrimeField64,
+    };
+    use p3_koala_bear::KoalaBear;
+
+    use super::accums_to_ext_elems;
+
+    /// Each extension element is `DIMENSION` consecutive accumulators, reduced mod p and read as
+    /// Montgomery limbs. Checked at both degrees the lane moves between, in one build -- the
+    /// function is generic, and its degree used to be a literal 4.
+    fn check<E: BasedVectorSpace<KoalaBear> + PartialEq + core::fmt::Debug>() {
+        let d = E::DIMENSION;
+        let p = KoalaBear::ORDER_U64;
+        // Over-p accumulators, as the kernel's atomics leave them.
+        let accum: Vec<u64> = (0..3 * d as u64)
+            .map(|i| i * 0x1_0000_0001 + 7 * p + i)
+            .collect();
+        let got: Vec<E> = accums_to_ext_elems::<KoalaBear, E>(&accum);
+        assert_eq!(got.len(), 3);
+        for (k, e) in got.iter().enumerate() {
+            for (i, c) in e.as_basis_coefficients_slice().iter().enumerate() {
+                let raw = (accum[k * d + i] % p) as u32;
+                // SAFETY: KoalaBear is repr(transparent) over its Montgomery u32.
+                let want: KoalaBear = unsafe { core::mem::transmute::<u32, KoalaBear>(raw) };
+                assert_eq!(*c, want, "element {k} coefficient {i} at D = {d}");
+            }
+        }
+    }
+
+    #[test]
+    fn accums_to_ext_elems_degree_4() {
+        check::<BinomialExtensionField<KoalaBear, 4>>();
+    }
+
+    #[test]
+    fn accums_to_ext_elems_degree_5() {
+        check::<QuinticTrinomialExtensionField<KoalaBear>>();
+    }
 }

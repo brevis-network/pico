@@ -1,14 +1,17 @@
-//! The C library's failure entry points: `abort()`, and the two names a failed `assert()` calls.
-//! Each ends the run abnormally with [`TerminationReason::Abort`] and exit code 134, the code a
-//! native process gets from `SIGABRT`.
+//! What a C or C++ guest needs from the C library's startup and exit, for a guest that links no C
+//! library: the failure entry points, `abort()` and the two names a failed `assert()` calls, and
+//! the exit handlers, `atexit` and `__cxa_atexit`, through which C++ runs its static destructors.
 //!
-//! They are weak, so a C library linked into the guest that brings its own wins without a
-//! duplicate-symbol error; a freestanding C guest, linked only against `libpico_zkvm.a`, gets
-//! these. Rust guests carry them too: the static library is this crate.
+//! The failure entry points end the run abnormally with [`TerminationReason::Abort`] and exit
+//! code 134, the code a native process gets from `SIGABRT`.
+//!
+//! Every symbol here is weak, so a C library linked into the guest that brings its own wins
+//! without a duplicate-symbol error; a freestanding guest, linked only against `libpico_zkvm.a`,
+//! gets these. Rust guests carry them too: the static library is this crate.
 //!
 //! [`TerminationReason::Abort`]: pico_vm::emulator::riscv::emulator::TerminationReason::Abort
 
-use core::ffi::{c_char, c_int, c_uint, CStr};
+use core::ffi::{c_char, c_int, c_uint, c_void, CStr};
 
 use crate::riscv_ecalls::{exit_code, halt_reason, halt_with_reason, sys_write};
 
@@ -101,4 +104,77 @@ fn decimal(n: i64, buf: &mut [u8; 20]) -> &[u8] {
         buf[i] = b'-';
     }
     &buf[i..]
+}
+
+/// One registered exit handler.
+#[derive(Clone, Copy)]
+enum ExitHandler {
+    /// `atexit(f)`.
+    Plain(extern "C" fn()),
+    /// `__cxa_atexit(f, arg, _)`: a C++ static destructor and its object.
+    WithArg(unsafe extern "C" fn(*mut c_void), *mut c_void),
+}
+
+/// C guarantees at least 32 `atexit` registrations; C++ registers one per static object with a
+/// destructor. A fixed table, so registering never allocates.
+const MAX_EXIT_HANDLERS: usize = 256;
+
+/// The guest has one thread.
+static mut EXIT_HANDLERS: [Option<ExitHandler>; MAX_EXIT_HANDLERS] = [None; MAX_EXIT_HANDLERS];
+static mut EXIT_HANDLER_COUNT: usize = 0;
+
+fn register(handler: ExitHandler) -> c_int {
+    // SAFETY: one thread, and `run_exit_handlers` runs only after `main` returns.
+    unsafe {
+        let count = core::ptr::addr_of!(EXIT_HANDLER_COUNT).read();
+        if count == MAX_EXIT_HANDLERS {
+            return -1;
+        }
+        core::ptr::addr_of_mut!(EXIT_HANDLERS[count]).write(Some(handler));
+        core::ptr::addr_of_mut!(EXIT_HANDLER_COUNT).write(count + 1);
+    }
+    0
+}
+
+/// `int atexit(void (*f)(void))`: `f` runs after `main` returns, latest registered first.
+#[no_mangle]
+#[linkage = "weak"]
+pub extern "C" fn atexit(f: extern "C" fn()) -> c_int {
+    register(ExitHandler::Plain(f))
+}
+
+/// `int __cxa_atexit(void (*f)(void*), void* arg, void* dso)`: how C++ registers a static
+/// object's destructor. The guest is one image, so `dso` is not needed.
+#[no_mangle]
+#[linkage = "weak"]
+pub extern "C" fn __cxa_atexit(
+    f: unsafe extern "C" fn(*mut c_void),
+    arg: *mut c_void,
+    _dso: *mut c_void,
+) -> c_int {
+    register(ExitHandler::WithArg(f, arg))
+}
+
+/// The handle C++ passes to `__cxa_atexit`, which a C library's `crtbegin.o` would define.
+#[no_mangle]
+#[linkage = "weak"]
+pub static __dso_handle: u8 = 0;
+
+/// Runs the registered exit handlers, latest first, each once; `_start` calls it after `main`.
+pub(crate) fn run_exit_handlers() {
+    // SAFETY: one thread. A handler may register another, which then runs next, as C requires.
+    unsafe {
+        loop {
+            let count = core::ptr::addr_of!(EXIT_HANDLER_COUNT).read();
+            if count == 0 {
+                return;
+            }
+            core::ptr::addr_of_mut!(EXIT_HANDLER_COUNT).write(count - 1);
+            match core::ptr::addr_of!(EXIT_HANDLERS[count - 1]).read() {
+                Some(ExitHandler::Plain(f)) => f(),
+                Some(ExitHandler::WithArg(f, arg)) => f(arg),
+                None => {}
+            }
+        }
+    }
 }

@@ -452,7 +452,7 @@ mod full {
             NUM_PV_ELMS_TO_HASH, RECURSION_PUBLIC_VALUES_COL_MAP,
         },
         mle::config::koala_bear_bn254_poseidon2::KoalaBearBn254Poseidon2Config as EmbedSc,
-        primitives::consts::RECURSION_NUM_PVS,
+        primitives::consts::{EXTENSION_DEGREE, RECURSION_NUM_PVS},
     };
     use pico_mle_core::{
         air::symbolic::{symbolic_variable::Entry, SymbolicExpressionNode},
@@ -1680,7 +1680,8 @@ mod full {
                     let leaves: Vec<Var<N>> = opened_values
                         .iter()
                         .map(|&v| {
-                            let limbs: [Felt<F>; 4] = core::array::from_fn(|_| builder.uninit());
+                            let limbs: [Felt<F>; EXTENSION_DEGREE] =
+                                core::array::from_fn(|_| builder.uninit());
                             builder.push_op(DslIr::CircuitExt2Felt(limbs, v));
                             outer_hash(builder, &limbs)
                         })

@@ -6,10 +6,9 @@ use crate::{
         ExtAluChip,
     },
     machine::builder::{ChipBuilder, ExtensionBuilder, RecursionBuilder},
-    primitives::consts::EXTENSION_DEGREE,
 };
 use p3_air::{Air, BaseAir, WindowAccess};
-use p3_field::{extension::BinomiallyExtendable, Field};
+use p3_field::{extension::QuinticTrinomialExtendable, Field};
 use std::{borrow::Borrow, iter::zip};
 
 impl<F> BaseAir<F> for ExtAluChip<F> {
@@ -18,7 +17,7 @@ impl<F> BaseAir<F> for ExtAluChip<F> {
     }
 }
 
-impl<F: Field + BinomiallyExtendable<EXTENSION_DEGREE>, CB> Air<CB> for ExtAluChip<F>
+impl<F: Field + QuinticTrinomialExtendable, CB> Air<CB> for ExtAluChip<F>
 where
     CB: ChipBuilder<F>,
 {

@@ -38,15 +38,15 @@ use crate::{
         field::FieldSpecificPoseidon2Config,
     },
     primitives::consts::{
-        BASE_ALU_DATAPAR, CONST_MEM_DATAPAR, EXTENSION_DEGREE, EXT_ALU_DATAPAR, POSEIDON2_DATAPAR,
-        SELECT_DATAPAR, VAR_MEM_DATAPAR,
+        BASE_ALU_DATAPAR, CONST_MEM_DATAPAR, EXT_ALU_DATAPAR, POSEIDON2_DATAPAR, SELECT_DATAPAR,
+        VAR_MEM_DATAPAR,
     },
 };
 #[cfg(feature = "cuda")]
 use crate::{chips::trace::TraceData, machine::chip::GpuChipBehavior};
 use hashbrown::HashMap;
 use p3_air::{Air, BaseAir};
-use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
+use p3_field::{extension::QuinticTrinomialExtendable, Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use std::ops::{Add, AddAssign};
 
@@ -77,8 +77,8 @@ pub enum RecursionChipType<F: FieldSpecificPoseidon2Config + Field> {
     ExpBitsLen(ExpBitsLenChip<F>),
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config>
-    ChipBehavior<F> for RecursionChipType<F>
+impl<F: PrimeField32 + QuinticTrinomialExtendable + FieldSpecificPoseidon2Config> ChipBehavior<F>
+    for RecursionChipType<F>
 {
     type Record = RecursionRecord<F>;
     type Program = RecursionProgram<F>;
@@ -284,8 +284,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPos
 }
 
 #[cfg(feature = "cuda")]
-impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config>
-    GpuChipBehavior<F> for RecursionChipType<F>
+impl<F: PrimeField32 + QuinticTrinomialExtendable + FieldSpecificPoseidon2Config> GpuChipBehavior<F>
+    for RecursionChipType<F>
 {
     fn gpu_generate_preprocessed(
         &self,
@@ -353,8 +353,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPos
     }
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config>
-    BaseAir<F> for RecursionChipType<F>
+impl<F: PrimeField32 + QuinticTrinomialExtendable + FieldSpecificPoseidon2Config> BaseAir<F>
+    for RecursionChipType<F>
 {
     fn width(&self) -> usize {
         match self {
@@ -414,7 +414,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPos
 }
 
 impl<
-        F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
+        F: PrimeField32 + QuinticTrinomialExtendable + FieldSpecificPoseidon2Config,
         AB: ChipBuilder<F>,
     > Air<AB> for RecursionChipType<F>
 where
@@ -422,7 +422,6 @@ where
     FieldSpecificPoseidon2PackedChip<F>: Air<AB>,
 {
     fn eval(&self, b: &mut AB) {
-        //assert_eq!(F::W, F::from_u32(F::W::U32));
         match self {
             Self::MemoryConst(chip) => chip.eval(b),
             Self::MemoryVar(chip) => chip.eval(b),
@@ -491,7 +490,7 @@ impl RecursionChipType<p3_koala_bear::KoalaBear> {
     }
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config>
+impl<F: PrimeField32 + QuinticTrinomialExtendable + FieldSpecificPoseidon2Config>
     RecursionChipType<F>
 {
     pub fn chip_heights(program: &RecursionProgram<F>) -> Vec<(String, usize)> {

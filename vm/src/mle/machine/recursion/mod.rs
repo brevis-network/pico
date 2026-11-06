@@ -1,13 +1,13 @@
-//! Shared helpers for the MLE/WHIR recursion provers, organized by role. Intended consumers are
-//! Convert, Combine, Embed, and Compress; **Convert** and **Combine** are wired today (Embed and
-//! Compress are sibling drivers that consume the same helpers).
+//! Shared helpers for the MLE/WHIR recursion provers, organized by role. Their consumers are
+//! Convert, Combine, Compress and Embed, all wired; Compress and Embed are single-child complete
+//! nodes over the same helpers.
 //!
 //! - [`chips`] — the recursion chip set, keygen AIR refs, and proving-context construction.
 //! - [`layout`] — stacking layout, constraint-DAG extraction, and VK-layout extraction.
 //! - [`witness`] — WHIR query-index derivation, the proof → witness-stream serializer, and the
 //!   convert and combine setup drivers.
 //! - [`root_check`] — the host-side acceptance checks on a complete root's public values.
-//!   Config-free (public values are `Kb` under any config), which is what lets combine and embed
+//!   Config-free (public values are `Kb` under any config), which is what lets combine, compress and embed
 //!   share them.
 
 mod chips;
@@ -25,10 +25,11 @@ pub type Pb = pico_mle_cpu::CpuBackend<Sc>;
 pub use chips::{
     build_proving_ctx, check_recursion_tier, pad_convert_program, pad_recursion_program,
     recursion_air_refs_with_preprocessed, recursion_natural_rows, recursion_poseidon2_chip,
-    recursion_poseidon2_packed_chip, recursion_tier_fit, select_convert_row, RecursionPrepAir,
+    recursion_poseidon2_packed_chip, recursion_tier_fit, select_convert_row,
+    try_select_convert_row, RecursionPrepAir,
 };
 pub use layout::{
-    extract_recursion_vk_layout, extract_recursion_vk_layout_from_heights,
+    compress_proof_layout, extract_recursion_vk_layout, extract_recursion_vk_layout_from_heights,
     recursion_vk_layouts_equal, stacking_layout_for_commit,
 };
 pub use root_check::{check_complete_root_public_values, recursion_public_values};
@@ -96,6 +97,25 @@ pub fn log_proof_size(label: &str, proof: &pico_mle_core::protocol::proof::Proof
         sz(&proof.batch_constraint_proof),
         sz(&proof.stacking_proof),
         sz(&proof.whir_proof),
+    );
+    // The stacked width of every commit the WHIR initial round opens, read the way the codec
+    // infers it (the first opened row of each commit), and their sum: the size model's Σw. Not
+    // recorded anywhere else.
+    let widths: Vec<usize> = proof
+        .whir_proof
+        .initial_round_opened_rows
+        .iter()
+        .map(|rows| {
+            rows.first()
+                .and_then(|q| q.first())
+                .map(|r| r.len())
+                .unwrap_or(0)
+        })
+        .collect();
+    tracing::info!(
+        target: "bench",
+        "{label} stacked widths per commit = {widths:?}, total stacked width = {}",
+        widths.iter().sum::<usize>()
     );
     let w = &proof.whir_proof;
     tracing::info!(

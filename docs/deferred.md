@@ -113,13 +113,16 @@ stack hashed a verifying key instead, so a caller porting from it is passing the
 With `vk_verification` on, a node checks its sub-proof the way combine checks its children: it
 witnesses the whitelist root into its own `vk_root`, requires the sub-proof's `vk_root` to equal it,
 and Merkle-checks the sub-proof's VK identity against it. Membership plus `flag_complete == 1`
-admits only the complete-root combine shapes, since every other recursion program bakes the flag
-to 0. The parent's `vk_root` agreement then ties the node, and through it the sub-proof, to the
-root the apex pins.
+admits only the complete programs among the whitelist's keys, the complete-root combine shapes and
+the compress node; every other recursion program bakes the flag to 0. What keeps a compress proof
+out of a deferred node is the child layout the node's program bakes in, the combine tier's, which a
+compress proof does not have. The parent's `vk_root` agreement then ties the node, and through it
+the sub-proof, to the root the apex pins.
 
 The node pads to the combine tier, so to its parent it is one more B-shaped child: the standard
 combine shapes already cover every pair it can sit in, and the whitelist gains exactly one leaf, the
-node's own VK, after the combine nodes (`DeferredMachine::preregister`).
+node's own VK, after the combine nodes (`DeferredMachine::preregister`); the compress node's VK
+follows it as the last leaf.
 
 **A sub-proof must be proved under the same whitelist as the tree that consumes it.** Each rebuild
 of the whitelist changes its root, so sub-proofs made before a rebuild have to be proved again
@@ -136,16 +139,18 @@ does not verify.
 
 ## Gates
 
-CI runs none of these. The deferred examples build with `--features cuda` too,
+CI runs three of these on the CPU prover: `test_mle_deferred` and `test_mle_e2e` in
+`CPU · MLE prove (fib)`, `test_carrier_tie` in `CPU · MLE carrier tie` (`test-vm.yml`); the others
+are run by hand. The deferred examples build with `--features cuda` too,
 which proves their riscv chunks on the GPU (the aggregator's then exercise the GPU Ecall tally),
 except `test_mle_deferred_split`, which builds its chunk contexts on the host and runs on the CPU
 build only.
 
 | | |
 |---|---|
-| `test_mle_deferred` (by hand) | proves one node over a real root; checks its public values and that its in-circuit chain step equals `hash_deferred_proof` |
+| `test_mle_deferred` (CI) | proves one node over a real root; checks its public values and that its in-circuit chain step equals `hash_deferred_proof` |
 | `test_mle_deferred_chain` (by hand) | over fib: a baseline that must prove, plus two cases that must fail at the root — one isolating `end_reconstruct == deferred_proofs_digest`; over the aggregator guest (`perf/bench_data/rv64/aggregator-elf`), claiming fib's root twice: a tree with both nodes must prove, the same leaves carrying no chain must fail, a tree with only the first node must be refused by combine's host-side seam check and, with that check off, fail at the root, while the aggregator claiming fib's root once, one node ahead of its leaves, must prove; a node over the proved two-node tree's root, whose own deferred digest is not zero, must fail to verify, while the same node keygen'd without the zero-digest requirement must prove |
 | `test_mle_deferred_split` (by hand) | a halt-only chunk carrying a forged digest behind real nodes, and a cut inside the commit run, must both fail; with the commit-tail hold, the run stays whole across a sweep of chunk sizes and a representative run proves |
 | `test_mle_deferred_whitelist` (by hand) | under the whitelist (the shipped artifact via `MLE_VK_MAP`/`MLE_VK_ROOT`, or a self-map): the aggregator tree with two nodes must prove and pass the apex; refused when the sub-proof is unlisted, proved under another root or not complete, when the node's Merkle path is forged or its own VK unlisted, and when the apex pins another root |
-| `test_carrier_tie` (by hand) | the tie the chain rests on: a carrier that disagrees with Ecall's copy is rejected |
-| `test_mle_e2e` (by hand) | the regression: an honest tree still proves, the chain degenerating to zero |
+| `test_carrier_tie` (CI) | the tie the chain rests on: a carrier that disagrees with Ecall's copy is rejected |
+| `test_mle_e2e` (CI) | the regression: an honest tree still proves, the chain degenerating to zero |

@@ -480,7 +480,9 @@ pub fn rs_code_matrix<Val: GpuNttField>(
     // The single biggest allocation of the commit: the whole RS codeword matrix in one buffer.
     // Log the exact request AND the device free bytes *before* allocating, so an OOM here is
     // diagnosable (the MemTracker delta only prints post-alloc and is lost when this panics).
-    {
+    // Only when the line is logged: `cudaMemGetInfo` takes a driver lock, and against another
+    // lane's allocations it takes milliseconds (p99 3.4 ms over a reth block) on the lane thread.
+    if tracing::enabled!(tracing::Level::INFO) || !crate::runtime::memory_manager::meminfo_lazy() {
         let want = codeword_height * width * std::mem::size_of::<Val>();
         let (dev_free, dev_total) = crate::runtime::memory_manager::device_mem_info();
         tracing::info!(
@@ -818,7 +820,8 @@ where
     }
     let n = col_starts.len();
 
-    {
+    // Only when the line is logged; see `rs_code_matrix`.
+    if tracing::enabled!(tracing::Level::INFO) || !crate::runtime::memory_manager::meminfo_lazy() {
         let block_bytes = codeword_height * bw * std::mem::size_of::<Val>();
         let state_bytes = codeword_height * STREAM_SPONGE_CELLS * std::mem::size_of::<Val>();
         let (dev_free, dev_total) = crate::runtime::memory_manager::device_mem_info();

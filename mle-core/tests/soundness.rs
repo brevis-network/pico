@@ -1,9 +1,11 @@
-//! Provable security of the wired production presets over KoalaBear / KoalaBear^4.
+//! Provable security of the wired production presets over KoalaBear / KoalaBear^5.
 //!
-//! The riscv machine proves with `riscv_params_with_100_bits_security(h)`, `h` = 23 by default and
+//! The riscv machine proves with `riscv_params_with_128_bits_security(h)`, `h` = 23 by default and
 //! any height the preset admits on request; the convert, combine and deferred machines, and the
-//! CPU-side root verification, prove with `recursion_params_with_100_bits_security()`; embed with
-//! `embed_params_with_100_bits_security()`. Each preset is scored at two circuit shapes: the bounds
+//! CPU-side root verification, prove with `recursion_params_with_128_bits_security()`; compress
+//! with `compress_params_with_128_bits_security()` and embed with
+//! `embed_params_with_128_bits_security()` (the same values, two presets; see the compress preset's
+//! doc). Each preset is scored at two circuit shapes: the bounds
 //! its doc comment assumes, and the shape of every key in `soundness_manifest.json`, which
 //! `vm/examples/mle_soundness_manifest.rs` writes from a real keygen of the production machines.
 //! Run with `--nocapture` to see the per-component breakdown.
@@ -12,11 +14,11 @@ use std::collections::BTreeMap;
 
 use pico_mle_core::{
     config::{
-        compress_params_with_100_bits_security, embed_params_with_100_bits_security,
+        compress_params_with_128_bits_security, embed_params_with_128_bits_security,
         koala_bear_poseidon2::KoalaBearPoseidon2Config,
-        recursion_params_with_100_bits_security, riscv_params_with_100_bits_security,
+        recursion_params_with_128_bits_security, riscv_params_with_128_bits_security,
         soundness::{SoundnessCalculator, VkShape, DEGREE_BOUND, PRODUCTION_SECURITY_BITS},
-        try_riscv_params_with_100_bits_security, MAX_RISCV_LOG_STACKED_HEIGHT,
+        try_riscv_params_with_128_bits_security, MAX_RISCV_LOG_STACKED_HEIGHT,
     },
     SystemParams,
 };
@@ -27,7 +29,7 @@ use serde::Deserialize;
 /// the default operating point.
 fn riscv_log_stacked_heights() -> Vec<usize> {
     (0..=MAX_RISCV_LOG_STACKED_HEIGHT)
-        .filter(|&h| try_riscv_params_with_100_bits_security(h).is_ok())
+        .filter(|&h| try_riscv_params_with_128_bits_security(h).is_ok())
         .collect()
 }
 
@@ -51,9 +53,10 @@ const RECURSION_ASSUMED: VkShape = VkShape {
 // Measured shapes: `soundness_manifest.json`, generated, never edited by hand. Per key it holds the
 // `VkShape::from_vk` of a real keygen, the params the key was generated under, its pre-hash and
 // every calculator component, plus the commit it was generated at. Two key sets: the whitelist-off
-// keys of a fib-10 run through the combine root and embed, the ones `test_mle_e2e` keygens, and
-// the whitelisted keys (the riscv key, one convert key per ladder row, every standard combine
-// node, the deferred node).
+// keys of a fib-10 run through the combine root, compress and embed (over the compress proof), the
+// ones `test_mle_e2e` keygens, and the whitelisted keys (the riscv key, one convert key per ladder
+// row, every standard combine node, the deferred and compress nodes over the combine-tier child,
+// and the embed node over the compress proof's layout).
 //
 // The shape is a property of the AIR set, not of the program being proved, so any workload that
 // registers the full chip set measures the same numbers; the riscv shape does not move with the
@@ -81,6 +84,9 @@ struct Manifest {
     shipped_whitelist: String,
     apex: Apex,
     onchain_test_keys: OnchainTestKeys,
+    /// Machines the generator did not keygen (a riscv-only manifest names them); empty for a
+    /// manifest CI accepts.
+    not_generated: Vec<serde_json::Value>,
     keys: Vec<ManifestKey>,
 }
 
@@ -123,7 +129,7 @@ struct ManifestKey {
     params: SystemParams,
     soundness: BTreeMap<String, f64>,
     whir_details: BTreeMap<String, f64>,
-    /// Recorded on the whitelist set's recursion keys only.
+    /// Recorded on the whitelist set's convert, combine, deferred and compress keys only.
     in_shipped_whitelist: Option<bool>,
 }
 
@@ -269,7 +275,7 @@ fn assert_target(label: &str, s: &SoundnessCalculator) {
 }
 
 #[test]
-fn riscv_preset_meets_100_bits_at_assumed_bounds() {
+fn riscv_preset_meets_128_bits_at_assumed_bounds() {
     let heights = riscv_log_stacked_heights();
     assert_eq!(
         (heights.first(), heights.last()),
@@ -277,15 +283,15 @@ fn riscv_preset_meets_100_bits_at_assumed_bounds() {
         "the admitted riscv heights moved: {heights:?}"
     );
     for h in heights {
-        let params = riscv_params_with_100_bits_security(h);
+        let params = riscv_params_with_128_bits_security(h);
         let label = format!("riscv({h}) at assumed bounds");
         assert_target(&label, &score(&label, &params, &RISCV_ASSUMED));
     }
 }
 
 #[test]
-fn recursion_preset_meets_100_bits_at_assumed_bounds() {
-    let params = recursion_params_with_100_bits_security();
+fn recursion_preset_meets_128_bits_at_assumed_bounds() {
+    let params = recursion_params_with_128_bits_security();
     let label = "recursion at assumed bounds";
     assert_target(label, &score(label, &params, &RECURSION_ASSUMED));
 }
@@ -293,24 +299,24 @@ fn recursion_preset_meets_100_bits_at_assumed_bounds() {
 /// Each riscv key is held to the manifest at the height it was keygen'd at, then its shape, which
 /// does not move with the height, is scored at every other admitted height.
 #[test]
-fn riscv_machine_meets_100_bits_at_measured_shape() {
+fn riscv_machine_meets_128_bits_at_measured_shape() {
     let manifest = manifest();
     for key in manifest.keys_of("riscv") {
         let keyed_at = key.shape.log_stacked_height;
-        let params = riscv_params_with_100_bits_security(keyed_at);
+        let params = riscv_params_with_128_bits_security(keyed_at);
         Manifest::check_key(key, &params, &score(&key.label(), &params, &key.shape));
         for h in riscv_log_stacked_heights() {
             let label = format!("{} at h = {h}", key.label());
-            let s = score(&label, &riscv_params_with_100_bits_security(h), &key.shape);
+            let s = score(&label, &riscv_params_with_128_bits_security(h), &key.shape);
             assert_target(&label, &s);
         }
     }
 }
 
 #[test]
-fn recursion_machines_meet_100_bits_at_measured_shape() {
+fn recursion_machines_meet_128_bits_at_measured_shape() {
     let manifest = manifest();
-    let params = recursion_params_with_100_bits_security();
+    let params = recursion_params_with_128_bits_security();
     for machine in RECURSION_MACHINES {
         for key in manifest.keys_of(machine) {
             let s = score(&key.label(), &params, &key.shape);
@@ -321,10 +327,23 @@ fn recursion_machines_meet_100_bits_at_measured_shape() {
 }
 
 #[test]
-fn embed_machine_meets_100_bits_at_measured_shape() {
+fn embed_machine_meets_128_bits_at_measured_shape() {
     let manifest = manifest();
-    let params = embed_params_with_100_bits_security();
+    let params = embed_params_with_128_bits_security();
     for key in manifest.keys_of("embed") {
+        let s = score(&key.label(), &params, &key.shape);
+        Manifest::check_key(key, &params, &s);
+        assert_target(&key.label(), &s);
+    }
+}
+
+/// The compress key (the final compression layer) at its measured shape: the recursion
+/// chip set over the combine root, at the compress preset.
+#[test]
+fn compress_machine_meets_128_bits_at_measured_shape() {
+    let manifest = manifest();
+    let params = compress_params_with_128_bits_security();
+    for key in manifest.keys_of("compress") {
         let s = score(&key.label(), &params, &key.shape);
         Manifest::check_key(key, &params, &s);
         assert_target(&key.label(), &s);
@@ -340,7 +359,9 @@ fn measured_shapes_are_within_assumed_bounds() {
         let measured = &key.shape;
         let assumed = match key.machine.as_str() {
             "riscv" => &RISCV_ASSUMED,
-            m if RECURSION_MACHINES.contains(&m) || m == "embed" => &RECURSION_ASSUMED,
+            m if RECURSION_MACHINES.contains(&m) || m == "embed" || m == "compress" => {
+                &RECURSION_ASSUMED
+            }
             m => panic!("{m}: a manifest machine no test scores; give it a preset and a bound"),
         };
         assert!(
@@ -370,14 +391,32 @@ fn manifest_identities_are_recorded() {
         manifest.commit
     );
     assert!(!manifest.shipped_whitelist.is_empty());
+    // The whitelist set is complete: every key kind a whitelist-mode prover
+    // keygens is scored, and the recursion ones among them are held to membership below.
+    for machine in ["convert", "combine", "deferred", "embed", "compress"] {
+        assert!(
+            manifest
+                .keys
+                .iter()
+                .any(|k| k.mode == "whitelist" && k.machine == machine),
+            "the manifest has no whitelist-mode {machine} key; {REGENERATE}"
+        );
+    }
+    assert!(
+        manifest.not_generated.is_empty(),
+        "the manifest lists machines it did not generate {:?}; {REGENERATE}",
+        manifest.not_generated
+    );
     for key in &manifest.keys {
-        let recursion = key.machine != "riscv" && key.machine != "embed";
-        let expected = (key.mode == "whitelist" && recursion).then_some(true);
+        // The keys the whitelist can hold: every KoalaBear-digest recursion key and the compress
+        // key; the riscv key is pinned by its pre-hash, the embed key is BN254-hashed.
+        let member_checked = key.machine != "riscv" && key.machine != "embed";
+        let expected = (key.mode == "whitelist" && member_checked).then_some(true);
         assert_eq!(
             key.in_shipped_whitelist,
             expected,
-            "{}: whitelist membership (every whitelist-mode recursion key is a member of the \
-             shipped whitelist, and no other key records it); {REGENERATE}",
+            "{}: whitelist membership (every whitelist-mode convert, combine, deferred and compress \
+             key is a member of the shipped whitelist, and no other key records it); {REGENERATE}",
             key.label()
         );
     }
@@ -421,38 +460,46 @@ fn manifest_identities_are_recorded() {
     );
 }
 
-/// The challenge field is `KoalaBear^4`: `4 · log2(2^31 - 2^24 + 1)` bits.
+/// The challenge field is `KoalaBear^5`: `5 · log2(2^31 - 2^24 + 1)` bits.
 #[test]
 fn koalabear_field_constants() {
     use pico_mle_core::config::{base_field_order, challenge_field_bits};
     assert_eq!(base_field_order(), 2130706433.0);
-    assert!((challenge_field_bits() - 123.9547).abs() < 1e-3);
+    assert!((challenge_field_bits() - 154.9434).abs() < 1e-3);
 }
 
 // ---------------------------------------------------------------------------------------------
-// The EVM path's stages: combine -> embed -> wrap -> Groth16. They register the same recursion
-// chip set as convert and combine, so `RECURSION_ASSUMED` bounds them too — for embed that is the
-// looser bound (its doc comment assumes 21 AIRs, not 50), and scoring against the looser one can
-// only understate the margin.
+// The tail after the combine root: combine -> compress (the final proof, under the inner config)
+// -> embed -> wrap -> Groth16, the EVM path. Compress re-proves the combine root and embed
+// the compress proof, both with the recursion chip set, so `RECURSION_ASSUMED` bounds them too —
+// for them that is the looser bound (their doc comments assume 21 AIRs, not 50), and scoring
+// against the looser one can only understate the margin.
 // ---------------------------------------------------------------------------------------------
 
-/// Heights compress is scored at: the one it is wired at, and the largest one it could be given.
-/// With `log_blowup = 2` the RS domain is `2^(h+2)` against KoalaBear's two-adicity of 24, so 22 is
-/// the last height whose domain exists; the constructor refuses 23.
-const COMPRESS_LOG_STACKED_HEIGHTS: [usize; 2] = [20, 22];
-
 #[test]
-fn compress_preset_meets_100_bits_at_assumed_bounds() {
-    for h in COMPRESS_LOG_STACKED_HEIGHTS {
-        let params = compress_params_with_100_bits_security(h);
-        let label = format!("compress({h}) at assumed bounds");
-        assert_target(&label, &score(&label, &params, &RECURSION_ASSUMED));
-    }
+fn compress_preset_meets_128_bits_at_assumed_bounds() {
+    let params = compress_params_with_128_bits_security();
+    let label = "compress at assumed bounds";
+    assert_target(label, &score(label, &params, &RECURSION_ASSUMED));
+}
+
+/// The compress and embed presets carry the same values. They are separate presets because they
+/// are tuned for different costs (proof size; the Groth16 circuit's cost per query); embed verifies
+/// the compress proof, and keeping its values equal is a choice (the wrap circuit over them is
+/// 7,243,820 R1CS, 13.6% under 2^23). A retune for the wrap circuit moves
+/// the embed key, and with it the wrap circuit, its Groth16 setup and the soundness manifest, but
+/// not the whitelist; then this test goes.
+#[test]
+fn compress_and_embed_params_agree_today() {
+    assert_eq!(
+        compress_params_with_128_bits_security(),
+        embed_params_with_128_bits_security()
+    );
 }
 
 #[test]
-fn embed_preset_meets_100_bits_at_assumed_bounds() {
-    let params = embed_params_with_100_bits_security();
+fn embed_preset_meets_128_bits_at_assumed_bounds() {
+    let params = embed_params_with_128_bits_security();
     let label = "embed at assumed bounds";
     assert_target(label, &score(label, &params, &RECURSION_ASSUMED));
 }
@@ -464,7 +511,7 @@ fn embed_preset_uses_the_full_two_adic_domain() {
     use p3_field::TwoAdicField;
     use p3_koala_bear::KoalaBear;
 
-    let params = embed_params_with_100_bits_security();
+    let params = embed_params_with_128_bits_security();
     assert_eq!(
         params.l_skip + params.n_stack + params.log_blowup,
         KoalaBear::TWO_ADICITY,
@@ -474,13 +521,13 @@ fn embed_preset_uses_the_full_two_adic_domain() {
 // ---------------------------------------------------------------------------------------------
 // Every component pinned at the assumed bounds, not only the minimum: a calculator change that
 // moves a term the total does not bind on fails here instead of passing silently. Values to the
-// hundredth, as `score` prints them; the embed preset is the one that differs under
+// hundredth, as `score` prints them; the compress and embed presets are the ones that differ under
 // `soundness-bchks25-optimized`. The measured shapes are pinned by the manifest, `check_key`.
 // ---------------------------------------------------------------------------------------------
 
 /// The two LogUp-GKR terms depend on the challenge field alone: `|F| - log2(4)` and `|F| - log2(2)`.
-const GKR_SUMCHECK: f64 = 121.95;
-const GKR_BATCHING: f64 = 122.95;
+const GKR_SUMCHECK: f64 = 152.94;
+const GKR_BATCHING: f64 = 153.94;
 
 struct Pinned {
     logup: f64,
@@ -530,22 +577,22 @@ fn assert_pinned(label: &str, s: &SoundnessCalculator, pinned: &Pinned) {
 }
 
 const RISCV_WHIR: [f64; 8] = [
-    100.09, 105.95, 127.37, 105.95, 105.95, 116.35, 100.09, 103.96,
+    128.32, 136.94, 158.36, 136.94, 136.94, 146.91, 128.32, 134.94,
 ];
 const RECURSION_WHIR: [f64; 8] = [
-    100.01, 105.95, 126.37, 105.95, 107.95, 117.06, 100.01, 102.96,
+    128.39, 136.94, 157.36, 136.94, 138.94, 147.61, 128.39, 133.94,
 ];
 
 #[test]
 fn riscv_components_are_pinned() {
-    let params = riscv_params_with_100_bits_security(23);
+    let params = riscv_params_with_128_bits_security(23);
     let label = "riscv(23) at assumed bounds";
     let pinned = Pinned {
-        logup: 102.97,
-        zerocheck: 118.05,
-        constraint_batching: 111.66,
-        stacked_reduction: 107.67,
-        total: 100.09,
+        logup: 133.95,
+        zerocheck: 149.04,
+        constraint_batching: 142.65,
+        stacked_reduction: 138.66,
+        total: 128.32,
         whir: RISCV_WHIR,
     };
     assert_pinned(label, &score(label, &params, &RISCV_ASSUMED), &pinned);
@@ -553,81 +600,68 @@ fn riscv_components_are_pinned() {
 
 #[test]
 fn recursion_components_are_pinned() {
-    let params = recursion_params_with_100_bits_security();
+    let params = recursion_params_with_128_bits_security();
     let label = "recursion at assumed bounds";
     let pinned = Pinned {
-        logup: 102.97,
-        zerocheck: 117.73,
-        constraint_batching: 113.94,
-        stacked_reduction: 111.99,
-        total: 100.01,
+        logup: 133.95,
+        zerocheck: 148.71,
+        constraint_batching: 144.93,
+        stacked_reduction: 142.98,
+        total: 128.39,
         whir: RECURSION_WHIR,
     };
     assert_pinned(label, &score(label, &params, &RECURSION_ASSUMED), &pinned);
 }
 
-#[test]
-fn compress_components_are_pinned() {
-    for (h, constraint_batching, whir) in [
-        (
-            20,
-            113.95,
-            [
-                100.01, 107.95, 127.37, 107.95, 108.95, 117.06, 100.01, 105.96,
-            ],
-        ),
-        (
-            22,
-            113.94,
-            [
-                100.01, 105.95, 127.37, 105.95, 106.95, 117.06, 100.01, 103.96,
-            ],
-        ),
-    ] {
-        let params = compress_params_with_100_bits_security(h);
-        let label = format!("compress({h}) at assumed bounds");
-        let pinned = Pinned {
-            logup: 102.97,
-            zerocheck: 117.73,
-            constraint_batching,
-            stacked_reduction: 111.99,
-            total: 100.01,
-            whir,
-        };
-        assert_pinned(&label, &score(&label, &params, &RECURSION_ASSUMED), &pinned);
-    }
-}
-
-/// The optimized degree bound shrinks the list size, which every term charging `log2(L_PCS)` gains;
-/// LogUp then clears WHIR's query term, which binds instead.
-#[test]
-fn embed_components_are_pinned() {
-    let params = embed_params_with_100_bits_security();
-    let label = "embed at assumed bounds";
-    let pinned = if cfg!(feature = "soundness-bchks25-optimized") {
+/// The pins of the list-decoding (`m = 2`) presets, compress and embed. The optimized degree bound
+/// shrinks the list size, which every term charging `log2(L_PCS)` gains; at 128 bits over
+/// KoalaBear^5 WHIR's query term binds under both bounds.
+fn list_decoding_pins() -> Pinned {
+    if cfg!(feature = "soundness-bchks25-optimized") {
         Pinned {
-            logup: 101.38,
-            zerocheck: 116.14,
-            constraint_batching: 112.36,
-            stacked_reduction: 110.40,
-            total: 100.66,
+            logup: 131.15,
+            zerocheck: 145.91,
+            constraint_batching: 142.13,
+            stacked_reduction: 140.17,
+            total: 128.05,
             whir: [
-                100.66, 102.79, 133.37, 102.79, 102.04, 113.14, 100.66, 105.73,
+                128.05, 129.56, 163.36, 129.56, 131.02, 142.80, 128.05, 131.98,
             ],
         }
     } else {
         Pinned {
-            logup: 100.38,
-            zerocheck: 115.14,
-            constraint_batching: 111.36,
-            stacked_reduction: 109.40,
-            total: 100.38,
+            logup: 130.63,
+            zerocheck: 145.39,
+            constraint_batching: 141.61,
+            stacked_reduction: 139.66,
+            total: 128.05,
             whir: [
-                100.66, 101.61, 132.78, 101.61, 100.78, 112.55, 100.66, 103.62,
+                128.05, 128.92, 163.04, 128.92, 130.30, 142.48, 128.05, 130.94,
             ],
         }
-    };
-    assert_pinned(label, &score(label, &params, &RECURSION_ASSUMED), &pinned);
+    }
+}
+
+#[test]
+fn compress_components_are_pinned() {
+    let params = compress_params_with_128_bits_security();
+    let label = "compress at assumed bounds";
+    assert_pinned(
+        label,
+        &score(label, &params, &RECURSION_ASSUMED),
+        &list_decoding_pins(),
+    );
+}
+
+#[test]
+fn embed_components_are_pinned() {
+    let params = embed_params_with_128_bits_security();
+    let label = "embed at assumed bounds";
+    assert_pinned(
+        label,
+        &score(label, &params, &RECURSION_ASSUMED),
+        &list_decoding_pins(),
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -636,9 +670,9 @@ fn embed_components_are_pinned() {
 
 /// One query fewer in the recursion preset's first WHIR round drops the query term below the target.
 #[test]
-#[should_panic(expected = "recursion, one query fewer in round 0: 99.33 bits < 100")]
-fn a_budget_weakened_below_100_bits_fails_the_target() {
-    let mut params = recursion_params_with_100_bits_security();
+#[should_panic(expected = "recursion, one query fewer in round 0: 127.81 bits < 128")]
+fn a_budget_weakened_below_128_bits_fails_the_target() {
+    let mut params = recursion_params_with_128_bits_security();
     params.whir.rounds[0].num_queries -= 1;
     let label = "recursion, one query fewer in round 0";
     assert_target(label, &score(label, &params, &RECURSION_ASSUMED));
@@ -652,5 +686,5 @@ fn a_budget_weakened_below_100_bits_fails_the_target() {
                 two-adicity 24"
 )]
 fn an_rs_domain_past_the_two_adicity_is_refused() {
-    riscv_params_with_100_bits_security(24);
+    riscv_params_with_128_bits_security(24);
 }

@@ -10,7 +10,7 @@
 //! not an oracle. What is compared is what the two runs mean.
 
 use pico_mle_core::{
-    config::recursion_params_with_100_bits_security,
+    config::{compress_params_with_128_bits_security, recursion_params_with_128_bits_security},
     p3_field::{PrimeCharacteristicRing, PrimeField32},
     StarkEngine,
 };
@@ -26,6 +26,7 @@ use pico_vm::{
     emulator::{recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP, stdin::EmulatorStdin},
     mle::machine::{
         combine::CombineMachine,
+        compress::CompressMachine,
         convert::{ConvertMachine, ProofWithVk},
         exe::RiscvVmVk,
         riscv::{self, air_id, RiscvProof},
@@ -63,15 +64,19 @@ struct Facts {
     committed: Vec<u8>,
     combine_vk_pre_hash: [u32; 8],
     combine_vk_merged: Option<[u32; 8]>,
+    compress_vk_pre_hash: [u32; 8],
+    compress_vk_merged: Option<[u32; 8]>,
 }
 
 struct Direct {
     facts: Facts,
     riscv: RiscvProof,
     root: ProofWithVk,
+    compress: ProofWithVk,
 }
 
-/// The chain driven straight against the machines, as the end-to-end example drives it.
+/// The chain driven straight against the machines, as the end-to-end example drives it, through
+/// compress (the proof embed takes). Embed and wrap are left to `tests/evm.rs`.
 fn direct_chain(n: u32) -> Direct {
     let program = Compiler::new(SourceType::RISCV, FIB_ELF)
         .expect("parse the fib ELF")
@@ -122,7 +127,7 @@ fn direct_chain(n: u32) -> Direct {
         riscv_vk,
         riscv_vm_vk.clone(),
         &riscv_proofs,
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         false,
     )
     .expect("convert machine");
@@ -134,12 +139,17 @@ fn direct_chain(n: u32) -> Direct {
     }
 
     let mut combine = CombineMachine::new(
-        recursion_params_with_100_bits_security(),
-        riscv_vm_vk,
+        recursion_params_with_128_bits_security(),
+        riscv_vm_vk.clone(),
         false,
     );
     let root = combine.prove_tree(convert_proofs).expect("combine prove");
     combine.verify(&root).expect("combine verify");
+
+    let mut compress =
+        CompressMachine::new(compress_params_with_128_bits_security(), riscv_vm_vk, false);
+    let compress_proof = compress.prove(root.clone()).expect("compress prove");
+    compress.verify(&compress_proof).expect("compress verify");
 
     Direct {
         facts: Facts {
@@ -150,9 +160,17 @@ fn direct_chain(n: u32) -> Direct {
             committed: emulated.committed_bytes,
             combine_vk_pre_hash: words(&root.1.pre_hash),
             combine_vk_merged: root.1.inner.merged_preprocessed_commit.as_ref().map(words),
+            compress_vk_pre_hash: words(&compress_proof.1.pre_hash),
+            compress_vk_merged: compress_proof
+                .1
+                .inner
+                .merged_preprocessed_commit
+                .as_ref()
+                .map(words),
         },
         riscv: keep,
         root,
+        compress: compress_proof,
     }
 }
 
@@ -194,6 +212,9 @@ fn the_facade_proves_what_the_direct_chain_proves() {
         .prove_to(Stdin::from(&N), Phase::Riscv)
         .expect("facade riscv");
     let combine_proof = prover.prove(Stdin::from(&N)).expect("facade combine");
+    let compress_proof = prover
+        .prove_to(Stdin::from(&N), Phase::Compress)
+        .expect("facade compress");
 
     // the two runs mean the same thing
     assert_eq!(riscv_proof.phase(), Phase::Riscv);
@@ -229,6 +250,22 @@ fn the_facade_proves_what_the_direct_chain_proves() {
         combine_proof.vk_merged_commit(),
         direct.facts.combine_vk_merged,
         "the facade's root circuit is not the direct path's"
+    );
+    assert_eq!(compress_proof.phase(), Phase::Compress);
+    assert_eq!(
+        compress_proof.committed_value_digest(),
+        direct.facts.committed_value_digest,
+        "compress lost the committed-value digest"
+    );
+    assert_eq!(
+        compress_proof.vk_pre_hash(),
+        Some(direct.facts.compress_vk_pre_hash),
+        "the facade keygen'd a different compress shape"
+    );
+    assert_eq!(
+        compress_proof.vk_merged_commit(),
+        direct.facts.compress_vk_merged,
+        "the facade's compress circuit is not the direct path's"
     );
     assert_eq!(riscv_proof.proof_count(), direct.facts.chunk_count);
     assert_eq!(combine_proof.proof_count(), 1);
@@ -285,7 +322,20 @@ fn the_facade_proves_what_the_direct_chain_proves() {
         .verify_artifact(ProofArtifact::read(&direct_root_file).expect("read"))
         .expect("the direct path's root must verify on the facade's own keygen'd shapes");
 
-    // what the container refuses to carry
+    let direct_compress_file = dir.join("direct_compress.pico");
+    as_proof(
+        &direct.facts,
+        Phase::Compress,
+        Payload::Compress(Box::new(direct.compress.clone())),
+    )
+    .write(&direct_compress_file)
+    .expect("write the direct compress proof");
+    prover
+        .verify_artifact(ProofArtifact::read(&direct_compress_file).expect("read"))
+        .expect("the direct path's compress proof must verify on the facade's compress key");
+
+    // what the container refuses to carry (a compress proof, unlike these, is written and answered
+    // for: above and `tests/compress.rs`)
     // The payload is irrelevant here; the refusal is by phase, because no verification entry point
     // can answer for a convert proof from a file.
     let err = as_proof(&direct.facts, Phase::Convert, Payload::Convert(Vec::new()))
@@ -586,6 +636,10 @@ fn the_end_to_end_example_still_drives_the_machines_directly() {
         "ConvertMachine::new(",
         "CombineMachine::new(",
         ".prove_tree(",
+        "prove_compress_node(root,",
+        "compress.prove(",
+        "EmbedMachine::new(",
+        "embed.prove(compress)",
     ] {
         assert!(
             source.contains(call),

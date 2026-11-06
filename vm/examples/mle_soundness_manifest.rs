@@ -8,21 +8,31 @@
 //! Two key sets, one per whitelist mode:
 //!
 //!   dev        whitelist off: natural heights, the way `test_mle_e2e` runs by default. The riscv
-//!              key, the convert key of each riscv record, the combine root, a deferred node over
-//!              that root and the embed key over it. Outside the whitelist a recursion key is keyed
-//!              to the heights of the proof it verifies, so fib-10 is proved through the combine
-//!              root -- its two records make a one-node tree -- and the deferred node and embed are
-//!              keygen'd over the root, from its proof's layout, not proved.
+//!              key, the convert key of each riscv record, the combine root, the compress key and
+//!              a deferred node over the root, and the embed key over the compress proof. Outside
+//!              the whitelist a recursion key is keyed to the heights of the proof it verifies, so
+//!              fib-10 is proved through the combine root -- its two records make a one-node tree
+//!              -- and on to the compress proof (a few seconds), since embed's key is keyed to the
+//!              compress proof's heights; the deferred node is keygen'd over the root's
+//!              layout, not proved.
 //!   whitelist  bucketed shapes, the keys a whitelisted deployment proves with. The riscv key, one
 //!              convert key per convert ladder row (the first whitelist shape that pads to it; the
 //!              whitelist holds one per riscv shape, too many to keygen here), every standard
-//!              combine node over the child kinds C0..C2 and B, and the deferred node. Nothing is
-//!              proved: under the whitelist a key is a function of its shape. Each of its
-//!              recursion keys records whether the shipped whitelist holds it.
+//!              combine node over the child kinds C0..C2 and B, the deferred and compress nodes
+//!              over the B child, and the embed node over the compress proof's layout
+//!              (`compress_proof_layout`). Nothing is proved: under the whitelist a key is a
+//!              function of its shape. Each of its recursion keys records whether the shipped
+//!              whitelist holds it; embed is scored but is no member: its key is BN254-hashed, so
+//!              it has no KoalaBear identity to be a leaf, and no apex verifies an embed proof.
 //!
-//! Embed is generated in the dev set only: its key follows the layout of the root proof it wraps,
-//! and the whitelist set proves no root. Its key is BN254-hashed, so its pre-hash is written as
-//! decimal strings.
+//! `MLE_SOUNDNESS_MANIFEST_RISCV_ONLY=1` writes a riscv-only manifest: both sets stop after the riscv
+//! key and the header lists the machines not generated (a transition mode, used while the
+//! recursion machines did not yet run on the 128-bit field).
+//!
+//! Embed's key is BN254-hashed, so its pre-hash is written as decimal strings. Compress is the
+//! final compression layer; its one whitelist-mode key is a whitelist member. Embed verifies the
+//! compress proof, so its key follows the compress proof's
+//! layout; the artifact unit test holds the whitelist set's embed identity against this binary.
 //!
 //! The header records the identities an apex verifier is built from in whitelist mode: the
 //! shipped whitelist's root (`MLE_VK_ROOT`) and the whitelist-mode riscv key's pre-hash. The
@@ -45,14 +55,16 @@
 //!   cargo run --release -p pico-vm --example mle_soundness_manifest
 //!
 //! Environment:
-//!   MLE_SOUNDNESS_MANIFEST_OUT  output path, default mle-core/tests/soundness_manifest.json
+//!   MLE_SOUNDNESS_MANIFEST_OUT         output path, default mle-core/tests/soundness_manifest.json
+//!   MLE_SOUNDNESS_MANIFEST_RISCV_ONLY  `1` writes the riscv-only manifest described above
 
 use std::{process::Command, sync::Arc, time::Instant};
 
 use p3_field::PrimeField32;
 use pico_mle_core::{
     config::{
-        embed_params_with_100_bits_security, recursion_params_with_100_bits_security,
+        compress_params_with_128_bits_security, embed_params_with_128_bits_security,
+        recursion_params_with_128_bits_security,
         soundness::{SoundnessCalculator, VkShape, DEGREE_BOUND},
         StarkProtocolConfig,
     },
@@ -71,12 +83,14 @@ use pico_vm::{
         compiler::recursion::{ConvertProgramInput, ConvertVerifierCircuit},
         machine::{
             combine::CombineMachine,
+            compress::CompressMachine,
             convert::ConvertMachine,
             deferred::DeferredMachine,
             embed::EmbedMachine,
             exe::RiscvVmVk,
             recursion::{
-                extract_recursion_vk_layout, recursion_natural_rows, select_convert_row, Engine,
+                compress_proof_layout, extract_recursion_vk_layout, recursion_natural_rows,
+                select_convert_row, Engine,
             },
             riscv::{self, Sc},
             shape::{mle_riscv_shapes, MLE_RECURSION_CONVERT_LADDER},
@@ -94,9 +108,9 @@ const DEFAULT_OUT: &str = "mle-core/tests/soundness_manifest.json";
 const FIB_ELF: &str = "perf/bench_data/rv64/fib-elf";
 const FIB_N: u32 = 10;
 const SHIPPED_WHITELIST: &str = "vm/src/mle/shape_vk_bins/mle_vk_map_kb.bin";
-const EMBED_REASON: &str = "the embed key follows the layout of the root proof it wraps, and \
-                            the whitelist set proves no root; the dev set's embed key has the \
-                            same params and shape";
+const RISCV_ONLY_REASON: &str =
+    "riscv-only manifest (MLE_SOUNDNESS_MANIFEST_RISCV_ONLY=1): only the \
+                                 riscv keys are generated";
 const ONCHAIN_TEST_KEYS: &str = "contracts/test/dev/manifest.json";
 const ONCHAIN_NOTE: &str = "test keys from a single-process Groth16 setup (contracts/README.md); \
                             a deployment needs a setup ceremony";
@@ -244,6 +258,7 @@ fn main() {
     }
     let out_path =
         std::env::var("MLE_SOUNDNESS_MANIFEST_OUT").unwrap_or_else(|_| DEFAULT_OUT.to_string());
+    let riscv_only = std::env::var("MLE_SOUNDNESS_MANIFEST_RISCV_ONLY").is_ok_and(|v| v == "1");
     let commit = git(&["rev-parse", "HEAD"]).trim().to_string();
     // Tracked changes only, the manifest itself excluded: those are what could move a key.
     let dirty_paths: Vec<String> = git(&["status", "--porcelain", "--untracked-files=no"])
@@ -307,93 +322,117 @@ fn main() {
         .into_parts();
     rows.push(row("riscv", "dev", format!("fib-{FIB_N}"), &riscv_vk, None));
 
-    let vm_vk = RiscvVmVk::from_program_and_vk(&program, &riscv_vk);
-    let convert = ConvertMachine::new(
-        riscv_vk.clone(),
-        vm_vk.clone(),
-        &riscv_proofs,
-        recursion_params_with_100_bits_security(),
-        false,
-    )
-    .expect("convert machine");
-    let children = convert
-        .prove_with_vks(&riscv_proofs)
-        .expect("convert prove");
-    // One row per distinct key, in the order of the first record it verifies.
-    let mut convert_keys: Vec<(Arc<MultiStarkVerifyingKey<Sc>>, Vec<usize>)> = Vec::new();
-    for (i, (_, vk)) in children.iter().enumerate() {
-        match convert_keys
-            .iter_mut()
-            .find(|(k, _)| vk_identity(k) == vk_identity(vk))
-        {
-            Some((_, records)) => records.push(i),
-            None => convert_keys.push((vk.clone(), vec![i])),
+    if !riscv_only {
+        let vm_vk = RiscvVmVk::from_program_and_vk(&program, &riscv_vk);
+        let convert = ConvertMachine::new(
+            riscv_vk.clone(),
+            vm_vk.clone(),
+            &riscv_proofs,
+            recursion_params_with_128_bits_security(),
+            false,
+        )
+        .expect("convert machine");
+        let children = convert
+            .prove_with_vks(&riscv_proofs)
+            .expect("convert prove");
+        // One row per distinct key, in the order of the first record it verifies.
+        let mut convert_keys: Vec<(Arc<MultiStarkVerifyingKey<Sc>>, Vec<usize>)> = Vec::new();
+        for (i, (_, vk)) in children.iter().enumerate() {
+            match convert_keys
+                .iter_mut()
+                .find(|(k, _)| vk_identity(k) == vk_identity(vk))
+            {
+                Some((_, records)) => records.push(i),
+                None => convert_keys.push((vk.clone(), vec![i])),
+            }
         }
-    }
-    for (vk, records) in &convert_keys {
+        for (vk, records) in &convert_keys {
+            rows.push(row(
+                "convert",
+                "dev",
+                format!("riscv records {records:?}"),
+                vk,
+                None,
+            ));
+        }
+
+        let n_children = children.len();
+        let mut combine = CombineMachine::new(
+            recursion_params_with_128_bits_security(),
+            vm_vk.clone(),
+            false,
+        );
+        let root = combine.prove_tree(children).expect("combine prove");
+        assert_eq!(
+            combine.num_distinct_shapes(),
+            1,
+            "the dev tree keyed more than its root; give the other nodes rows"
+        );
         rows.push(row(
-            "convert",
+            "combine",
             "dev",
-            format!("riscv records {records:?}"),
-            vk,
+            format!("root over {n_children} convert children"),
+            &root.1,
+            None,
+        ));
+
+        let root_layout = extract_recursion_vk_layout(&root.1, Some(&root.0));
+        // Compress over the root, proved: embed verifies the compress proof, and outside
+        // the whitelist its key follows that proof's heights.
+        let mut compress = CompressMachine::new(
+            compress_params_with_128_bits_security(),
+            vm_vk.clone(),
+            false,
+        );
+        let compress_vk = compress
+            .preregister(&root_layout)
+            .unwrap_or_else(|e| panic!("{e}"));
+        let compress_proof = compress.prove(root).expect("compress prove");
+        let compress_layout =
+            extract_recursion_vk_layout(&compress_proof.1, Some(&compress_proof.0));
+
+        let mut embed =
+            EmbedMachine::new(embed_params_with_128_bits_security(), vm_vk.clone(), false);
+        let embed_vk = embed
+            .preregister(&compress_layout)
+            .unwrap_or_else(|e| panic!("{e}"));
+        let embed_pre_hash: Vec<String> = embed_vk.pre_hash.iter().map(|x| x.to_string()).collect();
+        let embed_commit: Option<Vec<String>> = embed_vk
+            .inner
+            .merged_preprocessed_commit
+            .map(|c| c.iter().map(|x| x.to_string()).collect());
+        let mut embed_identity = vec![("vk_pre_hash", list(&embed_pre_hash))];
+        if let Some(commit) = embed_commit {
+            embed_identity.push(("merged_preprocessed_commit", list(&commit)));
+        }
+        rows.push(scored_row(
+            "embed",
+            "dev",
+            "over the compress proof".to_string(),
+            &embed_vk,
+            embed_identity,
+        ));
+        rows.push(row(
+            "compress",
+            "dev",
+            "over the combine root".to_string(),
+            &compress_vk,
+            None,
+        ));
+
+        let mut deferred =
+            DeferredMachine::new(recursion_params_with_128_bits_security(), vm_vk, false);
+        let deferred_vk = deferred
+            .preregister(&root_layout)
+            .unwrap_or_else(|e| panic!("{e}"));
+        rows.push(row(
+            "deferred",
+            "dev",
+            "node over the combine root".to_string(),
+            &deferred_vk,
             None,
         ));
     }
-
-    let n_children = children.len();
-    let mut combine = CombineMachine::new(
-        recursion_params_with_100_bits_security(),
-        vm_vk.clone(),
-        false,
-    );
-    let root = combine.prove_tree(children).expect("combine prove");
-    assert_eq!(
-        combine.num_distinct_shapes(),
-        1,
-        "the dev tree keyed more than its root; give the other nodes rows"
-    );
-    rows.push(row(
-        "combine",
-        "dev",
-        format!("root over {n_children} convert children"),
-        &root.1,
-        None,
-    ));
-
-    let root_layout = extract_recursion_vk_layout(&root.1, Some(&root.0));
-    let mut embed = EmbedMachine::new(embed_params_with_100_bits_security(), vm_vk.clone(), false);
-    let embed_vk = embed
-        .preregister(&root_layout)
-        .unwrap_or_else(|e| panic!("{e}"));
-    let embed_pre_hash: Vec<String> = embed_vk.pre_hash.iter().map(|x| x.to_string()).collect();
-    let embed_commit: Option<Vec<String>> = embed_vk
-        .inner
-        .merged_preprocessed_commit
-        .map(|c| c.iter().map(|x| x.to_string()).collect());
-    let mut embed_identity = vec![("vk_pre_hash", list(&embed_pre_hash))];
-    if let Some(commit) = embed_commit {
-        embed_identity.push(("merged_preprocessed_commit", list(&commit)));
-    }
-    rows.push(scored_row(
-        "embed",
-        "dev",
-        "over the combine root".to_string(),
-        &embed_vk,
-        embed_identity,
-    ));
-
-    let mut deferred =
-        DeferredMachine::new(recursion_params_with_100_bits_security(), vm_vk, false);
-    let deferred_vk = deferred
-        .preregister(&root_layout)
-        .unwrap_or_else(|e| panic!("{e}"));
-    rows.push(row(
-        "deferred",
-        "dev",
-        "node over the combine root".to_string(),
-        &deferred_vk,
-        None,
-    ));
     info!("dev keys: {:.0} s", t0.elapsed().as_secs_f64());
 
     // Whitelist set: keygen only.
@@ -410,90 +449,159 @@ fn main() {
         None,
     ));
 
-    // A convert program's row follows from its natural heights, so the first shape of each row is
-    // found by building programs, not keys. The core family leads the enumeration and reaches the
-    // last row with its catch-all.
-    let rows_n = MLE_RECURSION_CONVERT_LADDER.len();
-    let mut first_on_row: Vec<Option<usize>> = vec![None; rows_n];
-    let shapes = mle_riscv_shapes();
-    for (i, (_, shape)) in shapes.iter().enumerate() {
-        let program = ConvertVerifierCircuit::build_verify_program(&ConvertProgramInput {
-            vk: synthesized_convert_layout(&wl_riscv_vk, shape),
-            vk_verification: true,
-        });
-        first_on_row[select_convert_row(&recursion_natural_rows(&program))].get_or_insert(i);
-        if first_on_row.iter().all(Option::is_some) {
-            break;
-        }
-    }
-    let engine: Engine = StarkEngine::new(recursion_params_with_100_bits_security());
-    let mut convert_vk_row0 = None;
-    for (r, first) in first_on_row.iter().enumerate() {
-        let i = first.unwrap_or_else(|| panic!("no whitelist shape pads to convert row {r}"));
-        let (label, shape) = &shapes[i];
-        let vk = whitelist_convert_vk(&engine, &wl_riscv_vk, label, shape)
-            .unwrap_or_else(|e| panic!("{e}"));
-        rows.push(row(
-            "convert",
-            "whitelist",
-            format!("ladder row {r} (C{r}), shape `{label}`"),
-            &vk,
-            Some(&shipped),
-        ));
-        convert_vk_row0.get_or_insert(vk);
-    }
-    let convert_vk_row0 = convert_vk_row0.expect("the convert ladder is empty");
-
-    let wl_vm_vk = RiscvVmVk::from_program_and_vk(&program, &wl_riscv_vk);
-    let mut combine = CombineMachine::new(
-        recursion_params_with_100_bits_security(),
-        wl_vm_vk.clone(),
-        true,
-    );
-    let combine_vks = combine
-        .preregister_standard_shapes(&convert_vk_row0)
-        .unwrap_or_else(|e| panic!("{e}"));
-    // `preregister_standard_shapes`' order, which the whitelist's leaf order also rests on: the
-    // ordered pairs over the child kinds (ladder rows, then the combine tier) non-root and then
-    // root, then the single-child roots.
-    let kinds: Vec<String> = (0..rows_n)
-        .map(|r| format!("C{r}"))
-        .chain(["B".to_string()])
-        .collect();
-    let mut roles = Vec::new();
-    for complete in [false, true] {
-        let node = if complete { "root" } else { "non-root node" };
-        for left in &kinds {
-            for right in &kinds {
-                roles.push(format!("{node} over [{left}, {right}]"));
+    if !riscv_only {
+        // A convert program's row follows from its natural heights, so the first shape of each row is
+        // found by building programs, not keys. The core family leads the enumeration and reaches the
+        // last row with its catch-all.
+        let rows_n = MLE_RECURSION_CONVERT_LADDER.len();
+        let mut first_on_row: Vec<Option<usize>> = vec![None; rows_n];
+        let shapes = mle_riscv_shapes();
+        for (i, (_, shape)) in shapes.iter().enumerate() {
+            let program = ConvertVerifierCircuit::build_verify_program(&ConvertProgramInput {
+                vk: synthesized_convert_layout(&wl_riscv_vk, shape),
+                vk_verification: true,
+            });
+            first_on_row[select_convert_row(&recursion_natural_rows(&program))].get_or_insert(i);
+            if first_on_row.iter().all(Option::is_some) {
+                break;
             }
         }
-    }
-    roles.extend(kinds.iter().map(|k| format!("root over [{k}]")));
-    assert_eq!(roles.len(), combine_vks.len());
-    for (role, vk) in roles.into_iter().zip(&combine_vks) {
-        rows.push(row("combine", "whitelist", role, vk, Some(&shipped)));
-    }
+        let engine: Engine = StarkEngine::new(recursion_params_with_128_bits_security());
+        let mut convert_vk_row0 = None;
+        for (r, first) in first_on_row.iter().enumerate() {
+            let i = first.unwrap_or_else(|| panic!("no whitelist shape pads to convert row {r}"));
+            let (label, shape) = &shapes[i];
+            let vk = whitelist_convert_vk(&engine, &wl_riscv_vk, label, shape)
+                .unwrap_or_else(|e| panic!("{e}"));
+            rows.push(row(
+                "convert",
+                "whitelist",
+                format!("ladder row {r} (C{r}), shape `{label}`"),
+                &vk,
+                Some(&shipped),
+            ));
+            convert_vk_row0.get_or_insert(vk);
+        }
+        let convert_vk_row0 = convert_vk_row0.expect("the convert ladder is empty");
 
-    let mut deferred =
-        DeferredMachine::new(recursion_params_with_100_bits_security(), wl_vm_vk, true);
-    let combine_tier = combine
-        .combine_tier_child_layout(&convert_vk_row0)
-        .unwrap_or_else(|e| panic!("{e}"));
-    let deferred_vk = deferred
-        .preregister(&combine_tier)
-        .unwrap_or_else(|e| panic!("{e}"));
-    rows.push(row(
-        "deferred",
-        "whitelist",
-        "node over a combine-tier (B) child".to_string(),
-        &deferred_vk,
-        Some(&shipped),
-    ));
+        let wl_vm_vk = RiscvVmVk::from_program_and_vk(&program, &wl_riscv_vk);
+        let mut combine = CombineMachine::new(
+            recursion_params_with_128_bits_security(),
+            wl_vm_vk.clone(),
+            true,
+        );
+        let combine_vks = combine
+            .preregister_standard_shapes(&convert_vk_row0)
+            .unwrap_or_else(|e| panic!("{e}"));
+        // `preregister_standard_shapes`' order, which the whitelist's leaf order also rests on: the
+        // ordered pairs over the child kinds (ladder rows, then the combine tier) non-root and then
+        // root, then the single-child roots.
+        let kinds: Vec<String> = (0..rows_n)
+            .map(|r| format!("C{r}"))
+            .chain(["B".to_string()])
+            .collect();
+        let mut roles = Vec::new();
+        for complete in [false, true] {
+            let node = if complete { "root" } else { "non-root node" };
+            for left in &kinds {
+                for right in &kinds {
+                    roles.push(format!("{node} over [{left}, {right}]"));
+                }
+            }
+        }
+        roles.extend(kinds.iter().map(|k| format!("root over [{k}]")));
+        assert_eq!(roles.len(), combine_vks.len());
+        for (role, vk) in roles.into_iter().zip(&combine_vks) {
+            rows.push(row("combine", "whitelist", role, vk, Some(&shipped)));
+        }
+
+        let mut deferred = DeferredMachine::new(
+            recursion_params_with_128_bits_security(),
+            wl_vm_vk.clone(),
+            true,
+        );
+        let combine_tier = combine
+            .combine_tier_child_layout(&convert_vk_row0)
+            .unwrap_or_else(|e| panic!("{e}"));
+        let deferred_vk = deferred
+            .preregister(&combine_tier)
+            .unwrap_or_else(|e| panic!("{e}"));
+        rows.push(row(
+            "deferred",
+            "whitelist",
+            "node over a combine-tier (B) child".to_string(),
+            &deferred_vk,
+            Some(&shipped),
+        ));
+        // The compress node over the same child: the whitelist's last leaf.
+        let mut compress = CompressMachine::new(
+            compress_params_with_128_bits_security(),
+            wl_vm_vk.clone(),
+            true,
+        );
+        let compress_vk = compress
+            .preregister(&combine_tier)
+            .unwrap_or_else(|e| panic!("{e}"));
+        // The embed node over the compress proof's layout: scored, no whitelist member (its key
+        // is BN254-hashed and no apex verifies an embed proof), so no membership field.
+        let mut embed = EmbedMachine::new(embed_params_with_128_bits_security(), wl_vm_vk, true);
+        let embed_vk = embed
+            .preregister(&compress_proof_layout(&compress_vk))
+            .unwrap_or_else(|e| panic!("{e}"));
+        let embed_pre_hash: Vec<String> = embed_vk.pre_hash.iter().map(|x| x.to_string()).collect();
+        let embed_commit: Option<Vec<String>> = embed_vk
+            .inner
+            .merged_preprocessed_commit
+            .map(|c| c.iter().map(|x| x.to_string()).collect());
+        let mut embed_identity = vec![("vk_pre_hash", list(&embed_pre_hash))];
+        if let Some(commit) = embed_commit {
+            embed_identity.push(("merged_preprocessed_commit", list(&commit)));
+        }
+        rows.push(scored_row(
+            "embed",
+            "whitelist",
+            "node over the compress proof (compress-row layout)".to_string(),
+            &embed_vk,
+            embed_identity,
+        ));
+        rows.push(row(
+            "compress",
+            "whitelist",
+            "node over a combine-tier (B) child".to_string(),
+            &compress_vk,
+            Some(&shipped),
+        ));
+    }
     info!("whitelist keys: {:.0} s", t1.elapsed().as_secs_f64());
 
+    let mut not_generated = Vec::new();
+    if riscv_only {
+        for (machine, mode) in [
+            ("convert", "dev"),
+            ("combine", "dev"),
+            ("compress", "dev"),
+            ("embed", "dev"),
+            ("deferred", "dev"),
+            ("convert", "whitelist"),
+            ("combine", "whitelist"),
+            ("deferred", "whitelist"),
+            ("embed", "whitelist"),
+            ("compress", "whitelist"),
+        ] {
+            not_generated.push(object(&[
+                ("machine", j(machine)),
+                ("mode", j(mode)),
+                ("reason", j(RISCV_ONLY_REASON)),
+            ]));
+        }
+    }
+    let generated_by = if riscv_only {
+        format!("MLE_SOUNDNESS_MANIFEST_RISCV_ONLY=1 {COMMAND}")
+    } else {
+        COMMAND.to_string()
+    };
     let header: Vec<(&str, String)> = vec![
-        ("generated_by", j(COMMAND)),
+        ("generated_by", j(generated_by)),
         ("commit", j(&commit)),
         ("dirty", j(!dirty_paths.is_empty())),
         ("dirty_paths", list(&dirty_paths)),
@@ -513,6 +621,9 @@ fn main() {
                 ),
             ]),
         ),
+        // `onchain_test_keys.vk_root` is the root the Groth16 test keys were set up over
+        // (`contracts/test/dev/manifest.json`), which is `apex.vk_root` while they are current;
+        // `mle-core/tests/soundness.rs` checks the onchain record against that file.
         (
             "onchain_test_keys",
             object(&[
@@ -524,17 +635,7 @@ fn main() {
                 ("note", j(ONCHAIN_NOTE)),
             ]),
         ),
-        (
-            "not_generated",
-            format!(
-                "[{}]",
-                object(&[
-                    ("machine", j("embed")),
-                    ("mode", j("whitelist")),
-                    ("reason", j(EMBED_REASON))
-                ])
-            ),
-        ),
+        ("not_generated", format!("[{}]", not_generated.join(", "))),
     ];
     std::fs::write(&out_path, render(&header, &rows))
         .unwrap_or_else(|e| panic!("cannot write `{out_path}`: {e}"));

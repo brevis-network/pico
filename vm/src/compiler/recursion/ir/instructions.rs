@@ -1,7 +1,9 @@
 use super::{Array, Ext, Felt, MemIndex, Ptr, TracedVec, Usize, Var};
 use crate::{
-    configs::config::FieldGenericConfig, emulator::recursion::public_values::RecursionPublicValues,
-    machine::septic::SepticCurve, primitives::consts::DIGEST_SIZE,
+    configs::config::FieldGenericConfig,
+    emulator::recursion::public_values::RecursionPublicValues,
+    machine::septic::SepticCurve,
+    primitives::consts::{DIGEST_SIZE, EXTENSION_DEGREE},
 };
 
 /// An intermeddiate instruction set for implementing programs.
@@ -357,10 +359,12 @@ pub enum DslIr<FC: FieldGenericConfig> {
         Ext<FC::F, FC::EF>,
         Ext<FC::F, FC::EF>,
     ),
-    /// Converts an ext to a slice of felts. Should only be used when target is a gnark circuit.
-    CircuitExt2Felt([Felt<FC::F>; 4], Ext<FC::F, FC::EF>),
-    /// Converts a slice of felts to an ext. Should only be used when target is a gnark circuit.
-    CircuitFelts2Ext([Felt<FC::F>; 4], Ext<FC::F, FC::EF>),
+    /// Converts an ext to its EXTENSION_DEGREE felts. Should only be used when target is a gnark
+    /// circuit.
+    CircuitExt2Felt([Felt<FC::F>; EXTENSION_DEGREE], Ext<FC::F, FC::EF>),
+    /// Converts EXTENSION_DEGREE felts to an ext. Should only be used when target is a gnark
+    /// circuit.
+    CircuitFelts2Ext([Felt<FC::F>; EXTENSION_DEGREE], Ext<FC::F, FC::EF>),
 
     // Debugging instructions.
     /// Executes less than (var = var < var).  This operation is NOT constrained.

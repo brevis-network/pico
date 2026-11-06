@@ -27,11 +27,9 @@ impl Syscall for CommitSyscall {
 
         rt.sink.record_mut().public_values.committed_value_digest[word_idx] =
             public_values_digest_word;
+        rt.chunk_split_state.commits += 1;
         // A commit tail in flight holds the chunk cut until it lands (see `should_split`).
-        rt.chunk_split_state.commit_in_flight = commit_tail_in_flight(
-            &rt.sink.record().public_values.committed_value_digest,
-            rt.chunk_split_state.deferred_commits,
-        );
+        rt.chunk_split_state.commit_in_flight = commit_tail_in_flight(rt.chunk_split_state.commits);
 
         None
     }

@@ -67,6 +67,9 @@ fn bitmap_weight<F: PrimeField32>(bitmap: &[F]) -> F {
         .sum()
 }
 
+/// The mask weight of a COMMIT word: the output digest's words sit above the deferred digest's.
+const COMMIT_WEIGHT: u32 = 1 << 8;
+
 /// What an ECALL row reads off its step: the syscall code its `a` held before the call, and the
 /// `a`, `b` and `c` it committed. An ECALL writes `a` and reads `b` and `c` ([`Slots::of`]), so
 /// each is one of its memory records' values, the value [`CpuEvent`]'s `op_*` accessors give, and
@@ -102,24 +105,34 @@ impl EcallWords {
     }
 }
 
-/// The word index a COMMIT_DEFERRED_PROOFS ecall writes, or `None` for any other syscall.
-fn deferred_commit_index(words: EcallWords) -> Option<u32> {
-    ((words.code & 0xFF) as u32 == SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id())
-        .then_some((words.b & 0xFFFF_FFFF) as u32)
+/// A COMMIT or COMMIT_DEFERRED_PROOFS ecall's share of the mask, `2^(8 + word_index)` or
+/// `2^word_index` (0 for an out-of-range index, whose bitmap is empty), or `None` for any other
+/// syscall.
+fn commit_share(words: EcallWords) -> Option<u32> {
+    let code = (words.code & 0xFF) as u32;
+    let weight = if code == SyscallCode::COMMIT.syscall_id() {
+        COMMIT_WEIGHT
+    } else if code == SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id() {
+        1
+    } else {
+        return None;
+    };
+    let idx = words.b & 0xFFFF_FFFF;
+    Some(if idx < 8 { weight << idx } else { 0 })
 }
 
-/// The chunk's COMMIT_DEFERRED_PROOFS tally the Ecall air publishes: how many ran, and the sum of
-/// `2^word_index` over them, read off the records of the ECALL steps the chip's rows are built
-/// from. The public values take it from here; the trace sums the rows' own columns, and the air
-/// ties its last row to the public values.
-pub fn deferred_commit_tally(record: &EmulationRecord) -> (u32, u32) {
+/// The chunk's commit tally the Ecall air publishes: how many COMMIT and COMMIT_DEFERRED_PROOFS
+/// ecalls ran, and the sum of their mask shares (`commit_share`), read off the records of the
+/// ECALL steps the chip's rows are built from. The public values take it from here; the trace sums
+/// the rows' own columns, and the air ties its last row to the public values.
+pub fn commit_tally(record: &EmulationRecord) -> (u32, u32) {
     record
         .cpu_steps()
         .ecalls()
         .par_record_runs(|records, (n, mask): &mut (u32, u32)| {
-            if let Some(idx) = deferred_commit_index(EcallWords::of(records)) {
+            if let Some(share) = commit_share(EcallWords::of(records)) {
                 *n += 1;
-                *mask += 1u32 << idx;
+                *mask += share;
             }
         })
         .into_iter()
@@ -289,10 +302,11 @@ impl<F: PrimeField32> EcallChip<F> {
         let (mut count, mut mask) = (F::ZERO, F::ZERO);
         for row in rows.iter_mut() {
             let cols: &mut EcallChipCols<F> = row.as_mut_slice().borrow_mut();
-            count += cols.deferred_commit_mul;
-            mask += cols.deferred_commit_mul * bitmap_weight(&cols.ecall.index_bitmap);
-            cols.deferred_commits = count;
-            cols.deferred_commit_mask = mask;
+            count += cols.commit_mul + cols.deferred_commit_mul;
+            mask += (cols.commit_mul * F::from_u32(COMMIT_WEIGHT) + cols.deferred_commit_mul)
+                * bitmap_weight(&cols.ecall.index_bitmap);
+            cols.commits = count;
+            cols.commit_mask = mask;
         }
 
         rows.into_pico_iter().flatten().collect()
@@ -383,8 +397,8 @@ impl<F: PrimeField32> GpuChipBehavior<F> for EcallChip<F> {
     /// `build_host_trace_values`) plus the byte lookups the chip's
     /// constraints consume: the U16ToU8 u8-range pairs, and on COMMIT rows the two
     /// digest-byte range checks. This kernel is their only producer on the GPU path. Padding rows
-    /// are zero except the COMMIT_DEFERRED_PROOFS tally, whose running sums the device carries
-    /// down to the last row, as `generate_main` does.
+    /// are zero except the COMMIT / COMMIT_DEFERRED_PROOFS tally, whose running sums the device
+    /// carries down to the last row, as `generate_main` does.
     fn gpu_generate_extra_record_and_main(
         &self,
         device_id: usize,
@@ -494,7 +508,7 @@ mod tests {
 
     use p3_koala_bear::KoalaBear;
 
-    use super::{deferred_commit_tally, EcallWords};
+    use super::{commit_tally, EcallWords};
     use crate::{
         chips::tests::fib_records,
         compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program},
@@ -541,33 +555,35 @@ mod tests {
         record
     }
 
-    /// Eight deferred commits, then a COMMIT, which shares the index bitmap but is not counted,
-    /// and a HALT, which is not either.
+    /// A halt's commits, eight COMMITs and then eight deferred ones, and the HALT, which is not
+    /// counted.
     fn calls() -> Vec<(SyscallCode, u64)> {
         (0..8)
-            .map(|i| (SyscallCode::COMMIT_DEFERRED_PROOFS, i))
-            .chain([(SyscallCode::COMMIT, 3), (SyscallCode::HALT, 0)])
+            .map(|i| (SyscallCode::COMMIT, i))
+            .chain((0..8).map(|i| (SyscallCode::COMMIT_DEFERRED_PROOFS, i)))
+            .chain([(SyscallCode::HALT, 0)])
             .collect()
     }
 
     #[test]
-    fn the_tally_counts_deferred_commits_and_sums_their_word_bits() {
+    fn the_tally_counts_both_commit_runs_and_sums_their_word_bits() {
         let calls = calls();
-        assert_eq!(deferred_commit_tally(&history(&calls)), (8, 0xFF));
-        assert_eq!(deferred_commit_tally(&history(&calls[..3])), (3, 0b111));
-        assert_eq!(deferred_commit_tally(&history(&[])), (0, 0));
+        assert_eq!(commit_tally(&history(&calls)), (16, 0xFFFF));
+        assert_eq!(commit_tally(&history(&calls[..8])), (8, 0xFF00));
+        assert_eq!(commit_tally(&history(&calls[8..])), (8, 0xFF));
+        assert_eq!(commit_tally(&history(&calls[..3])), (3, 0b111 << 8));
+        assert_eq!(commit_tally(&history(&[])), (0, 0));
     }
 
     #[test]
-    fn a_history_record_publishes_the_deferred_commit_tally() {
+    fn a_history_record_publishes_the_commit_tally() {
         let calls = calls();
         let from_history = history(&calls);
-        assert_eq!(deferred_commit_tally(&from_history), (8, 0xFF));
-        assert_eq!(deferred_commit_tally(&history(&calls[..3])), (3, 0b111));
+        assert_eq!(commit_tally(&from_history), (16, 0xFFFF));
         let published = from_history.public_values::<KoalaBear>();
         let mut expected = from_history.public_values;
-        expected.deferred_commits = 8;
-        expected.deferred_commit_mask = 0xFF;
+        expected.commits = 16;
+        expected.commit_mask = 0xFFFF;
         assert_eq!(published, expected.to_vec::<KoalaBear>());
 
         assert_ne!(
@@ -598,14 +614,19 @@ mod tests {
                     "ECALL {index}"
                 );
                 let code = (event.op_a_prev_value() & 0xFF) as u32;
-                if event.instruction.is_ecall_instruction()
-                    && code == SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id()
-                {
+                let weight = if code == SyscallCode::COMMIT.syscall_id() {
+                    1 << 8
+                } else if code == SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id() {
+                    1
+                } else {
+                    0
+                };
+                if event.instruction.is_ecall_instruction() && weight > 0 {
                     tally.0 += 1;
-                    tally.1 += 1u32 << (event.op_b_committed_value() & 0xFFFF_FFFF);
+                    tally.1 += weight << (event.op_b_committed_value() & 0xFFFF_FFFF);
                 }
             }
-            assert_eq!(deferred_commit_tally(record), tally);
+            assert_eq!(commit_tally(record), tally);
             ecalls += steps.len();
             run_tally = (run_tally.0 + tally.0, run_tally.1 + tally.1);
         }
@@ -613,8 +634,8 @@ mod tests {
         let words = DIGEST_SIZE as u32;
         assert_eq!(
             run_tally,
-            (words, (1 << words) - 1),
-            "the deferred commits a guest makes before it halts"
+            (2 * words, (1 << (2 * words)) - 1),
+            "the commits a guest makes before it halts"
         );
     }
 }

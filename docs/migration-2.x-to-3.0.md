@@ -2,13 +2,16 @@
 
 This guide lists what changes for a project built on Pico 2.x (last release `v2.1.2`) when it moves
 to Pico 3.0 (`v3.0.0`). See also the [release notes](./release-notes/3.0.md) and the
-[support matrix](./support-matrix.md).
+[support matrix](./support-matrix.md). This guide is kept in the 3.1 tree and describes 3.1 where it
+mentions COMPRESS; for what changed from 3.0 to 3.1, see the [3.1 release notes](./release-notes/3.1.md).
 
 ## Overview
 
 Pico 3.0 replaces the proof system. 2.x proved with FRI-based STARKs over BabyBear, KoalaBear or
 Mersenne31; 3.0 proves with a multilinear (MLE) STARK over KoalaBear only — LogUp-GKR, ZeroCheck
-and WHIR — through five phases: RISCV → CONVERT → COMBINE → EMBED → WRAP.
+and WHIR — through the phases RISCV → CONVERT → COMBINE → EMBED → WRAP, the last two for the EVM
+path. 3.1 adds COMPRESS (the final compression layer) between COMBINE and EMBED, with the 128-bit
+parameters, and EMBED verifies it from 3.1 on.
 
 What follows from that:
 
@@ -65,7 +68,7 @@ pico-prover = { git = "https://github.com/brevis-network/pico", tag = "v3.0.0" }
 | `DefaultProverClient::new(&elf)` | `Prover::new(&elf)?` |
 | `new_with_opts(&elf, EmulatorOpts)` | `Prover::builder(&elf)` with setters (`log_stacked_height`, `chunk_size`, `concurrency`, `verify_keys`, `vk_map`, `trusted_vk_root`, ...) then `.build()?` |
 | `client.new_stdin_builder()`, `write(&v)`, `write_slice(&bytes)` | `Stdin::new()` with `write(&v)` and `write_bytes(&bytes)`, or `Stdin::from(&v)` for one value |
-| `prove(stdin) -> (riscv proof, embed proof)` | `prove(stdin) -> Proof`, which stops at COMBINE, **verifies the proof** and binds the guest's committed bytes to it before returning |
+| `prove(stdin) -> (riscv proof, embed proof)` | `prove(stdin) -> Proof`, which stops at COMBINE, **verifies the proof** and binds the guest's committed bytes to it before returning; `prove_to(stdin, Phase::Compress)` for the compress proof, the one handed out |
 | `prove_combine(stdin)` | `prove(stdin)`, or `prove_to(stdin, Phase::Combine)` |
 | `prove_fast(stdin)` | `prove_to(stdin, Phase::Riscv)`. The RISC-V phase is full-security; there is no "fast" mode |
 | `verify(&proof)` | no separate call: every returned `Proof` is already verified. To verify in another process: `Proof::write(path)`, then `ProofArtifact::read(path)` and `Prover::verify_artifact(artifact)` |
@@ -130,7 +133,7 @@ Subcommands are `install`, `build`, `execute`, `prove`, `aot` and `new`.
 
 | 2.x | 3.0 |
 |---|---|
-| `prove` with no `--phase`: proved through EMBED and wrote the gnark inputs | `prove` stops at COMBINE by default and writes `proof-combine.pico`. Use `--phase riscv\|convert\|combine\|embed\|wrap` to choose; `--phase wrap` writes the gnark inputs |
+| `prove` with no `--phase`: proved through EMBED and wrote the gnark inputs | `prove` stops at COMBINE by default and writes `proof-combine.pico`. Use `--phase riscv\|convert\|combine\|compress\|embed\|wrap` to choose (`compress` writes `proof-compress.pico`, the final proof; the default is `combine`, the complete root, which a deferred-proof node verifies); `--phase wrap` writes the gnark inputs |
 | `prove --fast` | `prove --phase riscv`. `--fast` now fails with that hint |
 | `prove --field kb\|bb\|m31` | removed; `--field` now fails (proving is KoalaBear only) |
 | `prove` without `--elf` found `elf/riscv64im-pico-zkvm-elf` | `--elf <path>` is required |
@@ -196,7 +199,9 @@ setup ceremony.
 ## Removed with no replacement
 
 - The BabyBear and Mersenne31 fields, and FRI-based proving.
-- The COMPRESS phase.
+- The FRI-era COMPRESS phase of 2.x. A phase of that name returns in 3.1, with the 128-bit
+  parameters, differently designed: the combine root re-proved at the compress preset into the
+  final proof (`--phase compress`, `proof-compress.pico`).
 - `prove --fast` as a separate mode, and `--field`.
 - The M31 RISC-V prover client.
 - Access to the RISC-V proving and verifying keys from the client (`riscv_vk`, `riscv_pk_vk`).

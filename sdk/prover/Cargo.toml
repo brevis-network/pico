@@ -35,6 +35,10 @@ thiserror.workspace = true
 # The warning `execute` logs when it falls back to the interpreter.
 log.workspace = true
 
+[dev-dependencies]
+# The soundness manifest, read by the test that holds the embed key against it.
+serde_json.workspace = true
+
 [features]
 default = ["multi-field-transcript"]
 # `build_pure_library`: generates a guest's pure-mode AOT code and builds it into a dynamic library
@@ -53,10 +57,11 @@ aot = ["pico-vm/aot-emulator"]
 bigint-rug = ["pico-vm/bigint-rug"]
 tcmalloc = ["pico-vm/tcmalloc"]
 mmap-memory = ["pico-vm/mmap-memory"]
-# Proves on the GPU only: a whitelist-mode `Phase::Combine` on every visible card through
-# `distributed-vm`, other modes and phases on card 0, since `pico-vm/cuda` swaps the proving engine
-# process-wide. Emulation and `execute` stay on the CPU, on the AOT runtime interpreting every
-# block (`ProverBuilder::interpreted_aot_runtime`). Needs the CUDA Toolkit and an NVIDIA GPU.
+# A whitelist-mode `Phase::Combine` proves on every visible card through `distributed-vm`; any other
+# mode or phase proves its RISC-V chunks and compress proof on card 0 and convert and combine on the
+# CPU, since `pico-vm/cuda` swaps the RISC-V and compress proving engine process-wide. Emulation and
+# `execute` stay on the CPU, on the AOT runtime interpreting every block
+# (`ProverBuilder::interpreted_aot_runtime`). Needs the CUDA Toolkit and an NVIDIA GPU.
 cuda = [
     "pico-vm/cuda",
     "dep:distributed-vm",

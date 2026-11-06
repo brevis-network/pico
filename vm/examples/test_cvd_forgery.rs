@@ -35,7 +35,7 @@ use std::{env, panic, sync::Arc};
 
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use pico_mle_core::{
-    config::riscv_params_with_100_bits_security, prover::DeviceDataTransporter, StarkEngine,
+    config::riscv_params_with_128_bits_security, prover::DeviceDataTransporter, StarkEngine,
 };
 use pico_vm::{
     compiler::{
@@ -111,8 +111,8 @@ fn digest_base(air: usize, scope_all: bool) -> Option<usize> {
     match air {
         // `AirProvingContext::simple(trace, pvs_riscv)` — RISCV PublicValues at offset 0.
         //
-        // ECALL belongs here too: 0913a7c86 hoisted the digest constraints out of the Cpu chip
-        // into the dedicated Ecall chip, and `build_ctx_inner` hands both the same `pvs_riscv`
+        // ECALL belongs here too: the digest constraints moved out of the Cpu chip into the
+        // dedicated Ecall chip, and `build_ctx_inner` hands both the same `pvs_riscv`
         // (`mle/machine/riscv.rs`: `air_id::CPU | air_id::ECALL => simple(trace, pvs_riscv)`).
         // Doctoring only CPU leaves the chip that actually evaluates the equalities looking at
         // honest public values, which is exactly what the control caught: `pv[0] += 1` verified.
@@ -301,7 +301,7 @@ fn main() {
     );
 
     // Keygen once, reuse across every case (keygen is the expensive part and is case-independent).
-    let engine: Engine = StarkEngine::new(riscv_params_with_100_bits_security(LOG_STACKED_HEIGHT));
+    let engine: Engine = StarkEngine::new(riscv_params_with_128_bits_security(LOG_STACKED_HEIGHT));
     let airs = mle_riscv_air_refs(program.clone(), BUCKET);
     let (pk, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
     let d_pk = engine.device().transport_pk_to_device(&pk);

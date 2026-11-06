@@ -20,8 +20,9 @@ pico-gpu-api = { workspace = true, optional = true }
 pico-mle-core = { path = "../mle-core", default-features = false }
 # Row-major CPU device; the engine the MLE RISCV path proves on.
 pico-mle-cpu = { path = "../mle-cpu", default-features = false }
-# The stable verifier the apex, whitelist hashing and exe identity live in. Its `codec` (zstd, C)
-# is enabled below for host builds only, so a guest build stays free of it.
+# The stable verifier the whitelist hashing, exe identity and public-value checks live in (this
+# crate keeps its own apex, which also verifies compress proofs: TODO(compress-apex)). Its `codec`
+# (zstd, C) is enabled below for host builds only, so a guest build stays free of it.
 pico-verifier.workspace = true
 # GPU CUDA MLE/WHIR backend, pulled in only under the `cuda` feature.
 cuda-mle = { path = "../cuda-mle", optional = true }

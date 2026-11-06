@@ -231,7 +231,7 @@ fn mem_tail_padded_cost(events: u64) -> u64 {
 const TAIL_MERGE_MAX_GKR_LEAVES: u64 = (1 << 28) - 1;
 
 /// riscv MLE proving lifts every active AIR's height to at least `2^l_skip` in the leaf
-/// account; the riscv machine uses `riscv_params_with_100_bits_security` ⇒
+/// account; the riscv machine uses `riscv_params_with_128_bits_security` ⇒
 /// `DEFAULT_RISCV_L_SKIP = 4` (mle-core/src/config/mod.rs).
 const TAIL_GKR_L_SKIP: u32 = 4;
 
@@ -247,11 +247,12 @@ const TAIL_GKR_FALLBACK_INTERACTIONS: u64 = 2048;
 /// activates alongside the precompile chips. Counted from the AIR eval code — one
 /// `looking_*`/`looked_*` call = one interaction instance, loops multiplied out; counts
 /// are structural per row, independent of multiplicities. Sources (current tree):
-///   - Global 8/row: 1 looked Global (riscv_global/constraints.rs:46) + 1 looking
+///   - Global 10/row: 1 looked Global (riscv_global/constraints.rs:46) + 1 looking
 ///     Poseidon2 (gadgets/global_interaction.rs) + 6 byte-bus range instances
-///     (global_interaction.rs:131-240). Six, not eight: the `kind < 32` LTU is gone (every
-///     sender passes a compile-time constant, so the multiset already pins the receiver's
-///     column) and two U8 checks share one instance.
+///     (global_interaction.rs:131-240) + the U16Range and BitRange(9) limbs of `message[1]`
+///     (riscv_global/constraints.rs:87). Six in the gadget, not eight: the `kind < 32`
+///     LTU is gone (every sender passes a compile-time constant, so the multiset already pins
+///     the receiver's column) and two U8 checks share one instance.
 ///   - MemoryInit/Finalize 13/row: 10 × U16 (initialize_finalize/constraints.rs:43-45) +
 ///     1 U8 pair (:55) + 1 looking Global (:70/:90) + 1 U16 inside LtWordU16Gadget
 ///     (gadgets/lt_word_u16.rs:190).
@@ -265,7 +266,7 @@ const TAIL_GKR_FALLBACK_INTERACTIONS: u64 = 2048;
 ///     looked/looking syscall (:51/:85) + looking Global (:62/:96).
 ///   - Byte 10/row × 2^17 fixed rows (byte/constraints.rs:33-63, byte/traces.rs:29).
 ///   - Program 1/row (riscv_program/constraints.rs:41) × pow2(instruction count) rows.
-const TAIL_GKR_GLOBAL_INTERACTIONS: u64 = 8;
+const TAIL_GKR_GLOBAL_INTERACTIONS: u64 = 10;
 const TAIL_GKR_INIT_FIN_INTERACTIONS: u64 = 13;
 const TAIL_GKR_MEMORY_LOCAL_INTERACTIONS: u64 = 11 * LOCAL_MEMORY_DATAPAR as u64;
 const TAIL_GKR_POSEIDON2_INTERACTIONS: u64 = RISCV_POSEIDON2_DATAPAR as u64;
@@ -1531,8 +1532,8 @@ impl RecordBehavior for EmulationRecord {
         // The tally is read off the events rather than kept by the emulator, which carries the
         // rest of the public values from one chunk into the next.
         let mut pvs = self.public_values;
-        (pvs.deferred_commits, pvs.deferred_commit_mask) =
-            crate::chips::chips::riscv_ecall::traces::deferred_commit_tally(self);
+        (pvs.commits, pvs.commit_mask) =
+            crate::chips::chips::riscv_ecall::traces::commit_tally(self);
         pvs.to_vec()
     }
 
@@ -1698,7 +1699,7 @@ mod tail_merge_constants {
         emulator::riscv::syscalls::SyscallCode,
         mle::machine::riscv::{air_id, mle_riscv_air_refs, RISCV_APP_PREP_AIR_IDS},
     };
-    use pico_mle_core::{config::riscv_params_with_100_bits_security, StarkEngine};
+    use pico_mle_core::{config::riscv_params_with_128_bits_security, StarkEngine};
     use pico_mle_cpu::KoalaBearPoseidon2CpuEngine;
     use std::sync::Arc;
 
@@ -1706,7 +1707,7 @@ mod tail_merge_constants {
     fn interaction_counts_match_their_airs() {
         // Any log_stacked_height keygens the same AIR set; interaction counts are structural.
         let engine: KoalaBearPoseidon2CpuEngine =
-            StarkEngine::new(riscv_params_with_100_bits_security(20));
+            StarkEngine::new(riscv_params_with_128_bits_security(20));
         // Keygen builds the Program chip's preprocessed table, which debug-asserts a non-empty
         // instruction list, so `Program::default()` will not do. Interaction counts are structural
         // — they do not depend on what the program computes — so one instruction is enough.

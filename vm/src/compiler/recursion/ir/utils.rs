@@ -2,6 +2,7 @@ use super::{Array, Builder, DslIr, Ext, Felt, SymbolicExt, Usize, Var, Variable}
 use crate::{
     configs::config::FieldGenericConfig,
     machine::field::{FieldBehavior, FieldType},
+    primitives::consts::EXTENSION_DEGREE,
 };
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use std::ops::{Add, Mul, MulAssign};
@@ -236,19 +237,19 @@ impl<FC: FieldGenericConfig> Builder<FC> {
     }
 
     pub fn felts2ext(&mut self, felts: &[Felt<FC::F>]) -> Ext<FC::F, FC::EF> {
-        assert_eq!(felts.len(), 4);
+        assert_eq!(felts.len(), EXTENSION_DEGREE);
         let out: Ext<FC::F, FC::EF> = self.uninit();
         self.push_op(DslIr::CircuitFelts2Ext(felts.try_into().unwrap(), out));
         out
     }
 
     /// Converts an ext to a slice of felts inside a circuit.
-    pub fn ext2felt_circuit(&mut self, value: Ext<FC::F, FC::EF>) -> [Felt<FC::F>; 4] {
-        let a = self.uninit();
-        let b = self.uninit();
-        let c = self.uninit();
-        let d = self.uninit();
-        self.push_op(DslIr::CircuitExt2Felt([a, b, c, d], value));
-        [a, b, c, d]
+    pub fn ext2felt_circuit(
+        &mut self,
+        value: Ext<FC::F, FC::EF>,
+    ) -> [Felt<FC::F>; EXTENSION_DEGREE] {
+        let felts: [Felt<FC::F>; EXTENSION_DEGREE] = core::array::from_fn(|_| self.uninit());
+        self.push_op(DslIr::CircuitExt2Felt(felts, value));
+        felts
     }
 }

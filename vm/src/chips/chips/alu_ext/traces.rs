@@ -21,7 +21,7 @@ use crate::{
     emulator::recursion::emulator::{ExtAluOpcode, RecursionRecord},
     iter::{IndexedPicoIterator, PicoIterator, PicoSliceMut},
     machine::chip::{ChipBehavior, PreprocessedRows},
-    primitives::consts::{EXTENSION_DEGREE, EXT_ALU_DATAPAR},
+    primitives::consts::EXT_ALU_DATAPAR,
 };
 use core::borrow::BorrowMut;
 #[cfg(feature = "cuda")]
@@ -34,12 +34,12 @@ use cudart::{
 use cudart_sys::*;
 #[cfg(feature = "cuda")]
 use log::info;
-use p3_field::{extension::BinomiallyExtendable, PrimeField32};
+use p3_field::{extension::QuinticTrinomialExtendable, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 #[cfg(feature = "cuda")]
 use pico_gpu_api::{cuda_alu_ext_generate_main, cuda_alu_ext_generate_preprocessed};
 
-impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F> for ExtAluChip<F> {
+impl<F: PrimeField32 + QuinticTrinomialExtendable> ChipBehavior<F> for ExtAluChip<F> {
     type Record = RecursionRecord<F>;
     type Program = RecursionProgram<F>;
 
@@ -138,9 +138,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F> f
 }
 
 #[cfg(feature = "cuda")]
-impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> GpuChipBehavior<F>
-    for ExtAluChip<F>
-{
+impl<F: PrimeField32 + QuinticTrinomialExtendable> GpuChipBehavior<F> for ExtAluChip<F> {
     fn gpu_generate_preprocessed(
         &self,
         device_id: usize,

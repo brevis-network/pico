@@ -156,7 +156,7 @@ impl<
     type Program = Program;
 
     fn name(&self) -> String {
-        if same_field::<F, KoalaBear, 4>() {
+        if same_field::<F, KoalaBear>() {
             "RiscvKoalaBearPoseidon2"
         } else {
             panic!("Unsupported field type");

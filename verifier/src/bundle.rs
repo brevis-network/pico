@@ -3,10 +3,10 @@
 //! declares the same structs.
 //!
 //! It carries the exe identity, the pinned whitelist root, and the Merkle memberships of the keys a
-//! root proof can carry. The memberships depend on the whitelist only through its root, so a
+//! root or a compress proof can carry. The memberships depend on the whitelist only through its root, so a
 //! verifier reading them needs no shape config.
 
-use pico_mle_core::config::recursion_params_with_100_bits_security;
+use pico_mle_core::config::recursion_params_with_128_bits_security;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -31,7 +31,7 @@ pub struct MleVkBundleV2 {
     pub vm_vk: Vec<u32>,
     /// The pinned whitelist root, canonical u32 limbs.
     pub vk_root: [u32; 8],
-    /// Memberships of the keys a root can carry, in leaf order.
+    /// Memberships of the keys a root or a compress proof can carry, in leaf order.
     pub members: Vec<MleVkMemberV2>,
 }
 
@@ -144,7 +144,7 @@ pub fn apex_from_bundle(
         return Err(VerifyError::UntrustedVkRoot);
     }
     MleApexVerifier::with_members(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         bundle.members.clone(),
         bundle.vm_vk,
         trusted_root,

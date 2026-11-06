@@ -6,6 +6,7 @@ use crate::{
         types::{Address, Poseidon2PackedInstr},
     },
     machine::chip::ChipBehavior,
+    primitives::consts::PERM_BLOCKS,
 };
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
@@ -21,7 +22,7 @@ fn test_poseidon2_packed_preprocessed_dimensions() {
     let instr = Poseidon2PackedInstr {
         input_addrs: std::array::from_fn(|i| mk_addr(10 + i as u32)),
         output_addrs: std::array::from_fn(|i| mk_addr(20 + i as u32)),
-        mults: [F::TWO; 4],
+        mults: [F::TWO; PERM_BLOCKS],
     };
 
     let program = RecursionProgram {
@@ -35,12 +36,12 @@ fn test_poseidon2_packed_preprocessed_dimensions() {
         preprocessed.width(),
         super::columns::NUM_POSEIDON2_PACKED_PREPROCESSED_COLS
     );
-    // Layout: [is_real, input[4], output[4] (addr, mult pairs)]
+    // Layout: [is_real, input[PERM_BLOCKS], output[PERM_BLOCKS] (addr, mult pairs)]
     let row = preprocessed.row_slice(0).unwrap();
     assert_eq!(row[0], F::ONE); // is_real
     assert_eq!(row[1], F::from_u32(10)); // input[0]
-    assert_eq!(row[5], F::from_u32(20)); // output[0].addr
-    assert_eq!(row[6], F::TWO); // output[0].mult
+    assert_eq!(row[1 + PERM_BLOCKS], F::from_u32(20)); // output[0].addr
+    assert_eq!(row[2 + PERM_BLOCKS], F::TWO); // output[0].mult
     assert_eq!(preprocessed.row_slice(1).unwrap()[0], F::ZERO); // padding
 }
 

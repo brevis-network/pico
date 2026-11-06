@@ -47,13 +47,21 @@ type Variable struct {
 	UpperBound *big.Int
 }
 
+// ExtDegree is the degree of KoalaBear's extension F_p[X]/(X^5 + X^2 - 1), Plonky3's
+// QuinticTrinomialExtensionField<KoalaBear> (mle-core's EF). An extension element is its five
+// coefficients, lowest first, in the order the Rust side writes them: ImmE's literals, Ext2Felt's
+// and CircuitFelts2Ext's limbs, and each row of the witness's exts.
+const ExtDegree = 5
+
 type ExtensionVariable struct {
-	Value [4]Variable
+	Value [ExtDegree]Variable
 }
 
 type Chip struct {
 	api          frontend.API
 	RangeChecker frontend.Rangechecker
+	// interpolation is interpolationWeights reduced into the circuit's field, made on first use.
+	interpolation *[productLen][productLen]*big.Int
 }
 
 func NewChip(api frontend.API) *Chip {
@@ -139,9 +147,9 @@ func (c *Chip) proveCanonicalBound(v frontend.Variable) *big.Int {
 	return new(big.Int).Set(modulus_sub_1)
 }
 
-// RangeCheckWitnessE is RangeCheckWitness over an extension element's four coefficients.
+// RangeCheckWitnessE is RangeCheckWitness over an extension element's five coefficients.
 func (c *Chip) RangeCheckWitnessE(e ExtensionVariable) ExtensionVariable {
-	for j := 0; j < 4; j++ {
+	for j := 0; j < ExtDegree; j++ {
 		e.Value[j] = c.RangeCheckWitness(e.Value[j])
 	}
 	return e
@@ -154,24 +162,35 @@ func NewF(value string) Variable {
 	}
 }
 
+// NewE takes exactly ExtDegree coefficients. Any other count is a writer on another extension
+// degree, so it panics rather than drop or invent a coefficient.
 func NewE(value []string) ExtensionVariable {
-	a := NewF(value[0])
-	b := NewF(value[1])
-	c := NewF(value[2])
-	d := NewF(value[3])
-	return ExtensionVariable{Value: [4]Variable{a, b, c, d}}
+	checkExtDegree("NewE", len(value))
+	var e ExtensionVariable
+	for i := range e.Value {
+		e.Value[i] = NewF(value[i])
+	}
+	return e
 }
 
+// NewEConst is NewE for a literal: each coefficient is bounded exactly, as NewFConst does.
 func NewEConst(value []string) ExtensionVariable {
-	a := NewFConst(value[0])
-	b := NewFConst(value[1])
-	c := NewFConst(value[2])
-	d := NewFConst(value[3])
-	return ExtensionVariable{Value: [4]Variable{a, b, c, d}}
+	checkExtDegree("NewEConst", len(value))
+	var e ExtensionVariable
+	for i := range e.Value {
+		e.Value[i] = NewFConst(value[i])
+	}
+	return e
 }
 
-func Felts2Ext(a, b, c, d Variable) ExtensionVariable {
-	return ExtensionVariable{Value: [4]Variable{a, b, c, d}}
+func checkExtDegree(what string, n int) {
+	if n != ExtDegree {
+		panic(fmt.Sprintf("koalabear.%s: %d coefficients, not KoalaBear^%d's %d", what, n, ExtDegree, ExtDegree))
+	}
+}
+
+func Felts2Ext(limbs [ExtDegree]Variable) ExtensionVariable {
+	return ExtensionVariable{Value: limbs}
 }
 
 func (c *Chip) AddF(a, b Variable, forceReduce ...bool) Variable {
@@ -274,10 +293,9 @@ func (c *Chip) AssertNotEqualF(a, b Variable) {
 }
 
 func (c *Chip) AssertIsEqualE(a, b ExtensionVariable) {
-	c.AssertIsEqualF(a.Value[0], b.Value[0])
-	c.AssertIsEqualF(a.Value[1], b.Value[1])
-	c.AssertIsEqualF(a.Value[2], b.Value[2])
-	c.AssertIsEqualF(a.Value[3], b.Value[3])
+	for i := 0; i < ExtDegree; i++ {
+		c.AssertIsEqualF(a.Value[i], b.Value[i])
+	}
 }
 
 func (c *Chip) SelectF(cond frontend.Variable, a, b Variable) Variable {
@@ -294,198 +312,379 @@ func (c *Chip) SelectF(cond frontend.Variable, a, b Variable) Variable {
 }
 
 func (c *Chip) SelectE(cond frontend.Variable, a, b ExtensionVariable) ExtensionVariable {
-	return ExtensionVariable{
-		Value: [4]Variable{
-			c.SelectF(cond, a.Value[0], b.Value[0]),
-			c.SelectF(cond, a.Value[1], b.Value[1]),
-			c.SelectF(cond, a.Value[2], b.Value[2]),
-			c.SelectF(cond, a.Value[3], b.Value[3]),
-		},
+	var out ExtensionVariable
+	for i := 0; i < ExtDegree; i++ {
+		out.Value[i] = c.SelectF(cond, a.Value[i], b.Value[i])
 	}
+	return out
 }
 
 func (c *Chip) AddEF(a ExtensionVariable, b Variable) ExtensionVariable {
-	v1 := c.AddF(a.Value[0], b)
-	return ExtensionVariable{Value: [4]Variable{v1, a.Value[1], a.Value[2], a.Value[3]}}
+	a.Value[0] = c.AddF(a.Value[0], b)
+	return a
 }
 
 func (c *Chip) AddE(a, b ExtensionVariable) ExtensionVariable {
-	v1 := c.AddF(a.Value[0], b.Value[0])
-	v2 := c.AddF(a.Value[1], b.Value[1])
-	v3 := c.AddF(a.Value[2], b.Value[2])
-	v4 := c.AddF(a.Value[3], b.Value[3])
-	return ExtensionVariable{Value: [4]Variable{v1, v2, v3, v4}}
+	var out ExtensionVariable
+	for i := 0; i < ExtDegree; i++ {
+		out.Value[i] = c.AddF(a.Value[i], b.Value[i])
+	}
+	return out
 }
 
 func (c *Chip) SubE(a, b ExtensionVariable) ExtensionVariable {
-	v1 := c.SubF(a.Value[0], b.Value[0])
-	v2 := c.SubF(a.Value[1], b.Value[1])
-	v3 := c.SubF(a.Value[2], b.Value[2])
-	v4 := c.SubF(a.Value[3], b.Value[3])
-	return ExtensionVariable{Value: [4]Variable{v1, v2, v3, v4}}
+	var out ExtensionVariable
+	for i := 0; i < ExtDegree; i++ {
+		out.Value[i] = c.SubF(a.Value[i], b.Value[i])
+	}
+	return out
 }
 
 func (c *Chip) SubEF(a ExtensionVariable, b Variable) ExtensionVariable {
-	v1 := c.SubF(a.Value[0], b)
-	return ExtensionVariable{Value: [4]Variable{v1, a.Value[1], a.Value[2], a.Value[3]}}
+	a.Value[0] = c.SubF(a.Value[0], b)
+	return a
 }
 
-// reduceFastThresholdBits mirrors the guard inside reduceFast: below it, reduceFast
-// is a no-op, so additions, constant scalings and modulus lifts are all free in R1CS.
-const reduceFastThresholdBits = 120
+// productLen is the number of coefficients of the product of two extension elements before it is
+// reduced: two degree-4 polynomials multiply to degree 8.
+const productLen = 2*ExtDegree - 1
 
-// karatsubaHeadroomBits bounds the blow-up of mulEKaratsuba's coefficients relative to
-// max(a)*max(b). The worst coefficient is out0 = p0 + 3*(q2 + r0), which propagates to
-// ~112*max(a)*max(b); 2^7 = 128 is the next power of two above that.
-const karatsubaHeadroomBits = 7
-
-// subLifted returns a - b without ever invoking reduceFast.
+// quinticFold reduces the product's coefficients c_0..c_8 to five, under X^5 = 1 - X^2 and so
+// X^6 = X - X^3, X^7 = X^2 - X^4, X^8 = X^3 + X^2 - 1. Row j is res[j] of Plonky3's
+// trinomial_quintic_mul:
 //
-// negF always calls reduceFast, which is harmless while bounds stay small but turns into a
-// real ~25-30 constraint reduction once they do not. Karatsuba needs twelve subtractions
-// where schoolbook needs none, so routing them through negF would trade seven saved
-// multiplications for twelve possible reductions. Here the modulus lift is applied directly:
-// api.Sub against a constant is a linear combination, hence free.
-func (c *Chip) subLifted(a, b Variable) Variable {
-	divisor := new(big.Int).Div(b.UpperBound, modulus)
-	lifted := new(big.Int).Mul(new(big.Int).Add(divisor, big.NewInt(1)), modulus)
-	return Variable{
-		Value:      c.api.Add(a.Value, c.api.Sub(lifted, b.Value)),
-		UpperBound: new(big.Int).Add(a.UpperBound, lifted),
+//	res0 = c0 + c5 - c8          res3 = c3 - c6 + c8
+//	res1 = c1 + c6               res4 = c4 - c7
+//	res2 = c2 - c5 + c7 + c8
+var quinticFold = [ExtDegree][productLen]int{
+	{1, 0, 0, 0, 0, 1, 0, 0, -1},
+	{0, 1, 0, 0, 0, 0, 1, 0, 0},
+	{0, 0, 1, 0, 0, -1, 0, 1, 1},
+	{0, 0, 0, 1, 0, 0, -1, 0, 1},
+	{0, 0, 0, 0, 1, 0, 0, -1, 0},
+}
+
+// interpolationMuls is the most mulEInterpolated costs: one multiplication per evaluation.
+const interpolationMuls = productLen
+
+// interpolationPoints are the finite points mulEInterpolated evaluates at. The ninth evaluation is
+// at infinity, the product of the leading coefficients. Any nine distinct points determine a
+// product of degree 8; small integers keep each evaluation a short linear combination.
+var interpolationPoints = [productLen - 1]int64{0, 1, -1, 2, -2, 3, -3, 4}
+
+// interpolationWeights[k][i] is the weight of evaluation i (infinity last) in coefficient c_k: the
+// inverse of the matrix that evaluates a degree-8 polynomial at those points, over the rationals.
+var interpolationWeights = invertEvaluationMatrix()
+
+// productCap is how large a reduced product's coefficient may be. Every coefficient is a wire in
+// BN254's scalar field, of modulus r ~ 2^253.6, and stands for an integer only while it stays
+// under r; the interpolated form gives back the integer only then. Operands leave reduceFast under
+// 2^120, so products of operands stay near 2^244 and MulE's check never fires on a tape: it is
+// there for an operand that has not been through a reduction.
+var productCap = new(big.Int).Lsh(big.NewInt(1), 250)
+
+// invertEvaluationMatrix inverts the matrix that takes a degree-8 polynomial's nine coefficients to
+// its values at interpolationPoints and at infinity, by Gauss-Jordan elimination over the
+// rationals.
+func invertEvaluationMatrix() [productLen][productLen]*big.Rat {
+	var m, inv [productLen][productLen]*big.Rat
+	for i := 0; i < productLen; i++ {
+		for k := 0; k < productLen; k++ {
+			m[i][k] = new(big.Rat)
+			inv[i][k] = new(big.Rat)
+		}
+		inv[i][i].SetInt64(1)
 	}
-}
-
-// karatsuba2 multiplies two degree-1 polynomials with three multiplications instead of
-// four, returning the three coefficients of the degree-2 product.
-func (c *Chip) karatsuba2(u0, u1, v0, v1 Variable) (Variable, Variable, Variable) {
-	m0 := c.MulF(u0, v0, false)
-	m2 := c.MulF(u1, v1, false)
-	t := c.MulF(c.AddF(u0, u1, false), c.AddF(v0, v1, false), false)
-	// m1 = u0*v1 + u1*v0 = t - m0 - m2
-	m1 := c.subLifted(c.subLifted(t, m0), m2)
-	return m0, m1, m2
-}
-
-// karatsubaFits reports whether mulEKaratsuba can run without any coefficient crossing the
-// reduceFast threshold. When it cannot, the extra modulus lifts would each widen a value that
-// is about to be reduced anyway, so the schoolbook form is the cheaper shape.
-func karatsubaFits(a, b ExtensionVariable) bool {
-	maxBits := func(e ExtensionVariable) int {
-		m := 0
-		for i := 0; i < 4; i++ {
-			if n := e.Value[i].UpperBound.BitLen(); n > m {
-				m = n
+	for i, x := range interpolationPoints {
+		power := big.NewInt(1)
+		for k := 0; k < productLen; k++ {
+			m[i][k].SetInt(power)
+			power.Mul(power, big.NewInt(x))
+		}
+	}
+	// At infinity a polynomial's value is its leading coefficient.
+	m[productLen-1][productLen-1].SetInt64(1)
+	for col := 0; col < productLen; col++ {
+		pivot := col
+		for pivot < productLen && m[pivot][col].Sign() == 0 {
+			pivot++
+		}
+		if pivot == productLen {
+			panic("koalabear: the interpolation points are not distinct")
+		}
+		m[col], m[pivot] = m[pivot], m[col]
+		inv[col], inv[pivot] = inv[pivot], inv[col]
+		scale := new(big.Rat).Inv(m[col][col])
+		for k := 0; k < productLen; k++ {
+			m[col][k].Mul(m[col][k], scale)
+			inv[col][k].Mul(inv[col][k], scale)
+		}
+		for row := 0; row < productLen; row++ {
+			if row == col || m[row][col].Sign() == 0 {
+				continue
+			}
+			factor := new(big.Rat).Set(m[row][col])
+			for k := 0; k < productLen; k++ {
+				m[row][k].Sub(m[row][k], new(big.Rat).Mul(factor, m[col][k]))
+				inv[row][k].Sub(inv[row][k], new(big.Rat).Mul(factor, inv[col][k]))
 			}
 		}
-		return m
 	}
-	return maxBits(a)+maxBits(b)+karatsubaHeadroomBits < reduceFastThresholdBits
+	return inv
 }
 
-// MulE multiplies in KoalaBear's quartic extension F_p[X]/(X^4 - 3).
+// interpolationInField is interpolationWeights in the circuit's field, each n/d as n * d^-1 mod r.
+func (c *Chip) interpolationInField() *[productLen][productLen]*big.Int {
+	if c.interpolation == nil {
+		field := c.api.Compiler().Field()
+		var weights [productLen][productLen]*big.Int
+		for k := range weights {
+			for i := range weights[k] {
+				w := interpolationWeights[k][i]
+				inverse := new(big.Int).ModInverse(w.Denom(), field)
+				weights[k][i] = inverse.Mul(inverse, w.Num()).Mod(inverse, field)
+			}
+		}
+		c.interpolation = &weights
+	}
+	return c.interpolation
+}
+
+// sum adds terms in one linear combination.
+func sum(api frontend.API, terms []frontend.Variable) frontend.Variable {
+	switch len(terms) {
+	case 0:
+		return frontend.Variable(0)
+	case 1:
+		return terms[0]
+	default:
+		return api.Add(terms[0], terms[1], terms[2:]...)
+	}
+}
+
+// evaluate is e's coefficient polynomial at x: a linear combination of the coefficients, so free.
+func (c *Chip) evaluate(e ExtensionVariable, x int64) frontend.Variable {
+	field := c.api.Compiler().Field()
+	terms := make([]frontend.Variable, 0, ExtDegree)
+	power := big.NewInt(1)
+	for i := 0; i < ExtDegree; i++ {
+		if power.Sign() != 0 {
+			terms = append(terms, c.api.Mul(e.Value[i].Value, new(big.Int).Mod(power, field)))
+		}
+		power.Mul(power, big.NewInt(x))
+	}
+	return sum(c.api, terms)
+}
+
+// wireLimbs marks e's coefficients that are wires rather than constants. A product costs a
+// multiplication only when both of its sides are wires.
+func (c *Chip) wireLimbs(e ExtensionVariable) (wires [ExtDegree]bool, n int) {
+	for i := range e.Value {
+		if _, constant := c.api.Compiler().ConstantValue(e.Value[i].Value); !constant {
+			wires[i] = true
+			n++
+		}
+	}
+	return wires, n
+}
+
+// mulCosts is what each of MulE's two forms costs for a*b, in multiplications.
 //
-// Additions and constant scalings are free in R1CS (they are linear combinations), so the
-// only cost that matters is the number of api.Mul calls: Karatsuba needs 9 where schoolbook
-// needs 16.
+// mulESchoolbook multiplies each pair of coefficients: one per pair of wires. mulEInterpolated
+// multiplies each pair of evaluations: at a nonzero point an operand with any wire coefficient
+// evaluates to a wire, so each of those seven costs one whenever both operands have a wire; at 0
+// the evaluations are the constant coefficients and at infinity the leading ones, so those two
+// cost one only when both of theirs are wires.
+func (c *Chip) mulCosts(a, b ExtensionVariable) (schoolbook, interpolated int) {
+	wa, na := c.wireLimbs(a)
+	wb, nb := c.wireLimbs(b)
+	schoolbook = na * nb
+	if schoolbook == 0 {
+		return 0, 0
+	}
+	for _, x := range interpolationPoints {
+		if x != 0 || (wa[0] && wb[0]) {
+			interpolated++
+		}
+	}
+	if wa[ExtDegree-1] && wb[ExtDegree-1] {
+		interpolated++
+	}
+	return schoolbook, interpolated
+}
+
+// productBounds bounds the product's coefficients: c_k is the sum of a_i*b_j over i+j = k, so it is
+// at most the same sum over the operands' bounds.
+func productBounds(a, b ExtensionVariable) [productLen]*big.Int {
+	var bounds [productLen]*big.Int
+	for k := range bounds {
+		bounds[k] = new(big.Int)
+	}
+	for i := 0; i < ExtDegree; i++ {
+		for j := 0; j < ExtDegree; j++ {
+			bounds[i+j].Add(bounds[i+j], new(big.Int).Mul(a.Value[i].UpperBound, b.Value[j].UpperBound))
+		}
+	}
+	return bounds
+}
+
+// foldLift returns the multiple of p that reduced coefficient j adds, and the bound that coefficient
+// then has. The fold subtracts, and a wire has to stay a non-negative integer, so a row with a
+// negative entry adds the least multiple of p above its negative part's bound: the result is the
+// same mod p and cannot go below zero. The bound is the positive part's bound plus that multiple.
+func foldLift(j int, bounds [productLen]*big.Int) (lift, bound *big.Int) {
+	positive, negative := new(big.Int), new(big.Int)
+	for k, sign := range quinticFold[j] {
+		switch sign {
+		case 1:
+			positive.Add(positive, bounds[k])
+		case -1:
+			negative.Add(negative, bounds[k])
+		}
+	}
+	lift = new(big.Int)
+	if negative.Sign() > 0 {
+		lift.Div(negative, modulus)
+		lift.Add(lift, big.NewInt(1)).Mul(lift, modulus)
+	}
+	return lift, positive.Add(positive, lift)
+}
+
+// productFits reports whether every reduced coefficient of a*b stays under productCap.
+func productFits(a, b ExtensionVariable) bool {
+	bounds := productBounds(a, b)
+	for j := 0; j < ExtDegree; j++ {
+		if _, bound := foldLift(j, bounds); bound.Cmp(productCap) >= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// MulE multiplies in KoalaBear's quintic extension F_p[X]/(X^5 + X^2 - 1).
+//
+// Additions and constant scalings are free in R1CS (they are linear combinations), so the only
+// cost that matters is the number of api.Mul calls between two wires. A product is the nine
+// coefficients c_0..c_8 of the product of the two coefficient polynomials, reduced to five by
+// quinticFold. MulE gets the nine whichever way multiplies less (mulCosts):
+//
+//   - mulEInterpolated evaluates both operands at nine points, multiplies the evaluations and
+//     interpolates: at most nine multiplications, for any operands.
+//   - mulESchoolbook multiplies every pair of coefficients, and a pair with a constant side costs
+//     nothing: five for a felt lifted into the extension, nothing when either operand is constant.
+//
+// The two give the same nine integers, and share the fold and its bounds.
 func (c *Chip) MulE(a, b ExtensionVariable) ExtensionVariable {
-	if karatsubaFits(a, b) {
-		return c.mulEKaratsuba(a, b)
+	if !productFits(a, b) {
+		a, b = c.ReduceE(a), c.ReduceE(b)
 	}
-	return c.mulESchoolbook(a, b)
+	if schoolbook, interpolated := c.mulCosts(a, b); schoolbook <= interpolated {
+		return c.foldProduct(a, b, c.mulESchoolbook(a, b))
+	}
+	return c.foldProduct(a, b, c.mulEInterpolated(a, b))
 }
 
-// mulEKaratsuba is the 9-multiplication form.
-//
-//	A0 = a0 + a1*X   A1 = a2 + a3*X      B0 = b0 + b1*X   B1 = b2 + b3*X
-//	P  = A0*B0       R  = A1*B1          Q  = (A0+A1)*(B0+B1) - P - R = A0*B1 + A1*B0
-//	a*b = P + Q*X^2 + R*X^4, and X^4 = 3, so
-//	  out0 = p0 + 3*(q2 + r0)      out2 = p2 + q0 + 3*r2
-//	  out1 = p1 + 3*r1             out3 = q1
-func (c *Chip) mulEKaratsuba(a, b ExtensionVariable) ExtensionVariable {
-	a0, a1, a2, a3 := a.Value[0], a.Value[1], a.Value[2], a.Value[3]
-	b0, b1, b2, b3 := b.Value[0], b.Value[1], b.Value[2], b.Value[3]
-
-	p0, p1, p2 := c.karatsuba2(a0, a1, b0, b1)
-	r0, r1, r2 := c.karatsuba2(a2, a3, b2, b3)
-	n0, n1, n2 := c.karatsuba2(
-		c.AddF(a0, a2, false), c.AddF(a1, a3, false),
-		c.AddF(b0, b2, false), c.AddF(b1, b3, false),
-	)
-
-	q0 := c.subLifted(c.subLifted(n0, p0), r0)
-	q1 := c.subLifted(c.subLifted(n1, p1), r1)
-	q2 := c.subLifted(c.subLifted(n2, p2), r2)
-
-	v2 := [4]Variable{
-		c.AddF(p0, c.MulFConst(c.AddF(q2, r0, false), 3, false), false),
-		c.AddF(p1, c.MulFConst(r1, 3, false), false),
-		c.AddF(c.AddF(p2, q0, false), c.MulFConst(r2, 3, false), false),
-		q1,
-	}
-	for i := 0; i < 4; i++ {
-		v2[i] = c.reduceFast(v2[i])
-	}
-	return ExtensionVariable{Value: v2}
-}
-
-// mulESchoolbook is the original 16-multiplication form, kept as the fallback for operands
-// whose bounds leave Karatsuba no headroom.
-func (c *Chip) mulESchoolbook(a, b ExtensionVariable) ExtensionVariable {
-	v2 := [4]Variable{
-		Zero(),
-		Zero(),
-		Zero(),
-		Zero(),
-	}
-
-	for i := 0; i < 4; i++ {
-		for j := 0; j < 4; j++ {
-			if i+j >= 4 {
-				v2[i+j-4] = c.AddF(v2[i+j-4], c.MulFConst(c.MulF(a.Value[i], b.Value[j], false), 3, false), false)
-			} else {
-				v2[i+j] = c.AddF(v2[i+j], c.MulF(a.Value[i], b.Value[j], false), false)
-			}
+// mulESchoolbook is the product's nine coefficients as sums of the 25 products of a coefficient of
+// a and one of b. A product with a constant side is a linear combination, so only the pairs of
+// non-constant coefficients cost a multiplication.
+func (c *Chip) mulESchoolbook(a, b ExtensionVariable) [productLen]frontend.Variable {
+	var terms [productLen][]frontend.Variable
+	for i := 0; i < ExtDegree; i++ {
+		for j := 0; j < ExtDegree; j++ {
+			terms[i+j] = append(terms[i+j], c.api.Mul(a.Value[i].Value, b.Value[j].Value))
 		}
 	}
-	v2[0] = c.reduceFast(v2[0])
-	v2[1] = c.reduceFast(v2[1])
-	v2[2] = c.reduceFast(v2[2])
-	v2[3] = c.reduceFast(v2[3])
-	return ExtensionVariable{Value: v2}
+	var coeffs [productLen]frontend.Variable
+	for k := range coeffs {
+		coeffs[k] = sum(c.api, terms[k])
+	}
+	return coeffs
+}
+
+// mulEInterpolated is the product's nine coefficients from nine multiplications: the operands'
+// values at interpolationPoints and at infinity, multiplied pairwise, then taken back to
+// coefficients by interpolationWeights. The evaluations and the interpolation are linear, so the
+// nine products are the whole cost.
+//
+// The coefficients are exact, not merely right mod r. Each product is constrained, so it is the
+// integer product of the two evaluations mod r; interpolation is a fixed invertible linear map, so
+// the nine results are the integer coefficients c_k mod r, and so is the fold of them. The true
+// fold is a non-negative integer under r (foldLift, productCap), so the wire is that integer:
+// negative points and fractional weights cannot leave a trace, because only the end result has to
+// lie in [0, r).
+func (c *Chip) mulEInterpolated(a, b ExtensionVariable) [productLen]frontend.Variable {
+	var evaluations [productLen]frontend.Variable
+	for i, x := range interpolationPoints {
+		evaluations[i] = c.api.Mul(c.evaluate(a, x), c.evaluate(b, x))
+	}
+	evaluations[productLen-1] = c.api.Mul(a.Value[ExtDegree-1].Value, b.Value[ExtDegree-1].Value)
+	weights := c.interpolationInField()
+	var coeffs [productLen]frontend.Variable
+	for k := range coeffs {
+		terms := make([]frontend.Variable, 0, productLen)
+		for i, e := range evaluations {
+			if weights[k][i].Sign() != 0 {
+				terms = append(terms, c.api.Mul(e, weights[k][i]))
+			}
+		}
+		coeffs[k] = sum(c.api, terms)
+	}
+	return coeffs
+}
+
+// foldProduct reduces a*b's nine coefficients to five by quinticFold, each one bounded and lifted
+// by foldLift, and reduces whichever crosses reduceFast's threshold.
+func (c *Chip) foldProduct(a, b ExtensionVariable, coeffs [productLen]frontend.Variable) ExtensionVariable {
+	bounds := productBounds(a, b)
+	var out ExtensionVariable
+	for j := 0; j < ExtDegree; j++ {
+		lift, bound := foldLift(j, bounds)
+		terms := []frontend.Variable{lift}
+		for k, sign := range quinticFold[j] {
+			switch sign {
+			case 1:
+				terms = append(terms, coeffs[k])
+			case -1:
+				terms = append(terms, c.api.Neg(coeffs[k]))
+			}
+		}
+		out.Value[j] = c.reduceFast(Variable{Value: sum(c.api, terms), UpperBound: bound})
+	}
+	return out
 }
 
 func (c *Chip) MulEF(a ExtensionVariable, b Variable) ExtensionVariable {
-	v1 := c.MulF(a.Value[0], b)
-	v2 := c.MulF(a.Value[1], b)
-	v3 := c.MulF(a.Value[2], b)
-	v4 := c.MulF(a.Value[3], b)
-	return ExtensionVariable{Value: [4]Variable{v1, v2, v3, v4}}
+	var out ExtensionVariable
+	for i := 0; i < ExtDegree; i++ {
+		out.Value[i] = c.MulF(a.Value[i], b)
+	}
+	return out
 }
 
 func (c *Chip) InvE(in ExtensionVariable) ExtensionVariable {
-	result, err := c.api.Compiler().NewHint(InvEHint, 4, in.Value[0].Value, in.Value[1].Value, in.Value[2].Value, in.Value[3].Value)
+	inputs := make([]frontend.Variable, ExtDegree)
+	for i := range inputs {
+		inputs[i] = in.Value[i].Value
+	}
+	result, err := c.api.Compiler().NewHint(InvEHint, ExtDegree, inputs...)
 	if err != nil {
 		panic(err)
 	}
 
 	// 2^31 - 1 for the same reason as in invF.
-	xinv := Variable{Value: result[0], UpperBound: new(big.Int).Set(twoPow31_sub_1)}
-	yinv := Variable{Value: result[1], UpperBound: new(big.Int).Set(twoPow31_sub_1)}
-	zinv := Variable{Value: result[2], UpperBound: new(big.Int).Set(twoPow31_sub_1)}
-	linv := Variable{Value: result[3], UpperBound: new(big.Int).Set(twoPow31_sub_1)}
-	c.RangeChecker.Check(result[0], 31)
-	c.RangeChecker.Check(result[1], 31)
-	c.RangeChecker.Check(result[2], 31)
-	c.RangeChecker.Check(result[3], 31)
-	out := ExtensionVariable{Value: [4]Variable{xinv, yinv, zinv, linv}}
+	var out ExtensionVariable
+	for i := 0; i < ExtDegree; i++ {
+		out.Value[i] = Variable{Value: result[i], UpperBound: new(big.Int).Set(twoPow31_sub_1)}
+		c.RangeChecker.Check(result[i], 31)
+	}
 
 	product := c.MulE(in, out)
-	c.AssertIsEqualE(product, NewEConst([]string{"1", "0", "0", "0"}))
+	c.AssertIsEqualE(product, NewEConst([]string{"1", "0", "0", "0", "0"}))
 
 	return out
 }
 
-func (c *Chip) Ext2Felt(in ExtensionVariable) [4]Variable {
+func (c *Chip) Ext2Felt(in ExtensionVariable) [ExtDegree]Variable {
 	return in.Value
 }
 
@@ -500,11 +699,11 @@ func (c *Chip) DivEF(a ExtensionVariable, b Variable) ExtensionVariable {
 }
 
 func (c *Chip) NegE(a ExtensionVariable) ExtensionVariable {
-	v1 := c.negF(a.Value[0])
-	v2 := c.negF(a.Value[1])
-	v3 := c.negF(a.Value[2])
-	v4 := c.negF(a.Value[3])
-	return ExtensionVariable{Value: [4]Variable{v1, v2, v3, v4}}
+	var out ExtensionVariable
+	for i := 0; i < ExtDegree; i++ {
+		out.Value[i] = c.negF(a.Value[i])
+	}
+	return out
 }
 
 // ToBinary reads the felt as an integer -- the 31 bits of v and of v + p differ -- so it
@@ -671,7 +870,7 @@ func ReduceHint(_ *big.Int, inputs []*big.Int, results []*big.Int) error {
 }
 
 func (p *Chip) ReduceE(x ExtensionVariable) ExtensionVariable {
-	for i := 0; i < 4; i++ {
+	for i := 0; i < ExtDegree; i++ {
 		x.Value[i] = p.ReduceSlow(x.Value[i])
 	}
 	return x
@@ -708,18 +907,20 @@ func SplitLimbsHint(_ *big.Int, inputs []*big.Int, results []*big.Int) error {
 	return nil
 }
 
+// InvEHint is the inverse of the extension element whose ExtDegree coefficients are its inputs, by
+// Plonky3's QuinticTrinomialExtensionField<KoalaBear>::try_inverse over the field FFI; zero gives
+// zero, which InvE's product check then rejects.
 func InvEHint(_ *big.Int, inputs []*big.Int, results []*big.Int) error {
-	a := C.uint(new(big.Int).Mod(inputs[0], modulus).Uint64())
-	b := C.uint(new(big.Int).Mod(inputs[1], modulus).Uint64())
-	c := C.uint(new(big.Int).Mod(inputs[2], modulus).Uint64())
-	d := C.uint(new(big.Int).Mod(inputs[3], modulus).Uint64())
-	ainv := C.koalabearextinv(a, b, c, d, 0)
-	binv := C.koalabearextinv(a, b, c, d, 1)
-	cinv := C.koalabearextinv(a, b, c, d, 2)
-	dinv := C.koalabearextinv(a, b, c, d, 3)
-	results[0].SetUint64(uint64(ainv))
-	results[1].SetUint64(uint64(binv))
-	results[2].SetUint64(uint64(cinv))
-	results[3].SetUint64(uint64(dinv))
+	if len(inputs) != ExtDegree || len(results) != ExtDegree {
+		return fmt.Errorf("InvEHint: %d coefficients in and %d out, not %d and %d", len(inputs), len(results), ExtDegree, ExtDegree)
+	}
+	var in, out [ExtDegree]C.uint32_t
+	for i := range in {
+		in[i] = C.uint32_t(new(big.Int).Mod(inputs[i], modulus).Uint64())
+	}
+	C.koalabearquinticinv(&in[0], &out[0])
+	for i := range out {
+		results[i].SetUint64(uint64(out[i]))
+	}
 	return nil
 }

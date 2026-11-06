@@ -13,6 +13,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/brevis-network/pico/gnark/koalabear"
 	"github.com/brevis-network/pico/gnark/utils"
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/frontend"
@@ -116,6 +117,11 @@ func TestTamperedWitnessIsUnsatisfiable(t *testing.T) {
 		"ext_last": func(w *utils.WitnessInput) {
 			i := last(len(w.Exts))
 			w.Exts[i][0] = plusOne(w.Exts[i][0], koalaBearModulus)
+		},
+		// The top coefficient, the one a reader on fewer coefficients than the writer's would drop.
+		"ext_mid_top": func(w *utils.WitnessInput) {
+			i, top := mid(len(w.Exts)), koalabear.ExtDegree-1
+			w.Exts[i][top] = plusOne(w.Exts[i][top], koalaBearModulus)
 		},
 		"vkey_hash": func(w *utils.WitnessInput) { w.VkeyHash = plusOne(w.VkeyHash, scalar) },
 		"cvd": func(w *utils.WitnessInput) {

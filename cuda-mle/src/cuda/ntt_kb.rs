@@ -106,9 +106,11 @@ pub unsafe fn kb_bit_rev(
     ))
 }
 
-/// Bit-reverses `(numerator, denominator)` pairs of degree-4 extension elements. The kernel
-/// permutes each 32-byte pair as opaque words (no field arithmetic), so the pair type only has to
-/// be the size of `(EF, EF)`.
+/// Bit-reverses `(numerator, denominator)` pairs of KoalaBear^5 extension elements. The kernel
+/// permutes each 40-byte pair as opaque words (no field arithmetic; `kb_frac_ext_words_t` in
+/// pico-gpu `third_party/sppark/ntt_koalabear/ntt_bitrev_kb.cu`), so the pair type only has to be
+/// that size. The size is the kernel's, not derived from `D_EF`, so a degree mismatch between the
+/// two sides fails here instead of passing.
 pub unsafe fn kb_bit_rev_frac_ext<E>(
     d_out: &DeviceBuffer<(E, E)>,
     d_inp: &DeviceBuffer<(E, E)>,
@@ -116,7 +118,7 @@ pub unsafe fn kb_bit_rev_frac_ext<E>(
     padded_poly_size: u32,
     poly_count: u32,
 ) -> Result<(), CudaError> {
-    assert_eq!(std::mem::size_of::<(E, E)>(), 32);
+    assert_eq!(std::mem::size_of::<(E, E)>(), 40);
     CudaError::from_result(_kb_bit_rev_frac_ext(
         d_out.as_mut_raw_ptr(),
         d_inp.as_raw_ptr(),

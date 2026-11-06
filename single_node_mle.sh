@@ -166,8 +166,14 @@ export MLE_COMBINE_OVERLAP_KEYGEN="${MLE_COMBINE_OVERLAP_KEYGEN:-1}"
 ELF="${MLE_ELF:-reth}"
 N="${MLE_N:-188}"
 
-# Prove the whole chain by default: stopping at riscv leaves the recursion layers unmeasured. `:-` so
-# an explicit MLE_STEP wins.
+# Prove to the combine root by default: stopping at riscv leaves the recursion layers unmeasured. `:-`
+# so an explicit MLE_STEP wins. `MLE_STEP=compress` adds the final compression layer after the root,
+# on card 0, reported on its own `MLE compress:` line and outside `e2e=`, so `e2e=` stays comparable
+# with the default's. That line's `e2e-compress=` runs from the start of `e2e=` to the compress
+# proof. Without `MLE_VERIFY=1`, compress starts as soon as the tree is done: the root is checked
+# only inside the compress proof, `root-accept=` / `total=` drop by its CPU keygen and verify (about
+# 0.7 s), and `e2e-compress=` is the proving time. With it, `e2e-compress=` also
+# carries the host-side verification of every intermediate proof, the root's included.
 export MLE_STEP="${MLE_STEP:-combine}"
 
 # GPU path (`cuda`) + `aot-emulator`. Without a CUDA toolkit and a GPU this stops, unless

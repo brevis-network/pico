@@ -10,6 +10,7 @@ mod aot;
 mod chain;
 mod chunks;
 mod committed;
+mod compress;
 mod coprocessor;
 mod cost;
 mod emulation_abort;
@@ -22,6 +23,7 @@ mod export;
 mod fixture;
 #[cfg(feature = "cuda")]
 mod gpu;
+mod memory_functions;
 mod options;
 mod pipeline;
 mod poseidon2;

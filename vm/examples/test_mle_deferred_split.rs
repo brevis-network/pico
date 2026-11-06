@@ -29,7 +29,7 @@ use std::{env, panic, sync::Arc};
 
 use p3_field::PrimeCharacteristicRing;
 use pico_mle_core::{
-    config::{recursion_params_with_100_bits_security, riscv_params_with_100_bits_security},
+    config::{recursion_params_with_128_bits_security, riscv_params_with_128_bits_security},
     prover::DeviceDataTransporter,
     StarkEngine,
 };
@@ -155,7 +155,7 @@ struct Riscv {
 impl Riscv {
     fn new(program: &Arc<Program>) -> Self {
         let engine: Engine =
-            StarkEngine::new(riscv_params_with_100_bits_security(LOG_STACKED_HEIGHT));
+            StarkEngine::new(riscv_params_with_128_bits_security(LOG_STACKED_HEIGHT));
         let airs = mle_riscv_air_refs(Arc::clone(program), false);
         let (pk, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
         let d_pk = engine.device().transport_pk_to_device(&pk);
@@ -288,7 +288,7 @@ fn main() {
     )
     .expect("honest tree");
     let mut deferred = DeferredMachine::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         riscv.vm_vk.clone(),
         false,
     );

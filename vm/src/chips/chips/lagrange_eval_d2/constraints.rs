@@ -10,10 +10,10 @@ use crate::{
     primitives::consts::EXTENSION_DEGREE,
 };
 use p3_air::{Air, WindowAccess};
-use p3_field::{extension::BinomiallyExtendable, Field, PrimeCharacteristicRing};
+use p3_field::{extension::QuinticTrinomialExtendable, Field, PrimeCharacteristicRing};
 use std::borrow::Borrow;
 
-impl<F: Field + BinomiallyExtendable<EXTENSION_DEGREE>, CB> Air<CB> for LagrangeEvalD2Chip<F>
+impl<F: Field + QuinticTrinomialExtendable, CB> Air<CB> for LagrangeEvalD2Chip<F>
 where
     CB: ChipBuilder<F>,
 {

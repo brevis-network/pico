@@ -1,0 +1,4 @@
+# build.sh and cargo pico lib output
+*.o
+*.elf
+pico-zkvm/

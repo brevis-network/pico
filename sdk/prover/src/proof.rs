@@ -26,6 +26,9 @@ pub(crate) enum Payload {
     Riscv(RiscvProof),
     Convert(Vec<ProofWithVk>),
     Combine(Box<ProofWithVk>),
+    /// The root re-proved at the compress preset: the same proof type as the root's, under the
+    /// compress key.
+    Compress(Box<ProofWithVk>),
     #[cfg(feature = "multi-field-transcript")]
     Embed(EmbedProofWithVk),
     #[cfg(feature = "multi-field-transcript")]
@@ -82,9 +85,10 @@ impl Proof {
 
     /// How many chunk proofs the RISC-V layer produced — one per emulation record, which runs
     /// ahead of the chunk count because the deferred split emits records after the guest halts.
-    /// `None` only where no bundle is at hand to count: a [`Phase::Combine`] proof loaded from a
-    /// container, which stores one root proof and no count. A loaded RISC-V bundle carries its
-    /// chunks, so it reports them, and every proof this prover produced counts the run it emulated.
+    /// `None` only where no bundle is at hand to count: a [`Phase::Combine`] or [`Phase::Compress`]
+    /// proof loaded from a container, which stores one proof and no count. A loaded RISC-V bundle
+    /// carries its chunks, so it reports them, and every proof this prover produced counts the run
+    /// it emulated.
     pub fn chunk_count(&self) -> Option<usize> {
         self.chunk_count
     }
@@ -113,7 +117,8 @@ impl Proof {
 
     /// The lean pre-hash of the verifying key this proof verifies under. `None` for
     /// [`Phase::Embed`] and [`Phase::Wrap`], whose keys live under the outer config and whose
-    /// digests are not KoalaBear limbs.
+    /// digests are not KoalaBear limbs; a [`Phase::Compress`] key is a KoalaBear-digest key and
+    /// reports one.
     ///
     /// A [`Phase::Convert`] proof is a set with one key per chunk layout, and this is the key of
     /// the set's first proof only: two sets that share a first key report the same value.
@@ -134,12 +139,14 @@ impl Proof {
             .map(digest_words)
     }
 
-    /// The key of a phase up to [`Phase::Combine`]; a convert set's first proof stands for the set.
+    /// The key of a phase up to [`Phase::Compress`]; a convert set's first proof stands for the
+    /// set.
     fn koalabear_vk(&self) -> Option<&VerifyingKey> {
         match &self.payload {
             Payload::Riscv(bundle) => Some(&*bundle.vk),
             Payload::Convert(proofs) => proofs.first().map(|(_, vk)| &**vk),
             Payload::Combine(root) => Some(&*root.1),
+            Payload::Compress(compress) => Some(&*compress.1),
             #[cfg(feature = "multi-field-transcript")]
             Payload::Embed(_) | Payload::Wrap { .. } => None,
         }
@@ -159,7 +166,8 @@ impl Proof {
     /// (`pico_verifier::envelope`) and the committed bytes it binds. With the prover's
     /// [`crate::Prover::vk_bundle`] they verify by `pico_verifier::verify(bundle, envelope,
     /// committed)` under the shipped whitelist, or `verify_with_root` under another. A
-    /// whitelist-mode [`Phase::Combine`] proof only; nothing is written to disk.
+    /// whitelist-mode [`Phase::Combine`] proof only: `pico_verifier` verifies no compress proof yet
+    /// (`TODO(compress-apex)`). Nothing is written to disk.
     pub fn export_v3(&self) -> Result<(Vec<u8>, Vec<u8>), ProveError> {
         if !self.verify_keys {
             return Err(ProveError::WhitelistModeRequired {
@@ -177,8 +185,9 @@ impl Proof {
 
     /// Write a container a fresh process can load with [`crate::ProofArtifact::read`].
     ///
-    /// Only [`Phase::Riscv`] and [`Phase::Combine`] can be written: those are the two the single
-    /// verification entry point can answer for from a file. See [`crate::ProofArtifact`].
+    /// Only [`Phase::Riscv`], [`Phase::Combine`] and [`Phase::Compress`] can be written: those are
+    /// the ones the single verification entry point can answer for from a file. See
+    /// [`crate::ProofArtifact`].
     pub fn write(&self, path: impl AsRef<Path>) -> Result<(), ProveError> {
         crate::artifact::write(self, path.as_ref())
     }
@@ -189,7 +198,7 @@ impl Proof {
         match &self.payload {
             Payload::Riscv(bundle) => bundle.chunk_proofs.len(),
             Payload::Convert(proofs) => proofs.len(),
-            Payload::Combine(_) => 1,
+            Payload::Combine(_) | Payload::Compress(_) => 1,
             #[cfg(feature = "multi-field-transcript")]
             Payload::Embed(_) | Payload::Wrap { .. } => 1,
         }
@@ -214,6 +223,7 @@ impl Proof {
                 .iter()
                 .try_fold(0usize, |acc, (p, _)| Ok(acc + size(p.encode_to_vec())?)),
             Payload::Combine(root) => size(root.0.encode_to_vec()),
+            Payload::Compress(compress) => size(compress.0.encode_to_vec()),
             #[cfg(feature = "multi-field-transcript")]
             Payload::Embed((p, _)) => size(p.encode_to_vec()),
             #[cfg(feature = "multi-field-transcript")]

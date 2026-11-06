@@ -1,6 +1,6 @@
 # Requirements
 
-Pico 3.1 (`v3.1.0`): the default build is the CPU prover, and the `cuda` feature adds the GPU
+Pico 3.1 (`v3.1.1`): the default build is the CPU prover, and the `cuda` feature adds the GPU
 prover. For the 3.0 release, see this page at `v3.0.0`.
 
 ## Host platform
@@ -41,16 +41,14 @@ Install the CLI and the guest toolchain:
 
 ```bash
 rustup toolchain install nightly-2026-09-27
-cargo +nightly-2026-09-27 install --git https://github.com/brevis-network/pico --tag v3.1.0 --locked pico-cli
+cargo +nightly-2026-09-27 install --git https://github.com/brevis-network/pico --tag v3.1.1 --locked pico-cli
 cargo pico install
 ```
 
-or, from a checkout:
-
-```bash
-cargo install --path sdk/cli --locked
-cargo pico install
-```
+or, from a checkout of the repository at `v3.1.1`, `cargo install --path sdk/cli --locked`.
+`cargo install --list` shows where a CLI came from: one installed with `--tag v3.1.1` shows
+`?tag=v3.1.1`. A CLI installed from `main` before the `v3.1.0` tag reports version 3.1.0 but is
+neither release.
 
 ## Only for the EVM path (`cargo pico prove --evm`)
 
@@ -67,8 +65,9 @@ verifier contracts in [`contracts/`](../contracts).
 
 ## Memory
 
-Proving memory depends on the program. The only figures in this repository are measurements of
-the examples with the 3.0 CPU prover, not guarantees. The emulation in them is serial
+Proving memory depends on the program. The only figures in this repository are measurements, not
+guarantees: the two example rows were taken with the 3.0 CPU prover and have not been measured
+again with the 128-bit parameters; the Groth16 rows are 3.1's. The emulation in them is serial
 (`ProverBuilder::serial_emulation`, `--serial-emulation`); the default snapshot pipeline, which
 emulates with up to 16 replay workers, has not been measured on them:
 
@@ -76,8 +75,8 @@ emulates with up to 16 replay workers, has not been measured on them:
 |---|---|---|---|
 | fibonacci, `prove` (RISC-V phase) | Apple M4 laptop, 10 cores, 24 GB | 6.7 GB | 25 s |
 | tendermint, prover defaults (19.1 M cycles) | 124-core server, 920 GB | 206 GB | 2 min 28 s |
-| Groth16 setup of the wrap circuit | one machine | 17 GB | 3 min 39 s |
-| Groth16 prove of the wrap circuit | one machine | 12 GB | 24 s |
+| Groth16 setup of the wrap circuit | 124-core server | 15.5 GB | 3 min 48 s |
+| Groth16 prove of the wrap circuit | 124-core server | 11.2 GB | 23 s |
 
 Sources: [`examples/README.md`](../examples/README.md) (including how a lower stacked height
 trades time for memory) and [`gnark/README.md`](../gnark/README.md).

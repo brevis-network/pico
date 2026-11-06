@@ -448,11 +448,8 @@ fn public_value_fields(pv: &PublicValues<u32, u32>) -> Vec<(&'static str, String
             "last_finalize_addr_limbs",
             format!("{:?}", pv.last_finalize_addr_limbs),
         ),
-        ("deferred_commits", format!("{}", pv.deferred_commits)),
-        (
-            "deferred_commit_mask",
-            format!("{}", pv.deferred_commit_mask),
-        ),
+        ("commits", format!("{}", pv.commits)),
+        ("commit_mask", format!("{}", pv.commit_mask)),
         ("empty", format!("{:?}", pv.empty)),
     ]
 }

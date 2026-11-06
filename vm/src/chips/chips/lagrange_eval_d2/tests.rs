@@ -8,6 +8,7 @@ use crate::{
     },
     emulator::recursion::emulator::RecursionRecord,
     machine::chip::ChipBehavior,
+    primitives::consts::EXTENSION_DEGREE,
 };
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_koala_bear::KoalaBear;
@@ -16,7 +17,7 @@ use p3_matrix::Matrix;
 type F = KoalaBear;
 
 fn b(v: u32) -> Block<F> {
-    Block([F::from_u32(v), F::ZERO, F::ZERO, F::ZERO])
+    Block::from(F::from_u32(v))
 }
 
 /// Reference quadratic interpolation on the base lane:
@@ -45,7 +46,7 @@ fn test_lagrange_eval_d2_trace_dimensions() {
         s1: b(2),
         s2: b(7),
         r: b(4),
-        next_claim: Block([next, F::ZERO, F::ZERO, F::ZERO]),
+        next_claim: Block::from(next),
     };
 
     let mut record = RecursionRecord::<F>::default();
@@ -56,13 +57,14 @@ fn test_lagrange_eval_d2_trace_dimensions() {
 
     assert!(trace.height() >= 16);
     assert_eq!(trace.width(), super::columns::NUM_LAGRANGE_EVAL_D2_COLS);
-    // Columns: [claim(4), s1(4), s2(4), r(4), next_claim(4)]
+    // Columns: [claim, s1, s2, r, next_claim], each a Block of E = EXTENSION_DEGREE lanes
+    const E: usize = EXTENSION_DEGREE;
     let row = trace.row_slice(0).unwrap();
     assert_eq!(row[0], claim);
-    assert_eq!(row[4], s1);
-    assert_eq!(row[8], s2);
-    assert_eq!(row[12], r);
-    assert_eq!(row[16], next);
+    assert_eq!(row[E], s1);
+    assert_eq!(row[2 * E], s2);
+    assert_eq!(row[3 * E], r);
+    assert_eq!(row[4 * E], next);
 }
 
 #[test]
@@ -139,6 +141,7 @@ mod gpu {
             F::from_u32(base.wrapping_add(1)),
             F::from_u32(base.wrapping_add(2)),
             F::from_u32(base.wrapping_add(3)),
+            F::from_u32(base.wrapping_add(4)),
         ])
     }
 

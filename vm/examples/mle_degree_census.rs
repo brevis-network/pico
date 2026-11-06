@@ -14,7 +14,7 @@
 
 use pico_mle_core::{
     air::symbolic::{SymbolicExpressionDag, SymbolicExpressionNode},
-    config::riscv_params_with_100_bits_security,
+    config::riscv_params_with_128_bits_security,
     StarkEngine,
 };
 use pico_vm::{
@@ -63,7 +63,7 @@ fn main() {
         .expect("failed to parse ELF")
         .compile();
 
-    let engine: Engine = StarkEngine::new(riscv_params_with_100_bits_security(23));
+    let engine: Engine = StarkEngine::new(riscv_params_with_128_bits_security(23));
     let airs = riscv::mle_riscv_air_refs(program, true);
     let (_, vk) = engine.keygen_with_app_prep(&airs, riscv::RISCV_APP_PREP_AIR_IDS);
     let global = vk.inner.max_constraint_degree();

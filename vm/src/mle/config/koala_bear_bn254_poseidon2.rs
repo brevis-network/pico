@@ -1,7 +1,7 @@
 //! Outer ("embed") protocol config: a KoalaBear STARK whose PCS commitments and Fiat–Shamir
 //! transcript run over **BN254 Poseidon2** instead of Poseidon2-KoalaBear.
 //!
-//! Purpose: the EMBED phase re-proves the recursion root 1:1 under this config, so that the
+//! Purpose: the EMBED phase re-proves the compress proof 1:1 under this config, so that the
 //! on-chain gnark circuit recomputes the proof's Merkle paths / transcript with **native** BN254
 //! `Permute` opcodes instead of emulated Poseidon2-KoalaBear. The field arithmetic stays KoalaBear;
 //! only the hash and the transcript move to BN254.
@@ -25,7 +25,7 @@ use std::{
 };
 
 use p3_bn254::{Bn254, Poseidon2Bn254};
-use p3_field::{extension::BinomialExtensionField, PrimeField};
+use p3_field::{extension::QuinticTrinomialExtensionField, PrimeField};
 use p3_koala_bear::KoalaBear;
 use p3_symmetric::TruncatedPermutation;
 use pico_mle_core::{
@@ -43,7 +43,7 @@ use crate::primitives::{
 };
 
 pub type F = KoalaBear;
-pub type EF = BinomialExtensionField<KoalaBear, 4>;
+pub type EF = QuinticTrinomialExtensionField<KoalaBear>;
 
 /// Width-3 BN254 Poseidon2 permutation (matches the gnark-side `Permute` chip).
 pub type EmbedPerm = Poseidon2Bn254<MULTI_FIELD_CHALLENGER_WIDTH>;
@@ -266,7 +266,7 @@ mod tests {
     /// A `SystemParams` value round-trips through the config, and the hasher is wired up.
     #[test]
     fn embed_config_initializes_from_params() {
-        let params = pico_mle_core::compress_params_with_100_bits_security(20);
+        let params = pico_mle_core::embed_params_with_128_bits_security();
         let config = KoalaBearBn254Poseidon2Config::default_from_params(params.clone());
         assert_eq!(config.params(), &params);
         let _ = config.hasher();

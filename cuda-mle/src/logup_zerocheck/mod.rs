@@ -48,7 +48,10 @@ use tracing::{debug, info, info_span, instrument};
 
 use crate::{
     base::DeviceMatrix,
-    cuda::{field_kernels::FieldKernels, logup_zerocheck::MainMatrixPtrs},
+    cuda::{
+        field_kernels::{FieldKernels, GkrLens},
+        logup_zerocheck::MainMatrixPtrs,
+    },
     data_transporter::transport_matrix_d2h_col_major,
     error::LogupZerocheckError,
     gpu_backend::GenericGpuBackend,
@@ -272,14 +275,41 @@ mod buf_cache {
         })
     }
 
+    /// The device's free VRAM, re-read from the driver at most every 100 ms per card.
+    ///
+    /// `checkin` runs at the end of every prove, on the lane thread, right before it starts its
+    /// next chunk. `cudaMemGetInfo` takes a driver lock, and against another lane's allocations it
+    /// took milliseconds (p99 3.4 ms, max 11.6 ms over a reth block), which the card spent idle.
+    /// A guard against memory pressure does not need a fresher figure than that.
     fn free_vram() -> usize {
+        use std::{
+            sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+            time::{Duration, Instant},
+        };
         #[link(name = "cudart")]
         extern "C" {
             fn cudaMemGetInfo(free: *mut usize, total: *mut usize) -> i32;
         }
+        const MAX_CARDS: usize = 16;
+        const STALE: Duration = Duration::from_millis(100);
+        static EPOCH: OnceLock<Instant> = OnceLock::new();
+        static READ_AT_US: [AtomicU64; MAX_CARDS] = [const { AtomicU64::new(0) }; MAX_CARDS];
+        static FREE: [AtomicUsize; MAX_CARDS] = [const { AtomicUsize::new(0) }; MAX_CARDS];
+        let dev = crate::runtime::context::get_device().unwrap_or(0).max(0) as usize;
+        let now_us = EPOCH.get_or_init(Instant::now).elapsed().as_micros() as u64 + 1;
+        if dev < MAX_CARDS && crate::runtime::memory_manager::meminfo_lazy() {
+            let at = READ_AT_US[dev].load(Ordering::Relaxed);
+            if at != 0 && now_us - at < STALE.as_micros() as u64 {
+                return FREE[dev].load(Ordering::Relaxed);
+            }
+        }
         let mut free = 0usize;
         let mut total = 0usize;
         unsafe { cudaMemGetInfo(&mut free, &mut total) };
+        if dev < MAX_CARDS {
+            FREE[dev].store(free, Ordering::Relaxed);
+            READ_AT_US[dev].store(now_us, Ordering::Relaxed);
+        }
         free
     }
 
@@ -482,6 +512,9 @@ where
     // may still be in flight when the span closes). STEP_PROF=1 to enable.
     let step_prof = std::env::var("STEP_PROF").is_ok();
     let t_ie = std::time::Instant::now();
+    let real_leaves = total_interactions as usize;
+    let virtual_padding =
+        has_interactions && fractional::use_virtual_padding::<FK>(real_leaves, total_leaves);
     let (inputs, alpha) = if has_interactions {
         log_gkr_input_evals::<FK, HS>(
             &zc_prover.trace_interactions,
@@ -491,17 +524,34 @@ where
             alpha_logup,
             &zc_prover.d_challenges,
             total_leaves,
-            total_interactions as usize,
+            real_leaves,
+            virtual_padding,
         )?
     } else {
         (DeviceBuffer::new(), FK::ValExt::ZERO)
+    };
+    let gkr_lens = if virtual_padding {
+        GkrLens {
+            real_len: real_leaves,
+            logical_len: total_leaves,
+        }
+    } else {
+        GkrLens::dense(inputs.len())
     };
     if step_prof {
         let _ = crate::runtime::stream::current_stream_sync();
         tracing::info!(target: "bench", "[stepprof][{}] input_evals_synced={}us", crate::prove_phase(), t_ie.elapsed().as_micros());
     }
-    // The batch-MLE memory budget starts from the size of the GKR input buffer.
-    zc_prover.gkr_mem_contribution = inputs.len() * std::mem::size_of::<Frac<FK::ValExt>>();
+    // The batch-MLE memory budget starts from the size of the GKR input buffer: what the dense
+    // layout holds and frees before the batch MLE runs. A virtual input frees less, but its budget
+    // stays at that dense size, capped (`gkr_zc_budget_leaves`) so that a chunk padded past the cap
+    // does not hand the batch MLE the memory the virtual input just saved.
+    let budget_leaves = if virtual_padding {
+        total_leaves.min(fractional::gkr_zc_budget_leaves())
+    } else {
+        inputs.len()
+    };
+    zc_prover.gkr_mem_contribution = budget_leaves * std::mem::size_of::<Frac<FK::ValExt>>();
     zc_prover.memory_limit_bytes = zc_prover.gkr_mem_contribution;
     if !zc_prover.save_memory {
         const DEFAULT_MEMORY_LIMIT: usize = 5 << 30; // 5GiB
@@ -529,6 +579,7 @@ where
     let (frac_out, mut xi) = fractional_sumcheck_gpu::<FK, HS::SC, _>(
         transcript,
         inputs,
+        gkr_lens,
         alpha,
         true,
         &mut zc_prover.mem,

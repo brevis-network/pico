@@ -51,11 +51,12 @@ pub struct PublicValues<W, T> {
     /// The largest finalization address in the current chunk as 3×u16 limbs.
     pub last_finalize_addr_limbs: [T; 3],
 
-    /// How many COMMIT_DEFERRED_PROOFS ecalls this chunk ran, and the sum of `2^word_index` over
-    /// them. The recursion takes the deferred digest only from a chunk that ran all eight words
-    /// once each; the digest itself is bound only on those rows.
-    pub deferred_commits: T,
-    pub deferred_commit_mask: T,
+    /// How many COMMIT and COMMIT_DEFERRED_PROOFS ecalls this chunk ran, and the sum over them of
+    /// `2^(8 + word_index)` (COMMIT) or `2^word_index` (COMMIT_DEFERRED_PROOFS). Each digest is
+    /// bound only on its own ecall rows, so the recursion takes it only from a chunk that ran all
+    /// eight of its words once each.
+    pub commits: T,
+    pub commit_mask: T,
 
     /// This field is here to ensure that the size of the public values struct is a multiple of 8.
     pub empty: [T; 1],
@@ -110,8 +111,8 @@ impl<F: PrimeCharacteristicRing> From<PublicValues<u32, u32>> for PublicValues<W
             last_init_addr_limbs,
             previous_finalize_addr_limbs,
             last_finalize_addr_limbs,
-            deferred_commits,
-            deferred_commit_mask,
+            commits,
+            commit_mask,
             ..
         } = value;
 
@@ -154,8 +155,8 @@ impl<F: PrimeCharacteristicRing> From<PublicValues<u32, u32>> for PublicValues<W
             last_init_addr_limbs,
             previous_finalize_addr_limbs,
             last_finalize_addr_limbs,
-            deferred_commits: F::from_u32(deferred_commits),
-            deferred_commit_mask: F::from_u32(deferred_commit_mask),
+            commits: F::from_u32(commits),
+            commit_mask: F::from_u32(commit_mask),
             empty: [F::ZERO; 1],
         }
     }

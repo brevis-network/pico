@@ -17,11 +17,12 @@ pub const PROOF_MAGIC: [u8; 8] = *b"PICOMLE\0";
 pub const ENVELOPE_V3: u32 = 3;
 
 /// zstd level for the v3 body. This runs inside the reported proving time, so a fast level: on a
-/// fib root -3 gives 480 KB in 1.3 ms, -19 gives 459 KB in 111 ms.
+/// fib root under the earlier 100-bit parameters -3 gave 480 KB in 1.3 ms, -19 gave 459 KB in
+/// 111 ms.
 const PROOF_ZSTD_LEVEL: i32 = 3;
 
-/// Bounds what a hostile envelope can make a decoder allocate. Real roots are under 1 MB
-/// decompressed (fib's is ~800 KB).
+/// Bounds what a hostile envelope can make a decoder allocate. Real roots were under 1 MB
+/// decompressed under the earlier 100-bit parameters (fib's ~800 KB), far below this bound.
 const MAX_BODY: u64 = 32 << 20;
 
 /// The v3 body.

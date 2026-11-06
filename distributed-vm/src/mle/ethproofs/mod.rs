@@ -229,7 +229,8 @@ pub fn run(cfg: &MleEthProofsConfig) {
                 }
             }
             None => {
-                // No root: `--step` stopped short of combine, the block emulated to nothing, or
+                // No root: `--step` stopped short of combine, the root was left to the compress
+                // proof (`--step compress` without `MLE_VERIFY`), the block emulated to nothing, or
                 // the export failed. RSP keeps polling and gets no proof, which is the truthful
                 // answer -- there is none.
                 failed += 1;

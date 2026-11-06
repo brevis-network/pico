@@ -14,7 +14,7 @@
 use std::sync::Arc;
 
 use p3_field::PrimeCharacteristicRing;
-use pico_mle_core::config::recursion_params_with_100_bits_security;
+use pico_mle_core::config::recursion_params_with_128_bits_security;
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
@@ -56,7 +56,7 @@ fn main() {
         riscv_vk.clone(),
         vm_vk.clone(),
         &proofs,
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         true, // whitelist mode: the default production circuit shape
     )
     .expect("convert machine");
@@ -76,7 +76,7 @@ fn main() {
         Arc::new(perturbed),
         vm_vk,
         &proofs,
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         true,
     )
     .expect("convert machine");

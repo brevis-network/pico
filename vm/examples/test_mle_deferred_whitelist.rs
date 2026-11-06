@@ -36,7 +36,8 @@ use std::{panic, sync::Arc};
 
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use pico_mle_core::{
-    config::recursion_params_with_100_bits_security, keygen::types::MultiStarkVerifyingKey,
+    config::{compress_params_with_128_bits_security, recursion_params_with_128_bits_security},
+    keygen::types::MultiStarkVerifyingKey,
     protocol::proof::Proof,
 };
 use pico_vm::{
@@ -112,7 +113,7 @@ fn convert_machine(guest: &Guest) -> ConvertMachine {
         guest.riscv_vk.clone(),
         guest.vm_vk.clone(),
         &guest.proofs,
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         true,
     )
     .expect("convert machine")
@@ -134,7 +135,7 @@ fn self_map(guests: &[&Guest]) -> MleVkMap {
     }
     let convert_vk = convert_vk.expect("a convert key");
     let mut combine = CombineMachine::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         guests[0].vm_vk.clone(),
         true,
     );
@@ -146,7 +147,7 @@ fn self_map(guests: &[&Guest]) -> MleVkMap {
             .map(|vk| vk_identity(vk)),
     );
     let mut deferred = DeferredMachine::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         guests[0].vm_vk.clone(),
         true,
     );
@@ -174,7 +175,7 @@ fn tree(
     let mut children = prefix.to_vec();
     children.extend(convert.prove_with_vks(&guest.proofs)?);
     let mut combine = CombineMachine::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         guest.vm_vk.clone(),
         true,
     );
@@ -192,7 +193,7 @@ fn nodes(
     skip_host_checks: bool,
 ) -> eyre::Result<(Vec<ProofWithVk>, [Kb; DIGEST_SIZE])> {
     let mut deferred = DeferredMachine::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         main.vm_vk.clone(),
         true,
     );
@@ -295,7 +296,8 @@ fn main() {
     let closes = (0..DIGEST_SIZE).all(|j| pvs[col.deferred_proofs_digest[j]] == chain_end[j]);
     let nodes_rooted = agg_nodes.iter().all(|n| vk_root_of(n) == root);
     let apex = MleApexVerifier::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
+        compress_params_with_128_bits_security(),
         map.clone(),
         agg.vm_vk.clone(),
         root,
@@ -370,7 +372,7 @@ fn main() {
         || {
             // A node proved outside the whitelist carries no root.
             let mut dev = DeferredMachine::new(
-                recursion_params_with_100_bits_security(),
+                recursion_params_with_128_bits_security(),
                 agg.vm_vk.clone(),
                 false,
             );
@@ -398,7 +400,8 @@ fn main() {
 
     let wrong = reordered(&map);
     let apex = MleApexVerifier::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
+        compress_params_with_128_bits_security(),
         wrong.clone(),
         agg.vm_vk.clone(),
         wrong.root(),

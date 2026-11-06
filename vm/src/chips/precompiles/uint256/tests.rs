@@ -26,13 +26,13 @@ use crate::{
 };
 use num::BigUint;
 use p3_air::{Air, RowWindow};
-use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing};
+use p3_field::{extension::QuinticTrinomialExtensionField, PrimeCharacteristicRing};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::{borrow::BorrowMut, collections::BTreeMap, sync::Arc};
 
 type F = KoalaBear;
-type EF = BinomialExtensionField<KoalaBear, 4>;
+type EF = QuinticTrinomialExtensionField<KoalaBear>;
 
 /// `x`, then `y` followed by the modulus, dword-aligned and clear of each other.
 const X_PTR: u64 = 0x10_0000;

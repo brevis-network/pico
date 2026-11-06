@@ -10,6 +10,7 @@ host's `verify` accepts the RISC-V proof file the CLI writes.
 |---|---|
 | `fibonacci/` | the quick start. `app/` is the guest; `lib/` holds `PublicValuesStruct`, the ABI-encoded output a Solidity verifier decodes; `prover/` emulates the guest, proves it to a file, and verifies that file in a separate process |
 | `tendermint/` | a light-client update between two real blocks: inputs the host encodes from JSON fixtures, an emulation checked before proving, a proof of the whole run, and an oracle that recomputes all three committed values on the host; `lib/` holds the verification the guest and the oracle share. **Needs a large machine** |
+| `c-guest/` | a guest in C and C++, compiled with clang and linked, with LLD and with GNU ld, against only `libpico_zkvm.a` and `pico.ld` (`cargo pico lib`): IO, exit codes, `abort` / `assert`, and C++ global constructors and destructors |
 | `aggregator/` | a guest that claims other programs' proofs (`verify_pico_proof`) and recursion that closes those claims. `prover/` proves fibonacci twice, then the aggregator claiming both, and verifies the result in the same process |
 
 The AOT emulation harnesses for fibonacci and reth are in `perf/aot/`, beside the fixtures they run.
@@ -134,6 +135,7 @@ at any other.
 |---|---|---|
 | `riscv` | `proof-riscv.pico` | any process with the ELF, at the file's operating point, because a RISC-V verifying key is derived from the program. In whitelist mode the verifier also needs `vk_map` and `trusted_vk_root`, as every whitelist-mode prover does. The proof covers each chunk of the run, not the run as one execution |
 | `combine` | `proof-combine.pico` | another process only in whitelist mode: `VK_VERIFICATION=true`, `MLE_VK_MAP` and `MLE_VK_ROOT` for the CLI, `ProverBuilder::verify_keys(true)` with `vk_map` and `trusted_vk_root` for `pico-prover`. Outside it, `Prover::prove` returns the combine proof already verified, in the process that made it |
+| `compress` | `proof-compress.pico` | as `combine`: another process only in whitelist mode (the compress key is a whitelist leaf), else the process that wrote it. The final proof; `embed` / `wrap` go on from it |
 
 These examples run outside whitelist mode, so the program id they print is not the one an on-chain
 verifier pins: whitelist mode pads the program table before committing to it, and the same ELF has

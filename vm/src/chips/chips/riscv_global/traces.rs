@@ -82,6 +82,9 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
                     let message0_8bit_limb = ((event.message[0] >> 16) & 0xFF) as u8;
                     blu.add_u16_range_check(message0_16bit_limb);
                     blu.add_u16_range_check(event.message[7] as u16);
+                    // 16 + 9 decomposition of message[1].
+                    blu.add_u16_range_check((event.message[1] & 0xFFFF) as u16);
+                    blu.add_bit_range_check(((event.message[1] >> 16) & 0x1FF) as u16, 9);
                     // No `kind < 32` LTU event: every sender passes a compile-time constant,
                     // so the multiset pins the receiver's column and keygen checks the constant.
                     // `message0_8bit_limb` rides the offset U8 pair below instead.
@@ -165,6 +168,8 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
                         cols.message_0_16bit_limb = F::from_u32(event.message[0] & 0xFFFF);
                         cols.message_0_8bit_limb = F::from_u32((event.message[0] >> 16) & 0xFF);
                         cols.message_0_high_bit = F::from_u32((event.message[0] >> 24) & 1);
+                        cols.message_1_16bit_limb = F::from_u32(event.message[1] & 0xFFFF);
+                        cols.message_1_hi9 = F::from_u32((event.message[1] >> 16) & 0x1FF);
                         cols.interaction.populate(
                             event.message,
                             event.is_receive,

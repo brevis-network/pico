@@ -2,6 +2,10 @@
 //!
 //! The format, its decoder and the apex built from it are `pico_verifier::bundle`'s; this module
 //! adds what needs the prover: the guest identity from an ELF and the members from a whitelist.
+//!
+//! TODO(compress-apex): [`apex_from_bundle`] builds `pico_verifier`'s apex, which verifies the
+//! combine root only, not this crate's `MleApexVerifier`; a compress proof is verified by the
+//! latter.
 
 use std::sync::Arc;
 
@@ -23,8 +27,9 @@ use crate::{
     },
 };
 
-/// The whitelist leaves a root proof's vk can be: everything after the convert keys, which is to
-/// say the combine node keys and the deferred node key (the artifact's leaf order).
+/// The whitelist leaves an outermost proof's vk can be: everything after the convert keys, which is
+/// to say the combine node keys, the deferred node key and the compress node key (the artifact's
+/// leaf order).
 pub fn root_capable_leaves(map: &MleVkMap) -> std::ops::Range<usize> {
     mle_riscv_shapes().len()..map.entries.len()
 }

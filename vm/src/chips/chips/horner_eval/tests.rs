@@ -8,17 +8,20 @@ use crate::{
     },
     emulator::recursion::emulator::RecursionRecord,
     machine::chip::ChipBehavior,
-    primitives::consts::HORNER_EVAL_DATAPAR,
+    primitives::consts::{EXTENSION_DEGREE, HORNER_EVAL_DATAPAR},
 };
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{
+    extension::QuinticTrinomialExtensionField, BasedVectorSpace, PrimeCharacteristicRing,
+};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 
 type F = KoalaBear;
+type EF = QuinticTrinomialExtensionField<KoalaBear>;
 const D: usize = HORNER_EVAL_DATAPAR;
 
 fn b(v: u32) -> Block<F> {
-    Block([F::from_u32(v), F::ZERO, F::ZERO, F::ZERO])
+    Block::from(F::from_u32(v))
 }
 
 #[test]
@@ -35,21 +38,22 @@ fn test_horner_eval_trace_row_acc_and_powers() {
     record.horner_eval_events.push(HornerEvalEvent {
         coeffs,
         x: b(2),
-        acc: Block([acc, F::ZERO, F::ZERO, F::ZERO]),
+        acc: Block::from(acc),
     });
 
     let mut output = RecursionRecord::<F>::default();
     let trace = chip.generate_main(&record, &mut output);
     assert!(trace.height() >= 16);
     assert_eq!(trace.width(), super::columns::NUM_HORNER_EVAL_COLS);
-    // Layout: [coeffs(4*D), x(4), x2(4), x3(4), x4(4), acc(4)]
+    // Layout: [coeffs(E*D), x(E), x2(E), x3(E), x4(E), acc(E)], E = EXTENSION_DEGREE
+    const E: usize = EXTENSION_DEGREE;
     let row = trace.row_slice(0).unwrap();
     assert_eq!(row[0], F::from_u32(5));
-    assert_eq!(row[4 * D], x);
-    assert_eq!(row[4 * D + 4], x * x); // x2
-    assert_eq!(row[4 * D + 8], x * x * x); // x3
-    assert_eq!(row[4 * D + 12], x * x * x * x); // x4
-    assert_eq!(row[4 * D + 16], acc);
+    assert_eq!(row[E * D], x);
+    assert_eq!(row[E * D + E], x * x); // x2
+    assert_eq!(row[E * D + 2 * E], x * x * x); // x3
+    assert_eq!(row[E * D + 3 * E], x * x * x * x); // x4
+    assert_eq!(row[E * D + 4 * E], acc);
 }
 
 #[test]
@@ -99,6 +103,49 @@ fn test_horner_eval_preprocessed_segmentation() {
         assert_eq!(row[2], is_end, "row {i} is_end");
         assert_eq!(row[mult_col], mult, "row {i} mult");
     }
+}
+
+/// An extension element with every one of its `EXTENSION_DEGREE` coefficients non-zero and
+/// distinct, so a tracegen that only handled the first four would disagree with `EF`.
+fn ef(seed: u32) -> EF {
+    EF::from_basis_coefficients_fn(|i| F::from_u32(seed + 7 * i as u32 + 1))
+}
+
+fn blk(e: EF) -> Block<F> {
+    Block::from(e.as_basis_coefficients_slice())
+}
+
+fn ef_at(row: &[F], at: usize) -> EF {
+    EF::from_basis_coefficients_slice(&row[at..at + EXTENSION_DEGREE]).unwrap()
+}
+
+#[test]
+fn test_horner_eval_powers_all_lanes() {
+    let chip = HornerEvalChip::<F>::default();
+
+    let x = ef(2);
+    let coeffs: [EF; D] = std::array::from_fn(|j| ef(10 * j as u32 + 5));
+    // acc = ((c0 x + c1) x + c2) x + c3, evaluation order.
+    let acc = coeffs.iter().fold(EF::ZERO, |acc, &c| acc * x + c);
+
+    let mut record = RecursionRecord::<F>::default();
+    record.horner_eval_events.push(HornerEvalEvent {
+        coeffs: coeffs.map(blk),
+        x: blk(x),
+        acc: blk(acc),
+    });
+
+    let mut output = RecursionRecord::<F>::default();
+    let trace = chip.generate_main(&record, &mut output);
+    // Layout: [coeffs(E*D), x(E), x2(E), x3(E), x4(E), acc(E)], E = EXTENSION_DEGREE
+    const E: usize = EXTENSION_DEGREE;
+    let row = trace.row_slice(0).unwrap();
+    assert_eq!(ef_at(&row[..], 0), coeffs[0]);
+    assert_eq!(ef_at(&row[..], E * D), x);
+    assert_eq!(ef_at(&row[..], E * D + E), x * x); // x2, recomputed by the tracegen
+    assert_eq!(ef_at(&row[..], E * D + 2 * E), x * x * x); // x3
+    assert_eq!(ef_at(&row[..], E * D + 3 * E), x * x * x * x); // x4
+    assert_eq!(ef_at(&row[..], E * D + 4 * E), acc);
 }
 
 /// GPU trace-gen must be element-wise identical to the CPU path. main computes x^2/x^3/x^4 on the

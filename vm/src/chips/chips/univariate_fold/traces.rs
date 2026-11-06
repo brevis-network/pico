@@ -36,7 +36,10 @@ use cudart_sys::*;
 #[cfg(feature = "cuda")]
 use log::info;
 use p3_air::BaseAir;
-use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
+use p3_field::{
+    extension::{trinomial_quintic_mul, QuinticTrinomialExtendable},
+    Field, PrimeField32,
+};
 use p3_matrix::dense::RowMajorMatrix;
 #[cfg(feature = "cuda")]
 use pico_gpu_api::{
@@ -76,7 +79,7 @@ impl<F> BaseAir<F> for UnivariateFoldChip<F> {
     }
 }
 
-impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F>
+impl<F: PrimeField32 + Field + QuinticTrinomialExtendable> ChipBehavior<F>
     for UnivariateFoldChip<F>
 {
     type Record = RecursionRecord<F>;
@@ -164,18 +167,18 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
                 // acc[i] = acc[i-1] * r + coeffs[MAX_COEFFS-1-i] for i in 1..(MAX_COEFFS-1).
                 // Matches the Horner constraints in constraints.rs (next_sum = p(r)).
                 {
-                    // EF multiplication over [F; 4] using binomial extension with W.
-                    let w = <F as BinomiallyExtendable<EXTENSION_DEGREE>>::W;
-                    let ef_mul = |a: [F; 4], b: [F; 4]| -> [F; 4] {
-                        [
-                            a[0] * b[0] + w * (a[1] * b[3] + a[2] * b[2] + a[3] * b[1]),
-                            a[0] * b[1] + a[1] * b[0] + w * (a[2] * b[3] + a[3] * b[2]),
-                            a[0] * b[2] + a[1] * b[1] + a[2] * b[0] + w * a[3] * b[3],
-                            a[0] * b[3] + a[1] * b[2] + a[2] * b[1] + a[3] * b[0],
-                        ]
+                    // EF multiplication over [F; EXTENSION_DEGREE] (KoalaBear^5, Plonky3's trinomial product).
+                    let ef_mul = |a: [F; EXTENSION_DEGREE],
+                                  b: [F; EXTENSION_DEGREE]|
+                     -> [F; EXTENSION_DEGREE] {
+                        let mut out = [F::ZERO; EXTENSION_DEGREE];
+                        trinomial_quintic_mul(&a, &b, &mut out);
+                        out
                     };
-                    let ef_add = |a: [F; 4], b: [F; 4]| -> [F; 4] {
-                        [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]]
+                    let ef_add = |a: [F; EXTENSION_DEGREE],
+                                  b: [F; EXTENSION_DEGREE]|
+                     -> [F; EXTENSION_DEGREE] {
+                        std::array::from_fn(|i| a[i] + b[i])
                     };
                     let r_arr = event.r.0;
                     // acc[0] = coeffs[MAX_COEFFS-1]
@@ -216,7 +219,7 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
 }
 
 #[cfg(feature = "cuda")]
-impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> GpuChipBehavior<F>
+impl<F: PrimeField32 + Field + QuinticTrinomialExtendable> GpuChipBehavior<F>
     for UnivariateFoldChip<F>
 {
     fn gpu_generate_preprocessed(
@@ -343,10 +346,6 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> GpuChipBe
             None => nb_rows.next_power_of_two(),
         };
 
-        // Binomial extension constant W, passed as its canonical u32 (the FFI wrapper rebuilds the
-        // field element); matches the CPU `ef_mul` which uses `<F as BinomiallyExtendable>::W`.
-        let w = <F as BinomiallyExtendable<EXTENSION_DEGREE>>::W.as_canonical_u32();
-
         let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
 
         let sync_mem_pool = get_global_mem_pool(device_id);
@@ -386,7 +385,6 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> GpuChipBe
                     event_size,
                     d_trace.as_mut_ptr() as *mut _,
                     NUM_UNIVARIATE_FOLD_COLS,
-                    w,
                     stream.into(),
                 );
             }

@@ -8,6 +8,7 @@ use crate::{
     },
     emulator::recursion::emulator::RecursionRecord,
     machine::chip::ChipBehavior,
+    primitives::consts::EXTENSION_DEGREE,
 };
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
@@ -29,8 +30,8 @@ fn test_unpack_block_trace_values() {
     assert!(trace.height() >= 16);
     assert_eq!(trace.width(), super::columns::NUM_UNPACK_BLOCK_COLS);
     let row = trace.row_slice(0).unwrap();
-    // Layout: [val[4]]
-    for i in 0..4 {
+    // Layout: [val[EXTENSION_DEGREE]]
+    for i in 0..EXTENSION_DEGREE {
         assert_eq!(row[i], val.0[i]);
     }
     // Padding row is all zeros.
@@ -45,7 +46,7 @@ fn test_unpack_block_preprocessed_dimensions() {
     let instr = UnpackBlockInstr {
         in_addr: mk_addr(5),
         out_addrs: std::array::from_fn(|i| mk_addr(10 + i as u32)),
-        mults: [F::TWO; 4],
+        mults: [F::TWO; EXTENSION_DEGREE],
     };
 
     let program = RecursionProgram {
@@ -59,7 +60,7 @@ fn test_unpack_block_preprocessed_dimensions() {
         preprocessed.width(),
         super::columns::NUM_UNPACK_BLOCK_PREPROCESSED_COLS
     );
-    // Layout: [is_real, in_addr, out[4] (addr, mult pairs)]
+    // Layout: [is_real, in_addr, out[EXTENSION_DEGREE] (addr, mult pairs)]
     let row = preprocessed.row_slice(0).unwrap();
     assert_eq!(row[0], F::ONE); // is_real
     assert_eq!(row[1], F::from_u32(5)); // in_addr
@@ -96,6 +97,7 @@ mod gpu {
                     F::from_u32(i.wrapping_add(1)),
                     F::from_u32(i.wrapping_add(2)),
                     F::from_u32(i.wrapping_add(3)),
+                    F::from_u32(i.wrapping_add(4)),
                 ]),
             })
             .collect()

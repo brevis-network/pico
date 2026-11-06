@@ -83,7 +83,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         }
         // Write integer constants 0, 1, ..., n-1 as EF block constants.
         let node_addrs: Vec<u32> = (0..n)
-            .map(|j| self.write_const(Block([F::from_u32(j as u32), F::ZERO, F::ZERO, F::ZERO])))
+            .map(|j| self.write_const(Block::from(F::from_u32(j as u32))))
             .collect();
         // diffs[j] = r - j.
         let diffs: Vec<u32> = (0..n).map(|j| self.ext_sub(r, node_addrs[j])).collect();
@@ -103,8 +103,8 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         // result = sum_i evals[i] * prefix[i] * suffix[i] * denom_inv[i].
         let mut result = self.addr_zero;
         for i in 0..n {
-            let denom_inv = lagrange_basis_denom_inv(n, i);
-            let addr_inv = self.write_const(Block([denom_inv, F::ZERO, F::ZERO, F::ZERO]));
+            let denom_inv: F = lagrange_basis_denom_inv(n, i);
+            let addr_inv = self.write_const(Block::from(denom_inv));
             let num = self.ext_mul(prefix[i], suffix[i]);
             let term = self.ext_mul(evals[i], num);
             let term = self.ext_mul(term, addr_inv);
@@ -152,7 +152,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         for &c in &coeffs {
             self.mark_read(c);
         }
-        // Unused coeff slots in the chip trace are filled with addr_zero (Block([0,0,0,0])).
+        // Unused coeff slots in the chip trace are filled with addr_zero (the zero block).
         // MemoryConst must account for those reads so the bus interaction balances.
         let az = self.addr_zero;
         let num_unused = MAX_COEFFS.saturating_sub(coeffs.len());
@@ -213,14 +213,11 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
     }
 
     /// Emit ExtDotProduct over PACKED value groups: each group is
-    /// (packed value block addr, [mu addr; EXTENSION_DEGREE]) and contributes
+    /// (packed value block addr, [mu addr; PACK_LANES]) and contributes
     /// sum_k val.lane_k * mu_k. Padding lanes must use the zero address for mu
     /// (their contribution is then 0 regardless of the lane value).
     /// Returns the accumulator address.
-    pub(super) fn ext_dot_product_packed(
-        &mut self,
-        groups: &[(u32, [u32; EXTENSION_DEGREE])],
-    ) -> u32 {
+    pub(super) fn ext_dot_product_packed(&mut self, groups: &[(u32, [u32; PACK_LANES])]) -> u32 {
         if groups.is_empty() {
             return self.addr_zero;
         }
@@ -239,7 +236,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         let pad = (gp - groups.len() % gp) % gp;
         for _ in 0..pad {
             self.mark_read(az);
-            for _ in 0..EXTENSION_DEGREE {
+            for _ in 0..PACK_LANES {
                 self.mark_read(az);
             }
         }
@@ -252,7 +249,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         let mu_addrs: Vec<Address<F>> = groups
             .iter()
             .flat_map(|&(_, mus)| mus)
-            .chain(std::iter::repeat_n(az, pad * EXTENSION_DEGREE))
+            .chain(std::iter::repeat_n(az, pad * PACK_LANES))
             .map(|a| Address(F::from_u32(a)))
             .collect();
         self.instructions
@@ -327,7 +324,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         }
         // Multiply by 2^{-l} in the base field.
         let inv2l = inv_2_pow::<F>(l as u64);
-        let c = self.write_const(Block([F::from_u32(inv2l), F::ZERO, F::ZERO, F::ZERO]));
+        let c = self.write_const(Block::from(F::from_u32(inv2l)));
         self.ext_mul(res, c)
     }
 
@@ -352,7 +349,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             z_cur = self.ext_mul(z_cur, z_cur);
         }
         let inv2n = inv_2_pow::<F>(abs_n as u64);
-        let c = self.write_const(Block([F::from_u32(inv2n), F::ZERO, F::ZERO, F::ZERO]));
+        let c = self.write_const(Block::from(F::from_u32(inv2n)));
         self.ext_mul(acc, c)
     }
 
@@ -369,7 +366,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             x_cur = self.ext_mul(x_cur, x_cur);
         }
         let inv2l = inv_2_pow::<F>(l as u64);
-        let c = self.write_const(Block([F::from_u32(inv2l), F::ZERO, F::ZERO, F::ZERO]));
+        let c = self.write_const(Block::from(F::from_u32(inv2l)));
         self.ext_mul(acc, c)
     }
 
@@ -402,19 +399,19 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             if j > 0 {
                 omega_cur = omega_pow_seq[j];
             }
-            let omega_addr = self.write_const(Block([omega_cur, F::ZERO, F::ZERO, F::ZERO]));
+            let omega_addr = self.write_const(Block::from(omega_cur));
             let xpo = self.ext_add(x_pow, omega_addr);
             let a = self.ext_mul(xpo, res);
             let x_m1 = self.ext_sub(x_pow, self.addr_one);
             // (omega_cur - 1) as a field constant (base-field arithmetic at build time)
             let omega_m1_val = omega_cur - F::ONE;
-            let om1_addr = self.write_const(Block([omega_m1_val, F::ZERO, F::ZERO, F::ZERO]));
+            let om1_addr = self.write_const(Block::from(omega_m1_val));
             let b = self.ext_mul(x_m1, om1_addr);
             res = self.ext_add(a, b);
             x_pow = self.ext_mul(x_pow, x_pow);
         }
         let inv2l = inv_2_pow::<F>(l as u64);
-        let c = self.write_const(Block([F::from_u32(inv2l), F::ZERO, F::ZERO, F::ZERO]));
+        let c = self.write_const(Block::from(F::from_u32(inv2l)));
         self.ext_mul(res, c)
     }
 
@@ -529,9 +526,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                 EvalNode::IsFirstRow => is_first_row,
                 EvalNode::IsLastRow => is_last_row,
                 EvalNode::IsTransition => is_transition,
-                EvalNode::Constant(c) => {
-                    self.write_const(Block([F::from_u32(*c), F::ZERO, F::ZERO, F::ZERO]))
-                }
+                EvalNode::Constant(c) => self.write_const(Block::from(F::from_u32(*c))),
                 EvalNode::Add(l, r) => {
                     let lv = vals[*l];
                     let rv = vals[*r];
@@ -570,11 +565,11 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         let r0 = rs_n[0];
         // Inverse of 2^l as base-field constant.
         let inv2l = inv_2_pow::<F>(l as u64);
-        let inv_l_addr = self.write_const(Block([F::from_u32(inv2l), F::ZERO, F::ZERO, F::ZERO]));
+        let inv_l_addr = self.write_const(Block::from(F::from_u32(inv2l)));
         // progression_exp2(r0, l)
         let pexp_r0 = self.progression_exp2_circuit(r0, l);
-        // r0 * omega (omega is an F constant; stored as EF [omega, 0, 0, 0])
-        let omega_addr = self.write_const(Block([omega, F::ZERO, F::ZERO, F::ZERO]));
+        // r0 * omega (omega is an F constant; stored as `Block::from(omega)`)
+        let omega_addr = self.write_const(Block::from(omega));
         let r0_omega = self.ext_mul(r0, omega_addr);
         let pexp_r0_omega = self.progression_exp2_circuit(r0_omega, l);
         // Products over rs_n[1..]
@@ -696,7 +691,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         } else {
             let abs_n = n.unsigned_abs() as u32;
             let inv_norm = inv_2_pow::<F>(abs_n as u64);
-            self.write_const(Block([F::from_u32(inv_norm), F::ZERO, F::ZERO, F::ZERO]))
+            self.write_const(Block::from(F::from_u32(inv_norm)))
         };
         // Compute beta powers: beta^0, beta^1, ..., beta^{max_msg_len}.
         let max_msg_len = interactions
@@ -725,7 +720,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             }
             // (bus_index + 1) as base-field constant
             let bus_p1_val = F::from_u32(ia.bus_index as u32 + 1);
-            let bus_p1_addr = self.write_const(Block([bus_p1_val, F::ZERO, F::ZERO, F::ZERO]));
+            let bus_p1_addr = self.write_const(Block::from(bus_p1_val));
             let bus_term = self.ext_mul(bus_p1_addr, beta_pows[ia.message.len()]);
             denom_i = self.ext_add(denom_i, bus_term);
             // Weight by eq_3b
@@ -884,7 +879,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         debug_assert_eq!(x.len(), y.len());
         // omega = two_adic_generator(l) — compile-time constant
         let omega = F::two_adic_generator(l);
-        let omega_addr = self.write_const(Block([omega, F::ZERO, F::ZERO, F::ZERO]));
+        let omega_addr = self.write_const(Block::from(omega));
         // y0_omega = y[0] * omega
         let y0_omega = self.ext_mul(y[0], omega_addr);
         // (eq_cube, rot_cube) = eval_eq_rot_cube(x[1..], y[1..])

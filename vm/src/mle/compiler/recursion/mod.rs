@@ -4,9 +4,9 @@
 //! evaluators, split across the `builder_*` submodules) plus the per-proof `verify_one` core that
 //! lowers "verify a child STARK proof" into a recursion DSL program. This machinery is
 //! recursion-phase-generic — any layer that verifies a child proof lowers through it. `Convert`
-//! (single-proof leaf recursion) and `Combine` (per-node tree aggregation) are both wired today,
-//! driven by `ConvertVerifierCircuit::build_verify_n_program_multi` in `lowering.rs`; `Compress` /
-//! `Embed` are the planned siblings that reuse the same `Builder` and `verify_one`.
+//! (single-proof leaf recursion) and `Combine` (per-node tree aggregation) are driven by
+//! `ConvertVerifierCircuit::build_verify_n_program_multi` in `lowering.rs`; `Compress` and `Embed`
+//! reuse the same `Builder` and `verify_one` through the same program family.
 //!
 //! For the wired Convert leaf, the generated program:
 //!   1. Embeds each machine-fixed preprocessed commit (e.g. the byte table) as MemConst
@@ -67,13 +67,27 @@ pub(super) use crate::{
         vk_map::{MLE_VK_MERKLE_DEPTH, VK_MAP_LEAF_DOMAIN},
     },
     primitives::consts::{
-        ADDR_NUM_LIMBS, DIGEST_SIZE, EXTENSION_DEGREE, MAX_NUM_PVS, RECURSION_NUM_PVS,
-        RISCV_NUM_PVS,
+        ADDR_NUM_LIMBS, DIGEST_BLOCKS, DIGEST_SIZE, EXTENSION_DEGREE, MAX_NUM_PVS, PACK_LANES,
+        PERM_BLOCKS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS, RISCV_NUM_PVS, WORD_SIZE,
     },
 };
 // Don't also import `WIDTH` from this module: it collides with the recursion-IR `WIDTH` imported
 // above, a distinct constant equal to 16 only by coincidence.
 pub(super) use pico_mle_core::config::koala_bear_poseidon2::RATE;
+/// Packed blocks the sponge rate occupies.
+pub(super) const RATE_BLOCKS: usize = RATE / PACK_LANES;
+const _: () = assert!(
+    RATE.is_multiple_of(PACK_LANES),
+    "the sponge rate packs into whole blocks"
+);
+const _: () = assert!(
+    DIGEST_BLOCKS <= RATE_BLOCKS,
+    "hash_poseidon2_fresh takes the digest from the rate blocks"
+);
+const _: () = assert!(
+    PERM_BLOCKS == 2 * DIGEST_BLOCKS,
+    "compress_poseidon2 permutes exactly two digests"
+);
 
 mod builder_field;
 mod builder_ir;
@@ -341,10 +355,10 @@ struct Builder<F> {
     sponge: [u32; WIDTH],
     /// Which lanes were overwritten by absorbs since the last permutation.
     lane_fresh: [bool; WIDTH],
-    /// The 4 packed block addresses of the last permutation output.
-    sponge_blocks: [u32; 4],
+    /// The PERM_BLOCKS packed block addresses of the last permutation output.
+    sponge_blocks: [u32; PERM_BLOCKS],
     /// Lazily unpacked lane addresses per output block.
-    sponge_unpacked: [Option<[u32; 4]>; 4],
+    sponge_unpacked: [Option<[u32; PACK_LANES]>; PERM_BLOCKS],
     absorb_idx: usize,
     sample_idx: usize,
     addr_zero: u32,
@@ -352,8 +366,8 @@ struct Builder<F> {
     addr_two: u32,
     /// Field inverse of 2 (= (P+1)/2), stored as EF constant.
     addr_inv2: u32,
-    /// Addresses of Block([0,1,0,0]), Block([0,0,1,0]), Block([0,0,0,1])  (EF basis).
-    ef_basis: [u32; 3],
+    /// Addresses of the EF basis elements x, x^2, …, x^(EXTENSION_DEGREE - 1) (lane k + 1 set).
+    ef_basis: [u32; EXTENSION_DEGREE - 1],
     /// Address of every base-field constant written so far, keyed by its canonical u32 (see
     /// `const_f`).
     const_f_addrs: HashMap<u32, u32>,

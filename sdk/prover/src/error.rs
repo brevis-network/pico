@@ -125,10 +125,12 @@ pub enum ProveError {
     Verification { phase: Phase, message: String },
 
     /// Under `verify_keys(true)`, a verifying key this run needs is not a member of the loaded
-    /// whitelist, so nothing proved under it could verify against that whitelist.
+    /// whitelist, so nothing proved under it could verify against that whitelist. At
+    /// [`Phase::Compress`] the key is the compress leaf, which is the same for every guest: the
+    /// artifact is stale, not the guest's shapes uncovered.
     #[error(
-        "{phase:?}: {missing} of this run's verifying key(s) are not in the whitelist, which does \
-         not cover this guest's shapes"
+        "{phase:?}: {missing} of this run's verifying key(s) are not in the whitelist, {}",
+        not_whitelisted_cause(.phase)
     )]
     KeyNotWhitelisted { phase: Phase, missing: usize },
 
@@ -227,9 +229,9 @@ pub enum ProveError {
     /// keygen'ing from the file's own layouts would let it choose the circuit it is checked
     /// against.
     #[error(
-        "verifying a {phase:?} proof needs an authenticated whitelist: build the prover with \
-         `verify_keys(true)`, `vk_map(path)` and `trusted_vk_root(root)`, or verify it on the \
-         prover that produced it"
+        "verifying a {phase:?} proof needs an authenticated whitelist (build the prover with \
+         `verify_keys(true)`, `vk_map(path)` and `trusted_vk_root(root)`) or the prover that \
+         produced it"
     )]
     WhitelistRequired { phase: Phase },
 
@@ -332,6 +334,18 @@ impl ProveError {
             EmbedError::Guest(GuestFailure::Panicked(message)) => Self::EmulationAborted(message),
             other => Self::Gpu(other.to_string()),
         }
+    }
+}
+
+/// The second half of [`ProveError::KeyNotWhitelisted`]'s message. The compress leaf is the same
+/// for every guest, so its absence points at the artifact, not at the guest.
+fn not_whitelisted_cause(phase: &Phase) -> &'static str {
+    match phase {
+        Phase::Compress => {
+            "which has no compress leaf for this binary: the artifact is stale, or the compress \
+             preset or tier row moved since it was built; rebuild it (`mle_build_vk_map`)"
+        }
+        _ => "which does not cover this guest's shapes",
     }
 }
 

@@ -10,8 +10,8 @@ use std::{
 
 use pico_mle_core::{
     config::{
-        recursion_params_with_100_bits_security, try_riscv_params_with_100_bits_security,
-        MAX_RISCV_LOG_STACKED_HEIGHT,
+        compress_params_with_128_bits_security, recursion_params_with_128_bits_security,
+        try_riscv_params_with_128_bits_security, MAX_RISCV_LOG_STACKED_HEIGHT,
     },
     p3_field::PrimeField32,
     AirRef, StarkEngine,
@@ -39,8 +39,10 @@ use pico_vm::{
     mle::machine::{
         apex::MleApexVerifier,
         combine::CombineMachine,
+        compress::CompressMachine,
         convert::{ConvertMachine, ProofWithVk},
         exe::RiscvVmVk,
+        recursion::extract_recursion_vk_layout,
         riscv::{self, RiscvMachine, RiscvProof},
         vk_bundle::encode_vk_bundle_v2,
         vk_map::{vk_identity, MleVkMap, VkMapError},
@@ -88,12 +90,13 @@ pub(crate) const DEFAULT_MAX_EMULATION_WORKERS: usize = 16;
 /// Recursion keys a machine keeps between proves at natural heights. A layout there follows each
 /// chunk's per-AIR heights, so new inputs bring new keys and an unbounded cache grows with every
 /// distinct input a long-lived prover serves. Convert keys past the bound go least recently used
-/// first; combine and embed keys past it are dropped all at once.
+/// first; combine, compress and embed keys past it are dropped all at once.
 ///
 /// In whitelist mode convert keys take [`MAX_RETAINED_WHITELIST_CONVERT_KEYS`], combine node keys
 /// are kept (they are among the [`CombineMachine::standard_node_count`] standard nodes, each
-/// keygened the first time a tree needs it, about 0.27 GiB of host memory per node key), and embed
-/// keeps this bound.
+/// keygened the first time a tree needs it, about 0.27 GiB of host memory per node key), and
+/// compress and embed keep this bound (in whitelist mode compress has one key, the whitelist's
+/// compress leaf).
 const MAX_RETAINED_KEYS: usize = 16;
 
 /// Convert keys a whitelist-mode prover keeps between proves, least recently used dropped first.
@@ -667,7 +670,8 @@ impl ProverBuilder {
         // One verifier for every later `verify_artifact`, rather than one engine per proof checked.
         let apex = vk_map.as_ref().map(|map| {
             MleApexVerifier::new(
-                recursion_params_with_100_bits_security(),
+                recursion_params_with_128_bits_security(),
+                compress_params_with_128_bits_security(),
                 Arc::clone(map),
                 riscv_vm_vk.clone(),
                 map.root(),
@@ -696,6 +700,9 @@ impl ProverBuilder {
             convert: None,
             combine,
             apex,
+            compress: None,
+            #[cfg(feature = "cuda")]
+            gpu_compress: None,
             #[cfg(feature = "multi-field-transcript")]
             embed: None,
             #[cfg(feature = "cuda")]
@@ -745,7 +752,7 @@ impl ProverBuilder {
     /// chunk-split variables: pure [`Self::execute`] chunks nothing and only takes its cycle limit
     /// from it.
     fn checked_chunk_size(&self) -> Result<u32, ProveError> {
-        try_riscv_params_with_100_bits_security(self.log_stacked_height).map_err(|err| {
+        try_riscv_params_with_128_bits_security(self.log_stacked_height).map_err(|err| {
             ProveError::InconsistentOptions(format!(
                 "log_stacked_height {} is not a height the backend can prove (maximum \
                  {MAX_RISCV_LOG_STACKED_HEIGHT}): {err}",
@@ -892,7 +899,7 @@ impl ProverBuilder {
 
 fn combine_machine(riscv_vm_vk: RiscvVmVk, verify_keys: bool) -> CombineMachine {
     CombineMachine::new(
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         riscv_vm_vk,
         verify_keys,
     )
@@ -1134,9 +1141,9 @@ pub(crate) fn emulator_opts(chunk_size: u32) -> EmulatorOpts {
 /// Takes an ELF and an input, and returns a verified proof.
 ///
 /// Keygen runs once, in [`ProverBuilder::build`]; each `prove` reuses it. The recursion machines —
-/// convert, combine and embed — keygen lazily per circuit shape and are kept here too, up to a fixed
-/// number of keys per machine, so a second `prove` whose shapes repeat pays neither cost again,
-/// which is why the proving methods take `&mut self`.
+/// convert, combine, compress and embed — keygen lazily per circuit shape and are kept here too, up
+/// to a fixed number of keys per machine, so a second `prove` whose shapes repeat pays neither cost
+/// again, which is why the proving methods take `&mut self`.
 pub struct Prover {
     program: Arc<Program>,
     pure: PureOptions,
@@ -1160,6 +1167,13 @@ pub struct Prover {
     /// The whitelist verifier, built with the map rather than per call. `None` without a
     /// whitelist, where [`Self::verify_artifact`] falls back to the machine that keygen'd.
     apex: Option<MleApexVerifier>,
+    /// The final compression layer; built on the first prove that reaches [`Phase::Compress`]. In a
+    /// `cuda` build it keygens and verifies, and `gpu_compress` proves.
+    compress: Option<CompressMachine>,
+    /// A `cuda` build's compress prover, beside `compress`, which keygens the same key and accepts
+    /// the proof. Its device keys stay on card 0 until `bound_key_caches` drops them with `compress`.
+    #[cfg(feature = "cuda")]
+    gpu_compress: Option<pico_vm::mle::machine::compress::GpuCompressMachine>,
     #[cfg(feature = "multi-field-transcript")]
     embed: Option<pico_vm::mle::machine::embed::EmbedMachine>,
     /// The ELF the GPU pipeline compiles for itself.
@@ -1224,7 +1238,7 @@ impl Prover {
 
     /// The v2 VK bundle (`pico_verifier::bundle`) a verifier of this prover's proofs is handed:
     /// the program's exe identity, the pinned whitelist root, and the membership of every key a
-    /// root proof can carry. Whitelist mode only. See [`Proof::export_v3`].
+    /// root or a compress proof can carry. Whitelist mode only. See [`Proof::export_v3`].
     pub fn vk_bundle(&self) -> Result<Vec<u8>, ProveError> {
         let map = self
             .vk_map
@@ -1296,7 +1310,9 @@ impl Prover {
         self.emulate(stdin).map(CostEstimate::from_emulation)
     }
 
-    /// Prove to [`Phase::Combine`]: a single complete root proof over the whole execution.
+    /// Prove to [`Phase::Combine`]: a single complete root proof over the whole execution, which a
+    /// deferred-proof node verifies (`docs/deferred.md`). [`Self::prove_to`] goes on along the
+    /// chain (compress, embed, wrap).
     pub fn prove(&mut self, stdin: Stdin) -> Result<Proof, ProveError> {
         self.prove_to(stdin, Phase::Combine)
     }
@@ -1306,9 +1322,10 @@ impl Prover {
     /// The returned [`Proof`] has been verified; there is no separate `verify` step and no way to
     /// obtain an unverified one.
     ///
-    /// A `cuda` build proves on the GPU only: a whitelist-mode [`Phase::Combine`] on every visible
-    /// card, anything else on card 0, because the feature swaps the proving engine for the whole
-    /// process. Build without `cuda` to prove on the CPU.
+    /// A `cuda` build proves a whitelist-mode [`Phase::Combine`] through the GPU pipeline on every
+    /// visible card. Any other phase takes the path below, where the feature swaps the RISC-V and
+    /// compress proving engine for the GPU's on card 0, while convert, combine and embed prove on
+    /// the CPU. Build without `cuda` to prove everything on the CPU.
     ///
     /// A [`Phase::Wrap`] proof made with `verify_keys(false)` is not accepted by the on-chain
     /// verifier: the wrap circuit bakes in the whitelist root only when there is one, so without it
@@ -1373,6 +1390,17 @@ impl Prover {
         if !self.verify_keys && self.combine.num_distinct_shapes() > MAX_RETAINED_KEYS {
             self.combine = combine_machine(self.riscv_vm_vk.clone(), self.verify_keys);
         }
+        if self
+            .compress
+            .as_ref()
+            .is_some_and(|compress| compress.num_distinct_shapes() > MAX_RETAINED_KEYS)
+        {
+            self.compress = None;
+            #[cfg(feature = "cuda")]
+            {
+                self.gpu_compress = None;
+            }
+        }
         #[cfg(feature = "multi-field-transcript")]
         if self
             .embed
@@ -1423,7 +1451,7 @@ impl Prover {
                     riscv_vk,
                     self.riscv_vm_vk.clone(),
                     &riscv_proofs,
-                    recursion_params_with_100_bits_security(),
+                    recursion_params_with_128_bits_security(),
                     self.verify_keys,
                 )
                 .map_err(|e| ProveError::proving(Phase::Convert, e.to_string()))?,
@@ -1514,14 +1542,85 @@ impl Prover {
             let shapes = Some(self.combine.num_distinct_shapes());
             return self.combine_proof(Box::new(root), committed, chunk_count, shapes);
         }
+        // The chain goes on through compress: its proof is the one handed out, and embed's child.
+        let (compress, shapes) = self.compress_root(root)?;
+        if phase == Phase::Compress {
+            return self.compress_proof(Box::new(compress), committed, chunk_count, Some(shapes));
+        }
 
-        self.prove_outer(root, committed, chunk_count, phase)
+        self.prove_outer(compress, committed, chunk_count, phase)
+    }
+
+    /// The complete root re-proved under the inner config at the compress preset, and verified: the
+    /// final compression layer, the proof that is handed out, and embed's child.
+    ///
+    /// In whitelist mode the compress key is looked up in the whitelist before anything is proved
+    /// (its leaf is the last): the key is keygen'd once (`keygen_for` keeps it; a
+    /// `cuda` build also keygens it on the device to prove) and a stale artifact is refused as
+    /// [`ProveError::KeyNotWhitelisted`] rather than answered with a proof no apex accepts. The
+    /// circuit re-runs the root's membership check in-circuit.
+    ///
+    /// Returns the verified proof and the number of compress shapes keygen'd so far.
+    fn compress_root(&mut self, root: ProofWithVk) -> Result<(ProofWithVk, usize), ProveError> {
+        let (riscv_vm_vk, verify_keys) = (&self.riscv_vm_vk, self.verify_keys);
+        let compress = self.compress.get_or_insert_with(|| {
+            CompressMachine::new(
+                compress_params_with_128_bits_security(),
+                riscv_vm_vk.clone(),
+                verify_keys,
+            )
+        });
+        if let Some(map) = &self.vk_map {
+            compress.set_vk_map(Arc::clone(map));
+            let layout = extract_recursion_vk_layout(&root.1, Some(&root.0));
+            let vk = compress.preregister(&layout)?;
+            let missing = not_whitelisted(map, std::iter::once(&*vk));
+            if missing > 0 {
+                return Err(ProveError::KeyNotWhitelisted {
+                    phase: Phase::Compress,
+                    missing,
+                });
+            }
+        }
+        #[cfg(not(feature = "cuda"))]
+        let proof = compress
+            .prove(root)
+            .map_err(|e| ProveError::proving(Phase::Compress, format!("{e:#}")))?;
+        // A `cuda` build proves on the GPU machine, as the GPU pipeline does: the CPU machine would
+        // hand the GPU engine a merged-preprocessed key, which it cannot take. The CPU machine
+        // keygens the same layout's key and accepts the proof.
+        #[cfg(feature = "cuda")]
+        let proof = {
+            // Card 0, where `build` set up the pool: a GPU pipeline run that panicked while setting
+            // up another card can leave this thread bound to it.
+            pico_vm::mle::cuda_mle::runtime::context::set_device(0)
+                .map_err(|e| ProveError::Gpu(format!("cannot bind card 0: {e:?}")))?;
+            let gpu = self.gpu_compress.get_or_insert_with(|| {
+                pico_vm::mle::machine::compress::GpuCompressMachine::new(
+                    compress_params_with_128_bits_security(),
+                    verify_keys,
+                )
+            });
+            if let Some(map) = &self.vk_map {
+                gpu.set_vk_map(Arc::clone(map));
+            }
+            let proved = gpu
+                .prove(&root)
+                .map_err(|e| ProveError::proving(Phase::Compress, format!("{e:#}")))?;
+            // Verified below under the key the CPU machine keygens, and handed on with that key.
+            let vk = compress.preregister(&proved.root_layout)?;
+            (proved.proof.0, vk)
+        };
+        compress
+            .verify(&proof)
+            .map_err(|e| ProveError::verification(Phase::Compress, format!("{e:#}")))?;
+        Ok((proof, compress.num_distinct_shapes()))
     }
 
     #[cfg(not(feature = "multi-field-transcript"))]
     fn prove_outer(
         &mut self,
-        _root: ProofWithVk,
+        _compress: ProofWithVk,
         _committed: Vec<u8>,
         _chunk_count: Option<usize>,
         phase: Phase,
@@ -1532,10 +1631,12 @@ impl Prover {
         })
     }
 
+    /// Embed over the verified compress proof, verified, then for [`Phase::Wrap`] the wrap circuit
+    /// and witness built from the embed proof.
     #[cfg(feature = "multi-field-transcript")]
     fn prove_outer(
         &mut self,
-        root: ProofWithVk,
+        compress: ProofWithVk,
         committed: Vec<u8>,
         chunk_count: Option<usize>,
         phase: Phase,
@@ -1548,7 +1649,7 @@ impl Prover {
         let (riscv_vm_vk, verify_keys) = (&self.riscv_vm_vk, self.verify_keys);
         let embed = self.embed.get_or_insert_with(|| {
             EmbedMachine::new(
-                pico_mle_core::config::embed_params_with_100_bits_security(),
+                pico_mle_core::config::embed_params_with_128_bits_security(),
                 riscv_vm_vk.clone(),
                 verify_keys,
             )
@@ -1557,7 +1658,7 @@ impl Prover {
             embed.set_vk_map(Arc::clone(map));
         }
         let embed_proof = embed
-            .prove(root)
+            .prove(compress)
             .map_err(|e| ProveError::proving(Phase::Embed, format!("{e:#}")))?;
         embed
             .verify(&embed_proof)
@@ -1614,6 +1715,27 @@ impl Prover {
             chunk_count,
             distinct_shapes,
             Payload::Riscv(bundle),
+        ))
+    }
+
+    /// A verified compress proof as a [`Proof`], once `committed` is bound to it. The compress
+    /// proof carries the root's public values unchanged, so the digest is read the same way.
+    fn compress_proof(
+        &self,
+        compress: Box<ProofWithVk>,
+        committed: Vec<u8>,
+        chunk_count: Option<usize>,
+        distinct_shapes: Option<usize>,
+    ) -> Result<Proof, ProveError> {
+        let digest =
+            binding::recursion_committed_digest(&compress.0.public_values, Phase::Compress)?;
+        let bound = binding::rebind(committed, digest)?;
+        Ok(self.finish(
+            Phase::Compress,
+            bound,
+            chunk_count,
+            distinct_shapes,
+            Payload::Compress(compress),
         ))
     }
 
@@ -1746,6 +1868,7 @@ impl Prover {
     /// |---|---|---|
     /// | [`Phase::Riscv`] | verifies against keys derived from **this prover's** ELF — sound in a fresh process — then refuses any chunk whose public values carry an exit code other than 0, with [`ProveError::NonZeroExitCode`] | a set of chunks, each proved and each carrying exit code 0 in its public values, whose global cumulative sums cancel the program's initial one. Whether they form one run that reached its halt is what [`Proof::binds_complete_execution`] reports, and it is false here |
     /// | [`Phase::Combine`] | verifies against the pinned whitelist, or against the shapes this prover keygen'd while proving and still retains; with neither, [`ProveError::WhitelistRequired`] | one complete execution: the root carries `flag_complete`, so the in-circuit continuity and halting asserts ran |
+    /// | [`Phase::Compress`] | verifies against the pinned whitelist (the compress key is a whitelist leaf, checked by the apex under the compress preset), or against the compress shape this prover keygen'd while proving and still retains; with neither, [`ProveError::WhitelistRequired`] | the same complete execution as the root it re-proves: the public values are the root's, unchanged |
     ///
     /// The artifact's own verifying key is never compiled into a verifier circuit, and its child
     /// layouts are not stored at all. A file that cannot be answered for is refused by name rather
@@ -1789,6 +1912,33 @@ impl Prover {
             LoadedPayload::Combine(root) => {
                 self.verify_root(&root)?;
                 self.combine_proof(root, committed, None, None)
+            }
+            LoadedPayload::Compress(compress) => {
+                if !binding::is_complete_root(&compress.0.public_values) {
+                    return Err(ProveError::Incomplete);
+                }
+                match &self.apex {
+                    // The compress key is a whitelist leaf, so membership authenticates it as it
+                    // does a root's: a machine that keygen'd nothing accepts the proof.
+                    Some(apex) => apex
+                        .verify_compress(&compress)
+                        .map_err(|e| ProveError::verification(phase, format!("{e:#}")))?,
+                    // Otherwise only the machine that keygen'd the compress shape can select an
+                    // honest key for it.
+                    None => {
+                        let Some(machine) = self
+                            .compress
+                            .as_ref()
+                            .filter(|machine| machine.honest_compress_vk(&compress.1).is_some())
+                        else {
+                            return Err(ProveError::WhitelistRequired { phase });
+                        };
+                        machine
+                            .verify(&compress)
+                            .map_err(|e| ProveError::verification(phase, format!("{e:#}")))?
+                    }
+                }
+                self.compress_proof(compress, committed, None, None)
             }
         }
     }

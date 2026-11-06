@@ -8,15 +8,19 @@ use crate::{
     },
     emulator::recursion::emulator::RecursionRecord,
     machine::chip::ChipBehavior,
+    primitives::consts::EXTENSION_DEGREE,
 };
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{
+    extension::QuinticTrinomialExtensionField, BasedVectorSpace, PrimeCharacteristicRing,
+};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 
 type F = KoalaBear;
+type EF = QuinticTrinomialExtensionField<KoalaBear>;
 
 fn b(v: u32) -> Block<F> {
-    Block([F::from_u32(v), F::ZERO, F::ZERO, F::ZERO])
+    Block::from(F::from_u32(v))
 }
 
 #[test]
@@ -94,11 +98,59 @@ fn test_univariate_fold_eval_columns() {
     let trace = chip.generate_main(&record, &mut output);
     let row = trace.row_slice(0).unwrap();
 
-    // eval_at_0 offset: after MAX_COEFFS blocks of 4 + 3 blocks of 4 = (MAX_COEFFS+3)*4
-    let eval_at_0_offset = (MAX_COEFFS + 3) * 4;
-    let eval_at_1_offset = eval_at_0_offset + 4;
+    // eval_at_0 offset: after MAX_COEFFS + 3 blocks of EXTENSION_DEGREE lanes.
+    let eval_at_0_offset = (MAX_COEFFS + 3) * EXTENSION_DEGREE;
+    let eval_at_1_offset = eval_at_0_offset + EXTENSION_DEGREE;
     assert_eq!(row[eval_at_0_offset], F::from_u32(1)); // eval_at_0 = coeffs[0] = 1
     assert_eq!(row[eval_at_1_offset], F::from_u32(0)); // eval_at_1 = coeffs[16] = 0 (zero-padded)
+}
+
+/// An extension element with every one of its `EXTENSION_DEGREE` coefficients non-zero and
+/// distinct, so a tracegen that only handled the first four would disagree with `EF`.
+fn ef(seed: u32) -> EF {
+    EF::from_basis_coefficients_fn(|i| F::from_u32(seed + 7 * i as u32 + 1))
+}
+
+fn blk(e: EF) -> Block<F> {
+    Block::from(e.as_basis_coefficients_slice())
+}
+
+fn ef_at(row: &[F], at: usize) -> EF {
+    EF::from_basis_coefficients_slice(&row[at..at + EXTENSION_DEGREE]).unwrap()
+}
+
+#[test]
+fn test_univariate_fold_horner_all_lanes() {
+    let chip = UnivariateFoldChip::<F>::default();
+
+    // p(X) = c0 + c1 X + c2 X^2 with every coefficient a full extension element.
+    let (c0, c1, c2) = (ef(1), ef(2), ef(3));
+    let r = ef(5);
+    let next_sum = c2 * r * r + c1 * r + c0;
+    // Domain sum (p(0) + p(1)) * omega_order with p(1) = coeffs[omega_order] = 0 (padding).
+    let claimed_sum = c0 * EF::from(F::from_u32(MAX_COEFFS.div_ceil(2) as u32));
+
+    let mut record = RecursionRecord::<F>::default();
+    record.univariate_fold_events.push(UnivariateFoldEvent {
+        coeffs: vec![blk(c0), blk(c1), blk(c2)],
+        claimed_sum: blk(claimed_sum),
+        r: blk(r),
+        next_sum: blk(next_sum),
+    });
+
+    let mut output = RecursionRecord::<F>::default();
+    let trace = chip.generate_main(&record, &mut output);
+    // Layout: [coeffs(MAX_COEFFS * E), claimed_sum, r, next_sum, eval_at_0, eval_at_1 (E each),
+    // acc((MAX_COEFFS - 1) * E)]; acc[i] = acc[i-1] * r + coeffs[MAX_COEFFS-1-i], acc[0] = 0 here.
+    const E: usize = EXTENSION_DEGREE;
+    let acc_at = |i: usize| (MAX_COEFFS + 5 + i) * E;
+    let row = trace.row_slice(0).unwrap();
+    assert_eq!(ef_at(&row[..], (MAX_COEFFS + 1) * E), r);
+    assert_eq!(ef_at(&row[..], acc_at(MAX_COEFFS - 4)), EF::ZERO); // coeffs[3] slot: padding
+    assert_eq!(ef_at(&row[..], acc_at(MAX_COEFFS - 3)), c2); // + coeffs[2]
+    assert_eq!(ef_at(&row[..], acc_at(MAX_COEFFS - 2)), c2 * r + c1); // + coeffs[1]
+                                                                      // next_sum = acc[MAX_COEFFS - 2] * r + coeffs[0] is enforced by the AIR, not a column.
+    assert_eq!(ef_at(&row[..], (MAX_COEFFS + 2) * E), next_sum);
 }
 
 /// GPU trace-gen must be element-wise identical to the CPU path, including the derived Horner
@@ -125,13 +177,15 @@ mod gpu {
 
     type F = KoalaBear;
 
-    /// A full 4-lane extension-field block, so the kernel's `ef4_mul` W-terms are exercised.
+    /// A full extension-field block, every lane non-zero, so the kernel's trinomial reduction terms
+    /// are exercised.
     fn block4(base: u32) -> Block<F> {
         Block([
             F::from_u32(base.wrapping_add(1)),
             F::from_u32(base.wrapping_mul(3).wrapping_add(2)),
             F::from_u32(base.wrapping_mul(7).wrapping_add(5)),
             F::from_u32(base.wrapping_mul(13).wrapping_add(11)),
+            F::from_u32(base.wrapping_mul(17).wrapping_add(13)),
         ])
     }
 

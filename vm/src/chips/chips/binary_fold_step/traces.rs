@@ -37,7 +37,10 @@ use cudart_sys::*;
 #[cfg(feature = "cuda")]
 use log::info;
 use p3_air::BaseAir;
-use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
+use p3_field::{
+    extension::{trinomial_quintic_mul, QuinticTrinomialExtendable},
+    Field, PrimeField32,
+};
 #[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
@@ -47,13 +50,35 @@ use pico_gpu_api::{
 };
 use std::borrow::BorrowMut;
 
+/// `v_lo + amt * (v_lo - v_hi) * tih` over all `EXTENSION_DEGREE` lanes: the fold step's output
+/// as the AIR constrains it. The tracegen recomputes `out` with it in debug builds, and the chip's
+/// all-lane test calls it directly, so the recomputation is exercised in every profile.
+pub(crate) fn fold_out<F: Field + QuinticTrinomialExtendable>(
+    v_lo: [F; EXTENSION_DEGREE],
+    v_hi: [F; EXTENSION_DEGREE],
+    amt: [F; EXTENSION_DEGREE],
+    tih: F,
+) -> [F; EXTENSION_DEGREE] {
+    let mut diff = v_lo;
+    for i in 0..EXTENSION_DEGREE {
+        diff[i] -= v_hi[i];
+    }
+    let mut t = [F::ZERO; EXTENSION_DEGREE];
+    trinomial_quintic_mul(&amt, &diff, &mut t);
+    let mut out = v_lo;
+    for i in 0..EXTENSION_DEGREE {
+        out[i] += t[i] * tih;
+    }
+    out
+}
+
 impl<F> BaseAir<F> for BinaryFoldStepChip<F> {
     fn width(&self) -> usize {
         NUM_BINARY_FOLD_STEP_COLS
     }
 }
 
-impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F>
+impl<F: PrimeField32 + Field + QuinticTrinomialExtendable> ChipBehavior<F>
     for BinaryFoldStepChip<F>
 {
     type Record = RecursionRecord<F>;
@@ -115,17 +140,6 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        // EF helpers over [F; 4] (same as univariate_fold tracegen).
-        let w = <F as BinomiallyExtendable<EXTENSION_DEGREE>>::W;
-        let ef_mul = |a: [F; 4], b: [F; 4]| -> [F; 4] {
-            [
-                a[0] * b[0] + w * (a[1] * b[3] + a[2] * b[2] + a[3] * b[1]),
-                a[0] * b[1] + a[1] * b[0] + w * (a[2] * b[3] + a[3] * b[2]),
-                a[0] * b[2] + a[1] * b[1] + a[2] * b[0] + w * a[3] * b[3],
-                a[0] * b[3] + a[1] * b[2] + a[2] * b[1] + a[3] * b[0],
-            ]
-        };
-
         let inv2 = F::TWO.inverse();
         let rows = input
             .binary_fold_step_events
@@ -148,18 +162,7 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
                 cols.out = event.out;
                 // Recompute out for a tracegen-side sanity check in debug builds.
                 debug_assert_eq!(
-                    {
-                        let mut diff = event.v_lo.0;
-                        for i in 0..4 {
-                            diff[i] -= event.v_hi.0[i];
-                        }
-                        let t = ef_mul(cols.amt.0, diff);
-                        let mut o = event.v_lo.0;
-                        for i in 0..4 {
-                            o[i] += t[i] * cols.tih;
-                        }
-                        o
-                    },
+                    fold_out(event.v_lo.0, event.v_hi.0, cols.amt.0, cols.tih),
                     event.out.0
                 );
                 row
@@ -181,7 +184,7 @@ impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehav
 }
 
 #[cfg(feature = "cuda")]
-impl<F: PrimeField32 + Field + BinomiallyExtendable<EXTENSION_DEGREE>> GpuChipBehavior<F>
+impl<F: PrimeField32 + Field + QuinticTrinomialExtendable> GpuChipBehavior<F>
     for BinaryFoldStepChip<F>
 {
     fn gpu_generate_preprocessed(

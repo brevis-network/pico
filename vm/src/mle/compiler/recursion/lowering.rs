@@ -22,9 +22,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                     return None;
                 }
                 air.preprocessed_commit.map(|commit| {
-                    std::array::from_fn(|i| {
-                        self.write_const(Block([F::from_u32(commit[i]), F::ZERO, F::ZERO, F::ZERO]))
-                    })
+                    std::array::from_fn(|i| self.write_const(Block::from(F::from_u32(commit[i]))))
                 })
             })
             .collect();
@@ -161,9 +159,9 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             }
         }
 
-        // Build stacking commit roots (packed into 2 blocks each, reused across all
+        // Build stacking commit roots (packed into DIGEST_BLOCKS blocks each, reused across all
         // queries) in trace_id order for WHIR query phase Merkle verify.
-        let mut stacking_commit_blocks: Vec<[u32; 2]> = Vec::new();
+        let mut stacking_commit_blocks: Vec<[u32; DIGEST_BLOCKS]> = Vec::new();
         stacking_commit_blocks.push(self.pack_digest(common_main_commit_addrs));
         // Merged-preprocessed mode: the merged commitment is stacking commit 1; per-trace
         // commits below then carry cached mains only (per-air preproc consts are all None).
@@ -359,8 +357,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             sum_univ = self.ext_add(sum_univ, bc_univar_coeffs[idx]);
             idx += step;
         }
-        let step_const =
-            self.write_const(Block([F::from_u32(step as u32), F::ZERO, F::ZERO, F::ZERO]));
+        let step_const = self.write_const(Block::from(F::from_u32(step as u32)));
         let sum_univ_scaled = self.ext_mul(sum_univ, step_const);
         self.assert_ext_eq(sum_claim, sum_univ_scaled);
 
@@ -417,7 +414,8 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                 let claim_addr = self.observe_ef_for_chip();
                 // RISCV verifier always observes claim_rot (via column_openings_by_rot):
                 //   need_rot=True:  claim_rot = actual rotated value (from stream)
-                //   need_rot=False: claim_rot = EF::ZERO (absorb 4 zeros, no stream read)
+                //   need_rot=False: claim_rot = EF::ZERO (absorb EXTENSION_DEGREE zeros, no
+                //   stream read)
                 let claim_rot_addr = if air.need_rot {
                     self.observe_ef_for_chip()
                 } else {
@@ -782,7 +780,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             whir_claim = self.ext_add(whir_claim, term);
         }
 
-        let mut codeword_commit_blocks: Vec<[u32; 2]> = Vec::new();
+        let mut codeword_commit_blocks: Vec<[u32; DIGEST_BLOCKS]> = Vec::new();
 
         let mut gammas: Vec<u32> = Vec::with_capacity(vk.num_whir_rounds);
         let mut z0_addrs: Vec<u32> = Vec::new();
@@ -873,9 +871,9 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
 
                 let yi = if whir_round == 0 {
                     let fold_size = 1usize << vk.k_whir;
-                    // Per-j packed (value block, [mu; 4]) groups collected across all
+                    // Per-j packed (value block, [mu; PACK_LANES]) groups collected across all
                     // commits; each codeword value is then one ExtDotProduct instruction.
-                    let mut mu_val_groups: Vec<Vec<(u32, [u32; EXTENSION_DEGREE])>> =
+                    let mut mu_val_groups: Vec<Vec<(u32, [u32; PACK_LANES])>> =
                         vec![Vec::new(); fold_size];
                     let mut mu_pow_idx = 0usize;
                     let az = self.addr_zero;
@@ -883,21 +881,23 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                     for (commit_root, &width) in
                         stacking_commit_blocks.iter().zip(vk.stacking_widths.iter())
                     {
-                        let blocks_per_row = width.div_ceil(4);
-                        // Batched hint: fold_size rows x ceil(width/4) PACKED value
-                        // blocks (4 row values per block, tail zero-padded), row-major
+                        let blocks_per_row = width.div_ceil(PACK_LANES);
+                        // Batched hint: fold_size rows x ceil(width/PACK_LANES) PACKED value
+                        // blocks (PACK_LANES row values per block, tail zero-padded), row-major
                         // (matches the witness-stream builder's push order).
                         let flat_blocks = self.hint_fs(fold_size * blocks_per_row);
                         let row_blocks: Vec<&[u32]> = flat_blocks.chunks(blocks_per_row).collect();
-                        let leaf_hashes: Vec<[u32; 2]> = row_blocks
+                        let leaf_hashes: Vec<[u32; DIGEST_BLOCKS]> = row_blocks
                             .iter()
                             .map(|blocks| self.hash_poseidon2_fresh_packed(blocks, width))
                             .collect();
                         let query_digest = self.tree_compress_circuit(leaf_hashes);
-                        // Batched hint: n_bits x 2 packed sibling digest blocks.
-                        let flat_sibs = self.hint_fs(n_bits * 2);
-                        let siblings: Vec<[u32; 2]> =
-                            flat_sibs.chunks(2).map(|c| [c[0], c[1]]).collect();
+                        // Batched hint: n_bits x DIGEST_BLOCKS packed sibling digest blocks.
+                        let flat_sibs = self.hint_fs(n_bits * DIGEST_BLOCKS);
+                        let siblings: Vec<[u32; DIGEST_BLOCKS]> = flat_sibs
+                            .chunks(DIGEST_BLOCKS)
+                            .map(|c| c.try_into().unwrap())
+                            .collect();
                         self.verify_merkle_path_circuit(
                             query_digest,
                             &index_bits,
@@ -908,8 +908,8 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                             for (b, &blk) in row_blocks[j].iter().enumerate() {
                                 // Padding lanes (beyond width) take the zero address
                                 // for mu, so they contribute 0 to the dot product.
-                                let mus: [u32; EXTENSION_DEGREE] = std::array::from_fn(|k| {
-                                    let c = 4 * b + k;
+                                let mus: [u32; PACK_LANES] = std::array::from_fn(|k| {
+                                    let c = PACK_LANES * b + k;
                                     if c < width {
                                         mu_pows[mu_pow_idx + c]
                                     } else {
@@ -938,7 +938,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                 } else {
                     let fold_size = 1usize << vk.k_whir;
                     let mut opened_ef_addrs: Vec<u32> = Vec::with_capacity(fold_size);
-                    let mut leaf_hashes: Vec<[u32; 2]> = Vec::with_capacity(fold_size);
+                    let mut leaf_hashes: Vec<[u32; DIGEST_BLOCKS]> = Vec::with_capacity(fold_size);
 
                     for _ in 0..fold_size {
                         let (ef_addr, f_addrs) = self.hint_ef_full();
@@ -948,10 +948,12 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                     }
                     let query_digest = self.tree_compress_circuit(leaf_hashes);
                     let commit_root = codeword_commit_blocks[whir_round - 1];
-                    // Batched hint: n_bits x 2 packed sibling digest blocks.
-                    let flat_sibs = self.hint_fs(n_bits * 2);
-                    let siblings: Vec<[u32; 2]> =
-                        flat_sibs.chunks(2).map(|c| [c[0], c[1]]).collect();
+                    // Batched hint: n_bits x DIGEST_BLOCKS packed sibling digest blocks.
+                    let flat_sibs = self.hint_fs(n_bits * DIGEST_BLOCKS);
+                    let siblings: Vec<[u32; DIGEST_BLOCKS]> = flat_sibs
+                        .chunks(DIGEST_BLOCKS)
+                        .map(|c| c.try_into().unwrap())
+                        .collect();
                     self.verify_merkle_path_circuit(
                         query_digest,
                         &index_bits,
@@ -1146,12 +1148,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         let col = RECURSION_PUBLIC_VALUES_COL_MAP;
         let addr_zero = self.addr_zero;
         let root_packed = self.pack_digest(vk_root_w);
-        let leaf_dom = self.write_const(Block([
-            F::from_u32(VK_MAP_LEAF_DOMAIN),
-            F::ZERO,
-            F::ZERO,
-            F::ZERO,
-        ]));
+        let leaf_dom = self.write_const(Block::from(F::from_u32(VK_MAP_LEAF_DOMAIN)));
         for child in children {
             for (i, &idx) in col.vk_root.iter().enumerate() {
                 self.assert_f_eq(child.pv[idx], vk_root_w[i]);
@@ -1190,10 +1187,14 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         let col = RECURSION_PUBLIC_VALUES_COL_MAP;
         for child in all_pvs {
             let blocks = self.hash_poseidon2_fresh(&child.pv[..NUM_PV_ELMS_TO_HASH]);
-            let d_lo = self.unpack_block(blocks[0]);
-            let d_hi = self.unpack_block(blocks[1]);
+            let d_lo = self.unpack_lanes(blocks[0]);
+            let d_hi = self.unpack_lanes(blocks[1]);
             for (i, &idx) in col.digest.iter().enumerate() {
-                let expected = if i < 4 { d_lo[i] } else { d_hi[i - 4] };
+                let expected = if i < PACK_LANES {
+                    d_lo[i]
+                } else {
+                    d_hi[i - PACK_LANES]
+                };
                 self.assert_f_eq(child.pv[idx], expected);
             }
         }
@@ -1250,10 +1251,8 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         // observes separately and never equates, and they pin disjoint fields — so both are tied.
         //
         // Ecall pins its fields only on its HALT / COMMIT rows, so in every other chunk they are
-        // free: exit_code is pinned to zero on every chunk below; committed_value_digest is held
-        // by the merge's consistency check to the words the committing chunks pin (the SDK's halt
-        // always commits all 8); and deferred_proofs_digest is taken only from the chunk that
-        // committed it, below.
+        // free: exit_code is pinned to zero on every chunk below, and each commit digest is taken
+        // only from the chunk that committed all eight of its words, below.
         let riscv_pv_airs: Vec<usize> = vk
             .per_air
             .iter()
@@ -1316,33 +1315,49 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         // all carry 0.
         self.assert_f_eq(riscv.exit_code, addr_zero);
 
-        // The deferred digest is bound only on the COMMIT_DEFERRED_PROOFS rows, so a leaf takes it
-        // only from the chunk that ran all eight words, once each — the tally Ecall publishes,
-        // tied to the carrier above — and contributes zero from every other chunk, whatever its
-        // copy says. The merge sums the contributions, and the root closes the chain on the sum.
-        // A chunk that ran some of the words but not all of them does not prove: the emulator
-        // keeps the run in one chunk. A chunk without Ecall publishes no tally.
-        let leaf_deferred: [u32; DIGEST_SIZE] = if has_cpu {
-            let count = riscv.deferred_commits;
-            let mask = riscv.deferred_commit_mask;
-            let eight = self.write_const(Block([F::from_u32(8), F::ZERO, F::ZERO, F::ZERO]));
-            let all_words = self.write_const(Block([F::from_u32(0xFF), F::ZERO, F::ZERO, F::ZERO]));
-            let eighth =
-                self.write_const(Block([F::from_u32(8).inverse(), F::ZERO, F::ZERO, F::ZERO]));
-            // count ∈ {0, 8}
-            let count_minus_eight = self.base_sub(count, eight);
-            let both = self.base_mul(count, count_minus_eight);
-            self.assert_f_eq(both, addr_zero);
-            // 8 · mask == 255 · count: with count == 8, eight powers of two summing to 255 are
-            // 2^0..2^7 once each; with count == 0 the mask is zero.
-            let lhs = self.base_mul(mask, eight);
-            let rhs = self.base_mul(count, all_words);
-            self.assert_f_eq(lhs, rhs);
-            let full = self.base_mul(count, eighth);
-            std::array::from_fn(|j| self.base_mul(full, riscv.deferred_proofs_digest[j]))
-        } else {
-            [addr_zero; DIGEST_SIZE]
-        };
+        // Each commit digest is bound only on its own COMMIT / COMMIT_DEFERRED_PROOFS rows, a word
+        // on its row, so a leaf takes it only from the chunk that ran all eight of its words, once
+        // each -- the tally Ecall publishes, tied to the carrier above -- and contributes zero from
+        // every other chunk, whatever its copy says. The merge sums the contributions, and the
+        // root closes on the sum. A chunk that ran some of a digest's words but not all of them
+        // does not prove: the emulator keeps each run in one chunk. A chunk without Ecall
+        // publishes no tally.
+        //
+        // An honest tally is `count = 8·(c + d)`, `mask = 0xFF00·c + 0xFF·d`, with `c` and `d`
+        // whether the chunk ran the output and the deferred digest. Both are linear in the pair,
+        // `c = (mask/255 - count/8)/255` and `d = count/8 - c`, so asserting them boolean admits
+        // exactly those four pairs. Then count is 0, 8 or 16 rows, each adding a power of two
+        // below 2^16, so the mask cannot wrap; and `count` powers of two summing to a mask with
+        // `count` bits set are those bits once each: COMMIT words 0..7 when `c`, and
+        // COMMIT_DEFERRED_PROOFS words 0..7 when `d`.
+        let (leaf_cvd, leaf_deferred): ([Word<u32>; PV_DIGEST_NUM_WORDS], [u32; DIGEST_SIZE]) =
+            if has_cpu {
+                let eighth = self.write_const(Block::from(F::from_u32(8).inverse()));
+                let inv255 = self.write_const(Block::from(F::from_u32(255).inverse()));
+                let runs = self.base_mul(riscv.commits, eighth);
+                let weighted = self.base_mul(riscv.commit_mask, inv255);
+                let c_255 = self.base_sub(weighted, runs);
+                let c = self.base_mul(c_255, inv255);
+                let d = self.base_sub(runs, c);
+                for flag in [c, d] {
+                    let flag_minus_one = self.base_sub(flag, self.addr_one);
+                    let both = self.base_mul(flag, flag_minus_one);
+                    self.assert_f_eq(both, addr_zero);
+                }
+                let cvd = std::array::from_fn(|w| {
+                    Word(std::array::from_fn(|b| {
+                        self.base_mul(c, riscv.committed_value_digest[w].0[b])
+                    }))
+                });
+                let deferred =
+                    std::array::from_fn(|j| self.base_mul(d, riscv.deferred_proofs_digest[j]));
+                (cvd, deferred)
+            } else {
+                (
+                    [Word([addr_zero; WORD_SIZE]); PV_DIGEST_NUM_WORDS],
+                    [addr_zero; DIGEST_SIZE],
+                )
+            };
 
         // A CPU chunk cannot start at pc == 0 (the halted sentinel). Assert the WHOLE pc is
         // nonzero — sum the three limbs and hint the inverse of the sum. That is an "is the pc
@@ -1394,7 +1409,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         // explicit). Hint the bits LSB-first, boolean-constrain each, assert the
         // recomposition equals the carrier's chunk.
         {
-            let two = self.write_const(Block([F::from_u32(2), F::ZERO, F::ZERO, F::ZERO]));
+            let two = self.write_const(Block::from(F::from_u32(2)));
             let max_bits = crate::primitives::consts::MAX_LOG_NUMBER_OF_CHUNKS;
             let mut acc = addr_zero;
             let mut pow = self.addr_one;
@@ -1443,7 +1458,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         }
         {
             let rec: &mut RecursionPublicValues<u32> = arr.as_mut_slice().borrow_mut();
-            rec.committed_value_digest = riscv.committed_value_digest;
+            rec.committed_value_digest = leaf_cvd;
             rec.deferred_proofs_digest = leaf_deferred;
             rec.start_pc = riscv.start_pc;
             rec.next_pc = riscv.next_pc;
@@ -1480,10 +1495,8 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
     /// Merge the children's public values into `pv_arr` (which starts as a copy of child 0):
     /// end-of-tree values from the last child; contains_execution_chunk OR (with a per-child
     /// boolean assert); a running-counter merge of start/next_execution_chunk that also asserts
-    /// execution-chunk continuity; the sum of the children's deferred_proofs_digest; a
-    /// consistency-lock merge of committed_value_digest (a nonzero accumulator forces all nonzero
-    /// children equal, then the merged value is written back); and all children agree on
-    /// vk_root. Does NOT fold GCS
+    /// execution-chunk continuity; the sums of the children's committed_value_digest and
+    /// deferred_proofs_digest; and all children agree on vk_root. Does NOT fold GCS
     /// (see `fold_global_cumulative_sum`).
     pub(super) fn merge_child_pvs(&mut self, pv_arr: &mut [u32], all_pvs: &[ProofPvAddrs]) {
         let col = RECURSION_PUBLIC_VALUES_COL_MAP;
@@ -1582,42 +1595,14 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         pv_arr[col.start_execution_chunk] = start_exec;
         pv_arr[col.next_execution_chunk] = current_exec;
 
-        // committed_value_digest: consistency check.
-        // PV_DIGEST_NUM_WORDS Words × WORD_SIZE bytes each = 32 flat elements.
-        let mut acc_cvd: Vec<u32> = col
-            .committed_value_digest
-            .iter()
-            .flat_map(|word| word.0.iter().copied())
-            .map(|idx| pv_arr[idx])
-            .collect();
-        for pv in all_pvs.iter().skip(1) {
-            let pv1_cvd: Vec<u32> = col
-                .committed_value_digest
-                .iter()
-                .flat_map(|word| word.0.iter().copied())
-                .map(|idx| pv.pv[idx])
-                .collect();
-            for k in 0..acc_cvd.len() {
-                for j in 0..acc_cvd.len() {
-                    let diff = self.base_sub(acc_cvd[j], pv1_cvd[j]);
-                    let check = self.base_mul(acc_cvd[k], diff);
-                    self.assert_f_eq(check, addr_zero);
+        // committed_value_digest: the sum of the children's, as for deferred_proofs_digest above.
+        for word in col.committed_value_digest.iter() {
+            for &idx in word.0.iter() {
+                let mut acc = pv_arr[idx];
+                for pv in all_pvs.iter().skip(1) {
+                    acc = self.base_add(acc, pv.pv[idx]);
                 }
-            }
-            acc_cvd = pv1_cvd;
-        }
-        // Write the merged value back: the consistency
-        // check locks every non-zero child to the same value, so acc_cvd now holds the
-        // program's committed output. Without this write-back the root would keep proof[0]'s
-        // value (0 for a guest that commits in a later chunk).
-        {
-            let cvd_indices: Vec<usize> = col
-                .committed_value_digest
-                .iter()
-                .flat_map(|word| word.0.iter().copied())
-                .collect();
-            for (flat_i, &idx) in cvd_indices.iter().enumerate() {
-                pv_arr[idx] = acc_cvd[flat_i];
+                pv_arr[idx] = acc;
             }
         }
 
@@ -1646,36 +1631,16 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         let n = all_pvs.len();
         // Write starting_digest and zero (CURVE_CUMULATIVE_SUM_START) as constants.
         let start_x: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block([
-                F::from_u32(F::DIGEST_SUM_START_X[i]),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-            ]))
+            self.write_const(Block::from(F::from_u32(F::DIGEST_SUM_START_X[i])))
         });
         let start_y: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block([
-                F::from_u32(F::DIGEST_SUM_START_Y[i]),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-            ]))
+            self.write_const(Block::from(F::from_u32(F::DIGEST_SUM_START_Y[i])))
         });
         let zero_x: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block([
-                F::from_u32(F::CURVE_CUMULATIVE_SUM_START_X[i]),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-            ]))
+            self.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_X[i])))
         });
         let zero_y: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block([
-                F::from_u32(F::CURVE_CUMULATIVE_SUM_START_Y[i]),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-            ]))
+            self.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_Y[i])))
         });
 
         // Get GCS coords for each proof.
@@ -1729,36 +1694,16 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
     ) {
         let col = RECURSION_PUBLIC_VALUES_COL_MAP;
         let start_x: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block([
-                F::from_u32(F::DIGEST_SUM_START_X[i]),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-            ]))
+            self.write_const(Block::from(F::from_u32(F::DIGEST_SUM_START_X[i])))
         });
         let start_y: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block([
-                F::from_u32(F::DIGEST_SUM_START_Y[i]),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-            ]))
+            self.write_const(Block::from(F::from_u32(F::DIGEST_SUM_START_Y[i])))
         });
         let zero_x: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block([
-                F::from_u32(F::CURVE_CUMULATIVE_SUM_START_X[i]),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-            ]))
+            self.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_X[i])))
         });
         let zero_y: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block([
-                F::from_u32(F::CURVE_CUMULATIVE_SUM_START_Y[i]),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-            ]))
+            self.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_Y[i])))
         });
         // sel = zero + is_first·(init − zero), limb-wise.
         let sel_x: [u32; 7] = std::array::from_fn(|j| {
@@ -1842,20 +1787,10 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         // telescopes to the UNIVERSAL zero point — a program-independent constant. (No witness
         // hints here, so this block does not move the inverse hinted above.)
         let zero_x: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block([
-                F::from_u32(F::CURVE_CUMULATIVE_SUM_START_X[i]),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-            ]))
+            self.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_X[i])))
         });
         let zero_y: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block([
-                F::from_u32(F::CURVE_CUMULATIVE_SUM_START_Y[i]),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-            ]))
+            self.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_Y[i])))
         });
         for j in 0..7 {
             self.assert_f_eq(pv_arr[col.global_cumulative_sum.0.x.0[j]], zero_x[j]);
@@ -1881,10 +1816,15 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         // Compute digest = Poseidon2_fresh(pv_arr[..NUM_PV_ELMS_TO_HASH]).
         let pv_arr_refs: Vec<u32> = pv_arr.to_vec();
         let digest_blocks = self.hash_poseidon2_fresh(&pv_arr_refs[..NUM_PV_ELMS_TO_HASH]);
-        let d_lo = self.unpack_block(digest_blocks[0]);
-        let d_hi = self.unpack_block(digest_blocks[1]);
-        let digest_addrs: [u32; 8] =
-            std::array::from_fn(|i| if i < 4 { d_lo[i] } else { d_hi[i - 4] });
+        let d_lo = self.unpack_lanes(digest_blocks[0]);
+        let d_hi = self.unpack_lanes(digest_blocks[1]);
+        let digest_addrs: [u32; 8] = std::array::from_fn(|i| {
+            if i < PACK_LANES {
+                d_lo[i]
+            } else {
+                d_hi[i - PACK_LANES]
+            }
+        });
         for (i, &idx) in col.digest.iter().enumerate() {
             pv_arr[idx] = digest_addrs[i];
         }
@@ -1986,7 +1926,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                     hi.mult = F::from_u32(read_counts.get(&addr).copied().unwrap_or(0));
                 }
                 Instruction::DigestSelect(di) => {
-                    for i in 0..2 {
+                    for i in 0..DIGEST_BLOCKS {
                         let addr = di.out_addrs[i].as_usize() as u32;
                         di.mults[i] = F::from_u32(read_counts.get(&addr).copied().unwrap_or(0));
                     }
@@ -1996,13 +1936,13 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                     pi.mult = F::from_u32(read_counts.get(&addr).copied().unwrap_or(0));
                 }
                 Instruction::UnpackBlock(ui) => {
-                    for i in 0..4 {
+                    for i in 0..EXTENSION_DEGREE {
                         let addr = ui.out_addrs[i].as_usize() as u32;
                         ui.mults[i] = F::from_u32(read_counts.get(&addr).copied().unwrap_or(0));
                     }
                 }
                 Instruction::Poseidon2Packed(pi) => {
-                    for i in 0..4 {
+                    for i in 0..PERM_BLOCKS {
                         let addr = pi.output_addrs[i].as_usize() as u32;
                         pi.mults[i] = F::from_u32(read_counts.get(&addr).copied().unwrap_or(0));
                     }
@@ -2146,22 +2086,21 @@ impl ConvertVerifierCircuit {
                 // Witness the VM-layer identity: pc_start (3 limbs) then initial_gcs (x 7, y 7).
                 let pc_w: [u32; 3] = std::array::from_fn(|_| b.hint_f());
                 let gcs_w: [u32; 14] = std::array::from_fn(|_| b.hint_f());
-                let dom = b.write_const(Block([
-                    F::from_u32(RISCV_VK_DIGEST_DOMAIN),
-                    F::ZERO,
-                    F::ZERO,
-                    F::ZERO,
-                ]));
+                let dom = b.write_const(Block::from(F::from_u32(RISCV_VK_DIGEST_DOMAIN)));
                 let mut preimage = Vec::with_capacity(26);
                 preimage.push(dom);
                 preimage.extend_from_slice(&program_commit);
                 preimage.extend_from_slice(&pc_w);
                 preimage.extend_from_slice(&gcs_w);
                 let digest_blocks = b.hash_poseidon2_fresh(&preimage);
-                let lo = b.unpack_block(digest_blocks[0]);
-                let hi = b.unpack_block(digest_blocks[1]);
+                let lo = b.unpack_lanes(digest_blocks[0]);
+                let hi = b.unpack_lanes(digest_blocks[1]);
                 for (i, &idx) in col.riscv_vk_digest.iter().enumerate() {
-                    pv_arr[idx] = if i < 4 { lo[i] } else { hi[i - 4] };
+                    pv_arr[idx] = if i < PACK_LANES {
+                        lo[i]
+                    } else {
+                        hi[i - PACK_LANES]
+                    };
                 }
 
                 // ── chunk-1 gating: is_first = (start_chunk == 1) ──
@@ -2349,10 +2288,15 @@ impl ConvertVerifierCircuit {
             }
         }
         let digest_blocks = b.hash_poseidon2_fresh(&preimage);
-        let d_lo = b.unpack_block(digest_blocks[0]);
-        let d_hi = b.unpack_block(digest_blocks[1]);
-        let end_digest: [u32; DIGEST_SIZE] =
-            std::array::from_fn(|i| if i < 4 { d_lo[i] } else { d_hi[i - 4] });
+        let d_lo = b.unpack_lanes(digest_blocks[0]);
+        let d_hi = b.unpack_lanes(digest_blocks[1]);
+        let end_digest: [u32; DIGEST_SIZE] = std::array::from_fn(|i| {
+            if i < PACK_LANES {
+                d_lo[i]
+            } else {
+                d_hi[i - PACK_LANES]
+            }
+        });
 
         // ── This node's own public values ──
         // Both are free witnesses here and pinned by cross-child continuity: the digest against
@@ -2361,20 +2305,10 @@ impl ConvertVerifierCircuit {
         let riscv_vk_digest: [u32; DIGEST_SIZE] = std::array::from_fn(|_| b.hint_f());
         let end_pc: [u32; 3] = std::array::from_fn(|_| b.hint_f());
         let zero_x: [u32; 7] = std::array::from_fn(|i| {
-            b.write_const(Block([
-                F::from_u32(F::CURVE_CUMULATIVE_SUM_START_X[i]),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-            ]))
+            b.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_X[i])))
         });
         let zero_y: [u32; 7] = std::array::from_fn(|i| {
-            b.write_const(Block([
-                F::from_u32(F::CURVE_CUMULATIVE_SUM_START_Y[i]),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-            ]))
+            b.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_Y[i])))
         });
         let mut pv_arr = vec![addr_zero; RECURSION_NUM_PVS];
         {
@@ -2393,7 +2327,7 @@ impl ConvertVerifierCircuit {
             rec.global_cumulative_sum.0.x.0.copy_from_slice(&zero_x);
             rec.global_cumulative_sum.0.y.0.copy_from_slice(&zero_y);
             // Left at zero: committed_value_digest and deferred_proofs_digest (this node makes no
-            // claim about either — the merge's consistency lock treats zero as "no opinion"), the
+            // claim about either, and the merge sums both, so a zero adds nothing), the
             // four address cursors, exit_code, flag_complete (a deferred node can never be a
             // complete root) and contains_execution_chunk.
         }

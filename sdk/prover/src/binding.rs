@@ -45,11 +45,12 @@ fn digest_at(
 
 /// Fold one more proof's digest into what a set of proofs attests to.
 ///
-/// A proof covering only chunks before the guest's COMMIT ecalls carries zero, and every proof
-/// covering a later chunk carries the final digest. So a set is read by taking the nonzero copies
-/// and requiring them to agree — the host-side mirror of the in-circuit consistency check, where a
-/// nonzero accumulator forces every nonzero child equal. Taking any one proof's copy would read zero
-/// on a run whose first chunk precedes the commit.
+/// A proof covering only chunks before the guest's COMMIT ecalls carries zero. Among RISC-V chunk
+/// proofs, every chunk from the committing one on carries the final digest; among recursion proofs,
+/// only the one covering the committing chunk does, since the convert leaf takes the digest only
+/// from the chunk that committed all eight words and the merge sums. Either way a set is read by
+/// taking the nonzero copies and requiring them to agree. Taking any one proof's copy would read
+/// zero on a run whose first chunk precedes the commit.
 fn agree(seen: [u8; 32], next: [u8; 32], phase: Phase) -> Result<[u8; 32], ProveError> {
     const ZERO: [u8; 32] = [0u8; 32];
     match (seen, next) {
@@ -65,10 +66,12 @@ fn agree(seen: [u8; 32], next: [u8; 32], phase: Phase) -> Result<[u8; 32], Prove
 
 /// Give every record that carries a nonzero digest the run's final one.
 ///
-/// The guest's COMMIT ecalls write the digest one word per call, and the emulator can end a chunk
-/// between two of them, leaving the earlier chunk a partial digest that the combine layer's
-/// consistency check rejects in an honest run. Replacing it is sound: a chunk's constraints bind
-/// only the words committed inside it, and those already equal the final digest's.
+/// The guest's COMMIT ecalls write the digest one word per call. The emulator holds the chunk cut
+/// while a run of them is in flight, but a chunk that reaches its clk ceiling first is still cut
+/// between two of them, leaving the earlier record a partial digest that [`agree`] would read as a
+/// disagreement. Replacing it is sound: a chunk's constraints bind only the words committed inside
+/// it, and those already equal the final digest's. Such a run still does not prove past the RISC-V
+/// layer: the convert leaf takes a digest only from a chunk that ran all eight of its words.
 pub(crate) fn backfill_final_digests(records: &mut [EmulationRecord]) {
     let Some(last) = records.last() else {
         return;

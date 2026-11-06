@@ -8,7 +8,7 @@ use crate::{
         global_interaction::GlobalInteractionOperation,
     },
     machine::{
-        builder::ChipBuilder,
+        builder::{ChipBuilder, ChipRangeBuilder},
         lookup::{LookupScope, LookupType, SymbolicLookup},
     },
 };
@@ -76,6 +76,19 @@ where
                 local.message_0_8bit_limb,
                 local.message_0_high_bit,
             ],
+        );
+
+        // message[1] is 25 bits. On a memory message it is the clk, which is bound
+        // otherwise only by the sends and receives cancelling on this bus; the direct check keeps
+        // memory consistency from resting on that argument. Every sender is in range honestly:
+        // a clk is within the 25-bit chunk-clk budget, a syscall message carries
+        // `syscall_id + 2^8 * arg1[0]` (u8 and u16, checked by the Syscall chip), and
+        // MemoryInitialize sends 0.
+        builder.range_check_u25_16_9(
+            local.message[1],
+            local.message_1_16bit_limb,
+            local.message_1_hi9,
+            local.is_real,
         );
 
         // Evaluate the accumulation.

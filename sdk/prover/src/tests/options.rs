@@ -326,8 +326,8 @@ fn missing_stdin_is_an_error() {
     );
 }
 
-/// All five phases can be named. Without the feature, the outer two say so by name rather than
-/// being absent from the enum.
+/// All six phases can be named. Without the feature, the outer two say so by name rather than
+/// being absent from the enum; compress needs no feature and is proved like combine.
 #[test]
 #[cfg(not(feature = "multi-field-transcript"))]
 fn the_outer_phases_can_be_named_and_report_themselves_missing() {
@@ -349,7 +349,7 @@ fn the_outer_phases_can_be_named_and_report_themselves_missing() {
 /// where it can actually arrive.
 #[test]
 fn an_empty_record_set_is_an_error() {
-    use pico_mle_core::config::recursion_params_with_100_bits_security;
+    use pico_mle_core::config::recursion_params_with_128_bits_security;
     use pico_vm::mle::machine::{convert::ConvertMachine, exe::RiscvVmVk, riscv::RiscvMachine};
 
     let program = fib_program();
@@ -365,7 +365,7 @@ fn an_empty_record_set_is_an_error() {
         riscv_vk,
         vm_vk,
         &[],
-        recursion_params_with_100_bits_security(),
+        recursion_params_with_128_bits_security(),
         false,
     );
     match result {

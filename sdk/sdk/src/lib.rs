@@ -92,7 +92,7 @@ mod zkvm {
     }
 
     /// What `_start` calls once `sp` and `gp` are set: IO, the C++ static constructors, `main`,
-    /// the static destructors, then the halt with `main`'s return value.
+    /// the exit handlers and static destructors, then the halt with `main`'s return value.
     #[no_mangle]
     unsafe extern "C" fn __start() -> ! {
         PUBLIC_VALUES_HASHER = Some(Sha256::new());
@@ -112,16 +112,23 @@ mod zkvm {
         run_table(&__preinit_array_start, &__preinit_array_end, false);
         run_table(&__init_array_start, &__init_array_end, false);
         let exit_code = main();
+        // As C's `exit`: the `atexit` / `__cxa_atexit` handlers, which hold C++'s static
+        // destructors, then the destructor table.
+        crate::c_runtime::run_exit_handlers();
         run_table(&__fini_array_start, &__fini_array_end, true);
 
         // The host sees the 32-bit two's complement: `return -1` arrives as 0xffff_ffff.
         syscall_halt(exit_code as u32);
     }
 
-    core::arch::global_asm!(include_str!("memset.s"));
-    core::arch::global_asm!(include_str!("memcpy.s"));
-
-    // `_stack_top` and `__global_pointer$` come from `pico.ld`.
+    // `_start`, `memcpy` and `memset` in one `global_asm!`, which is one object file: the one
+    // `_start` is in, which every link takes because `_start` is the entry point. So these strong
+    // definitions are always linked, and always win over `compiler_builtins`' weak ones (the
+    // guest build enables `compiler-builtins-mem`). In separate `global_asm!`s they could land in
+    // another object that a link need not take, and lose without an error; reth's ELF did, at a
+    // cost of 5 % of its instructions. `cargo pico build` checks the outcome through the
+    // `__pico_memcpy` / `__pico_memset` aliases. `_stack_top` and `__global_pointer$` come from
+    // `pico.ld`.
     core::arch::global_asm!(
         r#"
     .section .text._start;
@@ -133,6 +140,16 @@ mod zkvm {
         .option pop;
         la sp, _stack_top;
         call __start;
+    "#,
+        include_str!("memcpy.s"),
+        // `memset.s` names no section, and `memcpy.s` ends in `.note.GNU-stack`.
+        ".text",
+        include_str!("memset.s"),
+        r#"
+    .globl __pico_memcpy;
+    .set __pico_memcpy, memcpy;
+    .globl __pico_memset;
+    .set __pico_memset, memset;
     "#
     );
 

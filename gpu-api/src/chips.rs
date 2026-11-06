@@ -270,7 +270,6 @@ unsafe extern "C" {
         event_size: usize,
         d_trace: *mut c_void,
         num_cols: usize,
-        w: u32,
         stream: cudaStream_t,
     ) -> Error;
 
@@ -369,7 +368,6 @@ unsafe extern "C" {
         event_size: usize,
         d_trace: *mut c_void,
         num_cols: usize,
-        w: u32,
         stream: cudaStream_t,
     ) -> Error;
 
@@ -387,7 +385,6 @@ unsafe extern "C" {
         event_size: usize,
         d_trace: *mut c_void,
         num_cols: usize,
-        w: u32,
         stream: cudaStream_t,
     ) -> Error;
 

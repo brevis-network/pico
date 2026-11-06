@@ -14,7 +14,7 @@
 use std::sync::{Mutex, Once, PoisonError};
 
 use pico_vm::{
-    chips::chips::riscv_ecall::traces::deferred_commit_tally,
+    chips::chips::riscv_ecall::traces::commit_tally,
     emulator::record::RecordBehavior,
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::chip::MetaChip,
@@ -50,7 +50,7 @@ fn check_chip(chip: &str, air: usize, guests: &[&str]) -> u32 {
     let mut checked = 0usize;
     let mut real = 0usize;
     let mut history_reads = 0usize;
-    let mut deferred_commits = 0u32;
+    let mut commits = 0u32;
     for guest_name in guests {
         let guest = GUESTS
             .iter()
@@ -62,7 +62,7 @@ fn check_chip(chip: &str, air: usize, guests: &[&str]) -> u32 {
                     return;
                 }
                 let chunk_index = record.chunk_index();
-                deferred_commits += deferred_commit_tally(&record).0;
+                commits += commit_tally(&record).0;
                 let host = HostSide::build(&chips, &record);
                 let chunk = prepare_chunk_shaped(&chips, record, false);
                 let (verdict, _) =
@@ -95,19 +95,19 @@ fn check_chip(chip: &str, air: usize, guests: &[&str]) -> u32 {
     );
     println!(
         "{chip}: {checked} CPU chunk(s) equal from the history, {real} real row(s), \
-         {deferred_commits} deferred commit(s)"
+         {commits} commit(s)"
     );
-    deferred_commits
+    commits
 }
 
-/// Every guest's halt commits its deferred-proofs digest word by word, so the run's last chunks
-/// carry a nonzero tally down their padding rows.
+/// Every guest's halt commits its output and deferred-proofs digests word by word, so the run's
+/// last chunks carry a nonzero tally down their padding rows.
 #[test]
 fn ecall_from_the_history() {
-    let deferred_commits = check_chip("Ecall", air_id::ECALL, &["fib", "aggregator"]);
+    let commits = check_chip("Ecall", air_id::ECALL, &["fib", "aggregator"]);
     assert!(
-        deferred_commits > 0,
-        "no chunk tallied a deferred commit, so the running sums on padding rows proved nothing"
+        commits > 0,
+        "no chunk tallied a commit, so the running sums on padding rows proved nothing"
     );
 }
 

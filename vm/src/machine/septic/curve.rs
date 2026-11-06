@@ -94,7 +94,7 @@ impl<F: Field> SepticCurve<F> {
 impl<F: PrimeCharacteristicRing + Any> SepticCurve<F> {
     /// Evaluates the curve formula x^3 + 2x + 611z^5
     pub fn curve_formula(x: SepticExtension<F>) -> SepticExtension<F> {
-        if same_field::<F, KoalaBear, 4>() {
+        if same_field::<F, KoalaBear>() {
             koalabear::curve_formula(x)
         } else {
             panic!("Unsupported field type");

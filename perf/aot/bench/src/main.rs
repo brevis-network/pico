@@ -326,8 +326,8 @@ struct Args {
     #[clap(long, value_parser = parse_workers)]
     workers: Option<Workers>,
 
-    /// The phase the prove arms prove to: riscv, convert, combine, embed or wrap [default: combine];
-    /// `tracegen-aot` takes riscv only
+    /// The phase the prove arms prove to: riscv, convert, combine, compress, embed or wrap
+    /// [default: combine]; `tracegen-aot` takes riscv only
     #[clap(long, value_parser = parse_phase)]
     phase: Option<Phase>,
 
@@ -403,10 +403,11 @@ fn parse_phase(s: &str) -> Result<Phase, String> {
         "riscv" => Ok(Phase::Riscv),
         "convert" => Ok(Phase::Convert),
         "combine" => Ok(Phase::Combine),
+        "compress" => Ok(Phase::Compress),
         "embed" => Ok(Phase::Embed),
         "wrap" => Ok(Phase::Wrap),
         _ => Err(format!(
-            "unknown phase `{s}`: expected riscv, convert, combine, embed or wrap"
+            "unknown phase `{s}`: expected riscv, convert, combine, compress, embed or wrap"
         )),
     }
 }

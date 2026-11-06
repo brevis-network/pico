@@ -13,7 +13,7 @@ use crate::{
     transcript::duplex_sponge,
     StarkProtocolConfig, SystemParams, TranscriptLog,
 };
-use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing};
+use p3_field::{extension::QuinticTrinomialExtensionField, PrimeCharacteristicRing};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 
 pub const RATE: usize = 8;
@@ -27,8 +27,8 @@ type Compress<P> = TruncatedPermutation<P, 2, CHUNK, WIDTH>;
 type PermHasher<P> = Hasher<F, Digest, Hash<P>, Compress<P>>;
 
 pub type F = KoalaBear;
-pub type EF = BinomialExtensionField<KoalaBear, 4>;
-pub const D_EF: usize = 4;
+pub type EF = QuinticTrinomialExtensionField<KoalaBear>;
+pub const D_EF: usize = 5;
 pub type Digest = [F; DIGEST_SIZE];
 pub type DuplexSponge = duplex_sponge::DuplexSponge<F, Perm, WIDTH, RATE>;
 pub type DuplexSpongeRecorder = duplex_sponge::DuplexSpongeRecorder<F, Perm, WIDTH, RATE>;
@@ -170,7 +170,7 @@ mod tests {
     use p3_field::PrimeField32;
 
     use super::*;
-    use crate::config::riscv_params_with_100_bits_security;
+    use crate::config::riscv_params_with_128_bits_security;
 
     /// Every Poseidon2 round constant survives a canonical-form round-trip, the external/internal
     /// tables have the width-16 Grain schedule's shape (R_F = 8, R_P = 20, no zero rounds), and
@@ -246,7 +246,7 @@ mod tests {
     /// params survive the round-trip through it.
     #[test]
     fn kb_system_params_initialize_downstream() {
-        let params = riscv_params_with_100_bits_security(20);
+        let params = riscv_params_with_128_bits_security(20);
 
         let config = KoalaBearPoseidon2Config::default_from_params(params.clone());
         assert_eq!(config.params(), &params);

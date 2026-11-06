@@ -6,10 +6,9 @@ use crate::{
             constraints::eval_poseidon2,
         },
     },
-    compiler::recursion::ir::Block,
     configs::config::Poseidon2Config,
     machine::builder::{ChipBuilder, RecursionBuilder},
-    primitives::consts::PERMUTATION_WIDTH,
+    primitives::consts::{PACK_LANES, PERMUTATION_WIDTH, PERM_BLOCKS},
 };
 use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::Field;
@@ -42,27 +41,17 @@ where
         let prep_local: &Poseidon2PackedPreprocessedCols<CB::Var> = (*prep_local).borrow();
 
         let post = &local.ending_full_rounds[Self::HALF_FULL_ROUNDS - 1].post;
-        for j in 0..4 {
-            // Packed memory read of input Block j (lanes 4j..4j+4 of the state).
-            builder.looked_block(
+        for j in 0..PERM_BLOCKS {
+            // Packed memory read of input Block j (lanes PACK_LANES·j.. of the state).
+            builder.looked_packed(
                 prep_local.input[j],
-                Block([
-                    local.inputs[4 * j],
-                    local.inputs[4 * j + 1],
-                    local.inputs[4 * j + 2],
-                    local.inputs[4 * j + 3],
-                ]),
+                std::array::from_fn(|k| local.inputs[PACK_LANES * j + k]),
                 prep_local.is_real,
             );
             // Packed memory write of output Block j.
-            builder.looking_block(
+            builder.looking_packed(
                 prep_local.output[j].addr,
-                Block([
-                    post[4 * j],
-                    post[4 * j + 1],
-                    post[4 * j + 2],
-                    post[4 * j + 3],
-                ]),
+                std::array::from_fn(|k| post[PACK_LANES * j + k]),
                 prep_local.output[j].mult,
             );
         }

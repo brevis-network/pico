@@ -16,11 +16,109 @@ use p3_util::log2_strict_usize;
 use tracing::{debug_span, instrument};
 
 use super::errors::FractionalSumcheckError;
-use crate::{cuda::field_kernels::FieldKernels, poly::SqrtEqLayersFor};
+use crate::{
+    cuda::field_kernels::{FieldKernels, GkrLens},
+    poly::SqrtEqLayersFor,
+};
 
 const ROUND_POLY_DEG: usize = 3;
 const PRECOMPUTE_WINDOW_VARS: usize = 3;
 const PRECOMPUTE_DEFAULT_MIN_VARS: usize = 22;
+
+// ─── Virtual input padding ──────────────────────────────────────────────────────────────────────
+//
+// The GKR leaf count is padded to a power of two, `logical_len`, of which only the first
+// `real_len` leaves are real: logical_len / 2 <= real_len, with equality when the real count is
+// itself a power of two (padded to twice itself). Every padding leaf is (0, alpha) once the
+// denominators are shifted, so a subtree of 2^k padding leaves is (0, alpha^(2^k)). A virtual
+// input stores the real leaves only and the kernels read padding from a table where they meet
+// it, so the tree takes `real_len` entries instead of `logical_len`: up to half the
+// GKR memory on a chunk just past a power of two, and the padding's share of the GKR traffic.
+// Values, and so the proof, are exactly those of the dense layout. After
+// openvm-org/stark-backend#331 (MIT/Apache-2.0); the kernels (gkr.cu) say why each in-place
+// pass over a virtual buffer is race-free.
+//
+// The tree buffer stays virtual until the last outer round consumes it: earlier rounds only read
+// it (folds go out of place into the dense scratch buffer). In the last round the first fold is
+// the split round (`frac_compute_round_and_fold_split`) or, windowed, a multifold into scratch,
+// never an in-place fold over the virtual layout: #331 folds in place there, which lets one
+// thread overwrite a spilled leaf another thread has yet to read.
+
+/// Below this logical length the input is built dense: the bookkeeping is not worth it, and the
+/// separate bit-reversal path that small inputs take has no virtual form.
+const VIRTUAL_MIN_LEAVES: usize = 1 << 12;
+
+/// `MLE_GKR_VIRTUAL_PADDING=0` turns the virtual input off (dense, as before, for A/B runs).
+fn virtual_padding_requested() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| !matches!(env::var("MLE_GKR_VIRTUAL_PADDING").as_deref(), Ok("0")))
+}
+
+/// Whether a GKR input of `real_len` leaves padded to `logical_len` is proved virtually. The
+/// input evaluation allocates accordingly; [`fractional_sumcheck_gpu`] makes a virtual input dense
+/// first whenever this says no.
+pub(crate) fn use_virtual_padding<FK: FieldKernels>(real_len: usize, logical_len: usize) -> bool {
+    virtual_padding_requested()
+        && real_len < logical_len
+        && logical_len >= VIRTUAL_MIN_LEAVES
+        && !FK::use_cpu_gkr()
+        && (!FK::use_cpu_zerocheck_mle() || super::force_gpu_zc_site("treebuild"))
+}
+
+/// Leaf count whose dense buffer size caps the batch-MLE memory budget of a virtual input
+/// (`MLE_GKR_ZC_BUDGET_LOG`, default 28): the budget a chunk padded to 2^28 leaves already gets,
+/// so that a chunk padded past it does not spend the memory its virtual input saved.
+pub(crate) fn gkr_zc_budget_leaves() -> usize {
+    static V: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        let log = env::var("MLE_GKR_ZC_BUDGET_LOG")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(28)
+            .min(40);
+        1usize << log
+    })
+}
+
+/// The padding denominators a virtual tree's kernels read: `alpha^(2^k)` for k < 32, the
+/// denominator of an all-padding subtree of 2^k leaves. Returned with its host copy, which the
+/// caller keeps until the kernels are done with the table.
+#[allow(clippy::type_complexity)]
+fn padding_dens<FK: FieldKernels>(
+    alpha: FK::ValExt,
+) -> Result<(Vec<FK::ValExt>, DeviceBuffer<FK::ValExt>), FractionalSumcheckError> {
+    use crate::runtime::copy::MemCopyH2D;
+    let mut pows = Vec::with_capacity(32);
+    let mut den = alpha;
+    for _ in 0..32 {
+        pows.push(den);
+        den = den * den;
+    }
+    let device = pows.to_device()?;
+    Ok((pows, device))
+}
+
+/// A dense copy of a virtual input: the real leaves, then zeros up to `logical_len` (the padding
+/// before the denominator shift).
+fn densify_leaves<T: Copy>(
+    leaves: &DeviceBuffer<T>,
+    lens: GkrLens,
+) -> Result<DeviceBuffer<T>, FractionalSumcheckError> {
+    let dense = DeviceBuffer::<T>::with_capacity(lens.logical_len);
+    unsafe {
+        cuda_memcpy::<true, true>(
+            dense.as_mut_raw_ptr(),
+            leaves.as_ptr() as *const c_void,
+            lens.real_len * std::mem::size_of::<T>(),
+        )?;
+    }
+    if lens.real_len < lens.logical_len {
+        dense
+            .fill_zero_suffix(lens.real_len)
+            .map_err(FractionalSumcheckError::SegmentTree)?;
+    }
+    Ok(dense)
+}
 
 /// Where a fused compute+fold round reads its input and writes its folded output.
 #[derive(Debug, Clone, Copy)]
@@ -346,6 +444,8 @@ fn revert_and_first_inner_round<FK, SC, TS>(
     eq_layers: &mut SqrtEqLayersFor<FK::ValExt>,
     seg_tree: &mut DeviceBuffer<Frac<FK::ValExt>>,
     pq_len: usize,
+    tree_lens: GkrLens,
+    pad_dens: &DeviceBuffer<FK::ValExt>,
     batch_lambda: FK::ValExt,
     challenger: &mut TS,
     d_round_sums: &mut DeviceBuffer<FK::ValExt>,
@@ -362,11 +462,13 @@ where
     TS: FiatShamirTranscript<SC>,
 {
     unsafe {
-        FK::frac_compute_round_and_revert(
+        FK::frac_compute_round_and_revert_virt(
             eq_layers,
             seg_tree,
             pq_len / 2,
+            tree_lens,
             batch_lambda,
+            pad_dens,
             d_round_sums,
             block_partials,
         )
@@ -393,6 +495,8 @@ fn fused_round_out_of_place<FK, SC, TS>(
     pq_src: &DeviceBuffer<Frac<FK::ValExt>>,
     pq_dst: &mut DeviceBuffer<Frac<FK::ValExt>>,
     pq_len_before_fold: usize,
+    src_lens: GkrLens,
+    pad_dens: &DeviceBuffer<FK::ValExt>,
     batch_lambda: FK::ValExt,
     fold_r: FK::ValExt,
     challenger: &mut TS,
@@ -410,13 +514,15 @@ where
     TS: FiatShamirTranscript<SC>,
 {
     unsafe {
-        FK::frac_compute_round_and_fold(
+        FK::frac_compute_round_and_fold_virt(
             eq_layers,
             pq_src,
             pq_dst,
             pq_len_before_fold,
+            src_lens,
             batch_lambda,
             fold_r,
+            pad_dens,
             d_round_sums,
             block_partials,
         )
@@ -480,11 +586,69 @@ where
     )
 }
 
+/// [`fused_round_in_place`] over a virtual layer: the split round, with `upper_scratch` taking the
+/// upper folded quarter. Afterwards the low half of `pq_data` is the folded layer, dense.
+#[allow(clippy::too_many_arguments)]
+fn fused_round_split<FK, SC, TS>(
+    eq_layers: &mut SqrtEqLayersFor<FK::ValExt>,
+    pq_data: &mut DeviceBuffer<Frac<FK::ValExt>>,
+    upper_scratch: &mut DeviceBuffer<Frac<FK::ValExt>>,
+    pq_len_before_fold: usize,
+    lens: GkrLens,
+    pad_dens: &DeviceBuffer<FK::ValExt>,
+    batch_lambda: FK::ValExt,
+    fold_r: FK::ValExt,
+    challenger: &mut TS,
+    d_round_sums: &mut DeviceBuffer<FK::ValExt>,
+    block_partials: &mut DeviceBuffer<FK::ValExt>,
+    inner_round_polys: &mut Vec<[FK::ValExt; ROUND_POLY_DEG]>,
+    sampled_rs: &mut Vec<FK::ValExt>,
+    running_claim: &mut FK::ValExt,
+    xi_coord: FK::ValExt,
+    eq_prefix_product: &mut FK::ValExt,
+) -> Result<FK::ValExt, FractionalSumcheckError>
+where
+    FK: FieldKernels,
+    SC: StarkProtocolConfig<EF = FK::ValExt>,
+    TS: FiatShamirTranscript<SC>,
+{
+    unsafe {
+        FK::frac_compute_round_and_fold_split(
+            eq_layers,
+            pq_data,
+            upper_scratch,
+            pq_len_before_fold,
+            lens,
+            batch_lambda,
+            fold_r,
+            pad_dens,
+            d_round_sums,
+            block_partials,
+        )
+        .map_err(FractionalSumcheckError::ComputeRound)?;
+    }
+    eq_layers.drop_layer();
+    absorb_round_and_sample::<FK, SC, TS>(
+        d_round_sums,
+        challenger,
+        inner_round_polys,
+        sampled_rs,
+        running_claim,
+        xi_coord,
+        eq_prefix_product,
+    )
+}
+
 /// Proves the GKR fractional-sum tree over `input_leaves` on the GPU.
+///
+/// `lens` gives the leaf counts: `GkrLens::dense(input_leaves.len())` for a materialised input, or
+/// a virtual one holding the first `lens.real_len` of `lens.logical_len` leaves (see the module
+/// notes above); `input_leaves` must hold at least `lens.real_len` entries.
 #[instrument(skip_all)]
 pub fn fractional_sumcheck_gpu<FK, SC, TS>(
     challenger: &mut TS,
     input_leaves: DeviceBuffer<Frac<FK::ValExt>>,
+    lens: GkrLens,
     alpha: FK::ValExt,
     assert_zero: bool,
     mem: &mut MemTracker,
@@ -512,6 +676,16 @@ where
         let mut host_leaves: Vec<Frac<FK::ValExt>> = input_leaves
             .to_host()
             .map_err(FractionalSumcheckError::Copy)?;
+        if lens.is_virtual() {
+            host_leaves.truncate(lens.real_len);
+            host_leaves.resize(
+                lens.logical_len,
+                Frac {
+                    p: FK::ValExt::ZERO,
+                    q: FK::ValExt::ZERO,
+                },
+            );
+        }
         // MLE_DEBUG_GKR_FRACS: dump the first few leaves (raw limb 0 of p and q) before alpha
         if std::env::var("MLE_DEBUG_GKR_FRACS").is_ok() {
             tracing::warn!(
@@ -519,9 +693,12 @@ where
                 host_leaves.len()
             );
             for (i, f) in host_leaves.iter().take(8).enumerate() {
-                // reinterpret as raw u32 limbs
-                let p_limbs: [u32; 4] = unsafe { std::mem::transmute_copy(&f.p) };
-                let q_limbs: [u32; 4] = unsafe { std::mem::transmute_copy(&f.q) };
+                // reinterpret as raw u32 limbs, sized by the extension degree: transmute_copy into
+                // a smaller array would silently read a prefix instead of failing to compile
+                let p_limbs: [u32; crate::prelude::D_EF] =
+                    unsafe { std::mem::transmute_copy(&f.p) };
+                let q_limbs: [u32; crate::prelude::D_EF] =
+                    unsafe { std::mem::transmute_copy(&f.q) };
                 tracing::warn!("  fracs[{i}]: p[0]={} q[0]={}", p_limbs[0], q_limbs[0]);
             }
         }
@@ -558,7 +735,22 @@ where
             vec![],
         ));
     };
-    let leaf_count = seg_tree.len();
+    assert!(
+        seg_tree.len() >= lens.real_len && lens.real_len <= lens.logical_len,
+        "GKR input of {} entries for {lens:?}",
+        seg_tree.len()
+    );
+    // A virtual input this prover cannot run virtually (see `use_virtual_padding`) goes dense.
+    let lens = if lens.is_virtual() && !use_virtual_padding::<FK>(lens.real_len, lens.logical_len) {
+        seg_tree = densify_leaves(&seg_tree, lens)?;
+        GkrLens::dense(lens.logical_len)
+    } else {
+        lens
+    };
+    // Whether `seg_tree` holds a virtual layout: until the last outer round consumes the tree.
+    let mut tree_virtual = lens.is_virtual();
+    let leaf_count = lens.logical_len;
+    let (pad_dens_host, pad_dens) = padding_dens::<FK>(alpha)?;
     // depth = l_skip + n_logup
     let tree_depth = log2_strict_usize(leaf_count);
     assert!(tree_depth > 0, "n_logup > 0 when there are interactions");
@@ -580,7 +772,7 @@ where
                 &DeviceBuffer<Frac<FK::ValExt>>,
                 &DeviceBuffer<(FK::ValExt, FK::ValExt)>,
             >(&seg_tree);
-            FK::bit_rev_frac_ext_build_k2(pair_view, tree_depth as u32, alpha)
+            FK::bit_rev_frac_ext_build_k2(pair_view, lens.real_len, tree_depth as u32, alpha)
                 .map_err(FractionalSumcheckError::BitReversal)?;
         }
         // The vectorised k2 kernel (on unless FRAC_K2_VEC starts with '0') additionally folds
@@ -595,6 +787,10 @@ where
         }
     } else {
         // small input (or KB): bit reversal and first combine as separate kernels
+        debug_assert!(
+            !tree_virtual,
+            "use_virtual_padding admits no input for this path"
+        );
         unsafe {
             let pair_view = transmute::<
                 &DeviceBuffer<Frac<FK::ValExt>>,
@@ -627,7 +823,7 @@ where
     while i + 1 < tree_depth {
         let pair_half_len = leaf_count >> (i + 2);
         unsafe {
-            FK::frac_build_tree_two_layers(&mut seg_tree, pair_half_len)
+            FK::frac_build_tree_two_layers_virt(&mut seg_tree, pair_half_len, lens, &pad_dens)
                 .map_err(FractionalSumcheckError::SegmentTree)?;
         }
         i += 2;
@@ -635,14 +831,8 @@ where
     // odd leftover layer
     if i < tree_depth {
         unsafe {
-            FK::frac_build_tree_layer(
-                &mut seg_tree,
-                leaf_count >> i,
-                false,
-                FK::ValExt::ZERO,
-                false,
-            )
-            .map_err(FractionalSumcheckError::SegmentTree)?;
+            FK::frac_build_tree_layer_virt(&mut seg_tree, leaf_count >> i, lens, false, &pad_dens)
+                .map_err(FractionalSumcheckError::SegmentTree)?;
         }
     }
     mem.emit_metrics_with_label("frac_sumcheck.segment_tree");
@@ -653,8 +843,10 @@ where
         // read_device_element synchronises, so this timing includes every tree kernel.
         tracing::info!("[fracprof] tree_build={}us", fn_start.elapsed().as_micros());
     }
+    // The root is real; its right child is all padding when real_len == logical_len / 2 (a
+    // power-of-two real count, padded to twice itself), so the children are read virtually.
     unsafe {
-        FK::frac_build_tree_layer(&mut seg_tree, 2, true, FK::ValExt::ZERO, false)
+        FK::frac_build_tree_layer_virt(&mut seg_tree, 2, lens, true, &pad_dens)
             .map_err(FractionalSumcheckError::SegmentTree)?;
     }
     if assert_zero {
@@ -672,8 +864,8 @@ where
     let mut layer_claims = Vec::with_capacity(tree_depth);
     let mut layer_round_polys = Vec::with_capacity(tree_depth);
 
-    let claim_lo = read_device_element(&seg_tree, 0, &mut one_elem_scratch)?;
-    let claim_hi = read_device_element(&seg_tree, 1, &mut one_elem_scratch)?;
+    let claim_lo = read_tree_node(&seg_tree, 0, 2, lens, &pad_dens_host, &mut one_elem_scratch)?;
+    let claim_hi = read_tree_node(&seg_tree, 1, 2, lens, &pad_dens_host, &mut one_elem_scratch)?;
     layer_claims.push(GkrLayerClaims {
         p_xi_0: claim_lo.p,
         q_xi_0: claim_lo.q,
@@ -693,13 +885,17 @@ where
     let mut d_round_sums = DeviceBuffer::<FK::ValExt>::with_capacity(2);
 
     let windowed_enabled = windowed_precompute_requested();
+    let min_tail_blocks = min_tail_blocks_from_env();
+    let target_tail_blocks = target_tail_blocks_from_env();
+    let tile_override = tail_tile_override_from_env();
+    let min_vars = min_window_vars_from_env();
 
     // Scratch buffer that lets non-last outer rounds fold without destroying the tree (the
     // last outer round folds in the tree itself). With the windowed precompute, the first
     // multifold removes window_vars+1 variables at once (the pending fold_r plus the
     // window), leaving leaf_count >> (2 + window_vars); fused-fold fallback rounds below the
     // variable threshold need at most 2^min_vars entries.
-    let scratch_len = if tree_depth > 2 {
+    let mut scratch_len = if tree_depth > 2 {
         if windowed_enabled {
             (leaf_count >> (2 + PRECOMPUTE_WINDOW_VARS)).max(1 << PRECOMPUTE_DEFAULT_MIN_VARS)
         } else {
@@ -708,6 +904,24 @@ where
     } else {
         0
     };
+    // A virtual tree is not folded in place, so its last outer round needs room in scratch: the
+    // split round takes the upper folded quarter, leaf_count / 4 entries; a windowed last round
+    // multifolds the whole leaf layer into scratch, leaf_count >> (1 + window_vars) entries.
+    if tree_virtual && tree_depth > 2 {
+        let last_round_mode = pick_inner_round_mode(
+            tree_depth - 1,
+            windowed_enabled,
+            min_tail_blocks,
+            target_tail_blocks,
+            tile_override,
+            min_vars,
+        );
+        let last_round_need = match last_round_mode {
+            InnerRoundMode::FusedFold => leaf_count >> 2,
+            InnerRoundMode::WindowedPrecompute => leaf_count >> (1 + PRECOMPUTE_WINDOW_VARS),
+        };
+        scratch_len = scratch_len.max(last_round_need);
+    }
     let mut scratch_pq = if scratch_len > 0 {
         // kept across proofs (~1.1 GiB); allocating that fresh can hit `d_malloc`'s
         // trim-and-retry path, which forces a device sync.
@@ -726,10 +940,6 @@ where
     } else {
         DeviceBuffer::new()
     };
-    let min_tail_blocks = min_tail_blocks_from_env();
-    let target_tail_blocks = target_tail_blocks_from_env();
-    let tile_override = tail_tile_override_from_env();
-    let min_vars = min_window_vars_from_env();
     let mut m_table = DeviceBuffer::<FK::ValExt>::new();
     let mut m_partials = DeviceBuffer::<FK::ValExt>::new();
     let mut d_eq_prefix = DeviceBuffer::<FK::ValExt>::new();
@@ -789,13 +999,24 @@ where
         let revert_check_round: Option<usize> = std::env::var("MLE_VERIFY_REVERT")
             .ok()
             .and_then(|s| s.parse().ok());
+        // The host check indexes the dense layout, so a virtual tree skips it.
         let layer_before_revert: Option<Vec<Frac<FK::ValExt>>> =
-            if revert_check_round == Some(round) {
+            if revert_check_round == Some(round) && !tree_virtual {
                 use crate::runtime::copy::MemCopyD2H;
                 Some(seg_tree.to_host().map_err(FractionalSumcheckError::Copy)?)
             } else {
+                if revert_check_round == Some(round) {
+                    tracing::warn!("MLE_VERIFY_REVERT skipped: the GKR tree is virtual");
+                }
                 None
             };
+        // Lengths to read the tree with: the input's while the tree is virtual, dense after the
+        // last outer round has rewritten it.
+        let tree_lens = if tree_virtual {
+            lens
+        } else {
+            GkrLens::dense(leaf_count)
+        };
 
         // Inner round 0 reverts the tree and computes in one kernel; its fold is deferred and
         // merged into the next inner round's compute.
@@ -803,6 +1024,8 @@ where
             &mut eq_layers,
             &mut seg_tree,
             pq_len,
+            tree_lens,
+            &pad_dens,
             batch_lambda,
             challenger,
             &mut d_round_sums,
@@ -874,12 +1097,15 @@ where
             }
             // Print the raw limbs of the first mismatching input pair so the case can be replayed
             // in an isolated frac_build_tree_layer test.
-            // SAFETY: assumes ValExt is [u32; 4] (KB); debug-only path.
+            // SAFETY: a Frac is two extension elements of D_EF u32 limbs each; debug-only path.
+            // Sized from D_EF: a literal 8 here silently logged a prefix once the degree moved.
             if let Some((lhs_idx, rhs_idx)) = bad_pair {
-                let lhs_raw: [u32; 8] = unsafe { std::mem::transmute_copy(&tree_before[lhs_idx]) };
-                let rhs_raw: [u32; 8] = unsafe { std::mem::transmute_copy(&tree_before[rhs_idx]) };
+                let lhs_raw: [u32; 2 * crate::prelude::D_EF] =
+                    unsafe { std::mem::transmute_copy(&tree_before[lhs_idx]) };
+                let rhs_raw: [u32; 2 * crate::prelude::D_EF] =
+                    unsafe { std::mem::transmute_copy(&tree_before[rhs_idx]) };
                 tracing::warn!(
-                    "REVERT_VERIFY bad inputs (raw [p0..3,q0..3]): lhs={lhs_raw:?} rhs={rhs_raw:?}"
+                    "REVERT_VERIFY bad inputs (raw [p limbs, q limbs]): lhs={lhs_raw:?} rhs={rhs_raw:?}"
                 );
             }
         }
@@ -896,28 +1122,44 @@ where
                     let pq_len_before_fold = pq_len;
                     let folded_len = pq_len >> 1;
 
+                    let tree_read = if tree_virtual {
+                        lens
+                    } else {
+                        GkrLens::dense(0)
+                    };
                     let challenge = match planner.plan_fused_round(folded_len, last_outer_round) {
-                        FoldDestination::TreeIntoScratch => fused_round_out_of_place::<FK, SC, TS>(
-                            &mut eq_layers,
-                            &seg_tree,
-                            &mut scratch_pq,
-                            pq_len_before_fold,
-                            batch_lambda,
-                            last_r,
-                            challenger,
-                            &mut d_round_sums,
-                            &mut block_partials,
-                            &mut inner_round_polys,
-                            &mut sampled_rs,
-                            &mut running_claim,
-                            xi_coord,
-                            &mut eq_prefix_product,
-                        )?,
+                        FoldDestination::TreeIntoScratch => {
+                            let r = fused_round_out_of_place::<FK, SC, TS>(
+                                &mut eq_layers,
+                                &seg_tree,
+                                &mut scratch_pq,
+                                pq_len_before_fold,
+                                tree_read,
+                                &pad_dens,
+                                batch_lambda,
+                                last_r,
+                                challenger,
+                                &mut d_round_sums,
+                                &mut block_partials,
+                                &mut inner_round_polys,
+                                &mut sampled_rs,
+                                &mut running_claim,
+                                xi_coord,
+                                &mut eq_prefix_product,
+                            )?;
+                            // The last outer round's tree is consumed; later rounds write it dense.
+                            if last_outer_round {
+                                tree_virtual = false;
+                            }
+                            r
+                        }
                         FoldDestination::ScratchIntoTree => fused_round_out_of_place::<FK, SC, TS>(
                             &mut eq_layers,
                             &scratch_pq,
                             &mut seg_tree,
                             pq_len_before_fold,
+                            GkrLens::dense(0),
+                            &pad_dens,
                             batch_lambda,
                             last_r,
                             challenger,
@@ -929,6 +1171,28 @@ where
                             xi_coord,
                             &mut eq_prefix_product,
                         )?,
+                        FoldDestination::TreeInPlace if tree_virtual => {
+                            let r = fused_round_split::<FK, SC, TS>(
+                                &mut eq_layers,
+                                &mut seg_tree,
+                                &mut scratch_pq,
+                                pq_len_before_fold,
+                                lens,
+                                &pad_dens,
+                                batch_lambda,
+                                last_r,
+                                challenger,
+                                &mut d_round_sums,
+                                &mut block_partials,
+                                &mut inner_round_polys,
+                                &mut sampled_rs,
+                                &mut running_claim,
+                                xi_coord,
+                                &mut eq_prefix_product,
+                            )?;
+                            tree_virtual = false;
+                            r
+                        }
                         FoldDestination::TreeInPlace => fused_round_in_place::<FK, SC, TS>(
                             &mut eq_layers,
                             &mut seg_tree,
@@ -975,6 +1239,9 @@ where
                         &mut scratch_pq
                     }
                     FoldDestination::TreeInPlace => {
+                        // Only after a fused round of this (last) outer round, which left the tree
+                        // dense; a virtual tree here would mean a tree of depth 2, which is dense.
+                        assert!(!tree_virtual, "in-place fold over a virtual GKR tree");
                         unsafe {
                             FK::fold_ef_frac_columns_inplace(&mut seg_tree, pq_len, last_r)
                                 .map_err(FractionalSumcheckError::FoldColumns)?;
@@ -982,12 +1249,19 @@ where
                         &mut seg_tree
                     }
                     FoldDestination::TreeIntoScratch => {
+                        let tree_read = if tree_virtual {
+                            lens
+                        } else {
+                            GkrLens::dense(0)
+                        };
                         unsafe {
-                            FK::fold_ef_frac_columns(
+                            FK::fold_ef_frac_columns_virt(
                                 &seg_tree,
                                 scratch_pq.as_mut_ptr(),
                                 pq_len,
+                                tree_read,
                                 last_r,
+                                &pad_dens,
                             )
                             .map_err(FractionalSumcheckError::FoldColumns)?;
                         }
@@ -1007,7 +1281,10 @@ where
                 // fold_pending cleared.
                 let mut fold_pending = true;
                 let tree_read_ptr = seg_tree.as_ptr();
-                let window_dst = if last_outer_round {
+                // A virtual tree is never multifolded onto itself (a thread could overwrite a
+                // spilled leaf another one still reads), so its last round goes to scratch too.
+                let tree_read = tree_lens;
+                let window_dst = if last_outer_round && !tree_virtual {
                     &mut seg_tree
                 } else {
                     &mut scratch_pq
@@ -1085,13 +1362,20 @@ where
                     } else {
                         window_dst.as_ptr()
                     };
+                    let src_lens = if fold_pending {
+                        tree_read
+                    } else {
+                        GkrLens::dense(0)
+                    };
                     unsafe {
                         FK::frac_precompute_m_build_raw(
                             m_src,
+                            src_lens,
                             vars_left,
                             window_vars,
                             batch_lambda,
                             pending_r,
+                            &pad_dens,
                             fold_pending, // fold last_r inline on the first window only
                             eq_low_ptr,
                             eq_high_ptr,
@@ -1169,12 +1453,15 @@ where
                     } else {
                         window_dst.as_ptr()
                     };
+                    debug_assert!(window_dst.len() >= pq_len >> fold_vars);
                     unsafe {
                         FK::frac_multifold_raw(
                             fold_src,
                             window_dst.as_mut_ptr(),
+                            src_lens,
                             src_vars,
                             fold_vars,
+                            &pad_dens,
                             d_eq_window,
                         )
                         .map_err(FractionalSumcheckError::FoldColumns)?;
@@ -1236,6 +1523,9 @@ where
                 }
                 folded_pq = window_dst;
                 pq_len >>= 1;
+                if last_outer_round {
+                    tree_virtual = false;
+                }
             }
         }
 
@@ -1291,6 +1581,39 @@ where
         },
         xi_point,
     ))
+}
+
+/// Node `pos` of a tree layer with `active` entries, read as the kernels read it: an all-padding
+/// node of a virtual tree is (0, alpha^(logical_len / active)) and never touches the buffer.
+fn read_tree_node<E: Field>(
+    seg_tree: &DeviceBuffer<Frac<E>>,
+    pos: usize,
+    active: usize,
+    lens: GkrLens,
+    pad_dens_host: &[E],
+    staging: &mut DeviceBuffer<Frac<E>>,
+) -> Result<Frac<E>, FractionalSumcheckError> {
+    if lens.is_virtual() {
+        let subtree_len = lens.logical_len / active;
+        let first_leaf = bit_reverse_index(pos, log2_strict_usize(active)) * subtree_len;
+        if first_leaf >= lens.real_len {
+            return Ok(Frac {
+                p: E::ZERO,
+                q: pad_dens_host[log2_strict_usize(subtree_len)],
+            });
+        }
+        let slot = if pos < lens.real_len { pos } else { first_leaf };
+        return read_device_element(seg_tree, slot, staging);
+    }
+    read_device_element(seg_tree, pos, staging)
+}
+
+fn bit_reverse_index(value: usize, bits: usize) -> usize {
+    if bits == 0 {
+        0
+    } else {
+        value.reverse_bits() >> (usize::BITS as usize - bits)
+    }
 }
 
 fn read_device_element<T: Copy>(
@@ -1409,7 +1732,8 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
 
     use super::{
-        fractional_sumcheck_gpu, make_synthetic_leaves, FractionalSumcheckError, InnerRoundMode,
+        fractional_sumcheck_gpu, make_synthetic_leaves, FractionalSumcheckError, GkrLens,
+        InnerRoundMode,
     };
     use mle_core::config::koala_bear_poseidon2::{KoalaBearPoseidon2Config as SC, EF};
 
@@ -1436,6 +1760,7 @@ mod tests {
         let outcome = fractional_sumcheck_gpu::<KoalaBearKernels, SC, _>(
             &mut challenger,
             input_leaves,
+            GkrLens::dense(1 << n),
             EF::ZERO,
             false,
             &mut mem,
@@ -1545,6 +1870,7 @@ mod tests {
         let (gpu_proof, _) = fractional_sumcheck_gpu::<KoalaBearKernels, KbSC, _>(
             &mut gpu_transcript,
             gpu_leaves,
+            GkrLens::dense(1 << n),
             KbEF::ZERO,
             false,
             &mut mem,
@@ -1639,5 +1965,145 @@ mod tests {
 
         eprintln!("PASS: KB GPU GKR == CPU reference at n={n}");
         Ok(())
+    }
+
+    /// Proves the first `real_len` of 2^log_l synthetic leaves as a virtual input and checks the
+    /// proof against the CPU prover on the dense input (zero leaves up to 2^log_l, every
+    /// denominator shifted by alpha, as the GPU does). `windowed` selects the windowed
+    /// precompute with thresholds low enough that small inputs take it, including in the last
+    /// outer round (the multifold into scratch); otherwise every round is a fused fold, and the
+    /// last outer round's first fold is the split round.
+    fn virtual_vs_cpu(log_l: usize, real_len: usize, windowed: bool) {
+        use crate::runtime::copy::{MemCopyD2H, MemCopyH2D};
+        use mle_core::{
+            config::koala_bear_poseidon2::{
+                default_duplex_sponge, KoalaBearPoseidon2Config as KbSC,
+            },
+            prover::fractional_sumcheck_gkr::{fractional_sumcheck, Frac},
+        };
+        type KbEF = <KoalaBearKernels as super::FieldKernels>::ValExt;
+
+        let logical_len = 1usize << log_l;
+        assert!(logical_len / 2 <= real_len && real_len < logical_len);
+        assert!(super::use_virtual_padding::<KoalaBearKernels>(
+            real_len,
+            logical_len
+        ));
+        // SAFETY: mutates the process environment; run with --test-threads=1.
+        unsafe {
+            std::env::set_var(
+                "MLE_CUDA_GKR_PRECOMPUTE_M",
+                if windowed { "1" } else { "0" },
+            );
+            if windowed {
+                std::env::set_var("MLE_CUDA_GKR_PRECOMPUTE_M_MIN_N", "8");
+                std::env::set_var("MLE_CUDA_GKR_PRECOMPUTE_M_MIN_BLOCKS", "1");
+            } else {
+                std::env::remove_var("MLE_CUDA_GKR_PRECOMPUTE_M_MIN_N");
+                std::env::remove_var("MLE_CUDA_GKR_PRECOMPUTE_M_MIN_BLOCKS");
+            }
+        }
+        let alpha = KbEF::from_u32(7);
+        let all: Vec<Frac<KbEF>> = make_synthetic_leaves::<KoalaBearKernels>(log_l)
+            .unwrap()
+            .to_host()
+            .unwrap();
+        let real = &all[..real_len];
+
+        let gpu_leaves = real.to_device().unwrap();
+        let mut gpu_transcript = KoalaBearDuplexSpongeGpu::new();
+        let mut mem = MemTracker::start("test.virtual_padding");
+        let (gpu_proof, gpu_xi) = fractional_sumcheck_gpu::<KoalaBearKernels, KbSC, _>(
+            &mut gpu_transcript,
+            gpu_leaves,
+            GkrLens {
+                real_len,
+                logical_len,
+            },
+            alpha,
+            false,
+            &mut mem,
+        )
+        .unwrap();
+        current_stream_sync().expect("sync");
+
+        let mut dense = real.to_vec();
+        dense.resize(
+            logical_len,
+            Frac {
+                p: KbEF::ZERO,
+                q: KbEF::ZERO,
+            },
+        );
+        for leaf in &mut dense {
+            leaf.q += alpha;
+        }
+        let mut cpu_transcript = default_duplex_sponge();
+        let (cpu_proof, cpu_xi) =
+            fractional_sumcheck::<KbSC, _>(&mut cpu_transcript, &dense, false)
+                .unwrap_or_else(|e| panic!("CPU GKR failed: {e:?}"));
+
+        let case = format!("log_l={log_l} real_len={real_len} windowed={windowed}");
+        assert_eq!(
+            gpu_proof.fractional_sum, cpu_proof.fractional_sum,
+            "{case}: root"
+        );
+        for (round, (g, c)) in gpu_proof
+            .sumcheck_polys
+            .iter()
+            .zip(&cpu_proof.sumcheck_polys)
+            .enumerate()
+        {
+            assert_eq!(
+                g,
+                c,
+                "{case}: round polynomials of outer round {}",
+                round + 1
+            );
+        }
+        assert_eq!(
+            gpu_proof.claims_per_layer, cpu_proof.claims_per_layer,
+            "{case}: claims"
+        );
+        assert_eq!(gpu_xi, cpu_xi, "{case}: final point");
+    }
+
+    fn virtual_cases(log_l: usize) -> Vec<usize> {
+        let l = 1usize << log_l;
+        // l / 2: a power-of-two real count, padded to twice itself (the root's right child is all
+        // padding)
+        vec![
+            l / 2,
+            l / 2 + 1,
+            l / 2 + 7,
+            l / 2 + l / 20,
+            l - l / 8,
+            l - 1,
+        ]
+    }
+
+    /// The virtual input against the CPU prover, fused folds only. Run with --test-threads=1.
+    #[test]
+    fn test_virtual_padding_matches_cpu_fused() {
+        for log_l in [12, 13, 16, 20] {
+            for real_len in virtual_cases(log_l) {
+                virtual_vs_cpu(log_l, real_len, false);
+            }
+        }
+    }
+
+    /// The virtual input against the CPU prover with the windowed precompute. Run with
+    /// --test-threads=1.
+    #[test]
+    fn test_virtual_padding_matches_cpu_windowed() {
+        for log_l in [12, 13, 16, 20] {
+            for real_len in virtual_cases(log_l) {
+                virtual_vs_cpu(log_l, real_len, true);
+            }
+        }
+        unsafe {
+            std::env::remove_var("MLE_CUDA_GKR_PRECOMPUTE_M_MIN_N");
+            std::env::remove_var("MLE_CUDA_GKR_PRECOMPUTE_M_MIN_BLOCKS");
+        }
     }
 }

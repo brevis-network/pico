@@ -42,7 +42,7 @@ const PROVE_STAGES: &[&str] = &[
     "prove.verify",
 ];
 
-/// The host prove stages a `cuda-mle` build never runs, written as skipped for every chunk of an
+/// The host prove stages a `cuda` build never runs, written as skipped for every chunk of an
 /// arm that proves: the device generates the traces, so the extra-record pass and the per-chip
 /// host trace generation have no producer on it.
 #[cfg(feature = "cuda")]
@@ -418,7 +418,7 @@ pub fn finish() {
     for &chunk in &chunks {
         let at = At::chunk(chunk);
         for &stage in RESERVED_STAGES {
-            // A `cuda-mle` build generates its traces on the device, which the `gpu.*` names are
+            // A `cuda` build generates its traces on the device, which the `gpu.*` names are
             // for: not absent by design, so not written until a hook fills them.
             if cfg!(feature = "cuda") && stage.starts_with("gpu.") {
                 continue;
