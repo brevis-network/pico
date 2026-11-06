@@ -75,8 +75,8 @@ pub const PROGRAMS: &[BenchProgram] = &[
     },
     BenchProgram {
         name: "simple-fib",
-        elf: "./examples/fibonacci/app/elf/riscv32im-pico-zkvm-elf",
-        input: None,
+        elf: "./vm/src/compiler/test_elf/fib-elf",
+        input: Some("simple-fib"),
     },
     BenchProgram {
         name: "rv64-fibonacci",
@@ -95,6 +95,8 @@ pub const PROGRAMS: &[BenchProgram] = &[
 pub fn load_input(input: &str) -> Result<Vec<u8>, Error> {
     if input == "fibonacci-300kn" {
         Ok(bincode::serialize(&300_000u32)?)
+    } else if input == "simple-fib" {
+        Ok(bincode::serialize(&10u32)?)
     } else if input == "pure-fibonacci" {
         Ok(bincode::serialize(&20u32)?)
     } else if input == "rv64-fibonacci" {

@@ -103,6 +103,27 @@ fails if the two differ.
 per-program input. 8 MiB is about 150 times the deepest stack reth reaches (52 KiB, on blocks
 17106222, 18884864, 24004465, 24005809 and 24600825); its heap peaks at 56 MiB on 24600825.
 
+## ELF loading
+
+The loader (`vm/src/compiler/riscv/disassembler/elf.rs`) takes the image from the `PT_LOAD`
+segments alone, never the section headers, and rejects an ELF before anything runs or is proved
+unless (zkevm-standards: ELF loading and validation):
+
+- it is ELF64, little-endian, `EM_RISCV`, `ET_EXEC`;
+- every segment is 4-aligned, at or above `0x0001_0000`, inside guest memory, and segments do not
+  overlap and are in ascending address order;
+- no segment is both writable and executable (W^X);
+- every executable segment is `PF_X | PF_R` (below);
+- the executable segments form one gapless run, ascending: together they are the instruction
+  table, which indexes an instruction by its distance from the first one;
+- `e_entry` is 4-aligned and inside that run.
+
+**Permission model: execute-and-read.** Pico accepts executable segments flagged `PF_X | PF_R`
+and rejects execute-only (`PF_X` alone) ones. Code bytes are in the memory image, so a load from
+an executable segment returns the byte that executes there, and read-only data may share the
+segment with code. `pico.ld` gives code its own `R X` segment and read-only data a separate `R`
+one anyway.
+
 ## `_start`
 
 1. Sets `gp` (`__global_pointer$`) and `sp` (`_stack_top`).

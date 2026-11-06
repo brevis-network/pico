@@ -2022,24 +2022,12 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use std::{collections::BTreeMap, time::Instant};
 
-    #[allow(dead_code)]
-    const FIBONACCI_ELF: &[u8] =
-        include_bytes!("../../../compiler/test_elf/riscv32im-pico-fibonacci-elf");
-
-    #[allow(dead_code)]
-    const KECCAK_ELF: &[u8] =
-        include_bytes!("../../../compiler/test_elf/riscv32im-pico-keccak-elf");
+    /// The RV64 fibonacci guest; it reads `n: u32`.
+    const FIBONACCI_ELF: &[u8] = include_bytes!("../../../compiler/test_elf/fib-elf");
 
     pub fn simple_fibo_program() -> Arc<Program> {
         let compiler =
             Compiler::new(SourceType::RISCV, FIBONACCI_ELF).expect("failed to parse FIBONACCI_ELF");
-
-        compiler.compile()
-    }
-
-    pub fn simple_keccak_program() -> Arc<Program> {
-        let compiler =
-            Compiler::new(SourceType::RISCV, KECCAK_ELF).expect("failed to parse KECCAK_ELF");
 
         compiler.compile()
     }
@@ -2070,8 +2058,6 @@ mod tests {
         program.memory_image = Arc::new(BTreeMap::new());
         Arc::new(program)
     }
-
-    const MAX_FIBONACCI_NUM_IN_ONE_CHUNK: u32 = 836789u32;
 
     #[test]
     #[should_panic(expected = "the sink's record is for another program")]
@@ -2934,12 +2920,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "RV32 ELF — not supported under RV64-only emulator"]
     fn test_simple_fib() {
-        // just run a simple elf file in the compiler folder(test_elf)
+        // The fibonacci guest end to end; it reads `n`.
         let program = simple_fibo_program();
         let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
-        stdin.write(&MAX_FIBONACCI_NUM_IN_ONE_CHUNK);
+        stdin.write(&10u32);
         let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
             program,
             Arc::new(RecordFinalPvsState::default()),
@@ -2947,24 +2932,6 @@ mod tests {
         );
         let stdin = stdin.finalize();
         emulator.run(Some(stdin)).unwrap();
-        // println!("{:x?}", emulator.state.public_values_stream)
-    }
-
-    #[test]
-    #[ignore = "RV32 ELF — not supported under RV64-only emulator"]
-    fn test_simple_keccak() {
-        let program = simple_keccak_program();
-        let n = "a"; // do keccak(b"abcdefg")
-        let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
-        stdin.write(&n);
-        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
-            program,
-            Arc::new(RecordFinalPvsState::default()),
-            EmulatorOpts::default(),
-        );
-        let stdin = stdin.finalize();
-        emulator.run(Some(stdin)).unwrap();
-        // println!("{:x?}", emulator.state.public_values_stream)
     }
 
     #[test]

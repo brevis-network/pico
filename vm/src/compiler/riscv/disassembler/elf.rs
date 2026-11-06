@@ -1,7 +1,7 @@
 use crate::compiler::riscv::{disassembler::transpile, program::Program};
 use alloc::sync::Arc;
 use elf::{
-    abi::{EM_RISCV, ET_EXEC, PF_X, PT_LOAD},
+    abi::{EM_RISCV, ET_EXEC, PF_R, PF_W, PF_X, PT_LOAD},
     endian::LittleEndian,
     file::Class,
     ElfBytes,
@@ -35,11 +35,18 @@ const MAX_INSTRUCTIONS: usize = 1 << 22;
 
 /// RISC-V ELF (Executable and Linkable Format) File.
 ///
-/// This file represents a binary in the ELF format for RISC-V (ELF32 or ELF64) with
-/// the following extensions:
+/// A statically linked RV64IM executable: ELF64, little-endian, `EM_RISCV`, `ET_EXEC`. The image
+/// comes from the `PT_LOAD` segments alone, and [`Elf::new`] rejects, before anything runs, an
+/// ELF that breaks any rule of zkevm-standards' ELF loading and validation:
 ///
-/// - Base Integer Instruction Set (I)
-/// - Integer Multiplication and Division (M)
+/// - segments aligned, at or above `MIN_SEGMENT_ADDR`, inside guest memory, not overlapping, in
+///   ascending order;
+/// - W^X: no segment both writable and executable;
+/// - **execute-and-read**: Pico's permission model. Every executable segment is `PF_X | PF_R`,
+///   and a load from it returns the byte that executes there; an execute-only (`PF_X` alone)
+///   segment is rejected;
+/// - the executable segments form one gapless run, which is the instruction table;
+/// - `e_entry` is 4-aligned and inside that run.
 #[derive(Debug, Clone)]
 pub struct Elf {
     /// The instructions of the program encoded as 32-bits.
@@ -88,10 +95,13 @@ impl Elf {
         // Parse the ELF file assuming that it is little-endian..
         let elf = ElfBytes::<LittleEndian>::minimal_parse(source_code)?;
 
-        // Some sanity checks to make sure that the ELF file is valid.
-        // Support both ELF32 and ELF64 (truncate addresses for ELF64)
-        if elf.ehdr.class != Class::ELF32 && elf.ehdr.class != Class::ELF64 {
-            eyre::bail!("must be a 32-bit or 64-bit elf");
+        // The header. Magic and little-endian encoding are the `elf` crate's checks: it refuses a
+        // file that is neither, and `LittleEndian` makes it refuse a big-endian one.
+        if elf.ehdr.class != Class::ELF64 {
+            eyre::bail!(
+                "must be a 64-bit ELF (ELFCLASS64): the machine is RV64, and a 32-bit ELF would run \
+                 with RV64 semantics"
+            );
         } else if elf.ehdr.e_machine != EM_RISCV {
             eyre::bail!("must be a riscv machine");
         } else if elf.ehdr.e_type != ET_EXEC {
@@ -128,6 +138,17 @@ impl Elf {
 
             if !vaddr.is_multiple_of(WORD_SIZE_U64) {
                 eyre::bail!("vaddr {vaddr:08x} is unaligned");
+            }
+
+            let flags = segment.p_flags;
+            if flags & PF_W != 0 && flags & PF_X != 0 {
+                eyre::bail!("segment at 0x{vaddr:08x} is both writable and executable (W^X)");
+            }
+            if flags & PF_X != 0 && flags & PF_R == 0 {
+                eyre::bail!(
+                    "executable segment at 0x{vaddr:08x} is not readable: Pico takes executable \
+                     segments as execute-and-read (PF_X | PF_R), not execute-only"
+                );
             }
 
             if vaddr < MIN_SEGMENT_ADDR {
@@ -246,6 +267,13 @@ impl Elf {
         if instructions.is_empty() {
             eyre::bail!("no instructions found");
         }
+        let stream_end = pc_base + instructions.len() as u64 * WORD_SIZE_U64;
+        if !(pc_base..stream_end).contains(&entry) {
+            eyre::bail!(
+                "entrypoint 0x{entry:08x} is not inside the executable segments \
+                 [0x{pc_base:08x}, 0x{stream_end:08x})"
+            );
+        }
         if instructions.len() > MAX_INSTRUCTIONS {
             eyre::bail!(
                 "program has {} instructions, more than the {MAX_INSTRUCTIONS} the preprocessed table can hold",
@@ -262,7 +290,7 @@ impl Elf {
     }
 
     pub fn compile(&self) -> Arc<Program> {
-        // Transpile the RV32IM instructions.
+        // Transpile the RV64IM instructions.
         // `pc_base` is passed through so the transpiler can fold each slot's own address into the
         // instruction it emits (AUIPC becomes `ADD rd, imm, pc`).
         let instructions = transpile(&self.instructions, self.pc_base);
@@ -283,7 +311,6 @@ impl Elf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use elf::abi::{PF_R, PF_W};
 
     const EHDR_SIZE: usize = 64;
     const PHENT_SIZE: usize = 56;
@@ -584,5 +611,192 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("more than the"), "unexpected error: {err}");
+    }
+
+    // ── zkevm-standards ELF loading and validation: one negative test per rejection rule ──
+
+    fn rejection(elf: &[u8]) -> String {
+        match Elf::new(elf) {
+            Ok(_) => panic!("the ELF was accepted"),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    /// The ordinary ELF with one header byte replaced.
+    fn patched(offset: usize, value: &[u8]) -> Vec<u8> {
+        let mut elf = build_elf(0x10000, &[text_at(0x10000)]);
+        elf[offset..offset + value.len()].copy_from_slice(value);
+        elf
+    }
+
+    #[test]
+    fn a_file_without_the_elf_magic_is_rejected() {
+        let err = rejection(&patched(0, b"\x7fBAD"));
+        assert!(
+            err.to_lowercase().contains("magic"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// A real ELF32 layout (52-byte header, 32-byte program header): an RV32 ELF must not run
+    /// with RV64 semantics.
+    #[test]
+    fn an_elf32_file_is_rejected() {
+        let mut elf = vec![0x7F, b'E', b'L', b'F', 1, 1, 1, 0];
+        elf.extend_from_slice(&[0u8; 8]);
+        elf.extend_from_slice(&ET_EXEC.to_le_bytes());
+        elf.extend_from_slice(&EM_RISCV.to_le_bytes());
+        elf.extend_from_slice(&1u32.to_le_bytes()); // e_version
+        elf.extend_from_slice(&0x10000u32.to_le_bytes()); // e_entry
+        elf.extend_from_slice(&52u32.to_le_bytes()); // e_phoff
+        elf.extend_from_slice(&0u32.to_le_bytes()); // e_shoff
+        elf.extend_from_slice(&0u32.to_le_bytes()); // e_flags
+        elf.extend_from_slice(&52u16.to_le_bytes()); // e_ehsize
+        elf.extend_from_slice(&32u16.to_le_bytes()); // e_phentsize
+        elf.extend_from_slice(&1u16.to_le_bytes()); // e_phnum
+        elf.extend_from_slice(&[0u8; 6]); // e_shentsize, e_shnum, e_shstrndx
+        for field in [PT_LOAD, 84, 0x10000, 0x10000, 8, 8, PF_R | PF_X, 4] {
+            elf.extend_from_slice(&field.to_le_bytes());
+        }
+        elf.extend_from_slice(&[0x13, 0, 0, 0, 0x13, 0, 0, 0]);
+        let err = rejection(&elf);
+        assert!(
+            err.contains("must be a 64-bit ELF"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Endianness is fixed by the target, never taken from the file.
+    #[test]
+    fn a_big_endian_file_is_rejected() {
+        let err = rejection(&patched(5, &[2])); // EI_DATA = ELFDATA2MSB
+        assert!(
+            err.to_lowercase().contains("endian"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn a_non_risc_v_machine_is_rejected() {
+        let err = rejection(&patched(18, &62u16.to_le_bytes())); // EM_X86_64
+        assert!(
+            err.contains("must be a riscv machine"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn a_non_executable_type_is_rejected() {
+        for e_type in [1u16, 3, 4] {
+            // ET_REL, ET_DYN, ET_CORE
+            let err = rejection(&patched(16, &e_type.to_le_bytes()));
+            assert!(err.contains("must be executable"), "e_type {e_type}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_misaligned_segment_is_rejected() {
+        let segs = vec![text_at(0x10000), Seg::data(0x20002, vec![0xFF; 4], 4)];
+        let err = rejection(&build_elf(0x10000, &segs));
+        assert!(err.contains("is unaligned"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn a_segment_past_guest_memory_is_rejected() {
+        let segs = vec![
+            text_at(0x10000),
+            Seg::data(MAX_GUEST_WORD_ADDR, vec![0; 16], 16),
+        ];
+        let err = rejection(&build_elf(0x10000, &segs));
+        assert!(
+            err.contains("exceeds emulator memory limit"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn a_writable_executable_segment_is_rejected() {
+        let mut text = text_at(0x10000);
+        text.flags = PF_R | PF_W | PF_X;
+        let err = rejection(&build_elf(0x10000, &[text]));
+        assert!(err.contains("(W^X)"), "unexpected error: {err}");
+    }
+
+    /// Pico is execute-and-read: an execute-only segment is the other model, and refused.
+    #[test]
+    fn an_execute_only_segment_is_rejected() {
+        let mut text = text_at(0x10000);
+        text.flags = PF_X;
+        let err = rejection(&build_elf(0x10000, &[text]));
+        assert!(err.contains("execute-and-read"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn a_misaligned_entry_point_is_rejected() {
+        let err = rejection(&build_elf(0x10002, &[text_at(0x10000)]));
+        assert!(
+            err.contains("invalid entrypoint"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Inside a loaded segment, but a data one; and in no segment at all.
+    #[test]
+    fn an_entry_point_outside_the_executable_segments_is_rejected() {
+        let segs = vec![text_at(0x10000), Seg::data(0x20000, vec![0x13; 8], 8)];
+        for entry in [0x20000, 0x10008, 0x30000] {
+            let err = rejection(&build_elf(entry, &segs));
+            assert!(
+                err.contains("is not inside the executable segments"),
+                "entry 0x{entry:x}: unexpected error: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_elf_without_an_executable_segment_is_rejected() {
+        let segs = vec![Seg::data(0x10000, vec![0x13; 8], 8)];
+        let err = rejection(&build_elf(0x10000, &segs));
+        assert!(
+            err.contains("no executable segment found"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Completeness control: the entry at the last instruction of a two-segment run is accepted.
+    #[test]
+    fn an_entry_point_on_the_last_instruction_is_accepted() {
+        let segs = vec![text_at(0x10000), text_at(0x10008)];
+        let parsed = Elf::new(&build_elf(0x1000c, &segs)).expect("the entry is inside the run");
+        assert_eq!(parsed.pc_start, 0x1000c);
+    }
+
+    /// Every guest ELF the repository ships passes validation: the rules reject nothing a real
+    /// build produces. Each is an ELF64 from `cargo pico build`, most of them linked with `pico.ld`.
+    #[test]
+    fn every_shipped_guest_elf_passes_validation() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut checked = 0;
+        for dir in [
+            "vm/src/compiler/test_elf",
+            "perf/bench_data/rv64",
+            "examples/aggregator/app/elf",
+            "examples/fibonacci/app/elf",
+            "examples/tendermint/app/elf",
+        ] {
+            for entry in std::fs::read_dir(root.join(dir)).unwrap() {
+                let path = entry.unwrap().path();
+                let bytes = std::fs::read(&path).unwrap();
+                if !bytes.starts_with(b"\x7fELF") {
+                    continue; // a block input, not an ELF
+                }
+                Elf::new(&bytes).unwrap_or_else(|e| panic!("{} is rejected: {e}", path.display()));
+                checked += 1;
+            }
+        }
+        assert!(
+            checked >= 20,
+            "only {checked} ELFs found; did a fixture directory move?"
+        );
     }
 }
