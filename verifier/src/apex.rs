@@ -137,6 +137,11 @@ impl MleApexVerifier {
         // The whitelist indexes the STORED pre_hash and the STARK verify only observes it; without
         // this recompute a weakened body under an honest identity would pass. Merged mode excludes
         // every commitment from the preimage, so no app-prep ids.
+        // The whitelist holds root and compress keys alike; the preset each was made for is part of
+        // its authenticated body, so it is what tells the two kinds apart.
+        if vk.inner.params != *engine.params() {
+            return Err(VerifyError::WrongPreset { what: what.into() });
+        }
         if compute_vk_pre_hash(engine.config(), &vk.inner, &[]) != vk.pre_hash {
             return Err(VerifyError::VkBodyMismatch);
         }

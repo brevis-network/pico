@@ -1775,6 +1775,7 @@ impl Prover {
             return self.combine_proof(root, committed, None, None);
         }
         let (compress, shapes) = self.compress_root(*root)?;
+        self.bound_key_caches();
         self.compress_proof(Box::new(compress), committed, None, Some(shapes))
     }
 

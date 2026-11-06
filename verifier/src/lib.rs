@@ -227,6 +227,13 @@ mod tests {
         )
     }
 
+    fn other_identity2() -> VkIdentity {
+        (
+            std::array::from_fn(|i| Kb::from_u32(9 + i as u32)),
+            std::array::from_fn(|i| Kb::from_u32(90 + i as u32)),
+        )
+    }
+
     /// Public values an honest complete root carries for `vm_vk`, `root` and [`COMMITTED`].
     fn honest_pvs(root: [Kb; 8]) -> Vec<Kb> {
         let at = RECURSION_PV_OFFSETS;
@@ -317,10 +324,37 @@ mod tests {
         let err = verify_with(&apex, &compress, COMMITTED).unwrap_err();
         assert!(matches!(err, VerifyError::Envelope(_)), "{err}");
 
-        // Under the 128-bit compress preset, a proof made under other params does not verify.
+        // Under the 128-bit compress preset, a key made for other params is refused before the
+        // STARK verify.
         let strict =
             MleApexVerifier::with_members(params(), b_members(&f), b.vm_vk, b.vk_root).unwrap();
-        assert!(verify_compress_with(&strict, &compress, COMMITTED).is_err());
+        let err = verify_compress_with(&strict, &compress, COMMITTED).unwrap_err();
+        assert!(matches!(err, VerifyError::WrongPreset { .. }), "{err}");
+
+        // The root checks run on the compress path too: another guest's bundle, and a whitelist
+        // without this key.
+        let mut other_vm_vk = b.vm_vk;
+        other_vm_vk.pc_start[0] += Kb::ONE;
+        let other = MleApexVerifier::with_members(params(), b_members(&f), other_vm_vk, b.vk_root)
+            .unwrap()
+            .with_compress_params(params());
+        let err = verify_compress_with(&other, &compress, COMMITTED).unwrap_err();
+        assert!(
+            matches!(err, VerifyError::RiscvVkDigestMismatch { .. }),
+            "{err}"
+        );
+        let lone: Vec<VkIdentity> = vec![other_identity(), other_identity2()];
+        let tree = VkMerkleTree::try_build(&lone).unwrap();
+        let unlisted = MleApexVerifier::with_members(
+            params(),
+            vec![tree.membership(0, lone[0])],
+            b.vm_vk,
+            tree.root(),
+        )
+        .unwrap()
+        .with_compress_params(params());
+        let err = verify_compress_with(&unlisted, &compress, COMMITTED).unwrap_err();
+        assert!(matches!(err, VerifyError::NotWhitelisted), "{err}");
     }
 
     fn b_members(f: &Fixture) -> Vec<crate::whitelist::VkMembership> {
