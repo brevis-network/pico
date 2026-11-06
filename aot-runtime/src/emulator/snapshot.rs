@@ -1,7 +1,6 @@
-use super::AotEmulatorCore;
+use super::{types::is_present, AotEmulatorCore};
 use hashbrown::HashMap;
 use pico_vm::{
-    compiler::addr::fits_pc,
     emulator::{
         opts::EmulatorOpts,
         riscv::{
@@ -10,7 +9,7 @@ use pico_vm::{
                 Memory, RecvTimeoutError, GLOBAL_MEMORY_POOL, GLOBAL_MEMORY_RECYCLER, POOL_WAIT,
             },
             riscv_emulator::EmulationError,
-            state::{RiscvEmulationState, RuntimeRegisterRecord},
+            state::RiscvEmulationState,
         },
     },
     machine::report::EmulationReport,
@@ -52,15 +51,10 @@ impl AotEmulatorCore {
     }
 
     /// The interpreter's error for a run that ends here, where it raises it: inside an
-    /// unconstrained block, or at a pc the CPU trace cannot hold.
+    /// unconstrained block.
     pub(crate) fn run_end_error(&self) -> Option<EmulationError> {
-        if self.is_unconstrained_mode() {
-            Some(EmulationError::UnconstrainedEnd)
-        } else if !fits_pc(self.pc) {
-            Some(EmulationError::EndPcBeyondProofAddress(self.pc))
-        } else {
-            None
-        }
+        self.is_unconstrained_mode()
+            .then_some(EmulationError::UnconstrainedEnd)
     }
 
     pub(crate) fn next_state_batch(
@@ -187,29 +181,21 @@ impl AotEmulatorCore {
     /// registers touched during the batch. AOT must mirror that contract; untouched live registers
     /// remain in the snapshot, while touched ones are restored to batch-start state.
     fn restore_touched_snapshot_registers(&self, snapshot: &mut RiscvEmulationState) {
-        let regs = &self.batch_start_registers;
-        let reg_present = &self.batch_start_reg_present;
-        let reg_records = &self.batch_start_register_records;
-
-        for i in 0..32 {
-            if self.accessed_regs[i] && reg_present[i] {
-                let old_rec = reg_records[i];
-                snapshot.registers[i] = RuntimeRegisterRecord {
-                    chunk: old_rec.chunk,
-                    timestamp: old_rec.timestamp,
-                    value: regs[i],
-                };
-            }
+        for i in self.restored_registers() {
+            snapshot.registers[i] = self.batch_start_registers[i];
         }
     }
 
     /// The registers [`Self::restore_touched_snapshot_registers`] just restored: the register half of
     /// the segment's prestate.
     fn count_touched_registers(&mut self) {
-        let restored = (0..32)
-            .filter(|&i| self.accessed_regs[i] && self.batch_start_reg_present[i])
-            .count();
+        let restored = self.restored_registers().count();
         self.snapshot_counts.first_touch_registers += restored as u64;
+    }
+
+    /// The registers the batch touched that were present when it began.
+    fn restored_registers(&self) -> impl Iterator<Item = usize> + '_ {
+        (0..32).filter(|&i| self.touched_registers[i] && is_present(&self.batch_start_registers[i]))
     }
 
     /// Build snapshot state header.
@@ -254,7 +240,7 @@ impl AotEmulatorCore {
             current_chunk: self.current_chunk,
             clk: self.clk as u64,
             pc: self.pc,
-            registers: self.runtime_registers(),
+            registers: self.registers.0,
             uninitialized_memory: Memory::default(),
             // Stream fields are filled by `snapshot_stream_state` below; cloning them here
             // is redundant (the clones would be immediately overwritten). Start empty to
@@ -267,23 +253,6 @@ impl AotEmulatorCore {
         };
         self.snapshot_stream_state(&mut snapshot);
         snapshot
-    }
-
-    /// The register file as the interpreter keeps it: a register never accessed is the zero
-    /// record.
-    pub(crate) fn runtime_registers(&self) -> [RuntimeRegisterRecord; 32] {
-        let mut registers = [RuntimeRegisterRecord::default(); 32];
-        for (idx, present) in self.reg_present.iter().copied().enumerate() {
-            if present {
-                let record = self.register_records[idx];
-                registers[idx] = RuntimeRegisterRecord {
-                    chunk: record.chunk,
-                    timestamp: record.timestamp,
-                    value: self.registers[idx],
-                };
-            }
-        }
-        registers
     }
 
     /// Fill snapshot with memory delta (old values of accessed locations).

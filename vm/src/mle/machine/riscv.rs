@@ -1152,29 +1152,35 @@ pub fn augmented_record(
     let record = record.clone();
     if ledger::in_prove_slot() {
         ledger::prove_stage("prove.augment.clone", t_clone, || {
-            let history = record.history.as_ref();
-            json!({
-                "record_bytes": record_bytes(&record),
-                "trace_source": "history",
-                "branch_compares": "indices",
-                "history_bytes": history.map(ExecutionHistory::bytes),
-                "history_steps": history.map(|history| history.steps.len()),
-                "history_accesses": history.map(|history| history.reads.len() + history.writes.len()),
-                "history_reads": history.map(|history| history.reads.len()),
-                "history_writes": history.map(|history| history.writes.len()),
-                "history_operand_exceptions": history.map(|history| history.operand_exceptions.len()),
-                "history_table_bytes": history.map(|history| {
-                    history
-                        .table_bytes()
-                        .into_iter()
-                        .map(|(table, bytes)| (table.to_string(), json!(bytes)))
-                        .collect::<serde_json::Map<String, serde_json::Value>>()
-                }),
-                "streams": { "add_events": record.add_events.len() },
-            })
+            augment_clone_facts(&record)
         });
     }
     augment_record(chips, record)
+}
+
+/// The `prove.augment.clone` line's facts. `trace_source` is null on a record without a history,
+/// as a deferred record is; `perf/ledger/trace_digest.py` fails a CPU chunk whose line does not
+/// name the history.
+fn augment_clone_facts(record: &EmulationRecord) -> serde_json::Value {
+    let history = record.history.as_ref();
+    json!({
+        "record_bytes": record_bytes(record),
+        "trace_source": history.map(|_| "history"),
+        "history_bytes": history.map(ExecutionHistory::bytes),
+        "history_steps": history.map(|history| history.steps.len()),
+        "history_accesses": history.map(|history| history.reads.len() + history.writes.len()),
+        "history_reads": history.map(|history| history.reads.len()),
+        "history_writes": history.map(|history| history.writes.len()),
+        "history_operand_exceptions": history.map(|history| history.operand_exceptions.len()),
+        "history_table_bytes": history.map(|history| {
+            history
+                .table_bytes()
+                .into_iter()
+                .map(|(table, bytes)| (table.to_string(), json!(bytes)))
+                .collect::<serde_json::Map<String, serde_json::Value>>()
+        }),
+        "streams": { "add_events": record.add_events.len() },
+    })
 }
 
 /// [`augmented_record`] on a record the caller gives up, without the clone.
@@ -2704,6 +2710,27 @@ mod tests {
             );
             assert!(report.traces >= report.cpu_chunks, "bucket={bucket}");
         }
+    }
+
+    #[test]
+    fn augment_clone_facts_name_the_history_only_on_a_record_that_carries_one() {
+        let out = emulate_with_opts(fib_program(), &fib_stdin(10), fixed_opts(2048))
+            .expect("split fib emulation");
+        let chunk = out
+            .records
+            .iter()
+            .find(|record| record.is_cpu_chunk)
+            .expect("a CPU chunk");
+        assert!(chunk.history.is_some(), "a CPU chunk without a history");
+        let facts = augment_clone_facts(chunk);
+        assert_eq!(facts["trace_source"], "history");
+        assert!(facts["history_bytes"]
+            .as_u64()
+            .is_some_and(|bytes| bytes > 0));
+
+        let facts = augment_clone_facts(&EmulationRecord::default());
+        assert!(facts["trace_source"].is_null(), "{facts}");
+        assert!(facts["history_bytes"].is_null(), "{facts}");
     }
 
     /// With no CPU chip the CPU chunks reach no trace generation, and the report says so rather

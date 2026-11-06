@@ -49,16 +49,16 @@ export RS_STREAM_BLOCKS="${RS_STREAM_BLOCKS:-8}"
 export CHUNK_BATCH_SIZE="${CHUNK_BATCH_SIZE:-1}"
 # MLE_EVENT_POOL_SIZE, the variable's former name, still sets the count; the default here must not
 # shadow it, as the two set to different counts refuse to start.
-export MLE_HISTORY_SLOTS="${MLE_HISTORY_SLOTS:-${MLE_EVENT_POOL_SIZE:-64}}"
+export MLE_HISTORY_SLOTS="${MLE_HISTORY_SLOTS:-${MLE_EVENT_POOL_SIZE:-16}}"
 
-export MEMORY_POOL_SIZE="${MEMORY_POOL_SIZE:-140}"
+export MEMORY_POOL_SIZE="${MEMORY_POOL_SIZE:-16}"
 export MEMORY_RECYCLER_THREADS="${MEMORY_RECYCLER_THREADS:-4}"
 export MLE_PREWARM="${MLE_PREWARM:-1}"
 export MLE_HEAP_PREWARM_GB="${MLE_HEAP_PREWARM_GB:-6}"
 export TCMALLOC_RELEASE_RATE="${TCMALLOC_RELEASE_RATE:-0}"
 export NUM_THREADS="${NUM_THREADS:-8}"
 # MLE_REPLAY_WORKERS is left unset, as in single_node_mle.sh: the replay workers run the
-# interpreter. MLE_REPLAY_WORKERS=aot puts them on the AOT-compiled guest.
+# interpreter. MLE_REPLAY_WORKERS=aot puts them on the AOT-compiled guest's recording bodies.
 export RAYON_NUM_THREADS="${RAYON_NUM_THREADS:-32}"
 export PICO_GPU_MEM="${PICO_GPU_MEM:-5090}"
 export MEM_POOL_RESERVE_SIZE="${MEM_POOL_RESERVE_SIZE:-28000000000}"

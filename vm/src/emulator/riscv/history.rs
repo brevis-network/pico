@@ -505,7 +505,7 @@ pub struct ChipSteps {
 
 impl ChipSteps {
     /// Every list, in field order.
-    fn all(&self) -> [&[u32]; 11] {
+    pub(crate) fn all(&self) -> [&[u32]; 11] {
         let Self {
             add,
             sub,

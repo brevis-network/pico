@@ -59,7 +59,15 @@ fn exported_digest(out: &Path) -> [u8; 32] {
         matches!(aot.vis, syn::Visibility::Public(_)),
         "`AOT` is pub"
     );
-    let syn::Expr::Call(call) = &*aot.expr else {
+    // The generator always emits `AotProgram::stamped(..).with_recorder(..)`.
+    let syn::Expr::MethodCall(recorder) = &*aot.expr else {
+        panic!("`AOT` does not add a recording entry point");
+    };
+    assert_eq!(
+        recorder.method, "with_recorder",
+        "`AOT` adds its recording entry point"
+    );
+    let syn::Expr::Call(call) = &*recorder.receiver else {
         panic!("`AOT` is not built by a call");
     };
     let Some(syn::Expr::Array(digest)) = call.args.first() else {

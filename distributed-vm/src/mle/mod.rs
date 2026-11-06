@@ -43,8 +43,9 @@ use pico_vm::{
         opts::{EmulatorOpts, ReplayWorkers},
         record::RecordBehavior,
         riscv::{
+            memory::{memories_made, memory_pool_size},
             record::EmulationRecord,
-            record_slots::{init_record_slots, record_slots_from_env},
+            record_slots::{init_record_slots, record_slots_from_env, take_occupancy},
         },
         stdin::EmulatorStdin,
     },
@@ -58,7 +59,8 @@ use pico_vm::{
         },
     },
     proverchain::riscv::{
-        emulate_snapshot_pipeline, emulate_snapshot_pipeline_with, DeferredSplit,
+        emulate_snapshot_pipeline, emulate_snapshot_pipeline_with, init_memory_pool_for,
+        pipeline_workers_from_env, DeferredSplit,
     },
 };
 use tracing::{info, warn};
@@ -556,26 +558,21 @@ mod recursion_lane_tests {
 }
 
 /// The engine the snapshot pipeline's replay workers run, once per process.
-/// `MLE_REPLAY_WORKERS=aot` replays each chunk on the AOT-compiled guest, `=interpreter` on the
-/// interpreter. Unset or empty, it is `interpreter`: the AOT replay workers measured slower than
-/// the interpreter's on the production launch, so they are opt-in. Either engine writes the same
-/// records through the same history sink into the same history slots; only the replay's speed
-/// differs.
+/// `MLE_REPLAY_WORKERS=aot` replays each chunk on the AOT-compiled guest's recording bodies;
+/// `=interpreter`, the default when unset or empty, on the interpreter. AOT stays opt-in until it
+/// is shown to shorten a whole block on the production launch. Both write the same records into the
+/// same history slots.
 ///
 /// Both binaries call this right after registering the AOT program, so a value the process cannot
-/// honour stops it before any setup: `aot` with no program registered, and any word outside the
-/// two. Neither falls back, since a fallback would run under the name of the arm that was asked
-/// for. The one `bench` line it writes names the arm in a log filtered to that target, and later
-/// blocks of the same process read the same engine back without a second one. What each block's
-/// replay actually ran is the pipeline's own `bench` line at the end of its emulation
-/// (`emulate_snapshot_pipeline_with`): the engine, the chunks and, for AOT workers, the compiled
-/// blocks they entered.
+/// honour stops it before any setup. Nothing falls back, since a fallback would run under the name
+/// of the arm that was asked for. What each block's replay actually ran is the pipeline's own
+/// `bench` line (`emulate_snapshot_pipeline_with`).
 pub fn replay_workers() -> ReplayWorkers {
     static RESOLVED: std::sync::OnceLock<ReplayWorkers> = std::sync::OnceLock::new();
     *RESOLVED.get_or_init(|| {
         let workers = replay_workers_from(
             std::env::var("MLE_REPLAY_WORKERS").ok().as_deref(),
-            aot_program_registered(),
+            aot_registered(),
         )
         .unwrap_or_else(|e| panic!("{e}"));
         info!(
@@ -590,31 +587,62 @@ pub fn replay_workers() -> ReplayWorkers {
     })
 }
 
-/// Whether this process holds an AOT program for both the snapshot thread and the replay workers;
-/// `pico_aot_runtime::register` installs the two factories together or neither.
+/// What this process registered for the replay workers.
+#[derive(Clone, Copy)]
+struct AotRegistered {
+    /// The snapshot thread's factory, installed for any program `pico_aot_runtime::register`
+    /// accepts.
+    program: bool,
+    /// The replay workers' factory, installed only for a program with a recording entry point.
+    replay: bool,
+}
+
 #[cfg(feature = "aot-emulator")]
-fn aot_program_registered() -> bool {
-    pico_vm::emulator::aot::is_aot_factory_registered()
-        && pico_vm::emulator::aot::is_aot_replay_factory_registered()
+fn aot_registered() -> AotRegistered {
+    use pico_vm::emulator::aot;
+    let program = aot::is_aot_factory_registered();
+    AotRegistered {
+        program,
+        replay: program && aot::is_aot_replay_factory_registered(),
+    }
 }
 
 /// Without `aot-emulator` no AOT program can register.
 #[cfg(not(feature = "aot-emulator"))]
-fn aot_program_registered() -> bool {
-    false
+fn aot_registered() -> AotRegistered {
+    AotRegistered {
+        program: false,
+        replay: false,
+    }
 }
 
 /// Split from the read for the same reason as [`recursion_lane_from`]: the refusals are this
 /// switch's whole interface, and a test that set the variable would race the others in-process.
-fn replay_workers_from(raw: Option<&str>, aot_registered: bool) -> Result<ReplayWorkers, String> {
+fn replay_workers_from(
+    raw: Option<&str>,
+    registered: AotRegistered,
+) -> Result<ReplayWorkers, String> {
     let word = raw.map(|raw| raw.trim().to_ascii_lowercase());
-    match word.as_deref() {
-        None | Some("") | Some("interpreter") => Ok(ReplayWorkers::Interpreter),
-        Some("aot") if aot_registered => Ok(ReplayWorkers::Aot),
-        Some("aot") => Err(
-            "MLE_REPLAY_WORKERS=aot, and this process registered no AOT program: it was built \
+    let no_program = |word: &str| {
+        format!(
+            "MLE_REPLAY_WORKERS={word}, and this process registered no AOT program: it was built \
              without aot-emulator, or the registration was refused (logged above); set \
              MLE_REPLAY_WORKERS=interpreter"
+        )
+    };
+    match word.as_deref() {
+        None | Some("") | Some("interpreter") => Ok(ReplayWorkers::Interpreter),
+        Some("aot") if registered.replay => Ok(ReplayWorkers::Aot),
+        Some("aot") if registered.program => Err(
+            "MLE_REPLAY_WORKERS=aot, and the registered AOT program has no recording entry point, \
+             which the AOT replay workers run: regenerate it from the guest's ELF, or set \
+             MLE_REPLAY_WORKERS=interpreter"
+                .into(),
+        ),
+        Some("aot") => Err(no_program("aot")),
+        Some("aot-recorder") => Err(
+            "MLE_REPLAY_WORKERS=aot-recorder was removed: the AOT replay workers run the recording \
+             bodies as aot; set MLE_REPLAY_WORKERS=aot"
                 .into(),
         ),
         Some(_) => Err(format!(
@@ -626,13 +654,27 @@ fn replay_workers_from(raw: Option<&str>, aot_registered: bool) -> Result<Replay
 
 #[cfg(test)]
 mod replay_workers_tests {
-    use super::replay_workers_from;
+    use super::{replay_workers_from, AotRegistered};
     use pico_vm::emulator::opts::ReplayWorkers;
+
+    const NONE: AotRegistered = AotRegistered {
+        program: false,
+        replay: false,
+    };
+    /// A program without a recording entry point.
+    const PROGRAM: AotRegistered = AotRegistered {
+        program: true,
+        replay: false,
+    };
+    const REPLAY: AotRegistered = AotRegistered {
+        program: true,
+        replay: true,
+    };
 
     #[test]
     fn unset_and_empty_are_the_interpreter() {
         for raw in [None, Some(""), Some("  ")] {
-            for registered in [true, false] {
+            for registered in [NONE, PROGRAM, REPLAY] {
                 assert_eq!(
                     replay_workers_from(raw, registered),
                     Ok(ReplayWorkers::Interpreter)
@@ -643,7 +685,7 @@ mod replay_workers_tests {
 
     #[test]
     fn each_engine_by_name() {
-        for registered in [true, false] {
+        for registered in [NONE, PROGRAM, REPLAY] {
             for raw in ["interpreter", " Interpreter "] {
                 assert_eq!(
                     replay_workers_from(Some(raw), registered),
@@ -652,20 +694,54 @@ mod replay_workers_tests {
             }
         }
         for raw in ["aot", " AOT "] {
-            assert_eq!(replay_workers_from(Some(raw), true), Ok(ReplayWorkers::Aot));
+            assert_eq!(
+                replay_workers_from(Some(raw), REPLAY),
+                Ok(ReplayWorkers::Aot)
+            );
         }
     }
 
     #[test]
     fn aot_without_a_registered_program_refuses() {
-        let err = replay_workers_from(Some("aot"), false).unwrap_err();
+        let err = replay_workers_from(Some("aot"), NONE).unwrap_err();
         assert!(err.contains("registered no AOT program"), "{err}");
+        assert!(err.contains("=aot,"), "{err}");
+    }
+
+    #[test]
+    fn aot_without_a_recording_entry_point_refuses() {
+        let err = replay_workers_from(Some("aot"), PROGRAM).unwrap_err();
+        assert!(err.contains("no recording entry point"), "{err}");
+        assert!(err.contains("MLE_REPLAY_WORKERS=interpreter"), "{err}");
+    }
+
+    #[test]
+    fn aot_recorder_is_refused_for_aot() {
+        for raw in ["aot-recorder", " AOT-Recorder "] {
+            for registered in [NONE, PROGRAM, REPLAY] {
+                let err = replay_workers_from(Some(raw), registered).unwrap_err();
+                assert!(err.contains("aot-recorder was removed"), "{raw:?}: {err}");
+                assert!(
+                    err.ends_with("set MLE_REPLAY_WORKERS=aot"),
+                    "{raw:?}: {err}"
+                );
+            }
+        }
     }
 
     #[test]
     fn any_other_word_refuses() {
-        for raw in ["bogus", "interp", "1", "0", "true", "on"] {
-            for registered in [true, false] {
+        for raw in [
+            "bogus",
+            "interp",
+            "1",
+            "0",
+            "true",
+            "on",
+            "recorder",
+            "aot_recorder",
+        ] {
+            for registered in [NONE, PROGRAM, REPLAY] {
                 let err = replay_workers_from(Some(raw), registered).unwrap_err();
                 assert!(err.contains(&format!("{raw:?}")), "{err}");
             }
@@ -2465,6 +2541,11 @@ fn run_pipeline(
     // MLE proves with its own `RiscvMachine`. `handle_record` forwards each record to the preparer
     // thread (crossbeam Sender is Send+Sync, which the pipeline's handler requires); the event
     // precompute in `prepare_chunk_shaped` stays off this thread.
+    // The embedded entry states its replay engine with its options; the CLI's is `replay`.
+    let emulator_opts = embedded
+        .map(|e| e.emulator_opts)
+        .unwrap_or_else(|| EmulatorOpts::bench_riscv_ops().with_replay_workers(replay));
+    let emulation_workers = embedded.map(|e| e.emulation_workers);
     // `MLE_PREWARM=1`: pay the process's first-touch page-fault cost HERE, before the `e2e=` window
     // opens, instead of inside the first chunk's emulate/prepare where it lands on the pipeline's
     // critical path. The prove lane IS the critical path at that moment but has nothing to work on
@@ -2491,7 +2572,12 @@ fn run_pipeline(
         static PREWARMED: std::sync::Once = std::sync::Once::new();
         PREWARMED.call_once(|| {
             let t = Instant::now();
-            pico_vm::emulator::riscv::memory::init_memory_pool();
+            // At the size the run's own check gives an unset MEMORY_POOL_SIZE: the pool keeps the
+            // size it is built at, and that check comes after this.
+            init_memory_pool_for(
+                emulation_workers.unwrap_or_else(pipeline_workers_from_env),
+                emulator_opts.snapshot_main,
+            );
             let gb: usize = std::env::var("MLE_HEAP_PREWARM_GB")
                 .ok()
                 .and_then(|s| s.parse().ok())
@@ -2548,11 +2634,6 @@ fn run_pipeline(
     let (record_tx, record_rx) = crossbeam::channel::unbounded::<(usize, EmulationRecord)>();
     // Set once the guest's emulation fails in an embedded run: the run drains instead of proving.
     let guest_failed = Arc::new(AtomicBool::new(false));
-    // The embedded entry states its replay engine with its options; the CLI's is `replay`.
-    let emulator_opts = embedded
-        .map(|e| e.emulator_opts)
-        .unwrap_or_else(|| EmulatorOpts::bench_riscv_ops().with_replay_workers(replay));
-    let emulation_workers = embedded.map(|e| e.emulation_workers);
     let emulate_handle = {
         let program = program.clone();
         let guest_failed = Arc::clone(&guest_failed);
@@ -3951,6 +4032,20 @@ fn run_pipeline(
         info!(target: "bench", "{line}");
     }
     vram_probe("exit", iteration.unwrap_or(0), prover_count);
+    if let Some(slots) = take_occupancy() {
+        info!(
+            target: "bench",
+            "[record-slots] this run: at most {} of {} history slots held at once, {} of {} takes \
+             waited, {:.3}s in all | memory pool: {} memories made so far, pool size {}",
+            slots.max_in_use,
+            slots.slots,
+            slots.blocked_takes,
+            slots.takes,
+            slots.blocked.as_secs_f64(),
+            memories_made(),
+            memory_pool_size(),
+        );
+    }
 
     BlockOutcome {
         cycles: emulated_cycles,

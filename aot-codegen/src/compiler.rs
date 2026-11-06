@@ -7,18 +7,27 @@
 //!
 //! The compiler emits one crate per chunk plus a dispatcher crate that links
 //! all chunks and provides the execution entry points.
+//!
+//! Each block also gets a recording body, `rec_block_0x{pc}`, and each chunk crate a `rec_lookup`;
+//! the dispatch crate's `run_aot_record` runs them on the AOT replay workers, while the snapshot
+//! thread runs `run_aot`. No ordinary block depends on a recording one. One walk over the program
+//! cuts the blocks and writes both bodies of each.
 
 use crate::{
     block_analysis::BlockAnalyzer,
     cfg_analysis::CfgAnalysis,
     config::AotConfig,
     constants,
-    elf_parser::to_vm_opcode,
-    instruction_translator::InstructionTranslator,
+    instruction_translator::{
+        add_direct_rows, writes_rows_directly, BlockBody, InstructionTranslator,
+    },
     metrics::{AotMetrics, ChunkMetrics, LookupStrategy, ProgramMetrics},
-    types::{Opcode, ProgramInfo},
+    types::{Instruction, Opcode, ProgramInfo},
 };
-use pico_vm::emulator::riscv::chunk_split::{add_insn_leaf_rows, LEAF_INSN_CHIPS};
+use pico_vm::emulator::riscv::{
+    chunk_split::{add_insn_leaf_rows, LEAF_INSN_CHIPS},
+    sink::BlockRows,
+};
 use quote::{format_ident, quote};
 use std::{collections::HashSet, fs};
 use syn::visit_mut::VisitMut;
@@ -43,6 +52,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 /// Information about a compiled basic block
+#[derive(Clone)]
 struct BlockInfo {
     pc: u64,
     name: proc_macro2::Ident,
@@ -50,9 +60,153 @@ struct BlockInfo {
     mem_rw_events: usize,
     non_register_global_lookup_base_max: usize,
     reg_write_mask: u32,
-    global_lookup_base_max: usize,
     code: proc_macro2::TokenStream,
+    rec_code: proc_macro2::TokenStream,
+    /// The instructions whose rows the recording body writes directly, and those rows.
+    direct_insns: u32,
+    direct_rows: BlockRows,
+}
+
+/// The block [`AotCompiler::generate_blocks`] is adding instructions to: both its bodies so far and
+/// its tallies. Only the plain body keeps the chunk-split tally (the instruction translator's
+/// `# Recording bodies`).
+struct OpenBlock {
+    pc: u64,
+    plain: proc_macro2::TokenStream,
+    recorded: proc_macro2::TokenStream,
+    insn_count: u32,
+    mem_rw_events: usize,
+    non_register_global_lookup_base_max: usize,
+    reg_write_mask: u32,
+    leaf_rows: [u32; LEAF_INSN_CHIPS],
+    direct_insns: u32,
+    direct_rows: BlockRows,
+}
+
+/// One instruction's code in each body, and what its translation tallies.
+struct Translated {
+    plain: proc_macro2::TokenStream,
+    recorded: proc_macro2::TokenStream,
     is_terminal: bool,
+    mem_rw_events: usize,
+    global_lookup_base_max: usize,
+}
+
+impl OpenBlock {
+    fn new(pc: u64) -> Self {
+        Self {
+            pc,
+            plain: proc_macro2::TokenStream::new(),
+            recorded: proc_macro2::TokenStream::new(),
+            insn_count: 0,
+            mem_rw_events: 0,
+            non_register_global_lookup_base_max: 0,
+            reg_write_mask: 0,
+            leaf_rows: [0; LEAF_INSN_CHIPS],
+            direct_insns: 0,
+            direct_rows: BlockRows::default(),
+        }
+    }
+
+    /// Adds `inst`, at `pc`, translated into both bodies. A terminal instruction's code ends the
+    /// block, so the block's memory events are added before it.
+    fn push(&mut self, pc: u64, inst: &Instruction, code: Translated) {
+        self.mem_rw_events += code.mem_rw_events;
+        self.non_register_global_lookup_base_max +=
+            AotCompiler::instruction_non_register_global_lookup_base_max(
+                inst.opcode,
+                code.global_lookup_base_max,
+            );
+        self.reg_write_mask |= AotCompiler::instruction_reg_write_mask(inst);
+        if code.is_terminal {
+            self.plain.extend(self.memory_rw_events());
+        }
+        self.plain.extend(code.plain);
+        self.recorded.extend(code.recorded);
+        self.insn_count += 1;
+        add_insn_leaf_rows(&mut self.leaf_rows, inst.opcode);
+        if writes_rows_directly(pc, inst) {
+            self.direct_insns += 1;
+            add_direct_rows(&mut self.direct_rows, inst);
+        }
+    }
+
+    fn memory_rw_events(&self) -> proc_macro2::TokenStream {
+        let events = self.mem_rw_events;
+        if events > 0 {
+            quote! { emu.add_memory_rw_events(#events); }
+        } else {
+            quote! {}
+        }
+    }
+
+    /// Ends a block whose last instruction is not terminal: each body sets the pc to `next_pc`
+    /// and takes its `exit`.
+    fn end(&mut self, next_pc: u64, exit: impl Fn(BlockBody) -> proc_macro2::TokenStream) {
+        let events = self.memory_rw_events();
+        let check = BlockBody::Plain.check_chunk_boundary();
+        let plain_exit = exit(BlockBody::Plain);
+        self.plain.extend(quote! {
+            #events
+            emu.pc = #next_pc;
+            #check
+            #plain_exit
+        });
+        let recorded_exit = exit(BlockBody::Recorder);
+        self.recorded.extend(quote! {
+            emu.pc = #next_pc;
+            #recorded_exit
+        });
+    }
+
+    /// Falls through to the block at `next_pc`.
+    fn fall_through(mut self, next_pc: u64) -> BlockInfo {
+        self.end(next_pc, |body| {
+            let (step, next_block) = (body.step(), body.block_name(next_pc));
+            quote! {
+                if emu.should_yield() {
+                    return Ok(#step::Dynamic(emu.pc));
+                }
+                Ok(#step::Direct(#next_block))
+            }
+        });
+        self.close()
+    }
+
+    /// Runs off the program's end, `end`: the step goes to the pc past it, so the run fails at the
+    /// fallback's fetch, as the interpreter's does, rather than halting.
+    fn run_off(mut self, end: u64) -> BlockInfo {
+        self.end(end, |body| {
+            let step = body.step();
+            quote! { Ok(#step::Dynamic(emu.pc)) }
+        });
+        self.close()
+    }
+
+    /// The finished block. The plain body's rows on the per-instruction chips lead it, so that a
+    /// superblock, which keeps each inner block's statements up to its pc assignment, keeps them
+    /// too.
+    fn close(self) -> BlockInfo {
+        let mut code = proc_macro2::TokenStream::new();
+        for (chip, &count) in self.leaf_rows.iter().enumerate() {
+            if count > 0 {
+                code.extend(quote! { emu.add_leaf_rows(#chip, #count); });
+            }
+        }
+        code.extend(self.plain);
+        BlockInfo {
+            pc: self.pc,
+            name: BlockBody::Plain.block_name(self.pc),
+            insn_count: self.insn_count,
+            mem_rw_events: self.mem_rw_events,
+            non_register_global_lookup_base_max: self.non_register_global_lookup_base_max,
+            reg_write_mask: self.reg_write_mask,
+            code,
+            rec_code: self.recorded,
+            direct_insns: self.direct_insns,
+            direct_rows: self.direct_rows,
+        }
+    }
 }
 
 /// Information about a chunk of blocks
@@ -134,7 +288,7 @@ impl AotCompiler {
     }
 
     #[inline(always)]
-    fn instruction_reg_write_mask(inst: &crate::types::Instruction) -> u32 {
+    fn instruction_reg_write_mask(inst: &Instruction) -> u32 {
         let reg = match inst.opcode {
             Opcode::ADD
             | Opcode::SUB
@@ -318,183 +472,52 @@ impl AotCompiler {
         total_blocks.div_ceil(target)
     }
 
-    /// Generate all basic blocks from the program
+    /// Generate all basic blocks from the program, each with both its bodies, in one walk.
     fn generate_blocks(&self, leaders: &HashSet<u64>) -> Result<Vec<BlockInfo>, String> {
         let translator = InstructionTranslator::for_program(&self.program);
-        let mut blocks = Vec::new();
-
-        let mut current_block_name = format_ident!("block_0x{:08x}", self.program.pc_start);
-        let mut current_block_pc = self.program.pc_start;
-        let mut current_block_tokens = proc_macro2::TokenStream::new();
-        let mut active = false;
-        let mut block_terminated = false;
-        let mut force_new_block = false;
-        let mut block_insn_count = 0u32;
-        let mut block_has_terminal = false;
-        let mut block_mem_rw_events: usize = 0;
-        let mut block_non_register_global_lookup_base_max: usize = 0;
-        let mut block_reg_write_mask: u32 = 0;
-        let mut block_global_lookup_base_max: usize = 0;
-        let mut block_leaf_rows = [0u32; LEAF_INSN_CHIPS];
         let max_block_instructions = self.config.max_block_instructions;
+        let mut blocks = Vec::new();
+        let mut open: Option<OpenBlock> = None;
+        let mut force_new_block = false;
 
         for (idx, inst) in self.program.instructions.iter().enumerate() {
             let pc = self.program.pc_base + ((idx as u64) * 4);
 
             if leaders.contains(&pc) || force_new_block {
-                if active {
-                    // Finalize previous block
-                    if !block_terminated {
-                        if block_mem_rw_events > 0 {
-                            current_block_tokens.extend(quote! {
-                                emu.add_memory_rw_events(#block_mem_rw_events);
-                            });
-                        }
-                        let next_block_name = format_ident!("block_0x{:08x}", pc);
-                        current_block_tokens.extend(quote! {
-                                emu.pc = #pc;
-                                emu.check_chunk_boundary_fast();
-                                if emu.should_yield() {
-                                    return Ok(crate::NextStep::Dynamic(emu.pc));
-                            }
-                            Ok(crate::NextStep::Direct(#next_block_name))
-                        });
-                    }
-
-                    blocks.push(BlockInfo {
-                        pc: current_block_pc,
-                        name: current_block_name.clone(),
-                        insn_count: block_insn_count,
-                        mem_rw_events: block_mem_rw_events,
-                        non_register_global_lookup_base_max:
-                            block_non_register_global_lookup_base_max,
-                        reg_write_mask: block_reg_write_mask,
-                        global_lookup_base_max: block_global_lookup_base_max,
-                        code: Self::with_leaf_rows(&block_leaf_rows, &current_block_tokens),
-                        is_terminal: block_has_terminal,
-                    });
+                if let Some(block) = open.take() {
+                    blocks.push(block.fall_through(pc));
                 }
-
-                // Start new block
-                current_block_name = format_ident!("block_0x{:08x}", pc);
-                current_block_pc = pc;
-                current_block_tokens = proc_macro2::TokenStream::new();
-                active = true;
-                block_terminated = false;
-                block_insn_count = 0;
+                open = Some(OpenBlock::new(pc));
                 force_new_block = false;
-                block_has_terminal = false;
-                block_mem_rw_events = 0;
-                block_non_register_global_lookup_base_max = 0;
-                block_reg_write_mask = 0;
-                block_global_lookup_base_max = 0;
-                block_leaf_rows = [0; LEAF_INSN_CHIPS];
             }
+            let Some(block) = open.as_mut() else {
+                continue;
+            };
 
-            if active {
-                let (body, is_terminal, mem_rw_events, global_lookup_base_max) =
-                    translator.translate(pc, inst, leaders);
-                let inst_reg_write_mask = Self::instruction_reg_write_mask(inst);
-                let inst_non_register_global_lookup_base_max =
-                    Self::instruction_non_register_global_lookup_base_max(
-                        inst.opcode,
-                        global_lookup_base_max,
-                    );
+            let (plain, is_terminal, mem_rw_events, global_lookup_base_max) =
+                translator.translate_body(BlockBody::Plain, pc, inst, leaders);
+            let (recorded, ..) = translator.translate_body(BlockBody::Recorder, pc, inst, leaders);
+            let code = Translated {
+                plain,
+                recorded,
+                is_terminal,
+                mem_rw_events,
+                global_lookup_base_max,
+            };
+            block.push(pc, inst, code);
 
-                if is_terminal {
-                    let total_events = block_mem_rw_events + mem_rw_events;
-                    let total_non_register_global_lookup_base =
-                        block_non_register_global_lookup_base_max
-                            + inst_non_register_global_lookup_base_max;
-                    let total_reg_write_mask = block_reg_write_mask | inst_reg_write_mask;
-                    let total_global_lookup_base = total_non_register_global_lookup_base
-                        + (total_reg_write_mask.count_ones() as usize);
-                    if total_events > 0 {
-                        current_block_tokens.extend(quote! {
-                            emu.add_memory_rw_events(#total_events);
-                        });
-                    }
-                    current_block_tokens.extend(body);
-                    block_mem_rw_events = total_events;
-                    block_non_register_global_lookup_base_max =
-                        total_non_register_global_lookup_base;
-                    block_reg_write_mask = total_reg_write_mask;
-                    block_global_lookup_base_max = total_global_lookup_base;
-                } else {
-                    current_block_tokens.extend(body);
-                    block_mem_rw_events += mem_rw_events;
-                    block_non_register_global_lookup_base_max +=
-                        inst_non_register_global_lookup_base_max;
-                    block_reg_write_mask |= inst_reg_write_mask;
-                    block_global_lookup_base_max = block_non_register_global_lookup_base_max
-                        + (block_reg_write_mask.count_ones() as usize);
-                }
-                block_terminated = is_terminal;
-                block_has_terminal = is_terminal;
-                block_insn_count += 1;
-                add_insn_leaf_rows(&mut block_leaf_rows, to_vm_opcode(inst.opcode));
-
-                if !is_terminal {
-                    if max_block_instructions > 0
-                        && block_insn_count >= max_block_instructions
-                        && !force_new_block
-                    {
-                        force_new_block = true;
-                    }
-                } else {
-                    // Terminate block immediately so subsequent instructions
-                    // do not get appended after a return.
-                    blocks.push(BlockInfo {
-                        pc: current_block_pc,
-                        name: current_block_name.clone(),
-                        insn_count: block_insn_count,
-                        mem_rw_events: block_mem_rw_events,
-                        non_register_global_lookup_base_max:
-                            block_non_register_global_lookup_base_max,
-                        reg_write_mask: block_reg_write_mask,
-                        global_lookup_base_max: block_global_lookup_base_max,
-                        code: Self::with_leaf_rows(&block_leaf_rows, &current_block_tokens),
-                        is_terminal: block_has_terminal,
-                    });
-                    active = false;
-                    block_terminated = false;
-                    block_insn_count = 0;
-                    current_block_tokens = proc_macro2::TokenStream::new();
-                    force_new_block = true;
-                    block_has_terminal = false;
-                    block_mem_rw_events = 0;
-                    block_non_register_global_lookup_base_max = 0;
-                    block_reg_write_mask = 0;
-                    block_global_lookup_base_max = 0;
-                    block_leaf_rows = [0; LEAF_INSN_CHIPS];
-                }
+            if is_terminal {
+                // Close the block now, so that the instructions after it do not follow a return.
+                blocks.extend(open.take().map(OpenBlock::close));
+                force_new_block = true;
+            } else if max_block_instructions > 0 && block.insn_count >= max_block_instructions {
+                force_new_block = true;
             }
         }
 
-        // Finalize last block
-        if active {
-            if !block_terminated {
-                if block_mem_rw_events > 0 {
-                    current_block_tokens.extend(quote! {
-                        emu.add_memory_rw_events(#block_mem_rw_events);
-                    });
-                }
-                current_block_tokens.extend(quote! {
-                    Ok(crate::NextStep::Halt)
-                });
-            }
-
-            blocks.push(BlockInfo {
-                pc: current_block_pc,
-                name: current_block_name,
-                insn_count: block_insn_count,
-                mem_rw_events: block_mem_rw_events,
-                non_register_global_lookup_base_max: block_non_register_global_lookup_base_max,
-                reg_write_mask: block_reg_write_mask,
-                global_lookup_base_max: block_global_lookup_base_max,
-                code: Self::with_leaf_rows(&block_leaf_rows, &current_block_tokens),
-                is_terminal: block_has_terminal,
-            });
+        if let Some(block) = open {
+            let end = self.program.pc_base + 4 * self.program.instructions.len() as u64;
+            blocks.push(block.run_off(end));
         }
 
         Ok(blocks)
@@ -504,16 +527,17 @@ impl AotCompiler {
     /// [`crate::pure_translator`] and no event accounting.
     fn generate_blocks_pure(&self, leaders: &HashSet<u64>) -> Vec<BlockInfo> {
         let block =
-            |pc: u64, insn_count: u32, code: proc_macro2::TokenStream, terminal: bool| BlockInfo {
+            |pc: u64, insn_count: u32, code: proc_macro2::TokenStream, _terminal: bool| BlockInfo {
                 pc,
                 name: format_ident!("block_0x{:08x}", pc),
                 insn_count,
                 mem_rw_events: 0,
                 non_register_global_lookup_base_max: 0,
                 reg_write_mask: 0,
-                global_lookup_base_max: 0,
                 code,
-                is_terminal: terminal,
+                rec_code: proc_macro2::TokenStream::new(),
+                direct_insns: 0,
+                direct_rows: BlockRows::default(),
             };
         let max_block_instructions = self.config.max_block_instructions;
         let mut blocks = Vec::new();
@@ -552,23 +576,6 @@ impl AotCompiler {
             blocks.push(block(start, count, code, false));
         }
         blocks
-    }
-
-    /// `code` behind the statements that add its rows on the per-instruction chips, one per
-    /// chip it touches. They lead the block so that a superblock, which keeps each inner
-    /// block's statements up to its pc assignment, keeps them too.
-    fn with_leaf_rows(
-        rows: &[u32; LEAF_INSN_CHIPS],
-        code: &proc_macro2::TokenStream,
-    ) -> proc_macro2::TokenStream {
-        let mut tokens = proc_macro2::TokenStream::new();
-        for (chip, &count) in rows.iter().enumerate() {
-            if count > 0 {
-                tokens.extend(quote! { emu.add_leaf_rows(#chip, #count); });
-            }
-        }
-        tokens.extend(code.clone());
-        tokens
     }
 
     /// Partition blocks into chunks using CFG-aware segmentation
@@ -721,7 +728,7 @@ impl AotCompiler {
 
         // Analyze chunk and generate appropriate lookup strategy
         let (lookup_body, lookup_inline_attr, _strategy) =
-            self.generate_chunk_lookup(&lookup_entries, pc_min, pc_max, n)?;
+            self.generate_chunk_lookup(&lookup_entries, pc_min, pc_max, n, &quote! { BlockFn })?;
 
         if self.config.pure {
             let block_functions = chunk.blocks.iter().map(|block| {
@@ -759,7 +766,7 @@ impl AotCompiler {
         }
 
         // Generate block functions with selective inlining
-        let block_functions: Vec<_> = chunk
+        let block_functions = chunk
             .blocks
             .iter()
             .map(|block| {
@@ -771,7 +778,7 @@ impl AotCompiler {
                 let code = &block.code;
                 let inline_attr = self.get_inline_attr(insn_count);
 
-                quote! {
+                let plain = quote! {
                     #inline_attr
                     pub fn #name(emu: &mut AotEmulatorCore) -> Result<crate::NextStep, String> {
                         const BLOCK_INSNS: u32 = #insn_count;
@@ -798,9 +805,98 @@ impl AotCompiler {
                         let emitting = emu.is_emitting();
                         #code
                     }
-                }
+                };
+                let rec_code = &block.rec_code;
+                let rec_name = BlockBody::Recorder.block_name(block.pc);
+                let direct_insns = block.direct_insns;
+                let room = block.direct_rows;
+                let reserve = (room.steps > 0).then(|| {
+                    let BlockRows {
+                        steps,
+                        reads,
+                        writes,
+                        operand_exceptions,
+                        alu,
+                        memory,
+                        branch,
+                    } = room;
+                    quote! {
+                        emu.reserve_rows_rec(
+                            rec,
+                            BlockRows {
+                                steps: #steps,
+                                reads: #reads,
+                                writes: #writes,
+                                operand_exceptions: #operand_exceptions,
+                                alu: [#(#alu),*],
+                                memory: #memory,
+                                branch: #branch,
+                            },
+                        );
+                    }
+                });
+                Ok(quote! {
+                    #plain
+
+                    #inline_attr
+                    pub fn #rec_name(
+                        emu: &mut AotEmulatorCore,
+                        rec: &mut Recorder,
+                    ) -> Result<crate::RecordStep, String> {
+                        const BLOCK_INSNS: u32 = #insn_count;
+                        const BLOCK_MEM_RW_EVENTS: usize = #mem_rw_events;
+                        const BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX: usize =
+                            #non_register_global_lookup_base_max;
+                        const BLOCK_REG_WRITE_MASK: u32 = #reg_write_mask;
+                        const BLOCK_DIRECT_INSNS: u32 = #direct_insns;
+                        // The fallback writes through the core's sink, and stops at an ordinary
+                        // block, which the dispatch run looks up again among the recording ones.
+                        if !emu.can_run_record_block(
+                            BLOCK_INSNS,
+                            BLOCK_MEM_RW_EVENTS,
+                            BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX,
+                            BLOCK_REG_WRITE_MASK,
+                        ) {
+                            return emu
+                                .with_sink_on_core(rec, AotEmulatorCore::interpret_from_current_pc);
+                        }
+                        emu.count_recorder_block(BLOCK_INSNS, BLOCK_DIRECT_INSNS);
+                        #reserve
+                        #rec_code
+                    }
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+
+        let record_entries: Vec<LookupEntry> = chunk
+            .blocks
+            .iter()
+            .map(|block| LookupEntry {
+                pc: block.pc,
+                name: BlockBody::Recorder.block_name(block.pc),
             })
             .collect();
+        let recorder = self
+            .generate_chunk_lookup(
+                &record_entries,
+                pc_min,
+                pc_max,
+                n,
+                &quote! { RecordBlockFn },
+            )
+            .map(|(rec_lookup_body, rec_lookup_inline_attr, _)| {
+                quote! {
+                    pub use pico_aot_runtime::{
+                        direct::{AluStream, BlockRows, Instruction, Opcode},
+                        RecordBlockFn, RecordStep, Recorder,
+                    };
+
+                    #rec_lookup_inline_attr
+                    pub fn rec_lookup(pc: u64) -> Option<RecordBlockFn> {
+                        #rec_lookup_body
+                    }
+                }
+            })?;
 
         let chunk_code = quote! {
             // AUTO-GENERATED by AOT compiler - Chunk
@@ -814,6 +910,8 @@ impl AotCompiler {
             pub fn lookup(pc: u64) -> Option<BlockFn> {
                 #lookup_body
             }
+
+            #recorder
 
             #(#block_functions)*
         };
@@ -832,7 +930,16 @@ impl AotCompiler {
         let mut syntax_tree = syn::parse2(chunk_code)
             .map_err(|e| format!("Parse error in chunk {}: {}", chunk.chunk_idx, e))?;
 
-        let allowed_blocks = chunk.blocks.iter().map(|b| b.name.to_string()).collect();
+        let allowed_blocks = chunk
+            .blocks
+            .iter()
+            .flat_map(|b| {
+                [
+                    b.name.to_string(),
+                    BlockBody::Recorder.block_name(b.pc).to_string(),
+                ]
+            })
+            .collect();
         let mut rewriter = CrossChunkDirectRewriter { allowed_blocks };
         rewriter.visit_file_mut(&mut syntax_tree);
 
@@ -1014,12 +1121,15 @@ impl AotCompiler {
             }
         };
 
-        let lookup_block_body = if chunks.is_empty() {
-            quote! {
-                let _ = pc;
-                None
+        // The search for the chunk holding `pc`, ending in `lookup`, which may name that chunk as
+        // `c` and its index in `CHUNKS` as `idx`.
+        let chunk_lookup_body = |lookup: proc_macro2::TokenStream| {
+            if chunks.is_empty() {
+                return quote! {
+                    let _ = pc;
+                    None
+                };
             }
-        } else {
             quote! {
                 if pc < GLOBAL_PC_MIN {
                     return None;
@@ -1048,9 +1158,10 @@ impl AotCompiler {
                     return None;
                 }
 
-                (c.lookup)(pc)
+                #lookup
             }
         };
+        let lookup_block_body = chunk_lookup_body(quote! { (c.lookup)(pc) });
 
         if self.config.pure {
             let elf_sha256 = self.program.elf_sha256;
@@ -1125,6 +1236,28 @@ impl AotCompiler {
         let elf_sha256 = elf_sha256.iter();
         let codegen_stamp = CODEGEN_STAMP;
 
+        // `RECORD_LOOKUPS` follows `CHUNKS`' order. The fallback still stops at an ordinary block,
+        // so `run_aot_record` installs the ordinary lookup as `run_aot` does.
+        let record_lookups = chunks.iter().map(|c| {
+            let chunk_crate = format_ident!("pico_aot_chunk_{:03}", c.chunk_idx);
+            quote! { #chunk_crate::rec_lookup, }
+        });
+        let lookup_record_block_body = chunk_lookup_body(quote! { RECORD_LOOKUPS[idx](pc) });
+        let with_recorder = quote! { .with_recorder(run_aot_record) };
+        let recorder = quote! {
+            pub fn run_aot_record(emu: &mut AotEmulatorCore) -> Result<(), String> {
+                set_lookup_block_fn(lookup_block);
+                emu.run_record_blocks(lookup_record_block)
+            }
+
+            const RECORD_LOOKUPS: &[fn(u64) -> Option<pico_aot_runtime::RecordBlockFn>] =
+                &[#(#record_lookups)*];
+
+            fn lookup_record_block(pc: u64) -> Option<pico_aot_runtime::RecordBlockFn> {
+                #lookup_record_block_body
+            }
+        };
+
         let dispatch_code = quote! {
             // AUTO-GENERATED by AOT compiler - Dispatch crate
             // DO NOT EDIT MANUALLY
@@ -1134,12 +1267,14 @@ impl AotCompiler {
 
             #[doc = #aot_doc]
             pub static AOT: AotProgram =
-                AotProgram::stamped([#(#elf_sha256),*], #codegen_stamp, run_aot);
+                AotProgram::stamped([#(#elf_sha256),*], #codegen_stamp, run_aot)#with_recorder;
 
             pub fn run_aot(emu: &mut AotEmulatorCore) -> Result<(), String> {
                 set_lookup_block_fn(lookup_block);
                 emu.run_blocks(lookup_block)
             }
+
+            #recorder
 
             type ChunkLookupFn = fn(u64) -> Option<BlockFn>;
 
@@ -1179,6 +1314,7 @@ impl AotCompiler {
         pc_min: u64,
         pc_max: u64,
         n: usize,
+        fn_type: &proc_macro2::TokenStream,
     ) -> Result<
         (
             proc_macro2::TokenStream,
@@ -1238,7 +1374,7 @@ impl AotCompiler {
             let idx_entries: Vec<_> = idx_array.iter().map(|&idx| quote! { #idx, }).collect();
 
             let lookup_body = quote! {
-                const FN: [BlockFn; #n] = [
+                const FN: [#fn_type; #n] = [
                     #(#fn_entries)*
                 ];
                 const IDX: [u16; #range_words] = [
@@ -1310,7 +1446,7 @@ impl AotCompiler {
         let num_runs = runs.len();
 
         let lookup_body = quote! {
-            const FN: [BlockFn; #n] = [
+            const FN: [#fn_type; #n] = [
                 #(#fn_entries)*
             ];
             #[inline(always)]
@@ -1559,23 +1695,6 @@ fn compute_block_instruction_stats(counts: &[u32]) -> BlockInstructionStats {
     }
 }
 
-// Make BlockInfo cloneable for chunking
-impl Clone for BlockInfo {
-    fn clone(&self) -> Self {
-        Self {
-            pc: self.pc,
-            name: self.name.clone(),
-            insn_count: self.insn_count,
-            mem_rw_events: self.mem_rw_events,
-            non_register_global_lookup_base_max: self.non_register_global_lookup_base_max,
-            reg_write_mask: self.reg_write_mask,
-            global_lookup_base_max: self.global_lookup_base_max,
-            code: self.code.clone(),
-            is_terminal: self.is_terminal,
-        }
-    }
-}
-
 struct CrossChunkDirectRewriter {
     allowed_blocks: HashSet<String>,
 }
@@ -1590,6 +1709,10 @@ impl VisitMut for CrossChunkDirectRewriter {
                         if !self.allowed_blocks.contains(&name) {
                             if let Some(pc) = block_name_to_pc(&name) {
                                 *node = syn::parse_quote! { crate::NextStep::Dynamic(#pc) };
+                                return;
+                            }
+                            if let Some(pc) = record_block_name_to_pc(&name) {
+                                *node = syn::parse_quote! { crate::RecordStep::Dynamic(#pc) };
                                 return;
                             }
                         }
@@ -1622,14 +1745,16 @@ fn block_name_to_pc(name: &str) -> Option<u64> {
     }
 }
 
+fn record_block_name_to_pc(name: &str) -> Option<u64> {
+    name.strip_prefix("rec_").and_then(block_name_to_pc)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        block_analysis::BlockAnalyzer,
-        elf_parser::parse_elf,
+        block_analysis::BlockAnalyzer, elf_parser::parse_elf,
         instruction_translator::InstructionTranslator,
-        types::{sign_extend_imm32_to_u64, Instruction},
     };
     use std::{
         fs,
@@ -1678,7 +1803,7 @@ mod tests {
                     "translator emitted unexpected ADD-immediate code: {translated}"
                 );
                 assert!(
-                    translated.contains(&format!("{}u64", sign_extend_imm32_to_u64(inst.op_c))),
+                    translated.contains(&format!("{}u64", inst.op_c)),
                     "translator missed decoded immediate for ADD-like instruction: {translated}"
                 );
             }
@@ -1843,6 +1968,11 @@ mod tests {
                 assert!(exit.contains("should_yield"));
                 assert!(exit.contains("NextStep :: Dynamic (emu . pc)"));
                 assert!(exit.contains("NextStep :: Direct (block_0x00001008)"));
+                // The recording body steps to its own kind and tests no chunk boundary.
+                let exit = blocks[0].rec_code.to_string();
+                assert!(exit.contains("emu . pc = 4104u64"));
+                assert!(!exit.contains("check_chunk_boundary"), "{exit}");
+                assert!(exit.contains("RecordStep :: Direct (rec_block_0x00001008)"));
             }
         }
     }

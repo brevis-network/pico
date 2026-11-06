@@ -375,7 +375,6 @@ fn lifted_rows(rows: u64) -> u64 {
 /// memory until touched). Reset via `madvise(MADV_DONTNEED)` returns pages to the
 /// OS in a single syscall instead of iterating dirty entries.
 #[cfg(feature = "mmap-memory")]
-#[derive(Debug)]
 struct SimpleBitSet {
     mmap: memmap2::MmapMut,
 }
@@ -387,6 +386,12 @@ impl SimpleBitSet {
         let mmap =
             memmap2::MmapMut::map_anon(byte_size).expect("Failed to create mmap for SimpleBitSet");
         Self { mmap }
+    }
+
+    #[cfg(test)]
+    fn words(&self) -> &[u64] {
+        // SAFETY: mmap is allocated with byte_size = BITMAP_WORDS * size_of::<u64>().
+        unsafe { std::slice::from_raw_parts(self.mmap.as_ptr() as *const u64, BITMAP_WORDS) }
     }
 
     #[inline(always)]
@@ -465,7 +470,7 @@ impl Default for SimpleBitSet {
 
 /// Dirty-cleared bitmap for chunk split tracking.
 #[cfg(not(feature = "mmap-memory"))]
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct SimpleBitSet {
     words: Box<[u64]>,
     dirty_words: Vec<u32>,
@@ -478,6 +483,11 @@ impl SimpleBitSet {
             words: vec![0u64; BITMAP_WORDS].into_boxed_slice(),
             dirty_words: Vec::new(),
         }
+    }
+
+    #[cfg(test)]
+    fn words(&self) -> &[u64] {
+        &self.words
     }
 
     #[inline(always)]
@@ -527,6 +537,40 @@ impl SimpleBitSet {
 impl Default for SimpleBitSet {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl SimpleBitSet {
+    /// Every dword marked, in order. Walks the whole bitmap, megabytes and under `mmap-memory`
+    /// every page of it, so it stays out of `Debug`.
+    #[cfg(test)]
+    fn marked_dwords(&self) -> Vec<usize> {
+        self.words()
+            .iter()
+            .enumerate()
+            .filter(|&(_, &word)| word != 0)
+            .flat_map(|(index, &word)| {
+                (0..64usize)
+                    .filter(move |&bit| word & (1u64 << bit) != 0)
+                    .map(move |bit| index * 64 + bit)
+            })
+            .collect()
+    }
+}
+
+/// The size and backing, never the contents: any `{:?}` of a `ChunkSplitState` lands here, and
+/// reading the bitmap costs megabytes. [`SimpleBitSet::marked_dwords`] lists the contents.
+impl std::fmt::Debug for SimpleBitSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let backing = if cfg!(feature = "mmap-memory") {
+            "mmap"
+        } else {
+            "boxed"
+        };
+        f.debug_struct("SimpleBitSet")
+            .field("dwords", &(BITMAP_WORDS * 64))
+            .field("backing", &backing)
+            .finish_non_exhaustive()
     }
 }
 
@@ -727,6 +771,16 @@ impl ChunkSplitState {
         self.unique_memory_addrs + self.unique_reg_writes
     }
 
+    /// The dwords its two bitmaps mark, `[memory_access_addrs, cpu_windows]`: what its `Debug`
+    /// leaves out.
+    #[cfg(test)]
+    pub(crate) fn marked_dwords(&self) -> [Vec<usize>; 2] {
+        [
+            self.memory_access_addrs.marked_dwords(),
+            self.cpu_windows.marked_dwords(),
+        ]
+    }
+
     #[inline(always)]
     pub fn record_syscall_event(&mut self) {
         self.num_syscall_events += 1;
@@ -924,11 +978,12 @@ impl ChunkSplitState {
 mod tests {
     use super::{
         add_insn_leaf_rows, can_fit_block, commit_tail_in_flight, should_check_fast, should_split,
-        ChunkSplitConfig, ChunkSplitState, Opcode, CHUNK_CLK_START, LEAF_ADD, LEAF_ADDW,
-        LEAF_BITWISE, LEAF_CPU, LEAF_DIVREM, LEAF_ECALL, LEAF_GLOBAL_INTERACTIONS, LEAF_INSN_CHIPS,
-        LEAF_INSN_INTERACTIONS, LEAF_LT, LEAF_MEMORY_LOCAL_INTERACTIONS,
-        LEAF_MEMORY_RW_INTERACTIONS, LEAF_MUL, LEAF_POSEIDON2_INTERACTIONS, LEAF_SLL, LEAF_SR,
-        LEAF_SUB, LEAF_SUBW, LEAF_SYSCALL_INTERACTIONS,
+        ChunkSplitConfig, ChunkSplitState, Opcode, SimpleBitSet, BITMAP_WORDS, CHUNK_CLK_START,
+        LEAF_ADD, LEAF_ADDW, LEAF_BITWISE, LEAF_CPU, LEAF_DIVREM, LEAF_ECALL,
+        LEAF_GLOBAL_INTERACTIONS, LEAF_INSN_CHIPS, LEAF_INSN_INTERACTIONS, LEAF_LT,
+        LEAF_MEMORY_LOCAL_INTERACTIONS, LEAF_MEMORY_RW_INTERACTIONS, LEAF_MUL,
+        LEAF_POSEIDON2_INTERACTIONS, LEAF_SLL, LEAF_SR, LEAF_SUB, LEAF_SUBW,
+        LEAF_SYSCALL_INTERACTIONS,
     };
     use crate::{
         chips::chips::riscv_memory::event::MemoryAccessPosition,
@@ -1455,5 +1510,21 @@ mod tests {
             ChunkSplitConfig::COMMIT_TAIL_RESERVE_CLK
         );
         assert_eq!(big.commit_tail_overrun, 0);
+    }
+
+    /// `Debug` prints the same however much is marked; `marked_dwords` lists what is.
+    #[test]
+    fn a_bitset_lists_its_marks_but_prints_only_its_size() {
+        let mut bits = SimpleBitSet::default();
+        let empty = format!("{bits:?}");
+        assert!(
+            empty.contains(&format!("dwords: {}", BITMAP_WORDS * 64)),
+            "{empty}"
+        );
+        bits.insert_dword_index(70);
+        bits.insert_dword_index(3);
+        assert_eq!(format!("{bits:?}"), empty);
+        assert_eq!(bits.marked_dwords(), [3, 70]);
+        assert_eq!(bits.clone().marked_dwords(), [3, 70]);
     }
 }

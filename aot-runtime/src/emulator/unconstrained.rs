@@ -33,9 +33,7 @@ impl AotEmulatorCore {
             batch_chunks_emulated: self.batch_chunks_emulated,
             batch_stop: self.batch_stop,
             registers: self.registers,
-            reg_present: self.reg_present,
-            register_records: self.register_records,
-            // Note: accessed_regs is NOT saved - it persists
+            // Note: touched_registers is NOT saved - it persists
             // across unconstrained mode to match baseline behavior.
             memory_diff: HashMap::default(),
             committed_value_digest: self.committed_value_digest,
@@ -67,14 +65,12 @@ impl AotEmulatorCore {
         // restored as part of memory_diff. In AOT, we store them separately, so we
         // need to explicitly restore them here.
         self.registers = state.registers;
-        self.reg_present = state.reg_present;
-        self.register_records = state.register_records;
 
-        // Note: We do NOT restore accessed_regs.
+        // Note: We do NOT restore touched_registers.
         // Baseline's memory_snapshot persists across unconstrained mode boundaries,
         // capturing old values of all addresses accessed during the batch (including
-        // during unconstrained mode). By keeping our current accessed_* state instead
-        // of restoring it, we match baseline's behavior of tracking all accesses.
+        // during unconstrained mode). By keeping the current touched marks instead
+        // of restoring them, we match baseline's behavior of tracking all accesses.
         self.committed_value_digest = state.committed_value_digest;
         self.deferred_proofs_digest = state.deferred_proofs_digest;
         // The digest rolls back, so the flag its writes raised rolls back with it.

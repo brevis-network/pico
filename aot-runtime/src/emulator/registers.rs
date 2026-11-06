@@ -1,6 +1,10 @@
 use pico_vm::chips::chips::riscv_memory::event::MemoryAccessPosition;
 
-use super::{sink::by_sink, types::RegisterRecord, AotEmulatorCore};
+use super::{
+    sink::{by_sink, LentSink},
+    types::RegisterRecord,
+    AotEmulatorCore,
+};
 
 impl AotEmulatorCore {
     // ========================================================================
@@ -26,18 +30,20 @@ impl AotEmulatorCore {
     // Register Operations
     // ========================================================================
 
-    /// Mark a register as accessed.
+    /// Mark a register as accessed: a byte per register makes the mark one store, where a bit mask
+    /// would cost a load and a test on every access.
     #[inline(always)]
     fn mark_reg_accessed(&mut self, reg: usize) {
-        self.accessed_regs[reg] = true;
+        self.touched_registers[reg] = true;
     }
 
     /// Single write site for the per-access register record.
     #[inline(always)]
-    fn set_reg_record(&mut self, reg: usize, timestamp: u32) {
-        self.register_records[reg] = RegisterRecord {
+    fn set_reg_record(&mut self, reg: usize, value: u64, timestamp: u32) {
+        self.registers[reg] = RegisterRecord {
             chunk: self.current_chunk,
             timestamp,
+            value,
         };
     }
 
@@ -48,8 +54,8 @@ impl AotEmulatorCore {
 
     /// Clear all accessed register tracking.
     #[inline(always)]
-    pub(crate) fn clear_accessed_regs(&mut self) {
-        self.accessed_regs = [false; 32];
+    pub(crate) fn clear_touched_registers(&mut self) {
+        self.touched_registers = [false; 32];
     }
 
     /// Read a register value at position C (for operand C in instruction encoding).
@@ -75,72 +81,54 @@ impl AotEmulatorCore {
         by_sink!(self.read_reg_at(reg, position))
     }
 
-    /// The read of `reg` in operand `position`, its access written when `EMIT`.
+    /// The read of `reg` in operand `position`, its access written into `sink` when `EMIT`.
     #[inline(always)]
     pub(crate) fn read_reg_at<const EMIT: bool>(
         &mut self,
+        sink: LentSink<'_>,
         reg: usize,
         position: MemoryAccessPosition,
     ) -> u64 {
         self.mark_reg_accessed(reg);
-        if !self.reg_present[reg] {
-            self.reg_present[reg] = true;
-            self.registers[reg] = 0;
-        }
-        let prev = self.register_records[reg];
+        let prev = self.registers[reg];
         let timestamp = self.clk.wrapping_add(position as u32);
-        self.set_reg_record(reg, timestamp);
-        let value = if reg == 0 { 0 } else { self.registers[reg] };
+        self.set_reg_record(reg, prev.value, timestamp);
+        let value = if reg == 0 { 0 } else { prev.value };
         if EMIT {
-            self.record_reg_read(reg, position, value, prev, timestamp);
+            self.record_reg_read(sink, reg, position, value, prev, timestamp);
         }
         value
     }
 
-    /// Read a register value without materialization or access tracking.
+    /// Read a register value without access tracking.
     #[inline(always)]
     pub fn read_reg_unsafe(&self, reg: usize) -> u64 {
         if reg == 0 {
             return 0;
         }
-        if self.reg_present[reg] {
-            self.registers[reg]
-        } else {
-            0
-        }
+        self.registers[reg].value
     }
 
     /// Read a register value for snapshot compatibility without updating metadata.
     #[inline(always)]
     pub fn read_reg_snapshot(&mut self, reg: usize) -> u64 {
         self.mark_reg_accessed(reg);
-        if reg == 0 {
-            return 0;
-        }
-        if self.reg_present[reg] {
-            self.registers[reg]
-        } else {
-            0
-        }
+        self.read_reg_unsafe(reg)
     }
 
     /// Writes `value` to `reg` at operand `a`'s timestamp, `x0` keeping 0, its access written
-    /// when `EMIT`: what every write variant below does before its event counting.
+    /// into `sink` when `EMIT`: what every write variant below does before its event counting.
     #[inline(always)]
-    pub(crate) fn set_reg<const EMIT: bool>(&mut self, reg: usize, value: u64) {
+    pub(crate) fn set_reg<const EMIT: bool>(&mut self, sink: LentSink<'_>, reg: usize, value: u64) {
         self.track_chunk_split_address(reg as u64);
         let prev_value = self.read_reg_unsafe(reg);
-        let prev = self.register_records[reg];
-        self.reg_present[reg] = true;
-        if reg != 0 {
-            self.registers[reg] = value;
-        }
+        let prev = self.registers[reg];
+        let written = if reg == 0 { 0 } else { value };
         self.mark_reg_accessed(reg);
         let timestamp = self.clk.wrapping_add(MemoryAccessPosition::A as u32);
-        self.set_reg_record(reg, timestamp);
+        self.set_reg_record(reg, written, timestamp);
         if EMIT {
-            let written = if reg == 0 { 0 } else { value };
-            self.record_reg_write(reg, written, prev_value, prev, timestamp);
+            self.record_reg_write(sink, reg, written, prev_value, prev, timestamp);
         }
     }
 

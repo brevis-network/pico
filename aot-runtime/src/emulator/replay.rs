@@ -16,7 +16,7 @@ use std::sync::Arc;
 use pico_vm::{
     compiler::riscv::program::Program,
     emulator::riscv::{
-        chunk_split::{ChunkSplitConfig, ChunkSplitState},
+        chunk_split::ChunkSplitConfig,
         emulator::{postprocess, FinalState},
         memory::ContiguousRiscvMemory,
         record::EmulationRecord,
@@ -28,7 +28,7 @@ use pico_vm::{
     primitives::consts::{CHUNK_CLK_START, DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
 };
 
-use super::{types::RegisterRecord, AotEmulatorCore, EmittedChunk};
+use super::{types::RegisterFile, AotEmulatorCore, EmittedChunk};
 
 impl AotEmulatorCore {
     /// A replay worker's core, recovered from `state` to replay up to `target_global_clk`. Only a
@@ -55,10 +55,10 @@ impl AotEmulatorCore {
 
     /// [`Self::recover`] on a core that has replayed before, keeping its allocations: the core is
     /// left as `recover` builds it, except for the touched-register marks, which only the snapshot
-    /// thread reads and which a replay still sets: 32 flags, each a store that is cheaper than a
-    /// test of the core's role on every register access. The memory tracker needs nothing, since
-    /// a replay never writes it. Returns the memory the previous replay ran on, which only the
-    /// caller knows whether to give back to the pool.
+    /// thread reads; a replay's helpers still set them, since skipping the store would cost a role
+    /// test on every register access. The memory tracker needs nothing, since a replay never writes
+    /// it. Returns the memory the previous replay ran on, which only the caller knows whether to
+    /// give back to the pool.
     pub fn recover_in_place(
         &mut self,
         state: RiscvEmulationState,
@@ -70,16 +70,8 @@ impl AotEmulatorCore {
         self.current_batch = state.current_batch;
         self.current_chunk = state.current_chunk;
         self.clk = u32::try_from(state.clk).expect("a chunk's clock fits in u32");
-        // The snapshot thread writes a register it never accessed as the zero record, and any
-        // access leaves a chunk of at least 1, so a nonzero record is a present register.
-        for (idx, record) in state.registers.iter().enumerate() {
-            self.reg_present[idx] = record.value != 0 || record.chunk != 0 || record.timestamp != 0;
-            self.registers[idx] = record.value;
-            self.register_records[idx] = RegisterRecord {
-                chunk: record.chunk,
-                timestamp: record.timestamp,
-            };
-        }
+        // The snapshot's zero record for a register never accessed is the core's own encoding.
+        self.registers = RegisterFile(state.registers);
         self.uninitialized_memory = state.uninitialized_memory;
         self.input_stream = state.input_stream;
         self.input_stream_ptr = state.input_stream_ptr;
@@ -94,7 +86,9 @@ impl AotEmulatorCore {
         self.stderr.clear();
 
         self.chunk_split_config = ChunkSplitConfig::disabled(self.max_syscall_cycles);
-        self.chunk_split_state = ChunkSplitState::default();
+        // Cleared rather than rebuilt, as the interpreter's worker does: a new state maps its
+        // bitset afresh, an `mmap` and an `munmap` per chunk under `mmap-memory`.
+        self.chunk_split_state.clear();
         self.batch_chunk_target = 0;
         self.batch_chunks_emulated = 0;
         self.batch_stop = false;
@@ -104,7 +98,7 @@ impl AotEmulatorCore {
         self.role = CoreRole::Worker;
 
         let previous = std::mem::replace(&mut self.memory, state.memory);
-        self.emit_records();
+        self.restart_sink();
         previous
     }
 
@@ -166,10 +160,9 @@ impl AotEmulatorCore {
     /// The run's memory initialize and finalize events into `record`, from the state the replay
     /// that ended the run left.
     pub fn postprocess(&self, record: &mut EmulationRecord) {
-        let registers = self.runtime_registers();
         postprocess(
             FinalState {
-                registers: &registers,
+                registers: &self.registers.0,
                 uninitialized_memory: &self.uninitialized_memory,
                 memory: &self.memory,
                 input_stream_ptr: self.input_stream_ptr,
@@ -342,6 +335,17 @@ mod tests {
             .map(|event| (event.addr, event.value))
             .collect();
         assert_eq!(finalized, [(0, 0), (1, 3), (5, 0), (10, 0), (11, 0)]);
+    }
+
+    #[test]
+    fn a_core_recovered_in_place_forgets_the_addresses_it_tracked() {
+        hold_records_unbounded();
+        let mut emu = AotEmulatorCore::recover(program(), start(), 2, true);
+        emu.chunk_split_state.track_address(0x200);
+        drop(emu.recover_in_place(start(), 2, true));
+        assert_eq!(emu.chunk_split_state.unique_address_count(), 0);
+        emu.chunk_split_state.track_address(0x200);
+        assert_eq!(emu.chunk_split_state.unique_address_count(), 1);
     }
 
     /// A reused core replays the next snapshot as a fresh one would, and hands back the memory

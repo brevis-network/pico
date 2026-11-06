@@ -1,14 +1,21 @@
 //! The VM side of AOT registration: the factories the snapshot pipeline asks for an AOT emulator,
-//! one for its snapshot thread and one for its replay workers.
+//! one for its snapshot thread, which runs the program's ordinary entry point, and, for a program
+//! with a recording entry point, one for its replay workers, which run that (and only they can:
+//! `AotEmulatorCore::run_record_blocks` refuses any other core).
 //!
 //! The VM keeps one factory of each per process and the first install wins
 //! (`pico_vm::emulator::aot::register_aot_factory` and `register_aot_replay_factory`, which say
-//! whether a call was the one), and
+//! whether a call was the one, and `register_aot_factories`, which installs a program's pair whole
+//! or not at all), and
 //! generated code installs its block lookup the same way on its first run, without a word
 //! (`set_lookup_block_fn`). So a process runs one AOT program. [`register`] keys the program by its
 //! ELF digest, refuses code generated against another codegen stamp, and refuses anything that
 //! would leave the slot holding another; [`register_interpreted`] installs the runtime with no
 //! compiled code under the same one-per-process rule.
+//!
+//! An install is whole or refused. The program the factories run is in place before the VM takes
+//! either, the VM takes the pair in one step, and the program counts as registered only once it
+//! has: a refused install leaves no factory of this crate's behind, and a retry is refused too.
 
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
@@ -17,8 +24,7 @@ use pico_vm::{
     compiler::riscv::program::Program,
     emulator::{
         aot::{
-            is_aot_factory_registered, is_aot_replay_factory_registered, register_aot_factory,
-            register_aot_replay_factory, split_segments, splits_batch, AotReplayEmulator,
+            register_aot_factories, split_segments, splits_batch, AotReplayEmulator,
             AotSnapshotEmulator,
         },
         opts::EmulatorOpts,
@@ -36,13 +42,20 @@ use crate::{
     AotEmulatorCore,
 };
 
-// allow: domain-complex signature — tuple reflects prover data-flow structure
-#[allow(clippy::type_complexity)]
-static RUN_DISPATCH: OnceLock<fn(&mut AotEmulatorCore) -> Result<(), String>> = OnceLock::new();
+/// The program this crate's factories run, set before the VM takes either, so neither finds it
+/// missing. Never emptied: a refused install leaves it set, for a program no factory runs.
+static PROGRAM: OnceLock<&'static AotProgram> = OnceLock::new();
 
-/// The program [`register`] installed. Held locked for the whole of [`register`], so its checks
-/// and its install are one step to any other caller of it.
+/// The program [`install`] installed, recorded only once the VM has taken its factories. Held
+/// locked for the whole of [`install`], so its checks and its install are one step to any other
+/// caller of it.
 static REGISTERED: Mutex<Option<&'static AotProgram>> = Mutex::new(None);
+
+fn installed_program() -> &'static AotProgram {
+    PROGRAM
+        .get()
+        .expect("set before the VM takes either factory")
+}
 
 struct SharedSnapshotAot {
     emulator: AotEmulatorCore,
@@ -149,26 +162,21 @@ fn create_snapshot_aot(
     opts: EmulatorOpts,
     final_pvs_state: Arc<RecordFinalPvsState>,
 ) -> Box<dyn AotSnapshotEmulator> {
+    let aot = installed_program();
     Box::new(SharedSnapshotAot {
         emulator: AotEmulatorCore::new(program, input_stream),
         opts,
-        run_dispatch: RUN_DISPATCH
-            .get()
-            .copied()
-            .expect("AOT dispatch entrypoint not registered"),
+        run_dispatch: aot.run,
         final_pvs_state,
-        elf_sha256: REGISTERED
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .expect("only `install` installs this factory, recording its program under the lock")
-            .elf_sha256,
+        elf_sha256: aot.elf_sha256,
     })
 }
 
-/// A replay worker: the core recovered in place from each snapshot it is handed.
+/// A replay worker: the core recovered in place from each snapshot it is handed, running the
+/// program's recording entry point.
 struct ReplayAot {
     emulator: AotEmulatorCore,
-    run_dispatch: fn(&mut AotEmulatorCore) -> Result<(), String>,
+    run_record: fn(&mut AotEmulatorCore) -> Result<(), String>,
 }
 
 impl AotReplayEmulator for ReplayAot {
@@ -183,7 +191,7 @@ impl AotReplayEmulator for ReplayAot {
     }
 
     fn replay(&mut self) -> Result<(EmulationRecord, EmulationReport), EmulationError> {
-        let (chunk, report) = self.emulator.replay(self.run_dispatch)?;
+        let (chunk, report) = self.emulator.replay(self.run_record)?;
         Ok((chunk.record, report))
     }
 
@@ -197,6 +205,18 @@ impl AotReplayEmulator for ReplayAot {
 
     fn fallback_insns(&self) -> u64 {
         self.emulator.fallback_insns()
+    }
+
+    fn recorder_body_dispatches(&self) -> u64 {
+        self.emulator.recorder_body_dispatches()
+    }
+
+    fn recorder_body_insns(&self) -> u64 {
+        self.emulator.recorder_body_insns()
+    }
+
+    fn recorder_direct_insns(&self) -> u64 {
+        self.emulator.recorder_direct_insns()
     }
 
     fn replace_memory(&mut self, memory: ContiguousRiscvMemory) -> ContiguousRiscvMemory {
@@ -214,24 +234,26 @@ fn create_replay_aot(
     target_global_clk: u64,
     final_segment: bool,
 ) -> Box<dyn AotReplayEmulator> {
-    let run_dispatch = RUN_DISPATCH
-        .get()
-        .copied()
-        .expect("AOT dispatch entrypoint not registered");
+    let run_record = installed_program()
+        .run_record
+        .expect("installed only for a program with a recording entry point");
     Box::new(ReplayAot {
         emulator: AotEmulatorCore::recover(program, state, target_global_clk, final_segment),
-        run_dispatch,
+        run_record,
     })
 }
 
-/// Registers `program` as this process's AOT code: what the snapshot pipeline runs when it is
-/// asked for `SnapshotMainMode::Aot`, and what its replay workers run for `ReplayWorkers::Aot`.
+/// Registers `program` as this process's AOT code: its ordinary entry point for the snapshot
+/// thread (`SnapshotMainMode::Aot`), its recording entry point for the replay workers
+/// (`ReplayWorkers::Aot`). Without a recording entry point it registers for the snapshot thread
+/// alone, and the pipeline refuses AOT replay workers rather than run anything in their place.
 ///
-/// One program per process, identified by its ELF digest. Registering the same program again is
-/// `Ok`. Refused, with no factory installed: [`AotProgram::STUB`]; a program whose codegen stamp is
-/// not [`AotProgram::CODEGEN_STAMP`]; a program other than the one already registered; and any
-/// program while a factory installed without this function holds the slot, whether it got there
-/// before the call or during it, since the program behind it cannot be known.
+/// One program per process, identified by its ELF digest and whether it has a recording entry
+/// point. Registering the same program again is `Ok`. Refused, with no factory installed:
+/// [`AotProgram::STUB`]; a program whose codegen stamp is not [`AotProgram::CODEGEN_STAMP`]; any
+/// program other than the one already registered; and any program while a factory installed
+/// without this function holds the slot, whether it got there before the call or during it, since
+/// the program behind it cannot be known.
 pub fn register(program: &'static AotProgram) -> Result<(), AotError> {
     if program.is_stub() {
         return Err(AotError::Stub);
@@ -248,9 +270,9 @@ pub fn register(program: &'static AotProgram) -> Result<(), AotError> {
 /// The runtime with no compiled code, which [`register_interpreted`] installs.
 static INTERPRETED: AotProgram = AotProgram::STUB;
 
-/// Registers the AOT runtime without compiled code: the snapshot thread, and the replay workers
-/// when they run on the AOT runtime, interpret every block with the runtime's own interpreter and
-/// precompile backends, for any ELF.
+/// Registers the AOT runtime without compiled code: the snapshot thread interprets every block with
+/// the runtime's own interpreter and precompile backends, for any ELF. With no recording entry
+/// point, AOT replay workers are refused.
 /// It runs no generated code and reports none (`0 compiled-block dispatches`). Same
 /// one-per-process rule as [`register`]: a compiled program is refused once this is in, and this
 /// once one is.
@@ -261,7 +283,10 @@ pub fn register_interpreted() -> Result<(), AotError> {
 fn install(program: &'static AotProgram) -> Result<(), AotError> {
     let mut registered = REGISTERED.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(current) = *registered {
-        return if current.elf_sha256 == program.elf_sha256 {
+        // The first registration alone decides whether AOT replay workers exist.
+        let same = current.elf_sha256 == program.elf_sha256
+            && current.run_record.is_some() == program.run_record.is_some();
+        return if same {
             Ok(())
         } else {
             Err(AotError::Conflict {
@@ -270,17 +295,10 @@ fn install(program: &'static AotProgram) -> Result<(), AotError> {
             })
         };
     }
-    // Refuse occupied slots before touching any OnceLock; a partial install cannot be undone.
-    if RUN_DISPATCH.get().is_some()
-        || is_aot_factory_registered()
-        || is_aot_replay_factory_registered()
-    {
-        return Err(AotError::ForeignFactory);
-    }
-    if RUN_DISPATCH.set(program.run).is_err()
-        || !register_aot_factory(create_snapshot_aot)
-        || !register_aot_replay_factory(create_replay_aot)
-    {
+    // `PROGRAM` is already set only by an install the VM refused: a factory installed without
+    // this function holds a slot, and a slot is never emptied.
+    let replay = program.run_record.map(|_| create_replay_aot as _);
+    if PROGRAM.set(program).is_err() || !register_aot_factories(create_snapshot_aot, replay) {
         return Err(AotError::ForeignFactory);
     }
     *registered = Some(program);

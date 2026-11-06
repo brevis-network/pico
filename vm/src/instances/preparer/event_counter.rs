@@ -6,7 +6,6 @@
 //!
 //! # Performance Optimizations
 //!
-//! - Caching mechanism for precompile event counts to avoid repeated lookups
 //! - Modular counting functions to reduce code duplication
 //! - Efficient data structures for memory usage
 
@@ -31,47 +30,6 @@ use crate::{
     machine::chip::GpuChipBehavior,
 };
 use p3_field::PrimeField32;
-use std::collections::HashMap;
-
-/// Cache for precompile event counts to avoid repeated lookups
-///
-/// This cache stores precomputed event counts for different syscall codes,
-/// improving performance by avoiding repeated lookups in the emulation record.
-#[derive(Debug, Clone, Default)]
-struct PrecompileEventCache {
-    event_counts: HashMap<SyscallCode, usize>,
-    local_mem_counts: HashMap<SyscallCode, usize>,
-}
-
-impl PrecompileEventCache {
-    /// Create a new empty cache
-    fn new() -> Self {
-        Self {
-            event_counts: HashMap::new(),
-            local_mem_counts: HashMap::new(),
-        }
-    }
-
-    /// Get event count for a syscall code, using cache if available
-    fn get_event_count(&mut self, record: &EmulationRecord, code: SyscallCode) -> usize {
-        if let Some(&count) = self.event_counts.get(&code) {
-            return count;
-        }
-        let count = get_precompile_len(record, code);
-        self.event_counts.insert(code, count);
-        count
-    }
-
-    /// Get local memory count for a syscall code, using cache if available
-    fn get_local_mem_count(&mut self, record: &EmulationRecord, code: SyscallCode) -> usize {
-        if let Some(&count) = self.local_mem_counts.get(&code) {
-            return count;
-        }
-        let count = get_precompile_local_mem_len(record, code);
-        self.local_mem_counts.insert(code, count);
-        count
-    }
-}
 
 pub use crate::chips::chips::riscv_cpu::event::CpuExtraEventIndices;
 
@@ -200,9 +158,8 @@ pub struct EventCounter {
     precompile_counts: PrecompileCounts,
     precompile_local_mem_counts: PrecompileLocalMemCounts,
 
-    // Total precompile events (computed for verification)
+    // Total precompile local memory events, which the local memory chip proves beside the CPU's
     pub total_precompile_local_mem_events: usize,
-    pub total_precompile_events: usize,
 
     // System events
     pub num_syscall_events: usize,
@@ -323,39 +280,6 @@ impl EventCounter {
             + counts.fp2_add_sub_bls381
             + counts.fp2_mul_bls381
     }
-
-    /// Get the total count of all precompile events
-    ///
-    /// This method sums up all individual precompile event counts
-    /// to provide a comprehensive total for all precompile operations.
-    pub fn get_total_precompile_events(&self) -> usize {
-        let counts = &self.precompile_counts;
-        counts.sha_compress
-            + counts.sha_extend
-            + counts.ed_add
-            + counts.ed_decompress
-            + counts.keccak_p
-            + counts.poseidon2_p
-            + counts.u256_mul
-            + counts.secp256k1_add
-            + counts.secp256k1_double
-            + counts.secp256k1_decompress
-            + counts.secp256r1_add
-            + counts.secp256r1_double
-            + counts.secp256r1_decompress
-            + counts.bn254_add
-            + counts.bn254_double
-            + counts.bls381_add
-            + counts.bls381_double
-            + counts.bls381_decompress
-            + counts.fp_bn254
-            + counts.fp_bls381
-            + counts.fp_secp256k1
-            + counts.fp2_add_sub_bn254
-            + counts.fp2_mul_bn254
-            + counts.fp2_add_sub_bls381
-            + counts.fp2_mul_bls381
-    }
 }
 
 /// All supported precompile syscall codes
@@ -405,20 +329,16 @@ fn get_precompile_local_mem_len(record: &EmulationRecord, code: SyscallCode) -> 
         })
 }
 
-/// Count all precompile events and their local memory events using cache
-///
-/// This function efficiently counts all precompile events and their local memory events
-/// using a cache to avoid repeated lookups.
+/// Count all precompile events and their local memory events.
 fn count_all_precompile_events(
     record: &EmulationRecord,
-    cache: &mut PrecompileEventCache,
 ) -> (PrecompileCounts, PrecompileLocalMemCounts) {
     let mut precompile_counts = PrecompileCounts::default();
     let mut local_mem_counts = PrecompileLocalMemCounts::default();
 
     for &code in SUPPORTED_PRECOMPILE_CODES {
-        let event_count = cache.get_event_count(record, code);
-        let local_mem_count = cache.get_local_mem_count(record, code);
+        let event_count = get_precompile_len(record, code);
+        let local_mem_count = get_precompile_local_mem_len(record, code);
 
         match code {
             SyscallCode::SHA_COMPRESS => {
@@ -574,12 +494,10 @@ impl Traced<'_> {
             .memory_initialize_extra_global_start_index
             + counter.num_memory_initialize_events;
 
-        let mut cache = PrecompileEventCache::new();
-        let (precompile_counts, local_mem_counts) = count_all_precompile_events(record, &mut cache);
+        let (precompile_counts, local_mem_counts) = count_all_precompile_events(record);
         counter.precompile_counts = precompile_counts;
         counter.precompile_local_mem_counts = local_mem_counts;
         counter.total_precompile_local_mem_events = counter.get_total_precompile_local_mem_events();
-        counter.total_precompile_events = counter.get_total_precompile_events();
 
         // Global events: two per entry less one per fresh entry (`riscv_memory/event.rs`), for the
         // precompile entries here and the CPU entries in `MemoryLocalChip::count_extra_records`;

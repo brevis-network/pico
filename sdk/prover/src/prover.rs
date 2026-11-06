@@ -261,7 +261,7 @@ pub struct ProverBuilder {
     #[cfg(feature = "aot")]
     aot: Option<&'static AotProgram>,
     #[cfg(feature = "aot")]
-    aot_workers: bool,
+    replay_workers: ReplayWorkers,
     emulation_workers: Option<NonZeroUsize>,
     serial_emulation: bool,
     #[cfg(feature = "cuda")]
@@ -288,7 +288,7 @@ impl ProverBuilder {
             #[cfg(feature = "aot")]
             aot: None,
             #[cfg(feature = "aot")]
-            aot_workers: false,
+            replay_workers: ReplayWorkers::Interpreter,
             emulation_workers: None,
             serial_emulation: false,
             #[cfg(feature = "cuda")]
@@ -403,11 +403,12 @@ impl ProverBuilder {
     }
 
     /// Replay the snapshot pipeline's chunks on [`Self::aot`]'s program too, rather than on
-    /// interpreters: the replay workers run the AOT core, which writes the records the interpreter
-    /// would. Needs `aot`; [`Self::build`] and [`Self::execute_chunked`] refuse it without.
+    /// interpreters: its recording blocks write the records the interpreter would. Needs `aot` with
+    /// a program that has a recording entry point, which `cargo pico aot` always generates;
+    /// [`Self::build`] and [`Self::execute_chunked`] refuse it otherwise.
     #[cfg(feature = "aot")]
     pub fn aot_workers(mut self) -> Self {
-        self.aot_workers = true;
+        self.replay_workers = ReplayWorkers::Aot;
         self
     }
 
@@ -790,7 +791,7 @@ impl ProverBuilder {
     /// emulate alike; neither registers the program before its last fallible step.
     fn resolved_emulation(&self, chunk_size: u32) -> Result<EmulationPath, ProveError> {
         #[cfg(feature = "aot")]
-        if self.aot_workers && self.aot.is_none() {
+        if self.aot.is_none() && self.replay_workers == ReplayWorkers::Aot {
             return Err(ProveError::InconsistentOptions(
                 "aot_workers() was set without aot(program); the replay workers run the program \
                  aot registers"
@@ -831,11 +832,7 @@ impl ProverBuilder {
             SnapshotMainMode::Interpreter
         };
         #[cfg(feature = "aot")]
-        let replay_workers = if self.aot_workers {
-            ReplayWorkers::Aot
-        } else {
-            ReplayWorkers::Interpreter
-        };
+        let replay_workers = self.replay_workers;
         #[cfg(not(feature = "aot"))]
         let replay_workers = ReplayWorkers::Interpreter;
 
@@ -873,6 +870,16 @@ impl ProverBuilder {
                     generated_from: program.elf_sha256(),
                     elf,
                 });
+            }
+            // Refused before anything registers; the pipeline would refuse it only once a prove
+            // has started. Nothing falls back.
+            if self.replay_workers == ReplayWorkers::Aot && program.record_entry().is_none() {
+                return Err(ProveError::InconsistentOptions(
+                    "aot_workers() was set with a program that has no recording entry point, \
+                     which the AOT replay workers run; regenerate it from the guest's ELF with \
+                     `cargo pico aot`"
+                        .into(),
+                ));
             }
         }
         Ok(EmulationPath::Pipeline {
@@ -1271,7 +1278,7 @@ impl Prover {
         )
     }
 
-    /// Whether the snapshot pipeline's replay workers run the AOT program
+    /// Whether the snapshot pipeline's replay workers run the AOT program's recording blocks
     /// ([`ProverBuilder::aot_workers`]) rather than interpreters; `false` when this prover
     /// emulates serially.
     pub fn replays_with_aot(&self) -> bool {

@@ -9,6 +9,11 @@
 //! The record the interpreter's `mr`/`mw` return is built from the cell as it stood just before the
 //! access, which is what the core's access captures and does not hand back. An unrecorded read
 //! still snapshots its cell, as the interpreter's `dword` does.
+//!
+//! The core lends its sink to the precompile for the whole syscall, so its event and the closes of
+//! the CPU's windows take one look-up of the sink, not one per write. The core's accesses meanwhile
+//! run with its sink off, which loses nothing: they write no event of the core's, the precompile's
+//! windows being this context's own, as in the interpreter's `SyscallContext`.
 
 use hashbrown::HashMap;
 use p3_koala_bear::KoalaBear;
@@ -53,21 +58,24 @@ use pico_vm::{
 };
 use std::marker::PhantomData;
 
-use crate::emulator::AotEmulatorCore;
+use crate::emulator::{AotEmulatorCore, RecordingAotSink};
 
 /// A precompile's view of the AOT core for one syscall, as `SyscallContext` is the interpreter's.
 pub(crate) struct AotSyscallContext<'a> {
     core: &'a mut AotEmulatorCore,
+    /// The core's sink, held apart from it until the syscall returns.
+    sink: &'a mut RecordingAotSink,
     clk: RvClk,
     /// The syscall's own first and last access to each dword it touched.
     local_memory_access: HashMap<u64, MemoryLocalEvent>,
 }
 
 impl<'a> AotSyscallContext<'a> {
-    fn new(core: &'a mut AotEmulatorCore) -> Self {
+    fn new(core: &'a mut AotEmulatorCore, sink: &'a mut RecordingAotSink) -> Self {
         let clk = RvClk::from(core.clk);
         Self {
             core,
+            sink,
             clk,
             local_memory_access: HashMap::new(),
         }
@@ -181,9 +189,7 @@ impl SyscallHost for AotSyscallContext<'_> {
     }
 
     fn record_mut(&mut self) -> &mut EmulationRecord {
-        self.core
-            .emitting_record_mut()
-            .expect("a precompile runs on the AOT core only while it writes records")
+        self.sink.record_mut()
     }
 
     fn postprocess(&mut self) -> Vec<MemoryLocalEvent> {
@@ -196,13 +202,7 @@ impl SyscallHost for AotSyscallContext<'_> {
             // precompile's own windows, collected above in the same order, are not part of it.
             let start = ledger::timer_start();
             for event in &syscall_local_mem_events {
-                if let Some(cpu_window) = self.core.take_cpu_window(event.addr) {
-                    self.core
-                        .emitting_record_mut()
-                        .expect("a precompile runs on the AOT core only while it writes records")
-                        .cpu_local_memory_access
-                        .push(cpu_window);
-                }
+                self.sink.close_cpu_window(event.addr);
             }
             ledger::drain_cpu_window(start, self.core.role, syscall_local_mem_events.len());
         }
@@ -333,7 +333,8 @@ fn vm_precompile(code: SyscallCode) -> Option<Run> {
 
 impl AotEmulatorCore {
     /// Runs `code`'s precompile as the interpreter does, writing its events into the chunk's
-    /// record, and returns what it returns; `None` when `code` is not a precompile.
+    /// record, and returns what it returns; `None` when `code` is not a precompile. Only while the
+    /// core writes records.
     pub(crate) fn emulate_vm_precompile(
         &mut self,
         code: SyscallCode,
@@ -341,7 +342,12 @@ impl AotEmulatorCore {
         arg2: u64,
     ) -> Option<Option<RvValue>> {
         let run = vm_precompile(code)?;
-        Some(run(&mut AotSyscallContext::new(self), code, arg1, arg2))
+        Some(self.lend(|core, sink| {
+            // No precompile runs inside an unconstrained block: `execute_syscall` refuses it.
+            let sink =
+                sink.expect("a precompile runs on the AOT core only while it writes records");
+            run(&mut AotSyscallContext::new(core, sink), code, arg1, arg2)
+        }))
     }
 }
 

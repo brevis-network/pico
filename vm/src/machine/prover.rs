@@ -102,7 +102,8 @@ where
         const BYTE_CHIP_INDEX: usize = 45;
 
         // Ecall chip: appended after Byte in the gpu chip list so the indices above
-        // stay valid. Host tracegen + H2D upload — needs no device event buffers.
+        // stay valid. A device kernel over the history's ecall list, so it needs no device event
+        // buffers.
         const ECALL_CHIP_INDEX: usize = 46;
 
         // Poseidon2 precompile, Ed25519 add and Ed25519 decompress: host tracegen, appended after
@@ -284,9 +285,10 @@ where
             snap_after!(chip_index);
         }
 
-        // Ecall chip (host tracegen; its byte lookups are contributed by the Cpu kernel on the
-        // GPU path, so no snapshot delta is expected here).
+        // Ecall chip: its kernel reads the history's ecall list and adds the chip's byte lookups
+        // itself, so the snapshot after it carries them.
         run_chip(ECALL_CHIP_INDEX, &mut preallocated_gpu_memory);
+        snap_after!(ECALL_CHIP_INDEX);
 
         // Host-tracegen precompile chips. Their byte-table update is a read-modify-write through
         // the host (`gpu_add_host_byte_lookups`), which is sound only because the chips run one

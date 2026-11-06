@@ -5,7 +5,7 @@
 //! chunk accounting, no snapshots. `ECALL` goes to the host. Semantics follow `aot-runtime`'s
 //! `_no_count` helpers.
 
-use crate::types::{sign_extend_imm32_to_u64, Instruction, Opcode};
+use crate::types::{Instruction, Opcode};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::collections::HashSet;
@@ -14,16 +14,13 @@ use std::collections::HashSet;
 pub fn translate(pc: u64, inst: &Instruction, leaders: &HashSet<u64>) -> (TokenStream, bool) {
     match inst.opcode {
         Opcode::JAL => {
-            let (rd, imm) = inst.j_type();
-            let rd = rd as usize;
-            let target = pc.wrapping_add(sign_extend_imm32_to_u64(imm));
+            let (rd, imm) = (inst.op_a as usize, inst.op_b);
+            let target = pc.wrapping_add(imm);
             let step = step_to(target, leaders);
             (quote! { emu.link(#rd, #pc); Ok(#step) }, true)
         }
         Opcode::JALR => {
-            let (rd, rs1, imm) = inst.i_type();
-            let (rd, rs1) = (rd as usize, rs1 as usize);
-            let imm = u64::from(imm);
+            let (rd, rs1, imm) = (inst.op_a as usize, inst.op_b as usize, inst.op_c);
             (
                 quote! {
                     let target = emu.jalr(#rd, #rs1, #pc, #imm);
@@ -33,9 +30,8 @@ pub fn translate(pc: u64, inst: &Instruction, leaders: &HashSet<u64>) -> (TokenS
             )
         }
         Opcode::BEQ | Opcode::BNE | Opcode::BLT | Opcode::BGE | Opcode::BLTU | Opcode::BGEU => {
-            let (rs1, rs2, imm) = inst.b_type();
-            let (rs1, rs2) = (rs1 as usize, rs2 as usize);
-            let target = pc.wrapping_add(sign_extend_imm32_to_u64(imm));
+            let (rs1, rs2, imm) = (inst.op_a as usize, inst.op_b as usize, inst.op_c);
+            let target = pc.wrapping_add(imm);
             let taken = step_to(target, leaders);
             let fallthrough = step_to(pc.wrapping_add(4), leaders);
             let cond = match inst.opcode {
@@ -122,9 +118,8 @@ fn alu_fn(opcode: Opcode) -> Option<proc_macro2::Ident> {
 fn normal(pc: u64, inst: &Instruction) -> TokenStream {
     match inst.opcode {
         Opcode::AUIPC => {
-            let (rd, imm) = inst.u_type();
-            let rd = rd as usize;
-            let value = pc.wrapping_add(sign_extend_imm32_to_u64(imm));
+            let (rd, imm) = (inst.op_a as usize, inst.op_b);
+            let value = pc.wrapping_add(imm);
             return quote! { emu.w(#rd, #value); };
         }
         Opcode::LB
@@ -134,14 +129,12 @@ fn normal(pc: u64, inst: &Instruction) -> TokenStream {
         | Opcode::LHU
         | Opcode::LWU
         | Opcode::LD => {
-            let (rd, rs1, imm) = inst.i_type();
-            let (rd, rs1, imm) = (rd as usize, rs1 as usize, u64::from(imm));
+            let (rd, rs1, imm) = (inst.op_a as usize, inst.op_b as usize, inst.op_c);
             let f = format_ident!("{}", format!("{:?}", inst.opcode).to_lowercase());
             return quote! { emu.#f(#rd, #rs1, #imm)?; };
         }
         Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SD => {
-            let (rs2, rs1, imm) = inst.s_type();
-            let (rs2, rs1, imm) = (rs2 as usize, rs1 as usize, u64::from(imm));
+            let (rs2, rs1, imm) = (inst.op_a as usize, inst.op_b as usize, inst.op_c);
             let f = format_ident!("{}", format!("{:?}", inst.opcode).to_lowercase());
             return quote! { emu.#f(#rs2, #rs1, #imm)?; };
         }
@@ -156,13 +149,13 @@ fn normal(pc: u64, inst: &Instruction) -> TokenStream {
     };
     let rd = inst.op_a as usize;
     if inst.imm_b && inst.imm_c {
-        // Both operands constant, as the default translator folds them: sign-extended immediates.
-        let b = sign_extend_imm32_to_u64(inst.op_b);
-        let c = sign_extend_imm32_to_u64(inst.op_c);
+        // Both operands constant, as the default translator folds them; the decoder has already
+        // sign-extended them.
+        let (b, c) = (inst.op_b, inst.op_c);
         quote! { { let b: u64 = #b; let c: u64 = #c; emu.w(#rd, pico_aot_pure::#f(b, c)); } }
     } else if inst.imm_c {
         let rs1 = inst.op_b as usize;
-        let imm = u64::from(inst.op_c);
+        let imm = inst.op_c;
         quote! { { let b = emu.r(#rs1); let c = pico_aot_pure::sext32(#imm); emu.w(#rd, pico_aot_pure::#f(b, c)); } }
     } else {
         let rs1 = inst.op_b as usize;

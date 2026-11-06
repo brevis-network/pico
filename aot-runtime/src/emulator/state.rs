@@ -19,7 +19,7 @@ use crate::{
     types::BlockFn,
 };
 
-use super::{types::RegisterRecord, AotSink};
+use super::{types::RegisterFile, AotSink};
 
 /// Running totals over a run's batches. A first touch is the one access per batch that records an
 /// address's prior state in the batch's prestate. A load and a store narrower than the doubleword
@@ -51,10 +51,9 @@ pub(crate) enum Touch {
 pub struct AotEmulatorCore {
     /// Compiled program containing instruction stream for interpreter fallback.
     pub(crate) program: Arc<Program>,
-    /// 32 general-purpose registers (x0-x31)
-    pub registers: [u64; 32],
-    /// Tracks whether a register has ever been accessed (read or written).
-    pub(crate) reg_present: [bool; 32],
+    /// The 32 general-purpose registers (x0-x31), each with its last access, as the interpreter
+    /// keeps them.
+    pub registers: RegisterFile,
     /// Program counter
     pub pc: u64,
     /// Instruction counter for comparison with Pico's `state.global_clk`
@@ -86,15 +85,11 @@ pub struct AotEmulatorCore {
     pub batch_chunks_emulated: u32,
     pub batch_stop: bool,
     pub chunk_split_config: ChunkSplitConfig,
-    /// Snapshot (rollback) register data for the current batch
-    pub batch_start_registers: [u64; 32],
-    pub batch_start_reg_present: [bool; 32],
-    /// Register metadata (chunk/timestamp) for current state.
-    pub register_records: [RegisterRecord; 32],
-    /// Register metadata at batch start.
-    pub batch_start_register_records: [RegisterRecord; 32],
-    /// Lightweight tracking: which registers were accessed
-    pub accessed_regs: [bool; 32],
+    /// The registers at batch start, the prestate the snapshot restores a touched register to.
+    pub batch_start_registers: RegisterFile,
+    /// The registers accessed in the batch. Kept apart from the records, since an unconstrained
+    /// block rolls the records back but not these, as the interpreter's snapshot keeps its touches.
+    pub touched_registers: [bool; 32],
     /// Memory snapshot of pre-batch values (only addresses accessed in this batch).
     pub memory_snapshot: ContiguousRiscvMemory,
     /// True iff `memory_snapshot`'s bitmap is currently all-zero (clean). Maintained at batch
@@ -122,13 +117,21 @@ pub struct AotEmulatorCore {
     pub chunk_split_state: ChunkSplitState,
     /// Saved state for unconstrained execution blocks.
     pub(crate) unconstrained_state: Option<UnconstrainedState>,
-    /// Compiled blocks entered by `run_blocks`, so a run can show it executed generated code.
+    /// Compiled blocks entered by `run_blocks` or `run_record_blocks`, so a run can show it
+    /// executed generated code.
     pub(crate) compiled_block_dispatches: u64,
     /// Instructions the fallback interpreter ran. A generated block that does not fit what is left
     /// of the chunk falls back, so a run that cuts chunks interprets some of its instructions; how
     /// many, against its cycles, is what shows the generated code ran the rest. An unconstrained
     /// region rolls it back with `insn_count`, so it counts cycles.
     pub(crate) fallback_insns: u64,
+    /// Recording blocks that ran their bodies, and their instructions; unlike
+    /// `compiled_block_dispatches`, a block that fell back on entry is not counted, nor anything
+    /// inside an unconstrained region.
+    pub(crate) recorder_body_dispatches: u64,
+    pub(crate) recorder_body_insns: u64,
+    /// Of `recorder_body_insns`, those whose rows the recording blocks wrote directly.
+    pub(crate) recorder_direct_insns: u64,
     /// Where the instructions' events go.
     pub(crate) sink: AotSink,
     /// What the snapshot thread's batches cost in prestate, for the stage ledger.
@@ -150,10 +153,8 @@ pub struct UnconstrainedState {
     pub(crate) current_chunk: u32,
     pub(crate) batch_chunks_emulated: u32,
     pub(crate) batch_stop: bool,
-    pub(crate) registers: [u64; 32],
-    pub(crate) reg_present: [bool; 32],
-    pub(crate) register_records: [RegisterRecord; 32],
-    // Note: accessed_regs is intentionally NOT saved/restored.
+    pub(crate) registers: RegisterFile,
+    // Note: touched_registers is intentionally NOT saved/restored.
     // They persist across unconstrained mode to match baseline behavior where
     // memory_snapshot accumulates all accesses during the batch.
     pub(crate) memory_diff: HashMap<u64, MemoryRecord>,
@@ -196,8 +197,7 @@ impl AotEmulatorCore {
 
         Self {
             program: program.clone(),
-            registers: [0; 32],
-            reg_present: [false; 32],
+            registers: RegisterFile::default(),
             pc: program.pc_start,
             insn_count: 0,
             current_chunk: 1,
@@ -215,11 +215,8 @@ impl AotEmulatorCore {
             batch_chunks_emulated: 0,
             batch_stop: false,
             chunk_split_config: ChunkSplitConfig::disabled(max_syscall_cycles),
-            batch_start_registers: [0; 32],
-            batch_start_reg_present: [false; 32],
-            register_records: [RegisterRecord::default(); 32],
-            batch_start_register_records: [RegisterRecord::default(); 32],
-            accessed_regs: [false; 32],
+            batch_start_registers: RegisterFile::default(),
+            touched_registers: [false; 32],
             memory_snapshot: ContiguousRiscvMemory::new(),
             memory_snapshot_clean: true,
             next_sub_yield: u64::MAX,
@@ -232,6 +229,9 @@ impl AotEmulatorCore {
             unconstrained_state: None,
             compiled_block_dispatches: 0,
             fallback_insns: 0,
+            recorder_body_dispatches: 0,
+            recorder_body_insns: 0,
+            recorder_direct_insns: 0,
             sink: AotSink::Off,
             snapshot_counts: SnapshotCounts::default(),
             role: CoreRole::Snapshot,
@@ -253,8 +253,6 @@ impl AotEmulatorCore {
     #[inline(always)]
     pub fn save_batch_start_state(&mut self) {
         self.batch_start_registers = self.registers;
-        self.batch_start_reg_present = self.reg_present;
-        self.batch_start_register_records = self.register_records;
         // `memory_snapshot` is normally already clean here (the previous batch's
         // `fill_snapshot_memory_*` swapped in fresh pooled memory), so skip the redundant
         // ~31.5 MB bitmap scan. Only clear when the flag says it may be dirty (defensive).
@@ -262,7 +260,7 @@ impl AotEmulatorCore {
             self.memory_snapshot.clear();
             self.memory_snapshot_clean = true;
         }
-        self.clear_accessed_regs();
+        self.clear_touched_registers();
     }
 
     /// Look up a block function for the given program counter.
@@ -311,7 +309,10 @@ impl AotEmulatorCore {
 mod tests {
     use super::AotEmulatorCore;
     use crate::types::NextStep;
-    use pico_vm::compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program};
+    use pico_vm::{
+        compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program},
+        emulator::riscv::state::RuntimeRegisterRecord,
+    };
     use std::{collections::BTreeMap, sync::Arc};
 
     fn test_program_with_instructions(
@@ -444,6 +445,32 @@ mod tests {
         assert_eq!(snapshot.registers[2].value, 0x2222);
     }
 
+    /// The touched marks outlive the block, so the batch still restores and counts a register only
+    /// the block touched.
+    #[test]
+    fn an_unconstrained_block_rolls_the_records_back_and_keeps_the_touched_marks() {
+        let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
+        emu.write_reg(1, 0x1111);
+        emu.update_insn_clock();
+        emu.save_batch_start_state();
+        let before = emu.registers;
+
+        emu.enter_unconstrained_mode();
+        emu.write_reg(1, 0x2222);
+        emu.write_reg(2, 0x3333);
+        emu.exit_unconstrained_mode().unwrap();
+        assert_eq!(emu.registers, before);
+        assert_eq!(emu.registers[2], RuntimeRegisterRecord::default());
+
+        let mut snapshot = emu.build_snapshot_state();
+        emu.fill_snapshot_memory_delta(&mut snapshot);
+        assert_eq!(snapshot.registers, before.0);
+        assert_eq!(
+            emu.snapshot_counts.first_touch_registers, 1,
+            "x1, touched in the block and present at batch start; x2 was absent"
+        );
+    }
+
     #[test]
     fn phase5_snapshot_reads_capture_prestate_for_precompile_inputs() {
         let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
@@ -540,14 +567,18 @@ mod tests {
         assert_eq!(emu.read_reg_unsafe(4), 1);
     }
 
+    /// A helper takes its immediate as the program holds it: a negative one already 64 bits wide,
+    /// and one past 32 bits whole.
     #[test]
-    fn phase3_helper_immediates_sign_extend_from_low_32_bits() {
+    fn phase3_helper_immediates_are_taken_as_the_program_holds_them() {
         let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
         emu.write_reg(1, 0x20f1f8);
-        emu.adi_no_count(false, 2, 1, u64::from(0xffff_fef8u32), 0x1004);
-        emu.apc_no_count(false, 3, 0x2021f8, u64::from(0x0000_d000u32), 0x1008);
+        emu.adi_no_count(false, 2, 1, -264_i64 as u64, 0x1004);
+        emu.apc_no_count(false, 3, 0x2021f8, 0xd000, 0x1008);
+        emu.adi_no_count(false, 4, 1, 1 << 32, 0x100c);
         assert_eq!(emu.read_reg_unsafe(2), 0x20f0f0);
         assert_eq!(emu.read_reg_unsafe(3), 0x20f1f8);
+        assert_eq!(emu.read_reg_unsafe(4), 0x1_0020_f1f8);
     }
 
     #[test]
@@ -800,14 +831,14 @@ mod tests {
         for (helper, (reg, offset)) in helpers.into_iter().zip(expected) {
             let clk = emu.clk;
             helper(&mut emu);
-            assert_eq!(emu.register_records[reg].timestamp, clk + offset);
+            assert_eq!(emu.registers[reg].timestamp, clk + offset);
         }
 
         let mut emu = setup();
         for (reg, offset) in expected {
             let clk = emu.clk;
             emu.debug_interpret_single_step().unwrap();
-            assert_eq!(emu.register_records[reg].timestamp, clk + offset);
+            assert_eq!(emu.registers[reg].timestamp, clk + offset);
         }
     }
 

@@ -10,10 +10,7 @@ use crate::{
     chips::chips::events::{
         MemoryAccessPosition, MemoryLocalEvent, MemoryReadRecord, MemoryRecord, MemoryWriteRecord,
     },
-    compiler::{
-        addr::fits_pc,
-        riscv::{instruction::Instruction, program::Program, register::Register},
-    },
+    compiler::riscv::{instruction::Instruction, program::Program, register::Register},
     emulator::{
         opts::EmulatorOpts,
         record::RecordBehavior,
@@ -772,9 +769,6 @@ impl RiscvEmulator {
             );
             return Err(EmulationError::UnconstrainedEnd);
         }
-        if done && !fits_pc(self.state.pc) {
-            return Err(EmulationError::EndPcBeyondProofAddress(self.state.pc));
-        }
 
         if !self.is_unconstrained() {
             match self.chunk_boundary_mode() {
@@ -863,14 +857,9 @@ impl RiscvEmulator {
             }
         }
 
-        let done = self.state.pc == 0
-            || self.state.pc.wrapping_sub(self.program.pc_base)
-                >= (self.program.instructions.len() * 4) as u64;
+        let done = self.state.pc == 0;
         if done && self.is_unconstrained() {
             return Err(EmulationError::UnconstrainedEnd);
-        }
-        if done && !fits_pc(self.state.pc) {
-            return Err(EmulationError::EndPcBeyondProofAddress(self.state.pc));
         }
 
         if !self.is_unconstrained() {

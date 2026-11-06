@@ -207,12 +207,6 @@ pub enum EmulationError {
     /// before any thread starts, rather than run on interpreters under an AOT label.
     #[error("the snapshot pipeline cannot run AOT replay workers: {0}")]
     UnsupportedReplayWorkers(String),
-
-    /// The program ended on a jump to a pc the CPU trace's two-limb pc cannot hold. The last
-    /// chunk's `next_pc` is that pc, so no proof can state where the run ended. Raised where the
-    /// run ends, so every mode and every thread fails the same way.
-    #[error("ended at pc 0x{0:016x}, beyond the 32-bit proof pc range")]
-    EndPcBeyondProofAddress(u64),
 }
 
 // By hand rather than `#[from]`, which would also make the termination the error's source and

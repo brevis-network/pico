@@ -6,7 +6,9 @@ use crate::{
     compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program},
     emulator::riscv::{
         event_types::{RvAddr, RvChunk, RvClk, RvValue},
-        history::{ruled_operands, Access, ExecutionHistory, OperandException, Slots, Step},
+        history::{
+            ruled_operands, Access, ExecutionHistory, OperandException, ReadAccess, Slots, Step,
+        },
         history_arena,
         public_values_compat::encode_public_value_pc_limbs,
         record::{AluStream, EmulationRecord},
@@ -344,6 +346,253 @@ impl HistoryWriter {
         self.ended = false;
         self.slot_sought = false;
         std::mem::take(&mut self.history)
+    }
+}
+
+/// Per-table row counts a block reserves through [`HistoryRows::reserve`] before its steps.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BlockRows {
+    pub steps: usize,
+    pub reads: usize,
+    pub writes: usize,
+    /// An upper bound: whether an exception is written depends on the operand's value.
+    pub operand_exceptions: usize,
+    /// Indexed by [`AluStream`] discriminant.
+    pub alu: [usize; 8],
+    pub memory: usize,
+    pub branch: usize,
+}
+
+impl BlockRows {
+    /// In discriminant order, matching the indexing of [`Self::alu`].
+    const ALU_STREAMS: [AluStream; 8] = [
+        AluStream::Add,
+        AluStream::Sub,
+        AluStream::Mul,
+        AluStream::Bitwise,
+        AluStream::ShiftLeft,
+        AluStream::ShiftRight,
+        AluStream::Lt,
+        AluStream::DivRem,
+    ];
+
+    pub fn alu_mut(&mut self, stream: AluStream) -> &mut usize {
+        &mut self.alu[stream as usize]
+    }
+}
+
+/// The history's tables, for a writer that closes its steps itself instead of through
+/// [`ExecutionSink::end_cycle`]: the AOT core's recording blocks.
+///
+/// Each step must be, row for row, the one `end_cycle` writes for the same cycle: reads in
+/// [`Slots::ORDER`], then the write, the chip list entries, and an operand exception wherever the
+/// rule of [`ExecutionHistory::operands`] misses. Nothing here checks it; `check_step` (test
+/// builds) compares one step against `end_cycle`, which catches a wrong layout but not a value the
+/// writer gets wrong consistently.
+///
+/// Rows go through `end_cycle`'s first-write path, so the chunk takes its arena slot, and a table
+/// spills or refuses, at the same row. Steps are written between cycles: the emulator's open cycle
+/// must hold no access.
+pub struct HistoryRows<'a> {
+    writer: &'a mut HistoryWriter,
+}
+
+impl HistoryRows<'_> {
+    /// Takes the chunk's slot first, so the room is reserved in the tables the rows go into. Writes
+    /// no row, so a block that stops part way leaves only the steps it wrote.
+    #[inline]
+    pub fn reserve(&mut self, room: &BlockRows) {
+        let writer = &mut *self.writer;
+        writer.before_write();
+        let history = &mut writer.history;
+        history.steps.reserve(room.steps);
+        history.reads.reserve(room.reads);
+        history.writes.reserve(room.writes);
+        history.operand_exceptions.reserve(room.operand_exceptions);
+        for (stream, entries) in BlockRows::ALU_STREAMS.into_iter().zip(room.alu) {
+            if entries > 0 {
+                history.chip_steps.alu_mut(stream).reserve(entries);
+            }
+        }
+        history.chip_steps.memory.reserve(room.memory);
+        history.chip_steps.branch.reserve(room.branch);
+    }
+
+    /// Writes one step and its rows, `reads` in [`Slots::ORDER`]. Returns the step's index.
+    ///
+    /// # Panics
+    ///
+    /// If an index does not fit a `u32`.
+    #[inline(always)]
+    pub fn step<const READS: usize, const WRITES: usize>(
+        &mut self,
+        chunk: RvChunk,
+        clk: u32,
+        pc: u32,
+        next_pc: u32,
+        reads: [ReadAccess; READS],
+        writes: [Access; WRITES],
+    ) -> u32 {
+        let writer = &mut *self.writer;
+        debug_assert!(
+            writer.cycle.traced && writer.cycle.filled == 0,
+            "a step written while a cycle holds accesses"
+        );
+        writer.ended = true;
+        writer.before_write();
+        let history = &mut writer.history;
+        let index = narrow(history.steps.len() as u64, "step index");
+        if index == 0 {
+            history.chunk = chunk;
+        }
+        debug_assert_eq!(history.chunk, chunk, "a step of another chunk");
+        let first_read = narrow(history.reads.len() as u64, "read index");
+        let first_write = narrow(history.writes.len() as u64, "write index");
+        history.steps.push(Step {
+            clk,
+            pc,
+            next_pc,
+            first_read,
+            first_write,
+        });
+        history.reads.extend(reads);
+        history.writes.extend(writes);
+        index
+    }
+
+    /// This and the list and exception writers below must follow their step's [`Self::step`],
+    /// which took the chunk's slot.
+    #[inline(always)]
+    pub fn alu(&mut self, stream: AluStream, step: u32) {
+        self.writer.history.chip_steps.alu_mut(stream).push(step);
+    }
+
+    #[inline(always)]
+    pub fn memory(&mut self, step: u32) {
+        self.writer.history.chip_steps.memory.push(step);
+    }
+
+    #[inline(always)]
+    pub fn branch(&mut self, step: u32) {
+        self.writer.history.chip_steps.branch.push(step);
+    }
+
+    /// Operand `slot` held `value`, which the rule does not give.
+    #[inline(always)]
+    pub fn operand_exception(&mut self, step: u32, slot: MemoryAccessPosition, value: RvValue) {
+        self.writer
+            .history
+            .operand_exceptions
+            .push(OperandException {
+                step,
+                slot: slot as u32,
+                value,
+            });
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl HistoryRows<'_> {
+    /// Panics unless the step at `index`, the last written, holds exactly the rows
+    /// [`ExecutionSink::end_cycle`] writes for the cycle that made `accesses` (in the order made)
+    /// and an ALU event if `alu`. The emulator's open cycle must hold no access.
+    #[allow(clippy::too_many_arguments)]
+    pub fn check_step(
+        &self,
+        index: u32,
+        chunk: RvChunk,
+        clk: RvClk,
+        pc: RvAddr,
+        next_pc: RvAddr,
+        accesses: &[(MemoryAccessPosition, MemoryRecordEnum)],
+        alu: bool,
+        operands: [RvValue; 3],
+        instruction: &Instruction,
+    ) {
+        let writer = &*self.writer;
+        assert!(
+            writer.cycle.traced && writer.cycle.filled == 0,
+            "step {index} at {pc:#x} was written while a cycle held accesses"
+        );
+        // On the heap: the comparison's own history must not take a slot of the arena.
+        let mut generic = HistoryWriter {
+            slot_sought: true,
+            ..HistoryWriter::default()
+        };
+        generic.begin_cycle();
+        for &(position, record) in accesses {
+            generic.access(position, record);
+        }
+        if alu {
+            generic.alu(instruction.opcode);
+        }
+        let [a, b, c] = operands;
+        generic.end_cycle(chunk, clk, pc, next_pc, a, b, c, instruction);
+        let (expected, written) = (&generic.history, &writer.history);
+        let at = index as usize;
+        let what = |table: &str| format!("step {index} at {pc:#x} ({instruction:?}): {table}");
+        assert_eq!(written.steps.len(), at + 1, "{}", what("not the last step"));
+        assert_eq!(
+            expected.steps.len(),
+            1,
+            "{}",
+            what("end_cycle wrote no step")
+        );
+        assert!(writer.ended, "{}", what("the chunk holds no step"));
+        assert_eq!(written.chunk, chunk, "{}", what("chunk"));
+        let (step, generic_step) = (written.steps[at], expected.steps[0]);
+        assert_eq!(
+            (step.clk, step.pc, step.next_pc),
+            (generic_step.clk, generic_step.pc, generic_step.next_pc),
+            "{}",
+            what("clock and pcs")
+        );
+        assert_eq!(
+            &written.reads[step.first_read as usize..],
+            &expected.reads[..],
+            "{}",
+            what("reads")
+        );
+        assert_eq!(
+            &written.writes[step.first_write as usize..],
+            &expected.writes[..],
+            "{}",
+            what("writes")
+        );
+        let first_exception = written
+            .operand_exceptions
+            .partition_point(|exception| exception.step < index);
+        let rebased: Vec<_> = expected
+            .operand_exceptions
+            .iter()
+            .map(|exception| OperandException {
+                step: index,
+                ..*exception
+            })
+            .collect();
+        assert_eq!(
+            &written.operand_exceptions[first_exception..],
+            &rebased[..],
+            "{}",
+            what("operand exceptions")
+        );
+        let lists = written.chip_steps.all().into_iter();
+        for (list, (written_list, expected_list)) in
+            lists.zip(expected.chip_steps.all()).enumerate()
+        {
+            assert_eq!(
+                written_list.last() == Some(&index),
+                expected_list == [0],
+                "{}",
+                what(&format!("chip list {list}"))
+            );
+        }
+        assert_eq!(
+            written.operands(at, instruction),
+            (a, b, c),
+            "{}",
+            what("operands as the readers rebuild them")
+        );
     }
 }
 
@@ -743,6 +992,22 @@ impl Sink {
         }
     }
 
+    /// See [`HistoryRows`].
+    ///
+    /// # Panics
+    ///
+    /// On a counting sink, which keeps none.
+    #[inline]
+    pub fn history_rows(&mut self) -> HistoryRows<'_> {
+        match self {
+            Self::History(sink) => HistoryRows {
+                writer: &mut sink.history,
+            },
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Counting(_) => panic!("a counting sink keeps no history rows"),
+        }
+    }
+
     /// The emulator's register windows, indexed by register.
     #[inline]
     pub fn register_local_access_mut(&mut self) -> &mut [Option<MemoryLocalEvent>; 32] {
@@ -755,7 +1020,7 @@ impl Sink {
 
     /// Starts a replay over on `program`'s empty record, with no cycle accesses, no windows, no
     /// history and no open unconstrained block. The sink keeps its kind.
-    pub(crate) fn restart(&mut self, program: Arc<Program>) {
+    pub fn restart(&mut self, program: Arc<Program>) {
         match self {
             Self::History(sink) => {
                 sink.record = EmulationRecord::new(program);
@@ -903,8 +1168,13 @@ mod tests {
     use super::*;
     use crate::{
         chips::chips::riscv_memory::event::{MemoryReadRecord, MemoryRecord, MemoryWriteRecord},
-        emulator::riscv::{history::ReadAccess, record_digest::field_digests},
+        emulator::riscv::{
+            history::ReadAccess,
+            history_arena::{HistoryArena, HistoryCapacity, SpillPolicy, Table},
+            record_digest::field_digests,
+        },
     };
+    use std::num::NonZeroUsize;
 
     fn syscall(clk: RvClk) -> SyscallEvent {
         SyscallEvent {
@@ -1387,5 +1657,328 @@ mod tests {
         };
         assert!(history.history.history.steps.is_empty());
         assert!(!history.holds_steps());
+    }
+
+    /// `add_cycle`'s rows, written directly. An `x0` destination writes 0, so the computed 3 is an
+    /// operand exception and there is no ALU entry.
+    fn add_rows(sink: &mut Sink, rd: u8) -> u32 {
+        sink.begin_cycle();
+        let read = |value, prev_timestamp| ReadAccess {
+            value,
+            prev_chunk: 1,
+            prev_timestamp,
+        };
+        let written = if rd == 0 { 0 } else { 3 };
+        let write = Access {
+            value: written,
+            prev_value: 9,
+            prev_chunk: 1,
+            prev_timestamp: 7,
+        };
+        let mut rows = sink.history_rows();
+        let step = rows.step(2, 8, 0x1000, 0x1004, [read(1, 6), read(2, 5)], [write]);
+        if rd == 0 {
+            rows.operand_exception(step, MemoryAccessPosition::A, 3);
+        } else {
+            rows.alu(AluStream::Add, step);
+        }
+        step
+    }
+
+    fn written_history(sink: &Sink) -> &ExecutionHistory {
+        let Sink::History(sink) = sink else {
+            unreachable!("a history sink");
+        };
+        &sink.history.history
+    }
+
+    /// `add_cycle`'s accesses, for `check_step`.
+    fn add_accesses(rd_written: RvValue) -> [(MemoryAccessPosition, MemoryRecordEnum); 3] {
+        [
+            (MemoryAccessPosition::C, read(2, 5)),
+            (MemoryAccessPosition::B, read(1, 6)),
+            (MemoryAccessPosition::A, write(rd_written, 9, 7)),
+        ]
+    }
+
+    #[test]
+    fn a_step_written_directly_is_the_one_end_cycle_writes() {
+        let mut generic = HistorySink::new(EmulationRecord::default());
+        add_cycle(&mut generic);
+        let mut direct = Sink::History(HistorySink::new(EmulationRecord::default()));
+        let step = add_rows(&mut direct, 3);
+        assert_eq!(step, 0);
+        assert!(direct.holds_steps());
+        assert_eq!(
+            written_history(&direct).digest(),
+            generic.history.history.digest()
+        );
+        direct.history_rows().check_step(
+            step,
+            2,
+            8,
+            0x1000,
+            0x1004,
+            &add_accesses(3),
+            true,
+            [3, 1, 2],
+            &ADD,
+        );
+
+        // The next instruction's accesses go into the cycle the first left open.
+        add_cycle(&mut generic);
+        if let Sink::History(direct) = &mut direct {
+            direct.access(MemoryAccessPosition::C, read(2, 5));
+            direct.access(MemoryAccessPosition::B, read(1, 6));
+            direct.access(MemoryAccessPosition::A, write(3, 9, 7));
+            direct.alu(8, Opcode::ADD, 3, 1, 2, false);
+            direct.end_cycle(2, 8, 0x1000, 0x1004, 0, 3, 1, 2, ADD, None);
+        }
+        assert_eq!(
+            written_history(&direct).digest(),
+            generic.history.history.digest()
+        );
+    }
+
+    #[test]
+    fn check_step_takes_the_operand_exception_end_cycle_writes() {
+        let add_x0 = Instruction::new(Opcode::ADD, 0, 1, 2, false, false);
+        let mut direct = Sink::History(HistorySink::new(EmulationRecord::default()));
+        let step = add_rows(&mut direct, 0);
+        assert_eq!(
+            written_history(&direct).operand_exceptions,
+            [OperandException {
+                step,
+                slot: MemoryAccessPosition::A as u32,
+                value: 3,
+            }]
+        );
+        let rows = direct.history_rows();
+        rows.check_step(
+            step,
+            2,
+            8,
+            0x1000,
+            0x1004,
+            &add_accesses(0),
+            false,
+            [3, 1, 2],
+            &add_x0,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "reads")]
+    fn check_step_refuses_reads_out_of_slot_order() {
+        let mut direct = Sink::History(HistorySink::new(EmulationRecord::default()));
+        direct.begin_cycle();
+        let read = |value, prev_timestamp| ReadAccess {
+            value,
+            prev_chunk: 1,
+            prev_timestamp,
+        };
+        let write = Access {
+            value: 3,
+            prev_value: 9,
+            prev_chunk: 1,
+            prev_timestamp: 7,
+        };
+        let mut rows = direct.history_rows();
+        let step = rows.step(2, 8, 0x1000, 0x1004, [read(2, 5), read(1, 6)], [write]);
+        rows.alu(AluStream::Add, step);
+        rows.check_step(
+            step,
+            2,
+            8,
+            0x1000,
+            0x1004,
+            &add_accesses(3),
+            true,
+            [3, 1, 2],
+            &ADD,
+        );
+    }
+
+    #[test]
+    fn reserving_room_writes_no_row() {
+        let mut sink = Sink::History(HistorySink::new(EmulationRecord::default()));
+        let mut room = BlockRows {
+            steps: 4,
+            reads: 6,
+            writes: 4,
+            operand_exceptions: 1,
+            ..BlockRows::default()
+        };
+        *room.alu_mut(AluStream::ShiftRight) = 3;
+        room.memory = 2;
+        room.branch = 1;
+        sink.history_rows().reserve(&room);
+        let history = written_history(&sink);
+        assert!(history.steps.capacity() >= 4 && history.chip_steps.shift_right.capacity() >= 3);
+        assert!(history.chip_steps.memory.capacity() >= 2);
+        assert!(history.chip_steps.branch.capacity() >= 1);
+        assert_eq!(history.digest(), ExecutionHistory::default().digest());
+        assert!(!sink.holds_steps());
+    }
+
+    /// `LD x4, 0(x1)` then a taken `BNE x4, x1, -8`, as in
+    /// `history_sink_stores_each_step_and_its_accesses_in_slot_order`.
+    #[test]
+    fn a_load_and_a_branch_written_directly_are_the_ones_end_cycle_writes() {
+        let bne = Instruction::new(Opcode::BNE, 4, 1, (-8_i64) as u64, false, true);
+        let mut generic = HistorySink::new(EmulationRecord::default());
+        generic.begin_cycle();
+        generic.access(MemoryAccessPosition::B, read(1, 10));
+        generic.access(MemoryAccessPosition::Memory, read(0x55, 3));
+        generic.access(MemoryAccessPosition::A, write(0x55, 0, 11));
+        generic.end_cycle(2, 12, 0x1004, 0x1008, 0, 0x55, 1, 0, LD, Some(0x55));
+        generic.begin_cycle();
+        generic.access(MemoryAccessPosition::B, read(1, 14));
+        generic.access(MemoryAccessPosition::A, read(0x55, 15));
+        generic.end_cycle(2, 16, 0x1008, 0x1000, 0, 0x55, 1, bne.op_c, bne, None);
+
+        let as_read = |record: MemoryRecordEnum| ReadAccess::from(Access::from(record));
+        let mut direct = Sink::History(HistorySink::new(EmulationRecord::default()));
+        direct.begin_cycle();
+        let mut rows = direct.history_rows();
+        let load = rows.step(
+            2,
+            12,
+            0x1004,
+            0x1008,
+            [as_read(read(1, 10)), as_read(read(0x55, 3))],
+            [Access::from(write(0x55, 0, 11))],
+        );
+        rows.memory(load);
+        let branch = rows.step(
+            2,
+            16,
+            0x1008,
+            0x1000,
+            [as_read(read(0x55, 15)), as_read(read(1, 14))],
+            [],
+        );
+        rows.branch(branch);
+        assert_eq!((load, branch), (0, 1));
+        assert_eq!(
+            written_history(&direct).digest(),
+            generic.history.history.digest()
+        );
+        let rows = direct.history_rows();
+        rows.check_step(
+            branch,
+            2,
+            16,
+            0x1008,
+            0x1000,
+            &[
+                (MemoryAccessPosition::B, read(1, 14)),
+                (MemoryAccessPosition::A, read(0x55, 15)),
+            ],
+            false,
+            [0x55, 1, bne.op_c],
+            &bne,
+        );
+    }
+
+    /// An arena with `rows` rows a table. Built with `cuda`, its slots are pinned and need a CUDA
+    /// driver.
+    fn small_arena(slots: usize, rows: usize, policy: SpillPolicy) -> HistoryArena {
+        let capacity = Table::ALL
+            .into_iter()
+            .fold(HistoryCapacity::CENSUS, |capacity, table| {
+                capacity.with_rows(table, rows)
+            });
+        let slots = NonZeroUsize::new(slots).expect("at least one slot");
+        HistoryArena::pin(slots, capacity.chunk_size(), capacity, policy).expect("an arena")
+    }
+
+    /// A history sink holding a slot of `arena`, as its first write takes one when records are
+    /// bounded.
+    fn history_sink_in_a_slot(arena: &HistoryArena) -> HistorySink {
+        let mut sink = HistorySink::new(EmulationRecord::default());
+        let chunk = sink.history.history.chunk;
+        sink.history.history = arena.take(chunk);
+        sink.history.slot_sought = true;
+        sink
+    }
+
+    fn in_slot(history: &ExecutionHistory) -> Vec<bool> {
+        Table::ALL
+            .into_iter()
+            .map(|table| history.is_in_slot(table))
+            .collect()
+    }
+
+    /// Reserving past a region's room under a refusing policy neither refuses nor moves it.
+    #[test]
+    fn reserving_room_in_a_slot_writes_no_row_and_leaves_its_regions_in_place() {
+        let arena = small_arena(1, 2, SpillPolicy::Refuse);
+        let mut sink = Sink::History(history_sink_in_a_slot(&arena));
+        let mut room = BlockRows {
+            steps: 16,
+            reads: 32,
+            writes: 16,
+            operand_exceptions: 16,
+            memory: 16,
+            branch: 16,
+            ..BlockRows::default()
+        };
+        *room.alu_mut(AluStream::Add) = 16;
+        let taken = written_history(&sink).digest();
+        sink.history_rows().reserve(&room);
+        let history = written_history(&sink);
+        assert!(history.holds_slot());
+        assert_eq!(in_slot(history), [true; 16]);
+        assert_eq!(history.steps.capacity(), 2);
+        assert_eq!(history.bytes(), 0, "a reservation published rows");
+        assert_eq!(history.digest(), taken);
+        assert!(!sink.holds_steps());
+
+        let mut generic = HistorySink::new(EmulationRecord::default());
+        add_cycle(&mut generic);
+        add_rows(&mut sink, 3);
+        let history = written_history(&sink);
+        assert_eq!(history.digest(), generic.history.history.digest());
+        assert!(history.is_in_slot(Table::Steps) && history.is_in_slot(Table::Add));
+    }
+
+    /// The arena is process-wide, so this checks the seeking, not a slot taken.
+    #[test]
+    fn a_direct_step_seeks_the_chunks_slot_as_end_cycle_does() {
+        let program = Arc::new(Program::default());
+        let sink = HistorySink::new(EmulationRecord::new(program.clone()));
+        assert!(!sink.history.slot_sought);
+        let mut lent = Sink::History(sink);
+        add_rows(&mut lent, 3);
+        let Sink::History(mut sink) = lent else {
+            unreachable!("a history sink");
+        };
+        assert!(sink.history.slot_sought);
+        let boundary = ChunkBoundary {
+            start_pc: 0x1000,
+            next_pc: 0x1004,
+        };
+        let _ = sink.cut_chunk(program, boundary);
+        assert!(!sink.history.slot_sought);
+    }
+
+    /// At three rows a table, the two-read steps spill their reads on the second step and the
+    /// other tables on the fourth.
+    #[test]
+    fn direct_rows_fill_and_spill_a_slot_where_end_cycle_does() {
+        let arena = small_arena(2, 3, SpillPolicy::Spill);
+        let mut generic = history_sink_in_a_slot(&arena);
+        let mut direct = Sink::History(history_sink_in_a_slot(&arena));
+        for steps in 1..=4 {
+            add_cycle(&mut generic);
+            add_rows(&mut direct, 3);
+            let (expected, written) = (&generic.history.history, written_history(&direct));
+            assert_eq!(written.digest(), expected.digest(), "after {steps} step(s)");
+            assert_eq!(in_slot(written), in_slot(expected), "after {steps} step(s)");
+        }
+        let written = written_history(&direct);
+        assert!(!written.is_in_slot(Table::Reads) && !written.is_in_slot(Table::Steps));
+        assert!(written.is_in_slot(Table::Sub) && written.holds_slot());
     }
 }

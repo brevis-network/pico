@@ -11,6 +11,15 @@
 # restored on every exit, error paths included; the run refuses to start when aot-generated/ is
 # anything but that stub, rather than overwrite it.
 #
+# The replay workers' pass, its control included, runs the AOT workers on the recording bodies:
+# their ledger lines have to show the recording bodies and the fallback covering every cycle.
+#
+# -c builds the test with recorder-check: each step whose rows a recording block writes directly is
+# also closed by the shared writer's generic code, and a layout mismatch, or an instruction constant
+# that is not the program's at its pc, fails the run. It checks layout, not values; the record
+# comparison catches a wrong value. A run in which no block wrote rows directly fails, having
+# checked nothing.
+#
 # Prints each control's EXIT=<n>, then the generate time, the generated tree's size and crate count,
 # the build time and EXIT=<n> for each guest, then an overall line. Exits non-zero if a control or
 # any guest failed.
@@ -20,19 +29,40 @@ set -euo pipefail
 GUESTS_ALL="fib ed25519 poseidon2 aggregator bls12381-fp sha2 sha3 tiny-keccak k256 bn254-fp bls12381-ws bn254-ws"
 
 usage() {
-  echo "usage: perf/aot/record_parity.sh [-w WORKERS] GUEST... | all" >&2
+  echo "usage: perf/aot/record_parity.sh [-w WORKERS] [-e ENGINE] [-c] GUEST... | all" >&2
   echo "  GUEST    one of: $GUESTS_ALL (the ELF is perf/bench_data/rv64/<GUEST>-elf, but see elf_of)" >&2
   echo "  WORKERS  replay workers in the pipeline, every arm; default 4, or the core count if lower" >&2
+  echo "  ENGINE   what the AOT replay workers run: aot, the recording bodies (the default and only one)" >&2
+  echo "  -c       the checking build, every direct row checked as it is written" >&2
   exit 2
 }
 
 workers=""
-while getopts "w:h" opt; do
+engine=aot
+check=""
+while getopts "w:e:cih" opt; do
   case "$opt" in
     w) workers="$OPTARG" ;;
+    e) engine="$OPTARG" ;;
+    c) check=1 ;;
+    i)
+      echo "-i is refused: the recording blocks call their direct entries; the inlined form was slower and is gone" >&2
+      exit 2
+      ;;
     *) usage ;;
   esac
 done
+case "$engine" in
+  aot) ;;
+  aot-recorder)
+    echo "-e aot-recorder is refused: the AOT replay workers run the recording bodies as aot; use -e aot or leave -e out" >&2
+    exit 2
+    ;;
+  *) echo "ENGINE must be aot, not '$engine'" >&2; exit 2 ;;
+esac
+features=()
+[ -z "$check" ] || features+=(--features recorder-check)
+export AOT_PARITY_REPLAY="$engine"
 shift $((OPTIND - 1))
 [ "$#" -gt 0 ] || usage
 if [ -n "$workers" ]; then
@@ -60,7 +90,13 @@ now() { perl -MTime::HiRes=time -e 'printf "%.2f", time'; }
 since() { perl -e 'printf "%.1f", $ARGV[1] - $ARGV[0]' "$1" "$(now)"; }
 
 # Anything but the tracked stub (the bootstrap script's sentinel aside) is someone's generated code.
-leftovers=$(git -C "$ROOT" status --porcelain --ignored -- aot-generated \
+# Checked apart from the filter: a failed git status prints nothing, which would pass for the stub
+# and let the exit trap delete whatever aot-generated/ holds.
+if ! generated=$(git -C "$ROOT" status --porcelain --ignored -- aot-generated); then
+  echo "git status failed on aot-generated/, so the run cannot tell it is the committed stub" >&2
+  exit 2
+fi
+leftovers=$(printf '%s\n' "$generated" \
   | grep -v '^!! aot-generated/\.aot-bootstrap-stub$' || true)
 if [ -n "$leftovers" ]; then
   echo "aot-generated/ is not the committed stub, and this run would overwrite it:" >&2
@@ -94,7 +130,7 @@ generate_crates="$target_dir/release/generate_crates"
 # Against the stub first, so a guest's build time below is its generated crates' alone.
 echo "==> building the test's dependencies against the stub"
 start=$(now)
-(cd "$AOT_DIR" && cargo test --release -p aot-record-parity --test aot_against_interpreter --no-run)
+(cd "$AOT_DIR" && cargo test --release -p aot-record-parity ${features[@]+"${features[@]}"} --test aot_against_interpreter --no-run)
 echo "dependencies built in $(since "$start")s"
 
 echo "==> the stub's code under fib's digest, emitting"
@@ -102,7 +138,7 @@ control=0
 (
   cd "$AOT_DIR"
   if [ -n "$workers" ]; then export AOT_PARITY_WORKERS="$workers"; fi
-  cargo test --release -p aot-record-parity --test stub_code_against_interpreter -- --nocapture
+  cargo test --release -p aot-record-parity ${features[@]+"${features[@]}"} --test stub_code_against_interpreter -- --nocapture
 ) || control=$?
 control_line="[stub code] EXIT=$control"
 echo "$control_line"
@@ -112,7 +148,7 @@ workers_control=0
 (
   cd "$AOT_DIR"
   if [ -n "$workers" ]; then export AOT_PARITY_WORKERS="$workers"; fi
-  cargo test --release -p aot-record-parity --test stub_workers_against_interpreter -- --nocapture
+  cargo test --release -p aot-record-parity ${features[@]+"${features[@]}"} --test stub_workers_against_interpreter -- --nocapture
 ) || workers_control=$?
 workers_control_line="[stub workers] EXIT=$workers_control"
 echo "$workers_control_line"
@@ -140,7 +176,7 @@ run_guest() {
 
   echo "==> $guest: building"
   start=$(now)
-  (cd "$AOT_DIR" && cargo test --release -p aot-record-parity --test aot_against_interpreter --no-run) \
+  (cd "$AOT_DIR" && cargo test --release -p aot-record-parity ${features[@]+"${features[@]}"} --test aot_against_interpreter --no-run) \
     || return $?
   build_s=$(since "$start")
 
@@ -149,7 +185,7 @@ run_guest() {
   (
     cd "$AOT_DIR"
     if [ -n "$workers" ]; then export AOT_PARITY_WORKERS="$workers"; fi
-    cargo test --release -p aot-record-parity --test aot_against_interpreter -- --nocapture
+    cargo test --release -p aot-record-parity ${features[@]+"${features[@]}"} --test aot_against_interpreter -- --nocapture
   ) || code=$?
   return "$code"
 }
@@ -171,6 +207,8 @@ done
 echo "$control_line"
 echo "$workers_control_line"
 printf '%s' "$summary"
-echo "OVERALL: $((total - failed))/$total guest(s) passed, control EXIT=$control, workers control \
-EXIT=$workers_control, EXIT=$((failed > 0 || control != 0 || workers_control != 0 ? 1 : 0))"
+echo "OVERALL: $((total - failed))/$total guest(s) passed, replay workers on $engine${check:+, checking build}\
+${inline:+, direct entries inlined}, control \
+EXIT=$control, workers control EXIT=$workers_control, \
+EXIT=$((failed > 0 || control != 0 || workers_control != 0 ? 1 : 0))"
 [ "$failed" -eq 0 ] && [ "$control" -eq 0 ] && [ "$workers_control" -eq 0 ]

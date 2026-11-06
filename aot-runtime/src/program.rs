@@ -16,10 +16,17 @@
 //! contract still builds and still runs the guest, with events missing, so
 //! [`register`](crate::register) refuses a stamp that is not [`AotProgram::CODEGEN_STAMP`] rather
 //! than let it run.
+//!
+//! Generated code has a second entry point, [`AotProgram::record_entry`]: the same blocks'
+//! recording bodies, which only a replay worker runs. Only a program built by hand lacks it, and
+//! [`register`](crate::register) installs the AOT replay workers only for a program that has one.
 
 use std::fmt;
 
 use crate::AotEmulatorCore;
+
+/// An entry point of generated code: runs from `emu.pc` until the batch yields or the guest halts.
+type Entry = fn(&mut AotEmulatorCore) -> Result<(), String>;
 
 /// One guest's AOT-compiled code: what a generated `pico-aot-dispatch` crate exports as `AOT`.
 #[derive(Clone, Copy, Debug)]
@@ -27,6 +34,7 @@ pub struct AotProgram {
     pub(crate) elf_sha256: [u8; 32],
     pub(crate) codegen_stamp: u32,
     pub(crate) run: fn(&mut AotEmulatorCore) -> Result<(), String>,
+    pub(crate) run_record: Option<Entry>,
 }
 
 impl AotProgram {
@@ -42,6 +50,7 @@ impl AotProgram {
         elf_sha256: [0; 32],
         codegen_stamp: Self::CODEGEN_STAMP,
         run: interpret_every_block,
+        run_record: None,
     };
 
     /// A program with no codegen stamp, which [`register`](crate::register) refuses: what a crate
@@ -72,7 +81,22 @@ impl AotProgram {
             elf_sha256,
             codegen_stamp,
             run,
+            run_record: None,
         }
+    }
+
+    /// This program with `run_record`, the code generated beside `run`'s, as its recording entry
+    /// point.
+    pub const fn with_recorder(self, run_record: Entry) -> Self {
+        Self {
+            run_record: Some(run_record),
+            ..self
+        }
+    }
+
+    /// The recording entry point; `None` for [`Self::STUB`] and any program built without one.
+    pub const fn record_entry(&self) -> Option<Entry> {
+        self.run_record
     }
 
     /// The SHA-256 of the ELF this program's code was generated from.
@@ -109,13 +133,15 @@ pub enum AotError {
     /// [`AotProgram::CODEGEN_STAMP`], or before stamps existed (`found` is 0): it would run the
     /// guest without writing every event this runtime's records need.
     CodegenStamp { found: u32, expected: u32 },
-    /// The process already holds a different program, and the VM holds one per process.
+    /// The process already holds a different program, and the VM holds one per process. The two
+    /// digests are equal when the programs differ only in whether they have a recording entry
+    /// point.
     Conflict {
         registered: [u8; 32],
         requested: [u8; 32],
     },
-    /// An AOT factory was installed through `pico_vm::emulator::aot::register_aot_factory`
-    /// directly, so which program the process runs is unknown.
+    /// An AOT factory, for the snapshot thread or the replay workers, was installed through
+    /// `pico_vm::emulator::aot` directly, so which program the process runs is unknown.
     ForeignFactory,
 }
 
@@ -141,6 +167,16 @@ impl fmt::Display for AotError {
                 f,
                 "the AOT program was generated with codegen stamp {found}, and this runtime runs \
                  stamp {expected}; regenerate it from the guest's ELF with `cargo pico aot`"
+            ),
+            Self::Conflict {
+                registered,
+                requested,
+            } if registered == requested => write!(
+                f,
+                "this process already registered an AOT program for ELF {}, and the one requested \
+                 for the same ELF differs in having a recording entry point: the VM holds one AOT \
+                 program per process",
+                Sha256Hex(registered)
             ),
             Self::Conflict {
                 registered,

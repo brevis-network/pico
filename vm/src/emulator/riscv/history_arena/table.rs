@@ -183,6 +183,16 @@ impl<T: Copy> Rows<T> {
         }
     }
 
+    /// Grows a heap table's allocation. A region's room is fixed, so it is left as it is and a row
+    /// past it spills or is refused when written. Writes and moves no row either way.
+    #[inline]
+    pub fn reserve(&mut self, additional: usize) {
+        match &mut self.storage {
+            Storage::Resident(_) => {}
+            Storage::Spilled(rows) | Storage::Heap(rows) => rows.reserve(additional),
+        }
+    }
+
     /// Appends `row`.
     ///
     /// # Panics

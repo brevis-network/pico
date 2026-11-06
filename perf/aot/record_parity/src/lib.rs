@@ -26,13 +26,16 @@
 //! still have to be the interpreter's. It needs no generated code, so any build of this crate runs
 //! it.
 //!
-//! A third pass runs the pipeline's replay workers as AOT cores (`ReplayWorkers::Aot`) against
-//! interpreter workers, both on the AOT snapshot thread and with the same worker count, and
-//! compares the records the pipeline hands back. Records alone cannot show which engine replayed a
-//! chunk, so the pass reads each chunk's `worker.replay` ledger line ([`replay`]): the engine, the
-//! compiled blocks the worker entered and the instructions its fallback ran. [`check_stub_replay`]
-//! is that pass's control: the stub's code in the workers must read all-fallback on every chunk
-//! and still give the interpreter workers' records.
+//! A third pass runs the pipeline's replay workers as AOT cores on the program's recording blocks
+//! (`ReplayWorkers::Aot`) against interpreter workers, both on the AOT snapshot thread and with the
+//! same worker count, and compares the records the pipeline hands back. Records alone cannot show
+//! which engine replayed a chunk, so the pass reads each chunk's `worker.replay` ledger line
+//! ([`replay`]): the engine, the compiled blocks the worker entered, the instructions its fallback
+//! ran, and those its recording bodies ran, which with the fallback's must cover the chunk.
+//! [`check_stub_replay`] is that pass's control: the stub's code in the workers must read
+//! all-fallback on every chunk and still give the interpreter workers' records.
+//!
+//! `AOT_PARITY_REPLAY`, if set, must be `aot`.
 //!
 //! `AOT_PARITY_WORKERS` sets the worker count; unset, it is four, or the core count if lower.
 
@@ -65,6 +68,18 @@ pub mod replay;
 mod record_parity;
 use record_parity::{check_guest, Arm, Guest, GUESTS};
 
+/// Refuses an `AOT_PARITY_REPLAY` other than `aot`.
+fn check_replay_engine() {
+    match std::env::var("AOT_PARITY_REPLAY").as_deref() {
+        Err(_) | Ok("aot") => {}
+        Ok("aot-recorder") => panic!(
+            "AOT_PARITY_REPLAY=aot-recorder is refused: the AOT workers run the recording blocks \
+             as aot; set AOT_PARITY_REPLAY=aot or leave it unset"
+        ),
+        Ok(other) => panic!("AOT_PARITY_REPLAY={other:?} is not aot"),
+    }
+}
+
 fn workers() -> NonZeroUsize {
     match std::env::var("AOT_PARITY_WORKERS") {
         Ok(raw) => raw.trim().parse().unwrap_or_else(|_| {
@@ -78,12 +93,19 @@ fn workers() -> NonZeroUsize {
 static DISPATCHES: AtomicU64 = AtomicU64::new(0);
 
 /// The generated program, registered in its place: the same digest, stamp and code, reporting
-/// after every batch how many compiled blocks its run has entered.
-static COUNTED: AotProgram = AotProgram::stamped(
-    pico_aot_dispatch::AOT.elf_sha256(),
-    pico_aot_dispatch::AOT.codegen_stamp(),
-    run_counted,
-);
+/// after every batch how many compiled blocks its run has entered, and its recording entry point,
+/// which only replay workers run; without one, the pipeline refuses AOT workers.
+static COUNTED: AotProgram = {
+    let counted = AotProgram::stamped(
+        pico_aot_dispatch::AOT.elf_sha256(),
+        pico_aot_dispatch::AOT.codegen_stamp(),
+        run_counted,
+    );
+    match pico_aot_dispatch::AOT.record_entry() {
+        Some(run_record) => counted.with_recorder(run_record),
+        None => counted,
+    }
+};
 
 fn run_counted(emu: &mut AotEmulatorCore) -> Result<(), String> {
     let result = emitting::run_emitting(emu, |emu| pico_aot_dispatch::AOT.run(emu));
@@ -100,6 +122,14 @@ fn hex(digest: &[u8; 32]) -> String {
 /// workers, then with its sink on and its own records compared ([`emitting`]). Prints one line per
 /// run and every problem found, and panics if there was any.
 pub fn check_generated_guest() {
+    println!(
+        "recorder check: {}",
+        if pico_aot_runtime::RECORDER_CHECK {
+            "on, every direct row checked against the generic close"
+        } else {
+            "off"
+        }
+    );
     let generated = &pico_aot_dispatch::AOT;
     assert!(
         !generated.is_stub(),
@@ -117,6 +147,7 @@ pub fn check_generated_guest() {
                 GUESTS.map(|guest| guest.name)
             )
         });
+    check_replay_engine();
     // Before any pipeline run: the ledger reads its path once.
     let ledger = replay::Ledger::start();
     if let Err(err) = pico_aot_runtime::register(&COUNTED) {
@@ -181,8 +212,9 @@ pub fn check_generated_guest() {
     ledger.remove();
 }
 
-/// Runs every run of `guest` with the replay workers as interpreters and as AOT cores, both on an
-/// AOT snapshot thread, and compares the records. The two arms differ in `replay_workers` alone.
+/// Runs every run of `guest` with the replay workers as interpreters and as AOT cores on the
+/// recording blocks, both on an AOT snapshot thread, and compares the records. The two arms differ
+/// in `replay_workers` alone.
 fn check_replay_workers(guest: &Guest, ledger: &replay::Ledger, expect: replay::Expect) {
     let workers = workers();
     let totals = [Cell::new((0, 0)), Cell::new((0, 0))];
@@ -219,11 +251,19 @@ fn check_replay_workers(guest: &Guest, ledger: &replay::Ledger, expect: replay::
                 },
             },
         ],
-        |problems| ledger.audit(expect, totals.each_ref().map(Cell::get), problems),
+        |problems| {
+            ledger.audit(
+                expect,
+                pico_aot_runtime::RECORDER_CHECK,
+                totals.each_ref().map(Cell::get),
+                problems,
+            )
+        },
     );
 }
 
-/// The bootstrap stub's code under fib's digest, writing records when the emitting arm asks.
+/// The bootstrap stub's code under fib's digest, writing records when the emitting arm asks, with
+/// a recording entry point that has no recording body, so the fallback runs every instruction.
 fn stub_code() -> &'static AotProgram {
     static PROGRAM: OnceLock<AotProgram> = OnceLock::new();
     PROGRAM.get_or_init(|| {
@@ -232,6 +272,7 @@ fn stub_code() -> &'static AotProgram {
             AotProgram::CODEGEN_STAMP,
             |emu| emitting::run_emitting(emu, |emu| AotProgram::STUB.run(emu)),
         )
+        .with_recorder(|emu| emu.run_record_blocks(|_| None))
     })
 }
 
@@ -272,6 +313,7 @@ pub fn check_stub_code() {
 /// interpreted by the worker's fallback), and the records still have to be the interpreter
 /// workers'. Prints one line per run and every problem found, and panics if there was any.
 pub fn check_stub_replay() {
+    check_replay_engine();
     let ledger = replay::Ledger::start();
     if let Err(err) = pico_aot_runtime::register(stub_code()) {
         panic!("register the stub's code under fib's digest: {err}");

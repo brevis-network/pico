@@ -19,6 +19,9 @@ pub enum SnapshotMainMode {
 pub enum ReplayWorkers {
     #[default]
     Interpreter,
+    /// The AOT core on the registered program's recording blocks. The snapshot thread runs the
+    /// ordinary blocks either way.
+    #[serde(alias = "AotRecorder")]
     Aot,
 }
 
@@ -246,6 +249,25 @@ mod tests {
         let back: EmulatorOpts = serde_json::from_value(value).expect("deserialize");
         assert_eq!(back.replay_workers, ReplayWorkers::Interpreter);
         assert_eq!(back, opts);
+    }
+
+    /// Only a self-describing format reads the alias; a positional one such as bincode does not.
+    #[test]
+    fn serde_reads_a_saved_aot_recorder_as_aot() {
+        let saved =
+            serde_json::to_value(EmulatorOpts::default().with_snapshot_main(SnapshotMainMode::Aot))
+                .map(|mut value| {
+                    value["replay_workers"] = "AotRecorder".into();
+                    value
+                })
+                .expect("serialize");
+        let back: EmulatorOpts = serde_json::from_value(saved).expect("deserialize");
+        assert_eq!(back.replay_workers, ReplayWorkers::Aot);
+        assert_eq!(
+            serde_json::to_value(ReplayWorkers::Aot).expect("serialize"),
+            "Aot",
+            "written under its own name"
+        );
     }
 
     /// Options saved with the deferred-split thresholds still load, the thresholds ignored. This

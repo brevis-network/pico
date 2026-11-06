@@ -70,7 +70,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Failures and delays only a test can arrange. Process-wide, so only the child process a test
 /// spawns sets them.
@@ -427,13 +427,41 @@ where
         }
     }
 
-    /// The AOT core's compiled-block dispatches and fallback instructions so far; none for an
-    /// interpreter.
-    fn aot_counters(&self) -> Option<(u64, u64)> {
+    /// The AOT core's counters so far; none for an interpreter.
+    fn aot_counters(&self) -> Option<AotCounters> {
         match self {
             Self::Interpreter(_) => None,
             #[cfg(feature = "aot-emulator")]
-            Self::Aot(emu) => Some((emu.compiled_block_dispatches(), emu.fallback_insns())),
+            Self::Aot(emu) => Some(AotCounters {
+                dispatches: emu.compiled_block_dispatches(),
+                fallback_insns: emu.fallback_insns(),
+                recorder_dispatches: emu.recorder_body_dispatches(),
+                recorder_insns: emu.recorder_body_insns(),
+                recorder_direct_insns: emu.recorder_direct_insns(),
+            }),
+        }
+    }
+}
+
+/// An AOT replay worker's counters, cumulative over its replays.
+#[derive(Clone, Copy)]
+#[cfg_attr(not(feature = "aot-emulator"), allow(dead_code))]
+struct AotCounters {
+    dispatches: u64,
+    fallback_insns: u64,
+    recorder_dispatches: u64,
+    recorder_insns: u64,
+    recorder_direct_insns: u64,
+}
+
+impl AotCounters {
+    fn since(self, before: Self) -> Self {
+        Self {
+            dispatches: self.dispatches - before.dispatches,
+            fallback_insns: self.fallback_insns - before.fallback_insns,
+            recorder_dispatches: self.recorder_dispatches - before.recorder_dispatches,
+            recorder_insns: self.recorder_insns - before.recorder_insns,
+            recorder_direct_insns: self.recorder_direct_insns - before.recorder_direct_insns,
         }
     }
 }
@@ -803,7 +831,7 @@ pub fn default_pipeline_workers() -> NonZeroUsize {
 /// A pooled run with `MEMORY_POOL_SIZE` unset raises the pool, while it is not yet built, to one
 /// memory per worker plus the segments of the batch being cut, so every worker can replay at once:
 /// each holds a pool memory while it replays. A smaller pool is not refused; it caps how many
-/// workers replay at once.
+/// workers replay at once, and the first run of the process that meets one says so.
 pub fn check_pipeline(workers: NonZeroUsize, opts: &EmulatorOpts) -> Result<(), EmulationError> {
     let cores = max_pipeline_workers();
     if workers.get() > cores {
@@ -813,23 +841,79 @@ pub fn check_pipeline(workers: NonZeroUsize, opts: &EmulatorOpts) -> Result<(), 
         });
     }
     #[cfg(feature = "aot-emulator")]
-    let registered = crate::emulator::aot::is_aot_replay_factory_registered();
+    let registered = Registered {
+        program: crate::emulator::aot::is_aot_factory_registered(),
+        replay: crate::emulator::aot::is_aot_replay_factory_registered(),
+    };
     #[cfg(not(feature = "aot-emulator"))]
-    let registered = false;
+    let registered = Registered {
+        program: false,
+        replay: false,
+    };
     if let Some(reason) = replay_workers_refusal(opts, registered) {
         return Err(EmulationError::UnsupportedReplayWorkers(reason.into()));
     }
-    let segments = pooled_segments(opts.snapshot_main);
-    if let Some(segments) = segments {
-        raise_pool_size_floor(workers.get() + segments);
-    }
+    let segments = raise_pool_floor_for(workers, opts.snapshot_main);
     if let Some(reason) = history_slot_refusal(bound_in_force(), segments.unwrap_or(1)) {
         return Err(EmulationError::PipelineHistorySlots(reason));
     }
-    match memory_pool_refusal(memory_pool_capacity(), memory_recycler_threads(), segments) {
-        Some(reason) => Err(EmulationError::PipelineMemoryPool(reason)),
-        None => Ok(()),
+    let capacity = memory_pool_capacity();
+    if let Some(reason) = memory_pool_refusal(capacity, memory_recycler_threads(), segments) {
+        return Err(EmulationError::PipelineMemoryPool(reason));
     }
+    if let Some(shortfall) = memory_pool_shortfall(capacity, workers, segments) {
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        WARNED.call_once(|| warn!("{shortfall}"));
+    }
+    Ok(())
+}
+
+/// The replay workers [`emulate_snapshot_pipeline`] runs: `NUM_THREADS`, one when it is unset or
+/// `0`. A caller that prepares for that run sizes it with this, so the two cannot differ.
+pub fn pipeline_workers_from_env() -> NonZeroUsize {
+    crate::mle::env_u32("NUM_THREADS")
+        .and_then(|n| NonZeroUsize::new(n as usize))
+        .unwrap_or(NonZeroUsize::MIN)
+}
+
+/// Raises the size an unset `MEMORY_POOL_SIZE` stands for to one memory per worker plus the
+/// segments of the batch being cut, for a run whose snapshot memories come from the pool, and
+/// returns those segments.
+fn raise_pool_floor_for(workers: NonZeroUsize, snapshot_main: SnapshotMainMode) -> Option<usize> {
+    let segments = pooled_segments(snapshot_main);
+    if let Some(segments) = segments {
+        raise_pool_size_floor(workers.get() + segments);
+    }
+    segments
+}
+
+/// Builds the memory pool ahead of a run of `workers` workers whose snapshot thread is
+/// `snapshot_main`, at the size [`check_pipeline`] gives it. A pool keeps the size it was built
+/// at, so one built before the first run's check, as a prewarm builds it, is sized here or stays
+/// at the unraised size.
+pub fn init_memory_pool_for(workers: NonZeroUsize, snapshot_main: SnapshotMainMode) {
+    raise_pool_floor_for(workers, snapshot_main);
+    init_memory_pool();
+}
+
+/// Why a pool that ever holds `capacity` memories keeps some of `workers` workers from replaying
+/// while a batch is cut into `segments`, if it does: each worker holds a memory while it replays,
+/// and the batch holds one per segment.
+fn memory_pool_shortfall(
+    capacity: usize,
+    workers: NonZeroUsize,
+    segments: Option<usize>,
+) -> Option<String> {
+    let segments = segments?;
+    let needed = workers.get() + segments;
+    (capacity < needed).then(|| {
+        format!(
+            "the memory pool holds at most {capacity} memories, fewer than the {needed} this run \
+             replays with ({} workers and a batch cut into {segments} segments), so fewer workers \
+             replay at once; MEMORY_POOL_SIZE sets the cap",
+            workers.get()
+        )
+    })
 }
 
 /// Replay segments per chunk of a run whose snapshot thread is `snapshot_main`: more than one only
@@ -861,17 +945,30 @@ fn pooled_segments(snapshot_main: SnapshotMainMode) -> Option<usize> {
     segments
 }
 
-/// Why the pipeline cannot run the replay workers `opts` asks for, if it cannot; `registered` is
-/// whether this process holds an AOT replay factory. An AOT worker replays what the AOT snapshot
-/// thread hands out, runs the registered program, and keeps neither a cycle tracker nor a cost
-/// estimate, so a run asking for either would come back without it.
-fn replay_workers_refusal(opts: &EmulatorOpts, registered: bool) -> Option<&'static str> {
-    if opts.replay_workers != ReplayWorkers::Aot {
+/// The AOT factories this process holds.
+#[derive(Clone, Copy)]
+struct Registered {
+    /// The snapshot thread's, which any registered program installs.
+    program: bool,
+    /// The replay workers', which only a program with a recording entry point installs.
+    replay: bool,
+}
+
+/// Why the pipeline cannot run the replay workers `opts` asks for, if it cannot. An AOT worker
+/// keeps neither a cycle tracker nor a cost estimate, so a run asking for either would come back
+/// without it.
+fn replay_workers_refusal(opts: &EmulatorOpts, registered: Registered) -> Option<&'static str> {
+    if opts.replay_workers == ReplayWorkers::Interpreter {
         None
     } else if opts.snapshot_main != SnapshotMainMode::Aot {
         Some("they replay the AOT snapshot thread's snapshots: set snapshot_main = Aot")
-    } else if !registered {
+    } else if !registered.program {
         Some("no AOT program is registered in this process")
+    } else if !registered.replay {
+        Some(
+            "the registered AOT program has no recording entry point, which the AOT replay \
+             workers run: regenerate it from the guest's ELF with `cargo pico aot`",
+        )
     } else if opts.cycle_tracker {
         Some("an AOT worker keeps no cycle tracker: turn cycle_tracker off")
     } else if opts.cost_estimator {
@@ -939,10 +1036,12 @@ where
     C: 'static + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
     F: Fn(EmulationRecord, bool) + Send + Sync,
 {
-    let workers = crate::mle::env_u32("NUM_THREADS")
-        .and_then(|n| NonZeroUsize::new(n as usize))
-        .unwrap_or(NonZeroUsize::MIN);
-    emulate_snapshot_pipeline_with(witness, workers, DeferredSplit::FromChunk16, handle_record)
+    emulate_snapshot_pipeline_with(
+        witness,
+        pipeline_workers_from_env(),
+        DeferredSplit::FromChunk16,
+        handle_record,
+    )
 }
 
 /// Emulate `witness` with one snapshot thread, the interpreter or AOT code as
@@ -994,8 +1093,12 @@ where
 
     let num_threads = workers.get();
     info!("Emulator snapshot worker threads: {}", num_threads);
-    if opts.replay_workers == ReplayWorkers::Aot {
-        info!("[AOT] replay workers = AotReplayMetaEmulator (replaying on AOT-compiled code)");
+    match opts.replay_workers {
+        ReplayWorkers::Aot => info!(
+            "[AOT] replay workers = AotReplayMetaEmulator (replaying on AOT-compiled recording \
+             blocks)"
+        ),
+        ReplayWorkers::Interpreter => {}
     }
 
     let pooled = pooled_segments(opts.snapshot_main).is_some();
@@ -1018,8 +1121,9 @@ where
     let mut pv_stream: Vec<u8> = Vec::new();
     let reports = Mutex::new(Vec::new());
     let run = RunControl::default();
-    // Compiled blocks the AOT replay workers entered, over every replay of the run.
+    // Totals over every replay of the run, for the `bench` line.
     let replay_dispatches = AtomicU64::new(0);
+    let recorder_insns_run = AtomicU64::new(0);
 
     // One batch on worker `tid`. The emulator in `slot` is reused across batches; the replay owns
     // it meanwhile and only hands it back if the batch completes.
@@ -1187,16 +1291,21 @@ where
             "[bench][emulator-{tid}](chunk-{batch_idx}) emulator: running={record_batch_ms:.3} ms"
         );
         let worker_kind = replay.emu().kind();
-        let (dispatches, fallback_insns) = replay
+        let counted = replay
             .emu()
             .aot_counters()
             .zip(counted_before)
-            .map(|((dispatches, fallback), (before, fallback_before))| {
-                (dispatches - before, fallback - fallback_before)
-            })
-            .unzip();
+            .map(|(after, before)| after.since(before));
+        let dispatches = counted.map(|counted| counted.dispatches);
+        let fallback_insns = counted.map(|counted| counted.fallback_insns);
+        let recorder_dispatches = counted.map(|counted| counted.recorder_dispatches);
+        let recorder_insns = counted.map(|counted| counted.recorder_insns);
+        let recorder_direct_insns = counted.map(|counted| counted.recorder_direct_insns);
         if let Some(dispatches) = dispatches {
             replay_dispatches.fetch_add(dispatches, Ordering::Relaxed);
+        }
+        if let Some(insns) = recorder_insns {
+            recorder_insns_run.fetch_add(insns, Ordering::Relaxed);
         }
         ledger::stage(
             "worker.replay",
@@ -1216,6 +1325,11 @@ where
                     "sink": "history",
                     "dispatches": dispatches,
                     "fallback_insns": fallback_insns,
+                    // AOT workers only; with `fallback_insns`, every cycle replayed.
+                    "recorder_dispatches": recorder_dispatches,
+                    "recorder_insns": recorder_insns,
+                    // Of those, the ones whose rows the recording blocks wrote directly.
+                    "recorder_direct_insns": recorder_direct_insns,
                     "cycles_per_dispatch": dispatches
                         .filter(|&dispatches| dispatches > 0)
                         .map(|dispatches| cycles as f64 / dispatches as f64),
@@ -1804,9 +1918,11 @@ where
     match opts.replay_workers {
         ReplayWorkers::Aot => info!(
             target: "bench",
-            "MLE replay workers: aot, {} compiled-block dispatches over {} chunks",
+            "MLE replay workers: aot, {} compiled-block dispatches over {} chunks, {} \
+             instructions run by recording blocks",
             replay_dispatches.into_inner(),
-            reports.len()
+            reports.len(),
+            recorder_insns_run.into_inner()
         ),
         ReplayWorkers::Interpreter => info!(
             target: "bench",
@@ -2034,6 +2150,64 @@ mod tests {
     }
 
     #[test]
+    fn a_pool_short_of_every_worker_is_named_and_one_that_fits_is_not() {
+        let workers = NonZeroUsize::new(16).unwrap();
+        assert_eq!(memory_pool_shortfall(18, workers, Some(2)), None);
+        assert_eq!(
+            memory_pool_shortfall(16, workers, None),
+            None,
+            "a run that draws no pool memory per batch"
+        );
+        assert!(memory_pool_shortfall(16, workers, Some(2))
+            .is_some_and(|r| r.contains("at most 16") && r.contains("the 18 this run")));
+    }
+
+    /// A pool built ahead of the run, as a prewarm builds it, has the size the run's own check
+    /// gives an unset `MEMORY_POOL_SIZE`, and keeps it. In a child process: a process builds its
+    /// pool once. The hook stands in for the AOT snapshot thread's draw of one memory per batch, and
+    /// no memory is made, so building the pool costs nothing.
+    #[test]
+    fn a_pool_built_ahead_of_the_run_is_sized_for_it() {
+        const CHILD_VAR: &str = "PICO_POOL_AHEAD_PROBE";
+        const MARKER: &str = "[pool-ahead] the pool was built at the run's size";
+
+        if std::env::var(CHILD_VAR).is_ok() {
+            assert!(
+                std::env::var_os("MEMORY_POOL_SIZE").is_none(),
+                "the probe sizes an unset MEMORY_POOL_SIZE; unset it"
+            );
+            hooks::DRAW_POOL_BLOCK_PER_BATCH.store(true, Ordering::Relaxed);
+            init_memory_pool_for(
+                NonZeroUsize::new(20).unwrap(),
+                SnapshotMainMode::Interpreter,
+            );
+            let built = || {
+                crate::emulator::riscv::memory::GLOBAL_MEMORY_POOL
+                    .0
+                    .capacity()
+            };
+            assert_eq!(built(), Some(21), "20 workers and one segment");
+            raise_pool_size_floor(64);
+            assert_eq!(built(), Some(21));
+            assert_eq!(
+                crate::emulator::riscv::memory::memory_pool_size(),
+                21,
+                "a later raise leaves the size a built pool reports"
+            );
+            println!("{MARKER}");
+            return;
+        }
+        in_child(
+            "proverchain::riscv::tests::a_pool_built_ahead_of_the_run_is_sized_for_it",
+            CHILD_VAR,
+            &[("MEMORY_POOL_EAGER", "0"), ("MEMORY_POOL_LOW_WATER", "0")],
+            Duration::from_secs(60),
+            "building the pool hung",
+            MARKER,
+        );
+    }
+
+    #[test]
     fn a_bound_below_a_chunks_segments_is_named() {
         let slots = |count| -> Result<_, String> { Ok(NonZeroUsize::new(count)) };
         assert_eq!(
@@ -2052,9 +2226,7 @@ mod tests {
         );
     }
 
-    /// AOT workers run only on the AOT snapshot thread's snapshots, with a registered program, and
-    /// keep no cycle tracker and no cost estimate: each lack is named, and interpreter workers are
-    /// never refused.
+    /// Each refusal names what is missing; interpreter workers are never refused.
     #[test]
     fn aot_replay_workers_are_refused_where_they_cannot_run() {
         let opts = |snapshot_main, replay_workers| EmulatorOpts {
@@ -2064,9 +2236,15 @@ mod tests {
             cost_estimator: false,
             ..EmulatorOpts::default()
         };
+        let registered = |program, replay| Registered { program, replay };
+        let (none, program, both) = (
+            registered(false, false),
+            registered(true, false),
+            registered(true, true),
+        );
         let aot = opts(SnapshotMainMode::Aot, ReplayWorkers::Aot);
-        assert_eq!(replay_workers_refusal(&aot, true), None);
-        for registered in [false, true] {
+        assert_eq!(replay_workers_refusal(&aot, both), None);
+        for registered in [none, program, both] {
             let interpreter = opts(SnapshotMainMode::Interpreter, ReplayWorkers::Interpreter);
             assert_eq!(replay_workers_refusal(&interpreter, registered), None);
         }
@@ -2077,13 +2255,14 @@ mod tests {
             );
         };
         refused(
-            opts(SnapshotMainMode::Interpreter, ReplayWorkers::Aot),
-            true,
+            aot.with_snapshot_main(SnapshotMainMode::Interpreter),
+            both,
             "snapshot_main = Aot",
         );
-        refused(aot, false, "registered");
-        refused(aot.with_cycle_tracker(), true, "cycle_tracker");
-        refused(aot.with_cost_estimator(), true, "cost_estimator");
+        refused(aot, none, "no AOT program is registered");
+        refused(aot, program, "no recording entry point");
+        refused(aot.with_cycle_tracker(), both, "cycle_tracker");
+        refused(aot.with_cost_estimator(), both, "cost_estimator");
     }
 
     /// As many workers as the rayon pool has threads must still finish. The snapshot thread's

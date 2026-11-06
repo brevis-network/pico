@@ -317,8 +317,9 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::U256Mul(Default::default()),
             // Byte
             Self::Byte(Default::default()),
-            // Ecall: appended last so the orchestrator's hard-coded batch indices
-            // (0..=45) stay valid; host tracegen + H2D, see EcallChip::gpu_generate_extra_record_and_main.
+            // Ecall: appended after Byte so the orchestrator's hard-coded batch indices
+            // (0..=45) stay valid; a device kernel over the history, see
+            // EcallChip::gpu_generate_extra_record_and_main.
             Self::Ecall(Default::default()),
             // The precompiles whose traces are generated on the host (their device kernels
             // predate the RV64 layouts): appended after Ecall for the same reason Ecall is.

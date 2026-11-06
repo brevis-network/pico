@@ -677,19 +677,14 @@ impl<F> EventCapture for DivRemChip<F> {
         }
 
         let chunk_size = std::cmp::max(ops.len() / num_cpus::get(), 1);
-        let divrem_counts: Vec<(usize, usize)> = ops.par_flat_map(|event, counts| {
-            let e = Self::count_event(event);
-            counts.push((e.add, e.lt));
+        let divrem_counts: Vec<usize> = ops.par_flat_map(|event, counts| {
+            counts.push(Self::count_event(event).add);
         });
-        let (divrem_add, _divrem_lt) = divrem_counts
+        let divrem_add = divrem_counts
             .as_slice()
             .pico_chunks(chunk_size)
-            .map(|chunk| {
-                chunk
-                    .iter()
-                    .fold((0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1))
-            })
-            .pico_reduce(|| (0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1));
+            .map(|chunk| chunk.iter().sum::<usize>())
+            .pico_reduce(|| 0, |a, b| a + b);
         event_counter.num_add_sub_events += divrem_add;
     }
 }
@@ -699,7 +694,6 @@ impl<F> DivRemChip<F> {
     fn count_event(event: &AluEvent) -> DivremExtraEventIndices {
         DivremExtraEventIndices {
             add: derived_add_rows(event.opcode, event.b, event.c),
-            lt: 0,
         }
     }
 }

@@ -309,10 +309,9 @@ fn core_state(emu: &AotEmulatorCore) -> String {
     };
     let split = &emu.chunk_split_state;
     format!(
-        "{:?} {:?} {:?} {:?} {:?} {:?} {:#x} {} {} {} {:?} {:?}",
+        "{:?} {:?} {:?} {:?} {:?} {:#x} {} {} {} {:?} {:?}",
         emu.registers,
-        emu.register_records,
-        emu.accessed_regs,
+        emu.touched_registers,
         cells(&emu.memory),
         cells(&emu.memory_snapshot),
         (
@@ -352,19 +351,16 @@ fn boundary(record: &EmulationRecord) -> ([u32; 3], [u32; 3], u32) {
 }
 
 // The paths the code generator writes out inline, copied from `instruction_translator.rs` statement
-// for statement, with the chunk-boundary and yield checks left out: the chunk never fills here.
-
-/// `sign_extend_imm32_to_u64`: the generator's immediates are the low 32 bits of the operand.
-fn imm32(value: u64) -> u64 {
-    value as u32 as i32 as i64 as u64
-}
+// for statement, with the chunk-boundary and yield checks left out: the chunk never fills here. An
+// immediate is the instruction's, as the generated code hands it on. A `JALR` entry's error, which
+// the generated code returns, is unwrapped: the programs here jump inside themselves.
 
 /// `gen_jal`.
 fn jal(emu: &mut AotEmulatorCore, pc: u64, inst: &Instruction) {
     let (rd, imm) = (inst.op_a as usize, inst.op_b);
     let emitting = emu.is_emitting();
     emu.jal_no_count(emitting, rd, pc, imm);
-    emu.pc = pc.wrapping_add(imm32(imm));
+    emu.pc = pc.wrapping_add(imm);
     emu.update_insn_clock();
 }
 
@@ -372,7 +368,9 @@ fn jal(emu: &mut AotEmulatorCore, pc: u64, inst: &Instruction) {
 fn jalr(emu: &mut AotEmulatorCore, pc: u64, inst: &Instruction) {
     let (rd, rs1, imm) = (inst.op_a as usize, inst.op_b as usize, inst.op_c);
     let emitting = emu.is_emitting();
-    let target = emu.jalr_no_count(emitting, rd, rs1, pc, imm);
+    let target = emu
+        .jalr_no_count(emitting, rd, rs1, pc, imm)
+        .expect("a jump inside the program");
     emu.pc = target;
     emu.update_insn_clock();
 }
@@ -391,11 +389,7 @@ fn branch(emu: &mut AotEmulatorCore, pc: u64, inst: &Instruction) {
         BGEU => emu.bgeu_no_count(emitting, rs1, rs2, pc, imm),
         other => panic!("not a branch: {other:?}"),
     };
-    emu.pc = if taken {
-        pc.wrapping_add(imm32(imm))
-    } else {
-        pc + 4
-    };
+    emu.pc = if taken { pc.wrapping_add(imm) } else { pc + 4 };
     emu.update_insn_clock();
 }
 
@@ -419,7 +413,7 @@ fn ecall(emu: &mut AotEmulatorCore, pc: u64) {
 /// `gen_alu_helper` on an instruction whose two operands are immediates, as a constant is.
 fn folded_alu(emu: &mut AotEmulatorCore, pc: u64, inst: &Instruction) {
     use Opcode::*;
-    let (rd, b, c) = (inst.op_a as usize, imm32(inst.op_b), imm32(inst.op_c));
+    let (rd, b, c) = (inst.op_a as usize, inst.op_b, inst.op_c);
     let a = match inst.opcode {
         ADD => b.wrapping_add(c),
         SUB => b.wrapping_sub(c),
@@ -453,7 +447,7 @@ fn word(opcode: Opcode, lhs: u32, rhs: u32) -> u64 {
 /// `gen_word_alu_helper` on two immediates.
 fn folded_word(emu: &mut AotEmulatorCore, pc: u64, inst: &Instruction) {
     let result = word(inst.opcode, inst.op_b as u32, inst.op_c as u32);
-    let (b, c) = (imm32(inst.op_b), imm32(inst.op_c));
+    let (b, c) = (inst.op_b, inst.op_c);
     let emitting = emu.is_emitting();
     emu.constant_no_count(emitting, inst.op_a as usize, result, b, c, pc + 4);
 }

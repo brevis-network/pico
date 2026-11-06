@@ -3,8 +3,8 @@
 //!
 //! The registry keeps one program for the life of a process, so every case that registers one runs
 //! in a child process. The program these cases register pairs a guest's digest with the bootstrap
-//! stub's entry point, which interprets every block: they check the plumbing, and running compiled
-//! code is the AOT harness's to check.
+//! stub's code, which interprets every block, on both its entry points: they check the plumbing,
+//! and running compiled code is the AOT harness's to check.
 
 use std::{
     num::NonZeroUsize,
@@ -48,10 +48,13 @@ fn hex(bytes: &[u8; 32]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// Runs of the registered program with a sink set: a replay worker's, which writes records, and
-/// never the snapshot thread's. The stub's code makes the interpreter's records, so these runs are
-/// what shows which engine replayed.
+/// Runs of the ordinary entry point with a sink set: always none, since the snapshot thread runs it
+/// without one and an AOT worker runs the recording entry point.
 static EMITTING_RUNS: AtomicU64 = AtomicU64::new(0);
+
+/// Runs of the recording entry point, which only an AOT replay worker makes. The stub's records are
+/// the interpreter's, so this count is what shows which engine replayed.
+static RECORDING_RUNS: AtomicU64 = AtomicU64::new(0);
 
 /// The bootstrap stub's entry point, as the committed `aot-generated/` crate exports it.
 fn interpret_every_block(emu: &mut AotEmulatorCore) -> Result<(), String> {
@@ -61,6 +64,13 @@ fn interpret_every_block(emu: &mut AotEmulatorCore) -> Result<(), String> {
     AotProgram::STUB.run(emu)
 }
 
+/// No recording block, so every instruction is the fallback's.
+fn record_every_block(emu: &mut AotEmulatorCore) -> Result<(), String> {
+    RECORDING_RUNS.fetch_add(1, Ordering::Relaxed);
+    emu.run_record_blocks(|_| None)
+}
+
+/// Both entry points, as generated code has them.
 fn program_for(elf: &[u8], slot: &'static OnceLock<AotProgram>) -> &'static AotProgram {
     slot.get_or_init(|| {
         AotProgram::stamped(
@@ -68,12 +78,24 @@ fn program_for(elf: &[u8], slot: &'static OnceLock<AotProgram>) -> &'static AotP
             AotProgram::CODEGEN_STAMP,
             interpret_every_block,
         )
+        .with_recorder(record_every_block)
     })
 }
 
 pub(super) fn fib_program() -> &'static AotProgram {
     static PROGRAM: OnceLock<AotProgram> = OnceLock::new();
     program_for(FIB_ELF, &PROGRAM)
+}
+
+fn fib_program_without_a_recording_entry_point() -> &'static AotProgram {
+    static PROGRAM: OnceLock<AotProgram> = OnceLock::new();
+    PROGRAM.get_or_init(|| {
+        AotProgram::stamped(
+            sha256(FIB_ELF),
+            AotProgram::CODEGEN_STAMP,
+            interpret_every_block,
+        )
+    })
 }
 
 fn other_program() -> &'static AotProgram {
@@ -238,6 +260,24 @@ fn aot_workers_are_refused_without_aot_and_with_serial_emulation() {
     );
 }
 
+/// Refused before anything registers, rather than replayed by another engine.
+#[test]
+fn aot_workers_are_refused_without_a_program_that_records() {
+    let program = fib_program_without_a_recording_entry_point();
+    assert!(program.record_entry().is_none());
+    let err = small_builder()
+        .aot(program)
+        .aot_workers()
+        .build()
+        .expect_err("the program has no recording entry point");
+    assert!(
+        matches!(&err, ProveError::InconsistentOptions(m)
+            if m.contains("aot_workers()") && m.contains("no recording entry point")),
+        "{err}"
+    );
+    assert!(fib_program().record_entry().is_some());
+}
+
 /// AOT code runs on the pipeline's snapshot thread only, so the serial path cannot take it.
 #[test]
 fn serial_emulation_is_refused_with_aot() {
@@ -310,8 +350,8 @@ fn an_aot_run_proves_and_verifies_to_combine() {
     assert_eq!(execution.committed_bytes, interpreted.committed_bytes);
     assert_eq!(execution.chunks, interpreted.chunks);
     assert_eq!(
-        EMITTING_RUNS.load(Ordering::Relaxed),
-        0,
+        [&EMITTING_RUNS, &RECORDING_RUNS].map(|runs| runs.load(Ordering::Relaxed)),
+        [0, 0],
         "the replay workers ran the AOT program"
     );
     println!("{MARKER}");
@@ -319,8 +359,8 @@ fn an_aot_run_proves_and_verifies_to_combine() {
 
 /// [`an_aot_run_proves_and_verifies_to_combine`] with the replay workers on the AOT program too
 /// ([`crate::ProverBuilder::aot_workers`]): the same banner, worker count and end-of-run line, the
-/// workers' banner beside them, and replays of the program on every chunk, which only an AOT
-/// worker makes.
+/// workers' banner beside them, and a run of the recording entry point on every chunk, none of the
+/// ordinary one.
 #[test]
 fn aot_workers_prove_and_verify_to_combine() {
     const TEST_NAME: &str = "tests::aot::aot_workers_prove_and_verify_to_combine";
@@ -371,7 +411,7 @@ fn aot_workers_prove_and_verify_to_combine() {
     assert_eq!(proof.phase(), Phase::Combine);
     assert_is_fib_output(proof.committed().as_bytes(), N);
     assert_eq!(proof.committed().as_bytes(), interpreted.committed_bytes);
-    let proved = EMITTING_RUNS.load(Ordering::Relaxed);
+    let proved = RECORDING_RUNS.load(Ordering::Relaxed);
     assert!(
         proved >= u64::from(interpreted.chunks),
         "{proved} AOT replays for {} chunks",
@@ -381,11 +421,16 @@ fn aot_workers_prove_and_verify_to_combine() {
     let execution = prover.execute_chunked(Stdin::from(&N)).expect("execute");
     assert_eq!(execution.committed_bytes, interpreted.committed_bytes);
     assert_eq!(execution.chunks, interpreted.chunks);
-    let executed = EMITTING_RUNS.load(Ordering::Relaxed) - proved;
+    let executed = RECORDING_RUNS.load(Ordering::Relaxed) - proved;
     assert!(
         executed >= u64::from(interpreted.chunks),
         "{executed} AOT replays for {} chunks",
         interpreted.chunks
+    );
+    assert_eq!(
+        EMITTING_RUNS.load(Ordering::Relaxed),
+        0,
+        "a replay worker ran the ordinary entry point"
     );
     println!("{MARKER}");
 }

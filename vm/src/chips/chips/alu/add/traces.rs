@@ -113,7 +113,7 @@ impl<F: PrimeField32> ChipBehavior<F> for AddChip<F> {
 #[cfg(feature = "cuda")]
 impl<F: PrimeField32> GpuChipBehavior<F> for AddChip<F> {
     fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
-        record.event_counter.num_add_sub_events > 0
+        record.event_counter.num_add_events > 0
     }
 
     fn gpu_generate_extra_record_and_main(

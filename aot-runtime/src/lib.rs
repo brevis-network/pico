@@ -61,7 +61,19 @@ pub mod types;
 
 // Re-export core types
 pub use dispatch::{lookup_block_fn, set_lookup_block_fn};
-pub use emulator::AotEmulatorCore;
+pub use emulator::{AotEmulatorCore, Recorder};
 pub use program::{AotError, AotProgram};
 pub use snapshot_runtime::{register, register_interpreted};
-pub use types::{BlockClock, BlockFn, ClockUpdate, NextStep};
+pub use types::{BlockClock, BlockFn, ClockUpdate, NextStep, RecordBlockFn, RecordStep};
+
+/// Whether the `recorder-check` feature is on, for a harness to report which build it ran.
+pub const RECORDER_CHECK: bool = cfg!(feature = "recorder-check");
+
+/// The types generated recording blocks pass to the direct-row entries
+/// (`AotEmulatorCore::alu_direct_rec` and the like).
+pub mod direct {
+    pub use pico_vm::{
+        compiler::riscv::{instruction::Instruction, opcode::Opcode},
+        emulator::riscv::{record::AluStream, sink::BlockRows},
+    };
+}

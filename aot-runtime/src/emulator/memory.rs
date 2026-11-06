@@ -1,4 +1,9 @@
-use super::{constants::BYTES_PER_WORD, sink::by_sink, state::Touch, AotEmulatorCore};
+use super::{
+    constants::BYTES_PER_WORD,
+    sink::{by_sink, LentSink},
+    state::Touch,
+    AotEmulatorCore,
+};
 use pico_vm::chips::chips::riscv_memory::event::MemoryRecord;
 
 impl AotEmulatorCore {
@@ -255,10 +260,12 @@ impl AotEmulatorCore {
         )
     }
 
-    /// Read an aligned dword from memory in constrained mode, the access written when `EMIT`.
+    /// Read an aligned dword from memory in constrained mode, the access written into `sink` when
+    /// `EMIT`.
     #[inline(always)]
     pub(crate) fn read_mem_dword_constrained_impl<const EMIT: bool>(
         &mut self,
+        sink: LentSink<'_>,
         addr: u64,
         touch: Touch,
     ) -> u64 {
@@ -273,7 +280,7 @@ impl AotEmulatorCore {
         };
         self.snapshot_addr_if_needed(addr, &prev_record, touch);
         if EMIT {
-            self.record_mem_read(addr, value, prev_record);
+            self.record_mem_read(sink, addr, value, prev_record);
         }
         value
     }
@@ -347,14 +354,15 @@ impl AotEmulatorCore {
         by_sink!(self.write_mem_word_no_count_impl(addr, value))
     }
 
-    /// [`Self::write_mem_word_no_count`], the access written when `EMIT`.
+    /// [`Self::write_mem_word_no_count`], the access written into `sink` when `EMIT`.
     #[inline(always)]
     pub(crate) fn write_mem_word_no_count_impl<const EMIT: bool>(
         &mut self,
+        sink: LentSink<'_>,
         addr: u64,
         value: u64,
     ) -> u64 {
-        self.write_mem_dword_merged_no_count::<EMIT>(Self::dword_addr(addr), |current| {
+        self.write_mem_dword_merged_no_count::<EMIT>(sink, Self::dword_addr(addr), |current| {
             Self::insert_word(current, addr, value)
         })
     }
@@ -459,10 +467,11 @@ impl AotEmulatorCore {
         by_sink!(self.write_mem_dword_no_count_impl(addr, value));
     }
 
-    /// [`Self::write_mem_dword_no_count`], the access written when `EMIT`.
+    /// [`Self::write_mem_dword_no_count`], the access written into `sink` when `EMIT`.
     #[inline(always)]
     pub(crate) fn write_mem_dword_no_count_impl<const EMIT: bool>(
         &mut self,
+        sink: LentSink<'_>,
         addr: u64,
         value: u64,
     ) {
@@ -477,17 +486,18 @@ impl AotEmulatorCore {
         };
         self.snapshot_addr_if_needed(addr, &prev_record, Touch::FullStore);
         if EMIT {
-            self.record_mem_write(addr, value, prev_record);
+            self.record_mem_write(sink, addr, value, prev_record);
         }
     }
 
     /// Stores into part of the dword at `addr`, `merge` turning the dword into what is written,
     /// and returns that. The dword is read without an access of its own and written once: the
     /// interpreter's one write access, whose record carries the dword's state before the store,
-    /// written when `EMIT`.
+    /// written into `sink` when `EMIT`.
     #[inline(always)]
     pub(crate) fn write_mem_dword_merged_no_count<const EMIT: bool>(
         &mut self,
+        sink: LentSink<'_>,
         addr: u64,
         merge: impl FnOnce(u64) -> u64,
     ) -> u64 {
@@ -504,7 +514,7 @@ impl AotEmulatorCore {
         };
         self.snapshot_addr_if_needed(addr, &prev_record, Touch::PartialStore);
         if EMIT {
-            self.record_mem_write(addr, value, prev_record);
+            self.record_mem_write(sink, addr, value, prev_record);
         }
         value
     }
@@ -672,12 +682,15 @@ mod tests {
             (
                 "generated",
                 |emu, addr, merge| {
-                    let current =
-                        emu.read_mem_dword_constrained_impl::<false>(addr, Touch::PartialStore);
+                    let current = emu.read_mem_dword_constrained_impl::<false>(
+                        None,
+                        addr,
+                        Touch::PartialStore,
+                    );
                     emu.write_mem_dword_no_count(addr, merge(current));
                 },
                 |emu, addr, merge| {
-                    emu.write_mem_dword_merged_no_count::<false>(addr, merge);
+                    emu.write_mem_dword_merged_no_count::<false>(None, addr, merge);
                 },
             ),
             (

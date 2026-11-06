@@ -100,6 +100,8 @@ impl RiscvEmulator {
         }
     }
 
+    /// Emits the event only: the ECALL arm already counted the syscall for the chunk split, as the
+    /// simple interpreter does.
     pub(crate) fn emit_syscall(
         &mut self,
         clk: RvClk,
@@ -107,8 +109,6 @@ impl RiscvEmulator {
         arg1: RvValue,
         arg2: RvValue,
     ) {
-        self.chunk_split_state.num_syscall_events += 1;
-
         let syscall_event = self.syscall_event(clk, syscall_id, arg1, arg2);
 
         // Ungated: an unconstrained block's syscall events go with the record it discards.
@@ -125,4 +125,85 @@ pub const fn align_u64(addr: RvAddr) -> RvAddr {
 #[inline(always)]
 pub const fn dword_half(addr: RvAddr) -> u32 {
     ((addr >> 2) & 1) as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RiscvEmulator;
+    use crate::{
+        compiler::riscv::{
+            instruction::Instruction, opcode::Opcode, program::Program, register::Register,
+        },
+        emulator::{
+            opts::EmulatorOpts,
+            riscv::{
+                emulator::RiscvEmulatorMode, public_values::RecordFinalPvsState,
+                state::RuntimeRegisterRecord, syscalls::SyscallCode,
+            },
+        },
+    };
+    use alloc::sync::Arc;
+    use p3_koala_bear::KoalaBear;
+
+    fn ecall() -> Instruction {
+        Instruction::new(
+            Opcode::ECALL,
+            Register::X5 as u8,
+            Register::X10 as u64,
+            Register::X11 as u64,
+            false,
+            false,
+        )
+    }
+
+    /// An emulator in `mode` about to run a `POSEIDON2_PERMUTE` in place at 0x2000, a syscall the
+    /// syscall chip receives.
+    fn about_to_permute(mode: RiscvEmulatorMode) -> RiscvEmulator {
+        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
+            Arc::new(Program::new(vec![ecall()], 0x1000, 0x1000)),
+            Arc::new(RecordFinalPvsState::default()),
+            EmulatorOpts::default(),
+        );
+        emulator.mode = mode;
+        emulator.update_mode_deps();
+        for (register, value) in [
+            (Register::X5, SyscallCode::POSEIDON2_PERMUTE as u64),
+            (Register::X10, 0x2000),
+            (Register::X11, 0x2000),
+        ] {
+            emulator.state.registers[register as usize] = RuntimeRegisterRecord {
+                value,
+                chunk: 0,
+                timestamp: 0,
+            };
+        }
+        emulator
+    }
+
+    /// The leaf estimate charges the syscall chip by `num_syscall_events`, so the tracing
+    /// interpreter, which cuts the serial path's chunks, must count as the simple one, which cuts
+    /// the pipeline's.
+    #[test]
+    fn a_sent_syscall_counts_once_in_the_chunk_split_state() {
+        let mut trace = about_to_permute(RiscvEmulatorMode::Trace);
+        trace
+            .emulate_instruction(&ecall())
+            .expect("the tracing interpreter's permute");
+        let mut simple = about_to_permute(RiscvEmulatorMode::Simple);
+        simple
+            .emulate_instruction_simple(&ecall())
+            .expect("the simple interpreter's permute");
+
+        assert_eq!(trace.chunk_split_state.num_syscall_events, 1);
+        assert_eq!(
+            format!("{:?}", trace.chunk_split_state),
+            format!("{:?}", simple.chunk_split_state),
+            "the tracing interpreter's chunk-split state, then the simple one's"
+        );
+        assert_eq!(
+            trace.chunk_split_state.marked_dwords(),
+            simple.chunk_split_state.marked_dwords(),
+            "the dwords the tracing interpreter's chunk-split bitmaps mark, then the simple one's"
+        );
+    }
 }

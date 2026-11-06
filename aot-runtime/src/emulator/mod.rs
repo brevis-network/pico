@@ -15,6 +15,7 @@ mod constants;
 mod instructions_base;
 mod instructions_no_count;
 mod memory;
+mod recorder;
 mod registers;
 mod replay;
 mod sink;
@@ -23,5 +24,7 @@ mod state;
 mod types;
 mod unconstrained;
 
+pub use recorder::Recorder;
+pub(crate) use recorder::RecordingRun;
 pub use sink::{AotSink, EmittedChunk, RecordingAotSink};
 pub use state::AotEmulatorCore;
