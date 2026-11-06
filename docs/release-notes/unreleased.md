@@ -28,8 +28,8 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
   bytes, the cycles, the misaligned-access count and the reason a run ends.
 - **AOT code must be regenerated.** `AOT_CODEGEN_STAMP` is 7, and the pure-mode ABI is version 2:
   run `cargo pico aot` again, and rebuild cached pure-mode libraries.
-- **GPU kernels.** The `cuda` build needs pico-gpu's kernels for the code-range and stack-guard
-  columns.
+- **GPU kernels.** The `cuda` build pins pico-gpu at `edd0ceb`, its kernels for the code-range
+  and stack-guard columns; the 3.1 kernels do not match this tree.
 
 ## Added
 
