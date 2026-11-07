@@ -1,6 +1,9 @@
 //! The v3 proof envelope a whitelist-mode root is submitted as:
 //! `PICOMLE\0` | 3 (u32 LE) | zstd(bincode of [`MleRootProofV3`]). Field order is the wire format;
 //! ethproofs' verifier declares the same struct, so none of this may change.
+//!
+//! A compress proof travels as `PICOMLE\0` | 4 (u32 LE) | zstd(bincode of [`MleCompressProofV4`]):
+//! the proof alone, since its key is the whitelist's one compress key, which the verifier holds.
 
 use std::{io::Read, sync::Arc};
 
@@ -8,15 +11,16 @@ use bincode::Options;
 use pico_mle_core::{
     codec::{Decode, Encode},
     keygen::types::MultiStarkVerifyingKey,
+    proof::Proof,
 };
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{ProofWithVk, Sc, VerifyError};
 
 pub const PROOF_MAGIC: [u8; 8] = *b"PICOMLE\0";
 pub const ENVELOPE_V3: u32 = 3;
-/// The envelope of a compress proof: the v3 layout under its own version, so that neither kind
-/// decodes as the other.
+/// The envelope of a compress proof, under its own version so that neither kind decodes as the
+/// other.
 pub const ENVELOPE_V4_COMPRESS: u32 = 4;
 
 /// zstd level for the v3 body. This runs inside the reported proving time, so a fast level: on a
@@ -50,13 +54,46 @@ impl MleRootProofV3 {
 
     /// Decode the proof and vk the body carries.
     pub fn to_root(&self) -> Result<ProofWithVk, VerifyError> {
-        let proof = pico_mle_core::proof::Proof::<Sc>::decode_from_bytes(&self.proof)
-            .map_err(|e| VerifyError::Envelope(format!("root proof does not decode: {e}")))?;
+        let proof = decode_proof(&self.proof, "root")?;
         let vk: MultiStarkVerifyingKey<Sc> = bincode_options()
             .deserialize(&self.root_vk)
             .map_err(|e| VerifyError::Envelope(format!("root vk does not decode: {e}")))?;
         Ok((proof, Arc::new(vk)))
     }
+}
+
+/// The v4 body: a compress proof without its key.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MleCompressProofV4 {
+    /// The compress proof in `mle-core`'s canonical versioned wire format.
+    pub proof: Vec<u8>,
+}
+
+impl MleCompressProofV4 {
+    pub fn from_proof(proof: &Proof<Sc>) -> Result<Self, VerifyError> {
+        Ok(Self {
+            proof: proof
+                .encode_to_vec()
+                .map_err(|e| VerifyError::Envelope(e.to_string()))?,
+        })
+    }
+
+    pub fn to_proof(&self) -> Result<Proof<Sc>, VerifyError> {
+        decode_proof(&self.proof, "compress")
+    }
+}
+
+/// The proof the bytes hold, and nothing after it.
+fn decode_proof(bytes: &[u8], what: &str) -> Result<Proof<Sc>, VerifyError> {
+    let mut reader = std::io::Cursor::new(bytes);
+    let proof = Proof::<Sc>::decode(&mut reader)
+        .map_err(|e| VerifyError::Envelope(format!("{what} proof does not decode: {e}")))?;
+    if reader.position() != bytes.len() as u64 {
+        return Err(VerifyError::Envelope(format!(
+            "{what} proof has trailing bytes"
+        )));
+    }
+    Ok(proof)
 }
 
 /// The fixint encoding `bincode::serialize` writes, with a size limit.
@@ -71,12 +108,12 @@ pub fn encode_v3(body: &MleRootProofV3) -> Result<Vec<u8>, VerifyError> {
     encode_versioned(ENVELOPE_V3, body)
 }
 
-/// Encode a compress proof and its vk, in the v3 layout under [`ENVELOPE_V4_COMPRESS`].
-pub fn encode_compress_v4(body: &MleRootProofV3) -> Result<Vec<u8>, VerifyError> {
+/// Encode a compress envelope.
+pub fn encode_compress_v4(body: &MleCompressProofV4) -> Result<Vec<u8>, VerifyError> {
     encode_versioned(ENVELOPE_V4_COMPRESS, body)
 }
 
-fn encode_versioned(version: u32, body: &MleRootProofV3) -> Result<Vec<u8>, VerifyError> {
+fn encode_versioned<T: Serialize>(version: u32, body: &T) -> Result<Vec<u8>, VerifyError> {
     let err = |e: &dyn std::fmt::Display| VerifyError::Envelope(e.to_string());
     let raw = bincode::serialize(body).map_err(|e| err(&e))?;
     let zstd = zstd::encode_all(raw.as_slice(), PROOF_ZSTD_LEVEL).map_err(|e| err(&e))?;
@@ -93,11 +130,11 @@ pub fn decode_v3(bytes: &[u8]) -> Result<MleRootProofV3, VerifyError> {
 }
 
 /// Decode a compress envelope ([`encode_compress_v4`]); a v3 root envelope is refused.
-pub fn decode_compress_v4(bytes: &[u8]) -> Result<MleRootProofV3, VerifyError> {
+pub fn decode_compress_v4(bytes: &[u8]) -> Result<MleCompressProofV4, VerifyError> {
     decode_versioned(bytes, ENVELOPE_V4_COMPRESS)
 }
 
-fn decode_versioned(bytes: &[u8], expected: u32) -> Result<MleRootProofV3, VerifyError> {
+fn decode_versioned<T: DeserializeOwned>(bytes: &[u8], expected: u32) -> Result<T, VerifyError> {
     let err = |m: String| VerifyError::Envelope(m);
     if bytes.len() < 12 || bytes[..8] != PROOF_MAGIC {
         return Err(err("not an MLE proof envelope (magic)".into()));
@@ -127,9 +164,9 @@ pub fn decode_root_proof_v3(bytes: &[u8]) -> Result<ProofWithVk, VerifyError> {
     decode_v3(bytes)?.to_root()
 }
 
-/// [`decode_compress_v4`] then the proof and vk it carries.
-pub fn decode_compress_proof_v4(bytes: &[u8]) -> Result<ProofWithVk, VerifyError> {
-    decode_compress_v4(bytes)?.to_root()
+/// [`decode_compress_v4`] then the proof it carries.
+pub fn decode_compress_proof_v4(bytes: &[u8]) -> Result<Proof<Sc>, VerifyError> {
+    decode_compress_v4(bytes)?.to_proof()
 }
 
 #[cfg(test)]
@@ -174,6 +211,25 @@ mod tests {
         assert!(decode_v3(&foreign).is_err());
         assert!(decode_v3(&bytes[..bytes.len() / 2]).is_err());
         assert!(decode_v3(&bytes[..11]).is_err());
+    }
+
+    /// The compress envelope: the magic, version 4, then zstd of the bincode of the proof bytes
+    /// alone. Neither kind decodes as the other.
+    #[test]
+    fn v4_wire_format() {
+        let v4 = MleCompressProofV4 { proof: vec![7; 64] };
+        let bytes = encode_compress_v4(&v4).unwrap();
+        assert_eq!(bytes[..8], PROOF_MAGIC);
+        assert_eq!(
+            u32::from_le_bytes(bytes[8..12].try_into().unwrap()),
+            ENVELOPE_V4_COMPRESS
+        );
+        let raw = zstd::decode_all(&bytes[12..]).unwrap();
+        assert_eq!(raw[..8], 64u64.to_le_bytes());
+        assert_eq!(raw[8..], [7u8; 64]);
+        assert_eq!(decode_compress_v4(&bytes).unwrap(), v4);
+        assert!(decode_v3(&bytes).is_err());
+        assert!(decode_compress_v4(&encode_v3(&body()).unwrap()).is_err());
     }
 
     /// A body past the cap is refused before it is deserialized.

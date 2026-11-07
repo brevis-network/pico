@@ -35,7 +35,9 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
 
 - **Compress proofs verify in `pico-verifier`.** `verify_compress` / `verify_compress_with` take a
   compress proof as a v4 envelope (`Proof::export_compress_v4`), with the checks `verify` runs on
-  a combine root; neither entry point accepts the other's envelope.
+  a combine root; neither entry point accepts the other's envelope. The envelope holds the proof
+  alone: the whitelist has one compress key, which `pico-verifier` ships
+  (`shipped_compress_vk`, from `vm/src/mle/shape_vk_bins/mle_compress_vk.bin`).
 - **Compress on the GPU.** In a `cuda` build, a whitelist-mode `prove_to(Phase::Compress)` proves
   the root on the multi-card GPU pipeline, as `prove` does, then the compress layer on card 0.
 

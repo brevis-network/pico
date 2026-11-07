@@ -30,6 +30,30 @@ pub const VK_MAP_LEAF_DOMAIN: u32 = 0x564B_6D70; // "VKmp"
 pub const SHIPPED_VK_ROOT_FILE: &str =
     include_str!("../../vm/src/mle/shape_vk_bins/mle_vk_root.txt");
 
+/// The whitelist's one compress key, bincode, shipped beside the root file: a compress proof
+/// verifies under it, so its envelope carries no key.
+#[cfg(feature = "codec")]
+pub const SHIPPED_COMPRESS_VK_BIN: &[u8] =
+    include_bytes!("../../vm/src/mle/shape_vk_bins/mle_compress_vk.bin");
+
+/// [`SHIPPED_COMPRESS_VK_BIN`], decoded once. Its identity is the shipped whitelist's compress leaf;
+/// the apex checks that membership like any supplied key's.
+#[cfg(feature = "codec")]
+pub fn shipped_compress_vk() -> std::sync::Arc<MultiStarkVerifyingKey<Sc>> {
+    static VK: std::sync::OnceLock<std::sync::Arc<MultiStarkVerifyingKey<Sc>>> =
+        std::sync::OnceLock::new();
+    VK.get_or_init(|| {
+        std::sync::Arc::new(
+            bincode::Options::deserialize(
+                bincode::Options::with_fixint_encoding(bincode::DefaultOptions::new()),
+                SHIPPED_COMPRESS_VK_BIN,
+            )
+            .expect("the shipped compress vk decodes"),
+        )
+    })
+    .clone()
+}
+
 /// The whitelist root [`SHIPPED_VK_ROOT_FILE`] pins: the one [`crate::verify`] trusts.
 pub fn shipped_vk_root() -> [Kb; 8] {
     root_from_root_file(SHIPPED_VK_ROOT_FILE).expect("the shipped root file names a root")

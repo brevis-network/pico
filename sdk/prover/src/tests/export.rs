@@ -198,8 +198,14 @@ fn a_shipped_whitelist_compress_proof_verifies_with_pico_verifier() {
     let (root_envelope, _) = root.export_v3().expect("export");
     let err = pico_verifier::verify_compress(&bundle, &root_envelope, &committed).unwrap_err();
     assert!(matches!(err, VerifyError::Envelope(_)), "{err}");
+    // The compress proof and the shipped compress key, as a root envelope.
     let relabelled = {
-        let body = pico_verifier::envelope::decode_compress_v4(&envelope).expect("decodes");
+        let proof = pico_verifier::envelope::decode_compress_proof_v4(&envelope).expect("decodes");
+        let body = pico_verifier::envelope::MleRootProofV3::from_root(&(
+            proof,
+            pico_verifier::shipped_compress_vk(),
+        ))
+        .expect("a body");
         pico_verifier::envelope::encode_v3(&body).expect("encodes")
     };
     let err = pico_verifier::verify(&bundle, &relabelled, &committed).unwrap_err();

@@ -32,6 +32,8 @@ use pico_mle_core::{keygen::types::MultiStarkVerifyingKey, proof::Proof, StarkEn
 pub use apex::MleApexVerifier;
 pub use error::VerifyError;
 pub use vm_vk::VmVk;
+#[cfg(feature = "codec")]
+pub use whitelist::shipped_compress_vk;
 pub use whitelist::shipped_vk_root;
 
 /// Base field of every MLE proof.
@@ -75,8 +77,8 @@ pub fn verify_with_root(
 }
 
 /// Verify a compress proof (a [`envelope::ENVELOPE_V4_COMPRESS`] envelope) and the bytes it commits
-/// to, under the shipped whitelist root, with the checks of [`verify`]. A v3 root envelope is
-/// refused.
+/// to, under the shipped whitelist root and its compress key ([`shipped_compress_vk`]), with the
+/// checks of [`verify`]. A v3 root envelope is refused.
 #[cfg(feature = "codec")]
 pub fn verify_compress(
     vk_bundle: &[u8],
@@ -85,17 +87,22 @@ pub fn verify_compress(
 ) -> Result<(), VerifyError> {
     let bundle = bundle::decode_vk_bundle_v2(vk_bundle)?;
     let apex = bundle::apex_from_bundle(&bundle, shipped_vk_root())?;
-    verify_compress_with(&apex, envelope, committed)
+    verify_compress_with(&apex, &shipped_compress_vk(), envelope, committed)
 }
 
-/// [`verify_compress`] with an apex already built.
+/// [`verify_compress`] with an apex already built, under `compress_vk`: the compress key of the
+/// apex's whitelist, which must be a member of it.
 #[cfg(feature = "codec")]
 pub fn verify_compress_with(
     apex: &MleApexVerifier,
+    compress_vk: &Arc<MultiStarkVerifyingKey<Sc>>,
     envelope: &[u8],
     committed: &[u8],
 ) -> Result<(), VerifyError> {
-    let proof = envelope::decode_compress_proof_v4(envelope)?;
+    let proof = (
+        envelope::decode_compress_proof_v4(envelope)?,
+        Arc::clone(compress_vk),
+    );
     apex.verify_compress(&proof)?;
     bound(&proof, committed)
 }
@@ -313,13 +320,23 @@ mod tests {
         let apex = MleApexVerifier::with_members(params(), b.members, b.vm_vk, b.vk_root)
             .unwrap()
             .with_compress_params(params());
-        let body = envelope::decode_v3(&f.envelope).unwrap();
-        let compress = envelope::encode_compress_v4(&body).unwrap();
+        let (proof, vk) = envelope::decode_root_proof_v3(&f.envelope).unwrap();
+        let compress = envelope::encode_compress_v4(
+            &envelope::MleCompressProofV4::from_proof(&proof).unwrap(),
+        )
+        .unwrap();
 
-        verify_compress_with(&apex, &compress, COMMITTED).expect("the compress envelope verifies");
-        let err = verify_compress_with(&apex, &compress, &[]).unwrap_err();
+        verify_compress_with(&apex, &vk, &compress, COMMITTED)
+            .expect("the compress envelope verifies");
+        let err = verify_compress_with(&apex, &vk, &compress, &[]).unwrap_err();
         assert!(matches!(err, VerifyError::CommittedValuesUnbound), "{err}");
-        let err = verify_compress_with(&apex, &f.envelope, COMMITTED).unwrap_err();
+        let err = verify_compress_with(&apex, &vk, &f.envelope, COMMITTED).unwrap_err();
+        assert!(matches!(err, VerifyError::Envelope(_)), "{err}");
+        // The proof bytes and nothing after them.
+        let mut padded = envelope::MleCompressProofV4::from_proof(&proof).unwrap();
+        padded.proof.push(0);
+        let padded = envelope::encode_compress_v4(&padded).unwrap();
+        let err = verify_compress_with(&apex, &vk, &padded, COMMITTED).unwrap_err();
         assert!(matches!(err, VerifyError::Envelope(_)), "{err}");
         let err = verify_with(&apex, &compress, COMMITTED).unwrap_err();
         assert!(matches!(err, VerifyError::Envelope(_)), "{err}");
@@ -328,7 +345,7 @@ mod tests {
         // STARK verify.
         let strict =
             MleApexVerifier::with_members(params(), b_members(&f), b.vm_vk, b.vk_root).unwrap();
-        let err = verify_compress_with(&strict, &compress, COMMITTED).unwrap_err();
+        let err = verify_compress_with(&strict, &vk, &compress, COMMITTED).unwrap_err();
         assert!(matches!(err, VerifyError::WrongPreset { .. }), "{err}");
 
         // The root checks run on the compress path too: another guest's bundle, and a whitelist
@@ -338,7 +355,7 @@ mod tests {
         let other = MleApexVerifier::with_members(params(), b_members(&f), other_vm_vk, b.vk_root)
             .unwrap()
             .with_compress_params(params());
-        let err = verify_compress_with(&other, &compress, COMMITTED).unwrap_err();
+        let err = verify_compress_with(&other, &vk, &compress, COMMITTED).unwrap_err();
         assert!(
             matches!(err, VerifyError::RiscvVkDigestMismatch { .. }),
             "{err}"
@@ -353,8 +370,24 @@ mod tests {
         )
         .unwrap()
         .with_compress_params(params());
-        let err = verify_compress_with(&unlisted, &compress, COMMITTED).unwrap_err();
+        let err = verify_compress_with(&unlisted, &vk, &compress, COMMITTED).unwrap_err();
         assert!(matches!(err, VerifyError::NotWhitelisted), "{err}");
+    }
+
+    /// The shipped compress key is a recursion key made for the 128-bit compress preset, and its
+    /// body hashes to its pre_hash. That it is the shipped whitelist's compress leaf, and the key
+    /// the prover keygens, `pico-vm`'s `the_shipped_artifact_matches_this_binary` checks.
+    #[test]
+    fn the_shipped_compress_vk_is_a_compress_key() {
+        let vk = shipped_compress_vk();
+        assert!(vk.inner.merged_preprocessed_commit.is_some());
+        let engine: Engine =
+            StarkEngine::new(pico_mle_core::compress_params_with_128_bits_security());
+        assert!(vk.inner.params == *engine.params());
+        assert_eq!(
+            pico_mle_core::keygen::compute_vk_pre_hash(engine.config(), &vk.inner, &[]),
+            vk.pre_hash
+        );
     }
 
     fn b_members(f: &Fixture) -> Vec<crate::whitelist::VkMembership> {
