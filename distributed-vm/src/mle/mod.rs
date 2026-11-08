@@ -18,6 +18,7 @@
 pub mod config;
 pub mod embed;
 pub mod ethproofs;
+use pico_vm::mle::inject;
 pub mod two_machine;
 mod watch;
 
@@ -162,6 +163,9 @@ pub struct BlockOutcome {
     /// Embedded runs only: the guest failed, or a chunk of it was refused, and the run was
     /// drained rather than proved. Nothing it held is left behind, so the next block proves normally.
     pub guest_failure: Option<GuestFailure>,
+    /// Embedded runs only: a pipeline thread panicked, with this message, and the run was drained.
+    /// Whether the process can prove again is the caller's call ([`embed::prove`]).
+    pub stage_failure: Option<String>,
 }
 
 /// Why a guest ended an embedded run early: its emulation failed, or a chunk of it cannot be
@@ -225,6 +229,32 @@ fn expected_remote_digests() -> usize {
         .saturating_sub(1)
 }
 
+/// Whether the run is ending without a root: its guest failed (an embedded run), or a pipeline
+/// thread panicked. Stages drop what they hold rather than prove it, so the run drains fast.
+fn run_stopped(guest_failed: &AtomicBool) -> bool {
+    guest_failed.load(Ordering::SeqCst) || watch::failed()
+}
+
+/// Joins a pipeline thread; `None` if it panicked. The CLI gives up on the run's first failure,
+/// since its panic hook ends the process; an embedded run waits for the thread, and while the run
+/// stops it drops the prepared chunks, whose history slots the emulation needs to reach its stop.
+fn join_stage<T>(
+    handle: thread::JoinHandle<T>,
+    what: &str,
+    embedded: bool,
+    store: &DashMap<usize, PreparedChunk>,
+    guest_failed: &AtomicBool,
+) -> Option<T> {
+    if !embedded {
+        return Some(watch::join(handle, what));
+    }
+    watch::join_draining(handle, || {
+        if run_stopped(guest_failed) {
+            store.clear();
+        }
+    })
+}
+
 /// Take a chunk's prepared trace, waiting for the local emulator if it has not got there yet.
 ///
 /// Single-node registered a chunk only after storing it, so acquiring one implied it was present
@@ -238,9 +268,15 @@ fn expected_remote_digests() -> usize {
 /// correct reading, not a workaround — the trace is coming, from this machine's own emulator. The
 /// timeout keeps a genuine loss (an emulator that died, a chunk index nobody will produce) from
 /// becoming a silent hang.
-fn take_prepared_chunk(store: &DashMap<usize, PreparedChunk>, chunk_idx: usize) -> PreparedChunk {
+///
+/// `None` once the run stops ([`run_stopped`]): a stopped run drops its prepared chunks.
+fn take_prepared_chunk(
+    store: &DashMap<usize, PreparedChunk>,
+    chunk_idx: usize,
+    guest_failed: &AtomicBool,
+) -> Option<PreparedChunk> {
     if let Some((_, chunk)) = store.remove(&chunk_idx) {
-        return chunk;
+        return Some(chunk);
     }
     let t = Instant::now();
     let deadline = Duration::from_secs(600);
@@ -250,7 +286,10 @@ fn take_prepared_chunk(store: &DashMap<usize, PreparedChunk>, chunk_idx: usize) 
                 "chunk {chunk_idx}: waited {:.3}s for the local emulator",
                 t.elapsed().as_secs_f64()
             );
-            return chunk;
+            return Some(chunk);
+        }
+        if run_stopped(guest_failed) {
+            return None;
         }
         assert!(
             t.elapsed() < deadline,
@@ -956,6 +995,8 @@ struct RiscvLane {
     prove_count: Arc<AtomicUsize>,
     verify: bool,
     with_combine: bool,
+    /// Set once an embedded run's guest fails: see [`run_stopped`].
+    guest_failed: Arc<AtomicBool>,
     /// Set only when `MLE_CONVERT_PREBUILD` is on. Shared by every card's riscv lane: the
     /// pre-build reads only `riscv_vk` (identical on every card) and writes into a
     /// PROCESS-GLOBAL program cache, so which card's machine backs it is irrelevant — which is
@@ -1030,8 +1071,14 @@ impl RiscvLane {
     /// Prove one chunk and hand the proof on. `worker_id` is the calling lane's, so the `[bench]`
     /// lines are keyed on the thread that actually did the work under either shape.
     fn prove(&self, chunk_idx: usize, worker_id: &str, depth: Option<usize>) {
+        if run_stopped(&self.guest_failed) {
+            return;
+        }
         let _b = spans::busy(WorkKind::ProveRiscv, Some(chunk_idx as u32));
-        let chunk = take_prepared_chunk(&self.store, chunk_idx);
+        let Some(chunk) = take_prepared_chunk(&self.store, chunk_idx, &self.guest_failed) else {
+            return;
+        };
+        inject::at(inject::Stage::Prove);
         if let Some(depth) = depth {
             log_pickup(chunk_idx, worker_id, depth, &chunk);
         }
@@ -1133,6 +1180,7 @@ struct CardRecursion {
     combine_count: Arc<AtomicUsize>,
     verify: bool,
     with_combine: bool,
+    guest_failed: Arc<AtomicBool>,
 }
 
 #[cfg(feature = "cuda")]
@@ -1146,8 +1194,13 @@ impl CardRecursion {
             convert_done,
             verify,
             with_combine,
+            guest_failed,
             ..
         } = self;
+        // A stopped run drops the work, and the device context it carries with it.
+        if run_stopped(guest_failed) {
+            return;
+        }
         let _b = spans::busy(WorkKind::ProveConvert, Some(chunk_idx as u32));
         let machine = convert
             .as_ref()
@@ -1208,8 +1261,12 @@ impl CardRecursion {
             combine_nanos,
             combine_count,
             verify,
+            guest_failed,
             ..
         } = self;
+        if run_stopped(guest_failed) {
+            return;
+        }
         let combine = combine
             .as_ref()
             .expect("combine work with no combine machine — no_combine is misset");
@@ -1969,7 +2026,7 @@ impl EarlyRootKeygen {
     fn take(&self) -> Option<thread::JoinHandle<CombineMachine>> {
         self.slot
             .lock()
-            .expect("early root keygen mutex poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take()
     }
 }
@@ -2051,7 +2108,7 @@ fn resident_for(key: ResidentKey, build: impl FnOnce(Arc<[u8]>) -> Resident) -> 
     resident
 }
 
-/// The resident machines, if any, for reporting only.
+/// The resident machines, if any.
 #[cfg(feature = "cuda")]
 fn resident_snapshot() -> Option<Arc<Resident>> {
     RESIDENT
@@ -2059,6 +2116,19 @@ fn resident_snapshot() -> Option<Arc<Resident>> {
         .unwrap_or_else(|e| e.into_inner())
         .as_ref()
         .map(|(_, resident)| Arc::clone(resident))
+}
+
+/// Drops the device keys the resident recursion pk caches added during `run`; returns how many.
+#[cfg(feature = "cuda")]
+pub(crate) fn drop_pk_keys_added_in(run: u64) -> usize {
+    resident_snapshot().map_or(0, |resident| {
+        resident
+            .converts
+            .iter()
+            .map(|m| m.drop_keys_added_in(run))
+            .chain(resident.combines.iter().map(|m| m.drop_keys_added_in(run)))
+            .sum()
+    })
 }
 
 /// The single-node proving pipeline: keygen (+ eager JIT warmup) first on the quiescent main
@@ -2465,6 +2535,12 @@ fn run_pipeline(
         (prover_count, with_convert, with_combine, with_compress),
         "resident machines were built for a different shape; one process serves one shape"
     );
+    // What an embedded run's drain returns the cards' pools to: their use with the resident
+    // machines built, whichever block or program built them.
+    #[cfg(feature = "cuda")]
+    if embedded.is_some() {
+        embed::mark_run_start(prover_count);
+    }
     // Rebound with the names the pipeline below already uses, so the proving window is untouched
     // by the hoist. Every one of these is an `Arc` clone.
     let program = Arc::clone(&resident.program);
@@ -2663,6 +2739,7 @@ fn run_pipeline(
                 let corrupted = Arc::clone(&corrupted);
                 let refused = Arc::clone(&guest_failed);
                 let on_record = move |mut record: EmulationRecord, _done: bool| {
+                    inject::at(inject::Stage::Emulate);
                     // Nothing downstream will take it: end the emulation rather than run on.
                     if watch::failed() {
                         panic!("emulation stopped: the pipeline failed");
@@ -2708,10 +2785,15 @@ fn run_pipeline(
                     // CLI still stops on it.
                     Ok(Err(e)) if embedded_run => Err(GuestFailure::Emulation(e)),
                     Ok(Err(e)) => panic!("snapshot pipeline failed: {e:?}"),
-                    // A panic is the emulation's own unless another pipeline thread failed first.
-                    Err(payload) if embedded_run && !watch::failed() => Err(
-                        GuestFailure::Panicked(watch::panic_message(&*payload)),
-                    ),
+                    // A panic is the emulation's own unless another pipeline thread failed first,
+                    // or it is the symptom of one that is still unwinding (a closed channel).
+                    Err(payload)
+                        if embedded_run
+                            && !watch::failed()
+                            && !watch::is_symptom(&watch::panic_message(&*payload)) =>
+                    {
+                        Err(GuestFailure::Panicked(watch::panic_message(&*payload)))
+                    }
                     Err(payload) => std::panic::resume_unwind(payload),
                 }
             };
@@ -2788,11 +2870,10 @@ fn run_pipeline(
                         while let Some((idx, record)) =
                             recv_idle(&record_rx, WorkKind::PrepareRiscv)
                         {
-                            if watch::failed() {
-                                break;
-                            }
-                            // A drained run: drop the record, which returns its history slot.
-                            if guest_failed.load(Ordering::SeqCst) {
+                            // A stopped run: drop the record, which returns its history slot. Not a
+                            // `break`, which would leave the rest of the records, and their slots,
+                            // on the channel.
+                            if run_stopped(&guest_failed) {
                                 continue;
                             }
                             // This lane has no `Wait`: `prepare_chunk_shaped` takes no gate
@@ -2813,7 +2894,15 @@ fn run_pipeline(
                             // Whitelist mode: the shape goes on the record before the device
                             // event staging copies it (decided from the event counter the
                             // packaging computes anyway); plain packaging otherwise.
-                            let chunk = match shaper.try_prepare_chunk_shaped(record) {
+                            let shaped = if inject::refuses(idx + 1) {
+                                Err(pico_vm::mle::machine::riscv::CatchAllShape {
+                                    chunk: idx + 1,
+                                    natural: "injected by MLE_INJECT_FAILURE".into(),
+                                })
+                            } else {
+                                shaper.try_prepare_chunk_shaped(record)
+                            };
+                            let chunk = match shaped {
                                 Ok(chunk) => chunk,
                                 // An embedded caller gets the refusal back and the run drains,
                                 // as for a failed guest; the CLI still stops on it.
@@ -2831,6 +2920,10 @@ fn run_pipeline(
                                 }
                                 Err(e) => panic!("{e}"),
                             };
+                            // Stopped while it prepared: dropped, not stored, for the slot's sake.
+                            if run_stopped(&guest_failed) {
+                                continue;
+                            }
                             let cost = chunk.cost;
                             // Stamps need not arrive ascending: the store is a map and
                             // `register_chunk` keeps only a min/max. They must be distinct — an
@@ -2859,10 +2952,22 @@ fn run_pipeline(
             .spawn_watched(move || {
                 let mut total = 0usize;
                 let mut wall = Duration::ZERO;
+                // Every preparer joined before a panic goes on: one left running would read the
+                // next run's failure flag.
+                let mut panicked = None;
                 for h in hs {
-                    let (n, w) = h.join().expect("riscv preparer panicked");
-                    total += n;
-                    wall = wall.max(w);
+                    match h.join() {
+                        Ok((n, w)) => {
+                            total += n;
+                            wall = wall.max(w);
+                        }
+                        Err(payload) => {
+                            panicked.get_or_insert(watch::panic_message(&*payload));
+                        }
+                    }
+                }
+                if let Some(message) = panicked {
+                    panic!("riscv preparer panicked: {message}");
                 }
                 mle_finalize_emulation();
                 (total, wall)
@@ -2870,6 +2975,8 @@ fn run_pipeline(
             .expect("spawn mle-riscv-preparer-join")
     };
     vram_probe("preparers_spawned", iteration.unwrap_or(0), prover_count);
+    // The preparers hold the live receivers: a record left on the channel holds its history slot.
+    drop(record_rx);
 
     // Convert work reaches the prover on its own bounded(1) ready lane, carrying device-built
     // prepares — each parked ctx is a few hundred MB of VRAM (see `ConvertWork`), so the preparer
@@ -2944,6 +3051,7 @@ fn run_pipeline(
                                 .unwrap_or_else(|e| {
                                     panic!("binding preparer to card {card} failed: {e:?}")
                                 });
+                            inject::at(inject::Stage::Convert);
                             let prepared = machines[card].prepare_one(&riscv_proof);
                             info!("[mle-convert-preparer-{p}] chunk {chunk_idx} prepared");
                             // Built here, off the prover lane, so the prover never queues behind
@@ -3040,6 +3148,7 @@ fn run_pipeline(
                             if let Some(early) = early_root.as_ref().filter(|_| is_final) {
                                 early.start(children.to_vec(), start, end);
                             }
+                            inject::at(inject::Stage::Combine);
                             let prepared = machines[card].prepare_node(&children, is_final);
                             info!(
                                 "[mle-combine-preparer-{p}] node [{start},{end}] prepared \
@@ -3251,6 +3360,7 @@ fn run_pipeline(
             prove_count: Arc::clone(&prove_count),
             verify,
             with_combine,
+            guest_failed: Arc::clone(&guest_failed),
             #[cfg(feature = "cuda")]
             convert_prebuild: convert_prebuild.clone(),
         };
@@ -3274,6 +3384,7 @@ fn run_pipeline(
             combine_count: Arc::clone(&combine_count),
             verify,
             with_combine,
+            guest_failed: Arc::clone(&guest_failed),
         });
 
         if rec_lane {
@@ -3527,10 +3638,23 @@ fn run_pipeline(
     drop(combine_task_tx);
     drop(combine_ready_rxs);
 
-    let (emulate_wall, emulated_cycles, committed, guest_failure) =
-        watch::join(emulate_handle, "emulate thread");
+    let (emulate_wall, emulated_cycles, committed, guest_failure) = join_stage(
+        emulate_handle,
+        "emulate thread",
+        embedded_run,
+        &store,
+        &guest_failed,
+    )
+    .unwrap_or_default();
     vram_probe("emulate_joined", iteration.unwrap_or(0), prover_count);
-    let (chunk_count, prepare_wall) = watch::join(preparer_handle, "preparer thread");
+    let (chunk_count, prepare_wall) = join_stage(
+        preparer_handle,
+        "preparer thread",
+        embedded_run,
+        &store,
+        &guest_failed,
+    )
+    .unwrap_or_default();
     // A refusal stops the emulation, so it outranks the failure that stop reports.
     let guest_failure = refused_shape
         .lock()
@@ -3545,39 +3669,19 @@ fn run_pipeline(
         prepare_wall.as_secs_f64(),
     );
 
-    // The guest failed: the scheduler is aborted, so every lane drains and exits. Join them all,
-    // then drop what the run prepared and the cross-chunk sums it accumulated, so the resident
-    // machines and the history slots serve the next block as if this one never ran.
-    if let Some(failure) = guest_failure {
-        for h in workers {
-            watch::join(h, "worker thread");
-        }
-        #[cfg(feature = "cuda")]
-        {
-            if let Some(pb) = convert_prebuild.as_ref() {
-                pb.shutdown();
-            }
-            for h in convert_stage {
-                watch::join(h, "convert stage thread");
-            }
-            for h in combine_stage {
-                watch::join(h, "combine preparer thread");
-            }
-        }
-        store.clear();
-        let _ = RiscvMachine::drain_cross_chunk_gcs_over(provers.iter().map(|p| p.as_ref()));
-        info!("MLE run drained after the guest failed: {failure}");
-        return BlockOutcome {
-            cycles: emulated_cycles,
-            committed,
-            guest_failure: Some(failure),
-            ..Default::default()
-        };
-    }
+    // A stopped run: the guest failed, or (embedded) a pipeline thread panicked. The scheduler is
+    // aborted, so every stage drains and exits; the joins below wait for them all, the checks on a
+    // finished run are skipped, and the run is drained at the end instead of accepted.
+    let stopped = |guest_failure: &Option<GuestFailure>| {
+        guest_failure.is_some() || (embedded_run && watch::failed())
+    };
+    let join = |h: thread::JoinHandle<()>, what| {
+        join_stage(h, what, embedded_run, &store, &guest_failed);
+    };
 
     // Nothing to prove (degenerate empty program): the scheduler never completes with zero
     // chunks, so return without joining the workers — process exit reaps them.
-    if chunk_count == 0 {
+    if chunk_count == 0 && !stopped(&guest_failure) {
         info!("MLE single-node: no chunks emulated; nothing to prove");
         // The cycle count is real -- the emulator did run -- but there is no root. A caller that
         // has to report this block upstream must report it as unproved, and `root: None` is what
@@ -3598,13 +3702,13 @@ fn run_pipeline(
     // into their own record, so any real program emulates to >= 2 chunks. Kept because the failure
     // mode is a silent hang.
     assert!(
-        !with_combine || chunk_count >= 2,
+        stopped(&guest_failure) || !with_combine || chunk_count >= 2,
         "--step combine needs >= 2 chunks, got {chunk_count} \
          (a lone proof has no adjacent neighbour, so the tree never collapses)"
     );
 
     for h in workers {
-        watch::join(h, "worker thread");
+        join(h, "worker thread");
     }
     vram_probe("after_workers", iteration.unwrap_or(0), prover_count);
     // Every proof exists: each lane only exits once its own feeds are closed, so joining the
@@ -3619,7 +3723,7 @@ fn run_pipeline(
     // each element as `(x - Z)` and adds a single `Z` back at the end, so
     // `sum([sum(a), sum(b)]) == sum(a ++ b)`. It is NOT plain addition — there is no `Add` impl —
     // which is why this collects into one iterator and sums once instead of accumulating pairwise.
-    {
+    if !stopped(&guest_failure) {
         let local = RiscvMachine::drain_cross_chunk_gcs_over(provers.iter().map(|p| p.as_ref()));
         if is_mle_secondary() {
             let bytes =
@@ -3678,10 +3782,11 @@ fn run_pipeline(
     // Convert stage drain: the workers' exits dropped the last `convert_tx` senders, so the
     // preparer/prover pools run dry and exit; joining them means every convert proof is done.
     #[cfg(feature = "cuda")]
-    if !converts.is_empty() {
-        for h in convert_stage {
-            watch::join(h, "convert stage thread");
-        }
+    for h in convert_stage {
+        join(h, "convert stage thread");
+    }
+    #[cfg(feature = "cuda")]
+    if !converts.is_empty() && !stopped(&guest_failure) {
         let done = convert_done.load(Ordering::SeqCst);
         // Single-node proves every chunk it emulated, so convert count == chunk count. Under
         // two-machine each side emulates the WHOLE block but proves only its share, so
@@ -3718,10 +3823,11 @@ fn run_pipeline(
     // leaves has exactly N-1 internal nodes, so the count check doubles as an engagement check —
     // a dead ready lane could not have produced them.
     #[cfg(feature = "cuda")]
-    if !combines.is_empty() {
-        for h in combine_stage {
-            watch::join(h, "combine preparer thread");
-        }
+    for h in combine_stage {
+        join(h, "combine preparer thread");
+    }
+    #[cfg(feature = "cuda")]
+    if !combines.is_empty() && !stopped(&guest_failure) {
         let nodes = combine_count.load(Ordering::SeqCst);
         // A binary tree over N chunks has N-1 internal nodes, and single-node proves all of them.
         // Under two-machine the tree is one tree but its nodes are split across the machines --
@@ -3743,6 +3849,32 @@ fn run_pipeline(
                 chunk_count - 1
             );
         }
+    }
+
+    // Every stage has joined. Drop what the run prepared and the cross-chunk sums it accumulated,
+    // so the resident machines and the history slots serve the next block as if this one never ran.
+    if stopped(&guest_failure) {
+        // A root keygen started on the final node before the run stopped is CPU work; joined so
+        // that nothing of this run outlives it.
+        #[cfg(feature = "cuda")]
+        if let Some(keygen) = early_root.as_ref().and_then(EarlyRootKeygen::take) {
+            let _ = keygen.join();
+        }
+        store.clear();
+        let _ = RiscvMachine::drain_cross_chunk_gcs_over(provers.iter().map(|p| p.as_ref()));
+        let stage_failure = watch::failure_message().filter(|_| embedded_run);
+        match (&guest_failure, &stage_failure) {
+            (Some(failure), _) => info!("MLE run drained after the guest failed: {failure}"),
+            (None, Some(message)) => info!("MLE run drained after a stage failed: {message}"),
+            (None, None) => {}
+        }
+        return BlockOutcome {
+            cycles: emulated_cycles,
+            committed,
+            guest_failure,
+            stage_failure,
+            ..Default::default()
+        };
     }
 
     vram_probe("after_combine_check", iteration.unwrap_or(0), prover_count);
@@ -4092,6 +4224,7 @@ fn run_pipeline(
         root: root_export,
         committed,
         guest_failure: None,
+        stage_failure: None,
     }
 }
 

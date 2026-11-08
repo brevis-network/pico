@@ -166,13 +166,19 @@ pub enum ProveError {
     #[error("GPU proving failed: {0}")]
     Gpu(String),
 
-    /// A previous GPU prove failed in this process other than by its guest (a device error, a
-    /// failed pipeline stage) and may have left the pipeline mid-run; restart the process to prove
-    /// on the GPU again. A guest whose emulation fails is reported as on the CPU path, and does not
-    /// poison the process.
+    /// A previous GPU prove failed in this process other than by its guest or a card running out
+    /// of memory (a device error, a failed pipeline stage); restart the process to prove on the GPU
+    /// again. A guest whose emulation fails is reported as on the CPU path, and does not poison the
+    /// process.
     #[cfg(feature = "cuda")]
     #[error("a previous GPU prove failed in this process; restart the process to prove again")]
     GpuPoisoned,
+
+    /// A card ran out of memory proving this run. The run was drained, and the process can prove
+    /// again: a smaller guest, or a larger card, proves.
+    #[cfg(feature = "cuda")]
+    #[error("a card ran out of memory: {0}")]
+    GpuOutOfMemory(String),
 
     /// The container was written by a different container format.
     #[error("proof artifact format version mismatch: expected {expected}, file claims {found}")]
@@ -361,6 +367,7 @@ impl ProveError {
         use distributed_vm::mle::{embed::EmbedError, GuestFailure};
         match error {
             EmbedError::Poisoned => Self::GpuPoisoned,
+            EmbedError::OutOfMemory(message) => Self::GpuOutOfMemory(message),
             // The guest's own failure, reported as the CPU path reports it.
             EmbedError::Guest(GuestFailure::Emulation(e)) => {
                 Self::from_emulate(pico_vm::mle::machine::riscv::EmulateError::Emulation(e))

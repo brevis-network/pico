@@ -63,6 +63,11 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
 
 ## Fixed
 
+- A card running out of memory in an embedded GPU prove usually leaves the process able to prove.
+  The pipeline drains the run, drops the recursion keys the run added, and the prove returns
+  `ProveError::GpuOutOfMemory` if the drain left everything as the run found it. Otherwise, and
+  after any other failed stage, the process is poisoned as before: a card with an error pending,
+  history slots still held, or a card's pools above where the run started.
 - The BLS12-381 accelerators (`zkvm_bls12_*`, `zkvm_kzg_point_eval`) refuse a field element at or
   above the modulus before the curve library parses it. The library's parser multiplies even a
   value it then rejects, and inside the zkVM that multiplication is a field syscall that cannot be

@@ -82,6 +82,7 @@
 //! | `RECURSION_EARLY_EXIT_TS` | recursion emulation | **yes, and it breaks proving**: it truncates the recursion run, and a value that does not parse aborts |
 //! | `MLE_WITNESS_HASH`, `MLE_TRANSCRIPT_PROF`, `MLE_WALKER_XCHECK` | recursion witness generation | **yes**, and deliberately |
 //! | `MLE_REC_PARALLEL_CHILDREN`, `MLE_REC_WAVEFRONT` | recursion node interpretation | **yes**, and deliberately |
+//! | `MLE_INJECT_FAILURE` | the GPU pipeline | **yes, and it breaks proving**: a negative-test hook; it fails one prove's stage, or refuses one of its chunks, once per process |
 //! | `N11_TAMPER_PACKED_LANE` | recursion witness generation | **yes, and it breaks proving**: a negative-test hook; `1` corrupts the padding lane of the packed opened-row blocks, so the first recursion proof fails in its prover |
 //! | `MEMORY_POOL_SIZE` | the snapshot pipeline's memory pool | **yes**: the pool holds this many emulator memories. With `ProverBuilder::aot`, or the `cuda` feature's interpreted AOT runtime, a replay worker holds one while it replays: unset, the pool is 16, raised where that is fewer to one per worker plus one per segment of the batch being cut, so every worker replays at once, and a smaller value caps the replay workers running at once. `0`, or fewer than the segments of one batch, is refused by `build` and `execute`, unless they emulate with `ProverBuilder::serial_emulation` |
 //! | `MEMORY_POOL_EAGER`, `MEMORY_POOL_LOW_WATER`, `MEMORY_RECYCLER_THREADS` | the snapshot pipeline's memory pool | **yes**: how the pool is filled and recycled. A setting that leaves the pool empty, or `MEMORY_RECYCLER_THREADS=0`, which never returns a memory to it, is refused by `build` and `execute`, unless they emulate with `ProverBuilder::serial_emulation` |
@@ -204,6 +205,7 @@ pub const ENV_READ_BY_PROVER: &[(&str, &str)] = &[
     ),
     ("DEFERRED_TAIL_MERGE", "can change the proof"),
     ("MLE_FORCE_CATCH_ALL", "can change the proof"),
+    ("MLE_INJECT_FAILURE", "fails a GPU prove on purpose"),
     (
         "RECURSION_EARLY_EXIT_TS",
         "can truncate the recursion run and break proving",

@@ -657,6 +657,8 @@ struct GpuCombinePkEntry {
     shape_id: usize,
     /// LRU tick of the last use (larger = more recent).
     last_used: u64,
+    /// The [`super::PK_CACHE_RUN`] that added it.
+    run: u64,
 }
 
 /// Process-wide index of recursion programs already built for a shape, shared across cards.
@@ -955,6 +957,18 @@ pub struct CombineNode {
 
 #[cfg(feature = "cuda")]
 impl GpuCombineMachine {
+    /// Drops the device keys this cache added during `run` (a [`super::PK_CACHE_RUN`]); returns how
+    /// many.
+    pub fn drop_keys_added_in(&self, run: u64) -> usize {
+        let mut guard = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let before = guard.0.len();
+        guard.0.retain(|e| e.run != run);
+        before - guard.0.len()
+    }
+
     /// Combine nodes prove under the same params as convert (uniform child-verify cost across the
     /// tree): pass `recursion_params_with_128_bits_security()`.
     pub fn new(params: SystemParams, vk_verification: bool) -> Self {
@@ -1245,7 +1259,10 @@ impl GpuCombineMachine {
     /// Shapes cached on this card right now, and the cap. Same purpose as the convert machine's:
     /// the VRAM census needs to separate "the LRU is still filling" from "something unbounded".
     pub fn cache_len(&self) -> (usize, usize) {
-        let guard = self.cache.lock().expect("combine pk cache mutex poisoned");
+        let guard = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         (guard.0.len(), self.cache_cap)
     }
 
@@ -1254,7 +1271,11 @@ impl GpuCombineMachine {
     /// The single accessor on purpose — counts derived from the records here rather than at each
     /// call site, so `keygens` / `hits` / `nodes` cannot drift apart.
     pub fn shape_stats(&self) -> ShapeStats {
-        let records = self.shapes.lock().expect("shapes mutex poisoned").clone();
+        let records = self
+            .shapes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         ShapeStats {
             keygens: records.len(),
             hits: records.iter().map(|r| r.hits).sum(),
@@ -1282,7 +1303,12 @@ impl GpuCombineMachine {
         Arc<MultiStarkVerifyingKey<Sc>>,
         GpuPk,
     ) {
-        let mut guard = self.cache.lock().expect("combine pk cache mutex poisoned");
+        // A keygen that panicked under this lock (a card out of memory) left the entries as they
+        // were: they change only once a keygen succeeds.
+        let mut guard = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (entries, tick, next_shape_id) = &mut *guard;
         *tick += 1;
         let now = *tick;
@@ -1301,7 +1327,10 @@ impl GpuCombineMachine {
             // "one shape, two nodes" from "two shapes" (`child_ws` alone cannot — see its docs).
             // Lock order is cache -> shapes, the same as the miss path below; nothing takes them
             // the other way round.
-            let mut shapes = self.shapes.lock().expect("shapes mutex poisoned");
+            let mut shapes = self
+                .shapes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(rec) = shapes.iter_mut().find(|r| r.shape_id == shape_id) {
                 rec.hits += 1;
             }
@@ -1335,6 +1364,7 @@ impl GpuCombineMachine {
             p
         });
         let program_ms = t_program.elapsed().as_millis();
+        crate::mle::inject::at(crate::mle::inject::Stage::Keygen);
         let (vk, device_pk) = gpu::keygen_recursion_gpu(
             &self.engine,
             &program,
@@ -1435,6 +1465,7 @@ impl GpuCombineMachine {
             device_pk: device_pk.clone(),
             shape_id,
             last_used: now,
+            run: super::PK_CACHE_RUN.load(std::sync::atomic::Ordering::Relaxed),
         });
         (program, vk, device_pk)
     }

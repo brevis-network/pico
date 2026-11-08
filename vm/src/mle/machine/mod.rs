@@ -25,6 +25,12 @@ pub mod trace_oracle;
 #[cfg(not(target_os = "zkvm"))]
 pub mod vk_bundle;
 pub mod vk_map;
+
+/// The run the recursion pk caches (convert and combine, every card) tag the device keys they add
+/// with. A run a card ran out of memory in drops the keys it added, so its drain should leave the
+/// cards' pools where the run found them. Keys of earlier runs that the run's LRU evicted are not
+/// credited back, so they can mask that much of a leak.
+pub static PK_CACHE_RUN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 // Wrap artifact builder: embed proof -> gnark constraints + witness.
 #[cfg(feature = "multi-field-transcript")]
 pub mod wrap;

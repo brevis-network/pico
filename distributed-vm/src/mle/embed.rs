@@ -6,6 +6,9 @@
 
 use std::{fmt, num::NonZeroUsize, sync::Arc};
 
+#[cfg(feature = "cuda")]
+use std::sync::atomic::Ordering;
+
 use p3_koala_bear::KoalaBear;
 use pico_vm::{
     emulator::{
@@ -121,6 +124,9 @@ pub enum EmbedError {
     /// The guest's emulation failed, or the emulator panicked (a host-side emulator bug
     /// included). The run was drained, and the process can prove again.
     Guest(super::GuestFailure),
+    /// A card ran out of memory. The run was drained and the process can prove again; a smaller
+    /// guest, or a larger card, proves.
+    OutOfMemory(String),
     Panicked(String),
     /// An earlier call failed and may have left the pipeline's threads and scheduler mid-run.
     Poisoned,
@@ -155,6 +161,7 @@ impl fmt::Display for EmbedError {
             ),
             Self::NoRoot => write!(f, "the pipeline produced no root proof"),
             Self::Guest(failure) => write!(f, "the guest failed: {failure}"),
+            Self::OutOfMemory(msg) => write!(f, "a card ran out of memory: {msg}"),
             Self::Panicked(msg) => write!(f, "GPU proving failed: {msg}"),
             Self::Poisoned => write!(
                 f,
@@ -233,16 +240,17 @@ pub struct EmbeddedProof {
     pub cycles: u64,
 }
 
-/// Set once a pipeline run fails other than by its guest (a device error, a panicking stage, no
-/// root): the run can leave worker threads and scheduler state behind, so the process proves
-/// nothing more.
+/// Set once a pipeline run fails other than by its guest or a card running out of memory (a device
+/// error, a panicking stage, no root): the process proves nothing more.
 #[cfg(feature = "cuda")]
 static POISONED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Proves `program` on `stdin` to one complete whitelist-mode root on all visible cards, and
 /// verifies it with the apex before returning. One call at a time per process. A guest whose
 /// emulation fails, or with a chunk refused as [`super::GuestFailure::CatchAllShape`], returns
-/// [`EmbedError::Guest`] and leaves the process able to prove; after any
+/// [`EmbedError::Guest`] and leaves the process able to prove; so does a run a card ran out of
+/// memory in, as [`EmbedError::OutOfMemory`], once the drain left every card healthy, no history
+/// slot held and the cards' pools where the run found them ([`recoverable`]). After any
 /// other failed run every later call returns [`EmbedError::Poisoned`].
 ///
 /// The memory tier is latched as [`init_memory_tier`] does; a caller that emulates before its
@@ -254,7 +262,7 @@ pub fn prove(
 ) -> Result<EmbeddedProof, EmbedError> {
     static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
-    if POISONED.load(std::sync::atomic::Ordering::Acquire) {
+    if POISONED.load(Ordering::Acquire) {
         return Err(EmbedError::Poisoned);
     }
 
@@ -275,22 +283,51 @@ pub fn prove(
         log_stacked_height: pico_vm::mle::machine::riscv::DEFAULT_LOG_STACKED_HEIGHT,
         embedded: Some(program),
     };
+    *RUN_START.lock().unwrap_or_else(|e| e.into_inner()) = None;
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run_step(&cfg, None, Some(BlockJob { block: 0, stdin }))
     }));
     let mut outcome = match outcome {
         Ok(outcome) => outcome,
         Err(payload) => {
-            POISONED.store(true, std::sync::atomic::Ordering::Release);
+            POISONED.store(true, Ordering::Release);
             return Err(EmbedError::Panicked(super::watch::panic_message(&*payload)));
         }
     };
+    // A stage failed and the run drained: the process proves again only after a card ran out of
+    // memory and left nothing behind. This outranks a guest failure in the same run.
+    if let Some(message) = outcome.stage_failure.take() {
+        let failures = super::watch::all_failures();
+        let guest_failed = outcome.guest_failure.is_some();
+        let start = RUN_START.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let dropped = start
+            .as_ref()
+            .map_or(0, |(run, _)| super::drop_pk_keys_added_in(*run));
+        let start = start.as_ref().map(|(_, pools)| pools.as_slice());
+        match recoverable(&message, &failures, guest_failed, &gpus, start) {
+            Ok(()) => {
+                tracing::warn!(
+                    "embedded run drained after a card ran out of memory; dropped the {dropped} \
+                     recursion key(s) it added, and the process proves again"
+                );
+                if !guest_failed {
+                    return Err(EmbedError::OutOfMemory(message));
+                }
+            }
+            Err(why) => {
+                POISONED.store(true, Ordering::Release);
+                return Err(EmbedError::Panicked(format!(
+                    "{message} (the process is poisoned: {why})"
+                )));
+            }
+        }
+    }
     // The guest failed and the run drained cleanly: the process can prove again.
     if let Some(failure) = outcome.guest_failure.take() {
         return Err(EmbedError::Guest(failure));
     }
     let Some(root) = outcome.root.take() else {
-        POISONED.store(true, std::sync::atomic::Ordering::Release);
+        POISONED.store(true, Ordering::Release);
         return Err(EmbedError::NoRoot);
     };
     Ok(EmbeddedProof {
@@ -298,6 +335,138 @@ pub fn prove(
         committed: outcome.committed,
         cycles: outcome.cycles,
     })
+}
+
+/// Bytes the application holds from each card's pools, after every queued free has run.
+#[cfg(feature = "cuda")]
+fn pool_bytes_used(cards: usize) -> Vec<u64> {
+    use pico_vm::mle::cuda_mle::runtime::{
+        context::{get_device, set_device},
+        memory_manager::pool_bytes_for,
+        stream::device_synchronize,
+    };
+    let bound = get_device().ok();
+    let used = (0..cards)
+        .map(|card| {
+            if set_device(card as i32).is_ok() {
+                let _ = device_synchronize();
+            }
+            pool_bytes_for(card).used_total()
+        })
+        .collect();
+    if let Some(card) = bound {
+        let _ = set_device(card);
+    }
+    used
+}
+
+/// The run's [`pico_vm::mle::machine::PK_CACHE_RUN`] and each card's pool bytes once its resident
+/// machines exist: what a failed run's drain must return the pools to. Set by [`mark_run_start`].
+#[cfg(feature = "cuda")]
+static RUN_START: std::sync::Mutex<Option<(u64, Vec<u64>)>> = std::sync::Mutex::new(None);
+
+/// Starts the run with its resident machines built (rebuilt, for a new program) and before
+/// anything of the run itself: records the cards' pool use, and tags the recursion keys added from
+/// here on as this run's. Setup's warmup keys stay with the run before, so a failed run never
+/// drops them.
+#[cfg(feature = "cuda")]
+pub(crate) fn mark_run_start(cards: usize) {
+    let pools = pool_bytes_used(cards);
+    let run = pico_vm::mle::machine::PK_CACHE_RUN.fetch_add(1, Ordering::Relaxed) + 1;
+    *RUN_START.lock().unwrap_or_else(|e| e.into_inner()) = Some((run, pools));
+}
+
+/// Pool growth past the run's start that is no leak: the allocator's rounding.
+#[cfg(feature = "cuda")]
+const POOL_MARGIN_BYTES: u64 = 256 << 20;
+
+/// What the recovered runs together may leave behind on a card, each within
+/// [`POOL_MARGIN_BYTES`]: past it, growth that keeps coming back is a leak.
+#[cfg(feature = "cuda")]
+const RECOVERED_GROWTH_BUDGET: u64 = 4 * POOL_MARGIN_BYTES;
+
+/// Each card's growth summed over the runs that recovered.
+#[cfg(feature = "cuda")]
+static RECOVERED_GROWTH: std::sync::Mutex<Vec<u64>> = std::sync::Mutex::new(Vec::new());
+
+/// Whether a drained run whose stage failures were `failures` (the run's failure `message` first
+/// among them) leaves the process able to prove:
+/// - a card ran out of memory, and every other failure is that or a neighbour's symptom of it
+///   (with the guest failed too, symptoms alone are its drain);
+/// - every card synchronizes with no error pending, so no context is dead;
+/// - no history slot is still held;
+/// - with the keys the run added dropped, each card's pools are back within
+///   [`POOL_MARGIN_BYTES`] of the run's `start`, and the growth recovered runs left behind stays
+///   within [`RECOVERED_GROWTH_BUDGET`].
+#[cfg(feature = "cuda")]
+fn recoverable(
+    message: &str,
+    failures: &[String],
+    guest_failed: bool,
+    gpus: &GpuResources,
+    start: Option<&[u64]>,
+) -> Result<(), String> {
+    use super::watch::{is_device_oom, is_symptom};
+    let oom = is_device_oom(message);
+    if !(oom || guest_failed && is_symptom(message)) {
+        return Err("the stage failed other than by running out of memory".into());
+    }
+    if let Some(other) = failures
+        .iter()
+        .find(|m| !is_device_oom(m) && !is_symptom(m))
+    {
+        return Err(format!("another stage failed too: {other}"));
+    }
+    device_health(gpus.cards)?;
+    if let Some(held) =
+        pico_vm::emulator::riscv::record_slots::slots_outstanding().filter(|&held| held > 0)
+    {
+        return Err(format!(
+            "{held} history slot(s) are still held after the drain"
+        ));
+    }
+    let start = start.ok_or("the run failed before its machines were built")?;
+    let after = pool_bytes_used(gpus.cards);
+    let mut recovered = RECOVERED_GROWTH.lock().unwrap_or_else(|e| e.into_inner());
+    recovered.resize(gpus.cards, 0);
+    for (card, (&after, &start)) in after.iter().zip(start).enumerate() {
+        let growth = after.saturating_sub(start);
+        if growth > POOL_MARGIN_BYTES {
+            return Err(format!(
+                "card {card}'s pools hold {after} bytes after the drain, {start} at the run's start"
+            ));
+        }
+        if recovered[card] + growth > RECOVERED_GROWTH_BUDGET {
+            return Err(format!(
+                "card {card}'s recovered runs have left {} bytes behind",
+                recovered[card] + growth
+            ));
+        }
+    }
+    for (card, (&after, &start)) in after.iter().zip(start).enumerate() {
+        recovered[card] += after.saturating_sub(start);
+    }
+    Ok(())
+}
+
+/// Every card synchronizes, and has no error pending: a sticky error (a kernel's illegal access)
+/// leaves the context dead.
+#[cfg(feature = "cuda")]
+fn device_health(cards: usize) -> Result<(), String> {
+    use pico_vm::mle::cuda_mle::runtime::{
+        context::{get_device, set_device},
+        stream::{device_synchronize, take_last_error},
+    };
+    let bound = get_device().ok();
+    let health = (0..cards).try_for_each(|card| {
+        set_device(card as i32).map_err(|e| format!("card {card} cannot be bound: {e:?}"))?;
+        device_synchronize().map_err(|e| format!("card {card} fails to synchronize: {e}"))?;
+        take_last_error().map_err(|e| format!("card {card} has an error pending: {e}"))
+    });
+    if let Some(card) = bound {
+        let _ = set_device(card);
+    }
+    health
 }
 
 /// Refuses history slots too few for one chunk's replay segments, or that would pin more than

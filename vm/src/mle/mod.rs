@@ -12,6 +12,8 @@
 pub mod compiler;
 pub mod config;
 pub mod heights;
+#[doc(hidden)]
+pub mod inject;
 pub mod ledger;
 pub mod machine;
 pub mod spans;

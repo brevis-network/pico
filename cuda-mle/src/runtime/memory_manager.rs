@@ -746,6 +746,8 @@ fn oom_wait_budget() -> Duration {
 /// trims once more and gives up as before. Any lock the waiting thread itself holds turns the
 /// wait into that much delay for whoever needs it, and nothing worse: the wait is bounded.
 pub fn d_malloc(size: usize) -> Result<*mut c_void, MemoryError> {
+    // Only this call's outcome marks the thread: [`give_up`] sets the mark on an out-of-memory.
+    OOM_RAISED.with(|m| m.set(false));
     let manager = current_manager();
     let lock = || manager.lock().map_err(|_| MemoryError::LockError);
     // Each guard below lives for its own statement only: nothing sleeps or logs under the lock.
@@ -789,8 +791,26 @@ fn is_oom(e: &MemoryError) -> bool {
     matches!(e, MemoryError::Cuda(c) if c.is_out_of_memory())
 }
 
+thread_local! {
+    /// Whether this thread's last [`d_malloc`] gave up out of memory (each call resets it): a panic
+    /// that follows is the card running out, whatever its message says.
+    static OOM_RAISED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether this thread's last [`d_malloc`] gave up out of memory; clears the mark.
+pub fn take_device_oom_raised() -> bool {
+    OOM_RAISED.with(|m| m.replace(false))
+}
+
+/// Marks this thread as having run out of device memory, as [`d_malloc`] does when it gives up:
+/// for an injected failure that stands in for one.
+pub fn mark_device_oom_raised() {
+    OOM_RAISED.with(|m| m.set(true));
+}
+
 /// The one error line an allocation that is not going to happen gets.
 fn give_up(size: usize, e: MemoryError, waited: Option<Duration>) -> MemoryError {
+    OOM_RAISED.with(|m| m.set(is_oom(&e)));
     let waited = waited.map_or(String::new(), |w| {
         format!(" after waiting {} ms", w.as_millis())
     });
