@@ -70,6 +70,13 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
   `pico-prover` was compiled from, rather than whatever versions the registry has that day. The
   lockfile is version 4, so the build needs cargo 1.78 or later; the lockfile joins the library
   cache key, so libraries cached by an earlier version rebuild once.
+- `build_pure_library` is safe for processes or containers sharing one cache: one builds a key
+  under a file lock while the others wait, scratch names no longer repeat across containers that
+  all run as pid 1, and the library is synced before it is renamed into place. The key also holds
+  the toolchain (`rustc -vV`), so even a cache hit needs `rustc`; the build is for the host and
+  ignores `RUSTFLAGS`, `CARGO_BUILD_*` / `CARGO_PROFILE_*` / `CARGO_TARGET_*` and config
+  `rustflags`; and a dead build's scratch directory is cleared once its key's lock is free.
+  `ProverBuilder::disable_pure_aot` turns pure mode off without the missing-program warning.
 - The GPU pipeline's emulation runs at most `MLE_DEFERRED_RECORDS` (512) deferred (precompile and
   memory) records ahead of proving them, as the history slots bound it on CPU chunks. A
   precompile-heavy guest used to queue them without limit: BLS12-381 G2 MSM grew past 500 GB of

@@ -503,6 +503,14 @@ impl ProverBuilder {
         self
     }
 
+    /// Turn pure-mode AOT code off on purpose: [`Self::execute`] runs the stepping interpreter
+    /// without the warning a missing program logs. For a caller with an opt-out switch. It drops a
+    /// program set before it; one set after it turns pure mode back on.
+    pub fn disable_pure_aot(mut self) -> Self {
+        self.pure.disable();
+        self
+    }
+
     /// What [`Self::execute`] runs on.
     pub fn execute_engine(&self) -> ExecuteEngine {
         self.pure.engine()
