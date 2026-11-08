@@ -1,6 +1,6 @@
 //! `MLE_INJECT_FAILURE`, a negative-test hook: one failure injected into a pipeline run, for the
 //! tests that check a failed run leaves the process able to prove. Off unless set; read once per
-//! process, and fires once per process.
+//! process, and fires once per process unless stated otherwise.
 //!
 //! - `oom:<stage>:<n>` or `panic:<stage>:<n>`: the `n`-th item (1-based) `<stage>` takes panics.
 //!   `oom` marks the thread out of device memory as the allocator does when it gives up, so only
@@ -10,10 +10,15 @@
 //!   recursion pk-cache miss on a pipeline thread, inside the cache's lock; the warmup keygen on
 //!   the caller's thread, before the pipeline starts, is not counted).
 //! - `refuse:<chunk>`: chunk `<chunk>` (1-based) is refused as if it selected the catch-all shape.
+//! - `slow-finalize:<ms>`: every run finalizes its emulation `<ms>` late, as a slow emulation
+//!   teardown does; this one fires on every run.
 
-use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-    OnceLock,
+use std::{
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        OnceLock,
+    },
+    time::Duration,
 };
 
 /// The device allocator's panic on a failed allocation (`DeviceBuffer::with_capacity`); an
@@ -40,8 +45,17 @@ enum Kind {
 
 #[derive(Debug, PartialEq, Eq)]
 enum Plan {
-    Panic { stage: Stage, nth: usize, kind: Kind },
-    Refuse { chunk: usize },
+    Panic {
+        stage: Stage,
+        nth: usize,
+        kind: Kind,
+    },
+    Refuse {
+        chunk: usize,
+    },
+    SlowFinalize {
+        ms: u64,
+    },
 }
 
 fn parse(value: &str) -> Option<Plan> {
@@ -66,6 +80,9 @@ fn parse(value: &str) -> Option<Plan> {
         ["refuse", chunk] => Some(Plan::Refuse {
             chunk: chunk.parse().ok()?,
         }),
+        ["slow-finalize", ms] => Some(Plan::SlowFinalize {
+            ms: ms.parse().ok()?,
+        }),
         _ => None,
     }
 }
@@ -75,7 +92,7 @@ pub fn validate() -> Result<(), String> {
     match std::env::var("MLE_INJECT_FAILURE") {
         Ok(value) if parse(&value).is_none() => Err(format!(
             "MLE_INJECT_FAILURE={value}: expected oom:<stage>:<n>, oom-text:<stage>:<n>, \
-             panic:<stage>:<n> or refuse:<chunk>"
+             panic:<stage>:<n>, refuse:<chunk> or slow-finalize:<ms>"
         )),
         _ => Ok(()),
     }
@@ -138,6 +155,14 @@ pub fn refuses(chunk: usize) -> bool {
         && !FIRED.swap(true, Ordering::SeqCst)
 }
 
+/// How late the plan finalizes every run's emulation.
+pub fn finalize_delay() -> Option<Duration> {
+    match plan() {
+        Some(&Plan::SlowFinalize { ms }) => Some(Duration::from_millis(ms)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,6 +202,10 @@ mod tests {
             })
         );
         assert_eq!(parse("refuse:12"), Some(Plan::Refuse { chunk: 12 }));
+        assert_eq!(
+            parse("slow-finalize:500"),
+            Some(Plan::SlowFinalize { ms: 500 })
+        );
         for bad in ["", "oom:prove", "oom:prove:0", "oom:nowhere:1", "refuse:x"] {
             assert_eq!(parse(bad), None, "{bad}");
         }

@@ -651,3 +651,47 @@ fn a_late_refusal_drains_with_its_slots_full() {
     assert_is_fib_output(proof.committed().as_bytes(), LONG_N);
     println!("{LATE_REFUSAL_MARKER}");
 }
+
+const SLOW_FINALIZE_CHILD_VAR: &str = "PICO_PROVER_GPU_SLOW_FINALIZE_CHILD";
+const SLOW_FINALIZE_MARKER: &str = "[gpu] a late emulation finalize still proved the root";
+
+/// The tree can collapse before the emulation is finalized, when its teardown is slow (a large
+/// guest's memory): the node over every chunk waits for the finalize and is proved as the root,
+/// rather than as an inner node that leaves the run without one.
+#[test]
+#[ignore = "needs a GPU"]
+fn a_late_emulation_finalize_still_proves_the_root() {
+    if std::env::var(SLOW_FINALIZE_CHILD_VAR).is_err() {
+        run_child(
+            "tests::gpu::a_late_emulation_finalize_still_proves_the_root",
+            SLOW_FINALIZE_MARKER,
+            &[
+                (SLOW_FINALIZE_CHILD_VAR, "1".to_string()),
+                ("MLE_INJECT_FAILURE", "slow-finalize:10000".to_string()),
+            ],
+        );
+        return;
+    }
+
+    // Small chunks, so the tree has execution chunks to collapse over.
+    let builder = || {
+        let (map, root) = shipped_whitelist();
+        Prover::builder(FIB_ELF)
+            .log_stacked_height(WHITELIST_LOG_STACKED_HEIGHT)
+            .verify_keys(true)
+            .vk_map(map)
+            .trusted_vk_root(root)
+            .chunk_size(super::fixture::SMALL_CHUNK)
+    };
+    let chunks = builder()
+        .execute_chunked(Stdin::from(&N))
+        .expect("execute")
+        .chunks;
+    assert!(chunks >= 2, "{chunks} chunk(s): no combine node to hold");
+    let mut fib = builder().build().expect("whitelist prover");
+    for _ in 0..2 {
+        let proof = fib.prove(Stdin::from(&N)).expect("fib");
+        assert_is_fib_output(proof.committed().as_bytes(), N);
+    }
+    println!("{SLOW_FINALIZE_MARKER}");
+}

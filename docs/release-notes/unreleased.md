@@ -63,6 +63,11 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
 
 ## Fixed
 
+- A GPU prove whose emulation is finalized after its proof tree collapses, as when a large guest's
+  memory takes long to free, proves its root, on one machine or two: the scheduler holds back a
+  node over every chunk registered so far until the emulation is finalized. It used to be built as
+  an inner node, and the run failed with "no final combine node was recorded" or waited out the
+  scheduler's 300 s timeout.
 - A card running out of memory in an embedded GPU prove usually leaves the process able to prove.
   The pipeline drains the run, drops the recursion keys the run added, and the prove returns
   `ProveError::GpuOutOfMemory` if the drain left everything as the run found it. Otherwise, and

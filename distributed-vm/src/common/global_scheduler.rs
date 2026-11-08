@@ -311,6 +311,8 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
         // Update min/max
         self.min_chunk.fetch_min(chunk_idx, Ordering::SeqCst);
         self.max_chunk.fetch_max(chunk_idx, Ordering::SeqCst);
+        // A node that spanned every chunk registered so far no longer does.
+        self.release_held_combines();
 
         self.dispatch_or_enqueue(SchedulerTask::ChunkProof { chunk_idx });
 
@@ -328,6 +330,8 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
         // by checking if it collapsed to a single node covering the full range
 
         self.emulation_done.store(true, Ordering::SeqCst);
+        // The root, if it was waiting for the finalize, can go now.
+        self.release_held_combines();
 
         info!(
             "GlobalScheduler: emulation finalized, chunks [{}, {}], total = {}",
@@ -403,6 +407,9 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
 
         // First pass: Check for preferred tasks or final task (Primary only)
         if let Some(pos) = queue.iter().position(|t| {
+            if self.held_for_finalize(t.left.start_chunk, t.right.end_chunk) {
+                return false;
+            }
             if self.is_final_combine(t.left.start_chunk, t.right.end_chunk) {
                 return is_primary;
             }
@@ -423,6 +430,9 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
 
         // Second pass: Take any unpreferred task
         if let Some(pos) = queue.iter().position(|t| {
+            if self.held_for_finalize(t.left.start_chunk, t.right.end_chunk) {
+                return false;
+            }
             if self.is_final_combine(t.left.start_chunk, t.right.end_chunk) && !is_primary {
                 return false;
             }
@@ -558,6 +568,11 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
         // Check if this is a final combine task (only Primary can handle it).
         // is_final_combine includes emulation_done guard to prevent mis-identifying
         // partial combines as final before all chunks are registered.
+        if matches!(task, SchedulerTask::Combine(ref t)
+            if self.held_for_finalize(t.left.start_chunk, t.right.end_chunk))
+        {
+            return false;
+        }
         let is_final = matches!(task, SchedulerTask::Combine(ref t)
             if self.is_final_combine(t.left.start_chunk, t.right.end_chunk));
 
@@ -897,6 +912,40 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
         false
     }
 
+    /// Whether a combine node over `[start, end]` is held back: it spans every chunk registered so
+    /// far while the emulation may still register more, so whether it is the root is known only
+    /// once the emulation is finalized. Handed out then, it would be built as an inner node and the
+    /// run would complete without a root; it is released by the next registration or the finalize.
+    fn held_for_finalize(&self, start: usize, end: usize) -> bool {
+        !self.emulation_done.load(Ordering::SeqCst)
+            && start == self.min_chunk.load(Ordering::SeqCst)
+            && end == self.max_chunk.load(Ordering::SeqCst)
+    }
+
+    /// Hands queued combine nodes no longer held back to waiting workers. Lock order: `waiters`,
+    /// then the queue, as in `dispatch_or_enqueue`.
+    fn release_held_combines(&self) {
+        let mut waiters = self.waiters.lock();
+        if waiters.is_empty() {
+            return;
+        }
+        let mut queue = self.combine_queue.lock();
+        let mut i = 0;
+        while i < queue.len() && !waiters.is_empty() {
+            let (start, end) = (queue[i].left.start_chunk, queue[i].right.end_chunk);
+            if self.held_for_finalize(start, end) {
+                i += 1;
+                continue;
+            }
+            let task = SchedulerTask::Combine(queue[i].clone());
+            if self.try_fulfill_waiters_locked(&mut waiters, &task) {
+                queue.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
     /// Check if a combine task with given range will produce the final proof.
     /// Returns false until emulation is finalized, because `max_chunk` is updated
     /// incrementally during emulation and a combine tree that races ahead could
@@ -1083,7 +1132,7 @@ mod tests {
     /// with no costs registered, the queue stays FIFO.
     #[test]
     fn cost_order_hands_out_the_costliest_chunk_first() {
-        std::env::set_var("USECASE", "local_single_node");
+        let _mode = runtime_mode("local_single_node");
         let drain = |by_cost: bool, with_costs: bool| {
             let sched: GlobalScheduler<u32> = GlobalScheduler::new();
             sched.set_no_combine(true);
@@ -1118,7 +1167,7 @@ mod tests {
     fn no_combine_completes_by_count_and_never_yields_combine() {
         // Pin single-node mode (also the default when USECASE is unset); `get_runtime_mode`
         // reads the env fresh each call, and every value the test suite sets maps to SingleNode.
-        std::env::set_var("USECASE", "local_single_node");
+        let _mode = runtime_mode("local_single_node");
 
         let sched: GlobalScheduler<u32> = GlobalScheduler::new();
         sched.set_no_combine(true);
@@ -1196,6 +1245,14 @@ mod tests {
     }
 
     /// `acquire_task_async` on a thread and runtime of its own; the result arrives on the receiver.
+    /// Serializes the tests on the process-wide `USECASE`, set to `usecase` for the guard's life.
+    fn runtime_mode(usecase: &str) -> std::sync::MutexGuard<'static, ()> {
+        static MODE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let guard = MODE.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("USECASE", usecase);
+        guard
+    }
+
     fn spawn_acquire(
         sched: &Arc<GlobalScheduler<u32>>,
         worker_id: &'static str,
@@ -1245,7 +1302,7 @@ mod tests {
 
     #[test]
     fn a_chunk_queued_while_a_worker_registers_reaches_the_worker() {
-        std::env::set_var("USECASE", "local_single_node");
+        let _mode = runtime_mode("local_single_node");
         let sched = Arc::new(GlobalScheduler::<u32>::with_wait_slice(3600 * SECOND));
 
         let producer = Arc::clone(&sched);
@@ -1260,7 +1317,7 @@ mod tests {
     /// adjacent proofs generates.
     #[test]
     fn a_combine_queued_while_a_worker_registers_reaches_the_worker() {
-        std::env::set_var("USECASE", "local_single_node");
+        let _mode = runtime_mode("local_single_node");
         let sched = Arc::new(GlobalScheduler::<u32>::with_wait_slice(3600 * SECOND));
         // Three chunks, so that [0, 1] is not the final combine (which only the leader takes).
         for chunk in 0..3 {
@@ -1295,7 +1352,7 @@ mod tests {
     /// is found by the waiter's own check after a slice instead of after the 300 s timeout.
     #[test]
     fn a_waiter_finds_a_task_queued_without_a_wakeup_after_one_slice() {
-        std::env::set_var("USECASE", "local_single_node");
+        let _mode = runtime_mode("local_single_node");
         let sched = Arc::new(GlobalScheduler::<u32>::with_wait_slice(
             Duration::from_millis(100),
         ));
@@ -1318,5 +1375,117 @@ mod tests {
             sched.waiters.lock().is_empty(),
             "a waiter that took a queued task is deregistered"
         );
+    }
+
+    /// Two chunks proved, combined into a node over both: the root only if the emulation registers
+    /// no more. Until it is finalized nobody gets the node; then a waiting worker does.
+    #[test]
+    fn the_would_be_root_waits_for_the_finalize() {
+        let _mode = runtime_mode("local_single_node");
+        let sched = Arc::new(GlobalScheduler::<u32>::with_wait_slice(
+            Duration::from_secs(3600),
+        ));
+        let waiting = held_node_over_two_chunks(&sched);
+        sched.finalize_emulation();
+        match waiting.recv_timeout(SECOND) {
+            Ok(AcquireResult::Task(SchedulerTask::Combine(t))) => {
+                assert_eq!((t.left.start_chunk, t.right.end_chunk), (0, 1));
+                assert!(sched.is_final_combine(0, 1), "handed out as the root");
+            }
+            _ => panic!("the finalize hands the root to the waiting worker"),
+        }
+    }
+
+    /// A node held back as the would-be root goes out as an inner node once another chunk
+    /// registers.
+    #[test]
+    fn a_registration_releases_the_held_node() {
+        let _mode = runtime_mode("local_single_node");
+        let sched = Arc::new(GlobalScheduler::<u32>::with_wait_slice(
+            Duration::from_secs(3600),
+        ));
+        let waiting = held_node_over_two_chunks(&sched);
+        sched.register_chunk(2);
+        match waiting.recv_timeout(SECOND) {
+            Ok(AcquireResult::Task(SchedulerTask::Combine(t))) => {
+                assert_eq!((t.left.start_chunk, t.right.end_chunk), (0, 1));
+            }
+            _ => panic!("the registration hands the inner node to the waiting worker"),
+        }
+    }
+
+    /// On two machines only the leader proves the root: a finalize that finds only the other
+    /// machine's worker waiting leaves the root queued, and the leader's next acquire takes it.
+    #[test]
+    fn a_root_released_with_only_the_secondary_waiting_stays_for_the_leader() {
+        let _mode = runtime_mode("two_machine_primary");
+        let sched = Arc::new(GlobalScheduler::<u32>::with_wait_slice(
+            Duration::from_secs(3600),
+        ));
+        sched.register_chunk(0);
+        sched.register_chunk(1);
+        for _ in 0..2 {
+            assert!(matches!(
+                sched.acquire_task("primary-prover"),
+                AcquireResult::Task(SchedulerTask::ChunkProof { .. })
+            ));
+        }
+        assert!(sched
+            .report_proof(IndexedProof::new(0, 0, 0), "primary-prover")
+            .is_none());
+        assert!(sched
+            .report_proof(IndexedProof::new(1, 1, 1), "primary-prover")
+            .is_some());
+        let secondary = spawn_acquire(&sched, "secondary-prover");
+        let registered = std::time::Instant::now();
+        while sched.waiters.lock().is_empty() {
+            assert!(
+                registered.elapsed() < SECOND,
+                "the secondary never registered"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        sched.finalize_emulation();
+        thread::sleep(Duration::from_millis(200));
+        assert!(
+            secondary.try_recv().is_err(),
+            "the secondary is not handed the root"
+        );
+        match sched.acquire_task("primary-prover") {
+            AcquireResult::Task(SchedulerTask::Combine(t)) => {
+                assert_eq!((t.left.start_chunk, t.right.end_chunk), (0, 1));
+                assert!(sched.is_final_combine(0, 1), "taken as the root");
+            }
+            _ => panic!("the leader takes the queued root"),
+        }
+    }
+
+    /// Registers and proves chunks 0 and 1, so their combine node spans every registered chunk,
+    /// and returns a worker waiting for a task, after checking nobody can take the node.
+    fn held_node_over_two_chunks(
+        sched: &Arc<GlobalScheduler<u32>>,
+    ) -> mpsc::Receiver<AcquireResult<u32>> {
+        sched.register_chunk(0);
+        sched.register_chunk(1);
+        for _ in 0..2 {
+            assert!(matches!(
+                sched.acquire_task("prover"),
+                AcquireResult::Task(SchedulerTask::ChunkProof { .. })
+            ));
+        }
+        assert!(sched
+            .report_proof(IndexedProof::new(0, 0, 0), "prover")
+            .is_none());
+        assert!(sched
+            .report_proof(IndexedProof::new(1, 1, 1), "prover")
+            .is_some());
+        assert!(
+            matches!(sched.acquire_task("prover"), AcquireResult::WaitForMore),
+            "the node over every registered chunk is held back"
+        );
+        let waiting = spawn_acquire(sched, "prover");
+        thread::sleep(Duration::from_millis(200));
+        assert!(waiting.try_recv().is_err(), "nobody gets the held node");
+        waiting
     }
 }

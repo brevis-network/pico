@@ -2969,6 +2969,9 @@ fn run_pipeline(
                 if let Some(message) = panicked {
                     panic!("riscv preparer panicked: {message}");
                 }
+                if let Some(delay) = inject::finalize_delay() {
+                    thread::sleep(delay);
+                }
                 mle_finalize_emulation();
                 (total, wall)
             })
