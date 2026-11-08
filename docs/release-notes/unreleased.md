@@ -60,6 +60,9 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
 - The AOT replay workers run recording blocks that write the records themselves.
 - The chunk split counts what a precompile costs the RISC-V chunk, not each of its memory accesses.
 - The GPU pipeline holds 16 history slots by default.
+- A guest depending on `pico-sdk` no longer locks the prover: `pico-vm` is behind the `prover`
+  feature and `init_logger`'s crates behind `logger`, on by default. A minimal guest's lockfile
+  goes from 372 packages to 129, or 107 with `default-features = false`.
 
 ## Fixed
 

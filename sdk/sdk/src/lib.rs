@@ -14,10 +14,13 @@ mod c_runtime;
 pub mod command;
 pub mod heap;
 pub mod io;
+#[cfg(feature = "logger")]
 mod logger;
 pub mod zkvm_io;
 
+#[cfg(feature = "logger")]
 pub use logger::init_logger;
+#[cfg(feature = "logger")]
 #[doc(hidden)]
 pub use logger::SILENCED as SILENCED_LOG_TARGETS;
 

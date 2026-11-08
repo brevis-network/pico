@@ -18,7 +18,6 @@ p3-symmetric.workspace = true
 pico-patch-libs.workspace = true
 cfg-if.workspace = true
 rand.workspace = true
-env_logger.workspace = true
 lazy_static.workspace = true
 getrandom = { version = "0.2.15", features = ["custom"] }
 # Reached through p3's `rand`; needs its own backend, registered differently from 0.2.
@@ -42,19 +41,28 @@ ripemd = { version = "0.1.3", default-features = false }
 substrate-bn = { git = "https://github.com/brevis-network/bn", rev = "1455d63953ba9f7231043c57c7077cee6a10dc89" } # patch-v1.0.2-rv64
 hex.workspace = true
 serde_json.workspace = true
-tracing.workspace = true
-tracing-forest.workspace = true
-tracing-subscriber.workspace = true
+# `init_logger`, a host program's: behind `logger` so a guest that turns it off locks none of it.
+tracing = { workspace = true, optional = true }
+tracing-forest = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
 
-# The prover is host-side: a guest compiles none of it, nor the host-only crates it depends on.
 [target.'cfg(not(target_os = "zkvm"))'.dependencies]
+# Only for `prover`'s allocator: a lockfile lists every target's dependencies, so a non-optional
+# host dependency here would put the whole prover in a guest's lock.
 # TODO(onchain): back to `pico-vm.workspace = true` once `multi-field-transcript` is unconditional.
-pico-vm = { path = "../../vm", default-features = false, features = ["rayon", "strict"] }
+pico-vm = { path = "../../vm", default-features = false, features = ["rayon", "strict"], optional = true }
 # The Keccak permutation the accelerators run on the host, where there is no syscall.
 keccak = "0.1.5"
 
+[dev-dependencies]
+# The host values the SDK's constants are checked against.
+pico-vm = { path = "../../vm", default-features = false, features = ["rayon", "strict"] }
+
 [features]
-prover = ["pico-vm/jemalloc"]
+default = ["logger"]
+# `init_logger`. A guest can turn it off with `default-features = false`.
+logger = ["dep:tracing", "dep:tracing-forest", "dep:tracing-subscriber"]
+prover = ["dep:pico-vm", "pico-vm/jemalloc"]
 libm = ["dep:libm"]
 coprocessor = ["dep:coprocessor-sdk"]
 # `memmove`, `memcmp`, `bcmp` and `strlen` from the runtime, for a build without
