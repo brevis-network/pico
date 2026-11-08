@@ -604,6 +604,7 @@ mod tests {
         "MEM_POOL_RESERVE_SIZE",
         "MLE_EVENT_POOL_SIZE",
         "MLE_HISTORY_SLOTS",
+        "MLE_DEFERRED_RECORDS",
         "MLE_PREWARM",
         "MLE_HEAP_PREWARM_GB",
         "MLE_ETHPROOFS_PREWARM",

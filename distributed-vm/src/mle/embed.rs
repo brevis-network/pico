@@ -120,6 +120,8 @@ pub enum EmbedError {
     },
     /// The history slots could not be pinned, or this process pinned another count already.
     EventPoolPin(String),
+    /// A pipeline setting in the environment does not parse.
+    BadSetting(String),
     NoRoot,
     /// The guest's emulation failed, or the emulator panicked (a host-side emulator bug
     /// included). The run was drained, and the process can prove again.
@@ -148,6 +150,7 @@ impl fmt::Display for EmbedError {
             Self::TierLatched(e) => write!(f, "{e}"),
             Self::EventPoolTooSmall(why) => write!(f, "{why}; raise the event pool size"),
             Self::EventPoolPin(why) => write!(f, "{why}"),
+            Self::BadSetting(why) => write!(f, "{why}"),
             Self::EventPoolTooLarge {
                 pool_size,
                 pinned_bytes,
@@ -270,6 +273,8 @@ pub fn prove(
         return Err(EmbedError::WhitelistRootMismatch);
     }
     check_pinned_memory(&program)?;
+    super::deferred_records_bound().map_err(EmbedError::BadSetting)?;
+    pico_vm::mle::inject::validate().map_err(EmbedError::BadSetting)?;
     let gpus = init_memory_tier()?;
     pico_vm::emulator::riscv::record_slots::try_init_record_slots(program.event_pool_size)
         .map_err(EmbedError::EventPoolPin)?;

@@ -63,6 +63,10 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
 
 ## Fixed
 
+- The GPU pipeline's emulation runs at most `MLE_DEFERRED_RECORDS` (512) deferred (precompile and
+  memory) records ahead of proving them, as the history slots bound it on CPU chunks. A
+  precompile-heavy guest used to queue them without limit: BLS12-381 G2 MSM grew past 500 GB of
+  host memory. `0` lifts the bound.
 - A GPU prove whose emulation is finalized after its proof tree collapses, as when a large guest's
   memory takes long to free, proves its root, on one machine or two: the scheduler holds back a
   node over every chunk registered so far until the emulation is finalized. It used to be built as

@@ -235,6 +235,101 @@ fn run_stopped(guest_failed: &AtomicBool) -> bool {
     guest_failed.load(Ordering::SeqCst) || watch::failed()
 }
 
+/// Deferred records handed to the preparers and not yet taken by a prover (or dropped), which
+/// the emulation waits on at a bound. They hold no history slot, so the slots alone let a
+/// precompile-heavy guest queue hundreds of GB of them ahead of proving.
+#[derive(Default)]
+struct DeferredGate {
+    waiting: AtomicUsize,
+    bound: Option<usize>,
+    peak: AtomicUsize,
+    parked_us: AtomicU64,
+}
+
+/// `MLE_DEFERRED_RECORDS`: deferred records the emulation may run ahead of proving by; `0` lifts
+/// the bound.
+const DEFAULT_DEFERRED_RECORDS: usize = 512;
+
+/// The `MLE_DEFERRED_RECORDS` bound, `None` for none; an embedded caller checks it up front, where
+/// a bad value poisons nothing.
+pub(crate) fn deferred_records_bound() -> Result<Option<usize>, String> {
+    let bound = match std::env::var("MLE_DEFERRED_RECORDS") {
+        Ok(v) => v
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| format!("MLE_DEFERRED_RECORDS={v}: expected a count of records"))?,
+        Err(_) => DEFAULT_DEFERRED_RECORDS,
+    };
+    Ok((bound > 0).then_some(bound))
+}
+
+impl DeferredGate {
+    fn from_env() -> Self {
+        Self {
+            bound: deferred_records_bound().unwrap_or_else(|e| panic!("{e}")),
+            ..Default::default()
+        }
+    }
+
+    /// Counts one more record in, first waiting below the bound unless the run stops.
+    fn admit(&self, stopped: impl Fn() -> bool) {
+        let Some(bound) = self.bound else {
+            self.count_in();
+            return;
+        };
+        let mut parked: Option<Instant> = None;
+        loop {
+            let now = self.waiting.load(Ordering::SeqCst);
+            if now < bound || stopped() {
+                if self
+                    .waiting
+                    .compare_exchange(now, now + 1, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                {
+                    self.peak.fetch_max(now + 1, Ordering::Relaxed);
+                    break;
+                }
+                continue;
+            }
+            parked.get_or_insert_with(Instant::now);
+            thread::sleep(Duration::from_millis(1));
+        }
+        if let Some(t) = parked {
+            self.parked_us
+                .fetch_add(t.elapsed().as_micros() as u64, Ordering::Relaxed);
+        }
+    }
+
+    fn count_in(&self) {
+        let now = self.waiting.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::Relaxed);
+    }
+
+    /// One record out: taken by a prover, or dropped unproved here.
+    fn release(&self) {
+        let mut now = self.waiting.load(Ordering::SeqCst);
+        while now > 0 {
+            match self
+                .waiting
+                .compare_exchange(now, now - 1, Ordering::SeqCst, Ordering::SeqCst)
+            {
+                Ok(_) => break,
+                Err(seen) => now = seen,
+            }
+        }
+    }
+}
+
+/// The last run's deferred records: the most waiting at once, and how long the emulation parked
+/// on the bound. For tests and logs.
+static LAST_DEFERRED: std::sync::Mutex<(usize, Duration)> =
+    std::sync::Mutex::new((0, Duration::ZERO));
+
+#[doc(hidden)]
+pub fn last_run_deferred_records() -> (usize, Duration) {
+    *LAST_DEFERRED.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Joins a pipeline thread; `None` if it panicked. The CLI gives up on the run's first failure,
 /// since its panic hook ends the process; an embedded run waits for the thread, and while the run
 /// stops it drops the prepared chunks, whose history slots the emulation needs to reach its stop.
@@ -997,6 +1092,7 @@ struct RiscvLane {
     with_combine: bool,
     /// Set once an embedded run's guest fails: see [`run_stopped`].
     guest_failed: Arc<AtomicBool>,
+    deferred: Arc<DeferredGate>,
     /// Set only when `MLE_CONVERT_PREBUILD` is on. Shared by every card's riscv lane: the
     /// pre-build reads only `riscv_vk` (identical on every card) and writes into a
     /// PROCESS-GLOBAL program cache, so which card's machine backs it is irrelevant — which is
@@ -1078,6 +1174,9 @@ impl RiscvLane {
         let Some(chunk) = take_prepared_chunk(&self.store, chunk_idx, &self.guest_failed) else {
             return;
         };
+        if !chunk.record.is_cpu_chunk {
+            self.deferred.release();
+        }
         inject::at(inject::Stage::Prove);
         if let Some(depth) = depth {
             log_pickup(chunk_idx, worker_id, depth, &chunk);
@@ -2719,9 +2818,11 @@ fn run_pipeline(
         None::<pico_vm::mle::machine::riscv::CatchAllShape>,
     ));
     let embedded_run = embedded.is_some();
+    let deferred = Arc::new(DeferredGate::from_env());
     let emulate_handle = {
         let program = program.clone();
         let guest_failed = Arc::clone(&guest_failed);
+        let deferred = Arc::clone(&deferred);
         thread::Builder::new()
             .name("mle-emulate".into())
             .spawn_watched(move || {
@@ -2760,6 +2861,9 @@ fn run_pipeline(
                     // combine tree pairing chunks that are not adjacent. FRI's coordinator keys on
                     // the same field.
                     let seq = record.chunk_index() - 1;
+                    if !record.is_cpu_chunk {
+                        deferred.admit(|| run_stopped(&refused));
+                    }
                     record_tx.send((seq, record)).expect("preparer hung up");
                 };
                 // The embedded entry states its replay workers; the CLI reads `NUM_THREADS`.
@@ -2860,6 +2964,7 @@ fn run_pipeline(
             let shaper = Arc::clone(&provers[0]);
             let guest_failed = Arc::clone(&guest_failed);
             let refused_shape = Arc::clone(&refused_shape);
+            let deferred = Arc::clone(&deferred);
             hs.push(
                 thread::Builder::new()
                     .name(format!("mle-riscv-preparer-{pidx}"))
@@ -2886,6 +2991,9 @@ fn run_pipeline(
                             // below — the scheduler learns the block's chunks from the primary,
                             // which must announce every one of them, including the secondary's.
                             if !prepares_chunk(idx) {
+                                if !record.is_cpu_chunk {
+                                    deferred.release();
+                                }
                                 drop(record);
                                 mle_register_chunk(idx);
                                 n += 1;
@@ -3241,6 +3349,7 @@ fn run_pipeline(
         // The dispatcher needs the store to evict records for chunks proved on the other machine
         // (see the acquire loop below), and the prover threads already took the original.
         let store = Arc::clone(&store);
+        let deferred = Arc::clone(&deferred);
         let dispatch_id: &'static str =
             Box::leak(format!("{}-mle-dispatch", get_worker_label()).into_boxed_str());
         #[cfg(feature = "cuda")]
@@ -3286,7 +3395,11 @@ fn run_pipeline(
                             // A no-op in single-node: this machine already removed each chunk in
                             // `take_prepared_chunk` when it proved it.
                             for idx in &proven_elsewhere {
-                                store.remove(idx);
+                                if let Some((_, chunk)) = store.remove(idx) {
+                                    if !chunk.record.is_cpu_chunk {
+                                        deferred.release();
+                                    }
+                                }
                             }
                             acquired
                         };
@@ -3364,6 +3477,7 @@ fn run_pipeline(
             verify,
             with_combine,
             guest_failed: Arc::clone(&guest_failed),
+            deferred: Arc::clone(&deferred),
             #[cfg(feature = "cuda")]
             convert_prebuild: convert_prebuild.clone(),
         };
@@ -3670,6 +3784,17 @@ fn run_pipeline(
         "MLE emulate done in {:.3}s, prepare in {:.3}s ({chunk_count} chunk(s))",
         emulate_wall.as_secs_f64(),
         prepare_wall.as_secs_f64(),
+    );
+    let deferred_stats = (
+        deferred.peak.load(Ordering::Relaxed),
+        Duration::from_micros(deferred.parked_us.load(Ordering::Relaxed)),
+    );
+    *LAST_DEFERRED.lock().unwrap_or_else(|e| e.into_inner()) = deferred_stats;
+    info!(
+        "MLE deferred records: at most {} waiting (bound {:?}), the emulation parked {:.3}s on them",
+        deferred_stats.0,
+        deferred.bound,
+        deferred_stats.1.as_secs_f64(),
     );
 
     // A stopped run: the guest failed, or (embedded) a pipeline thread panicked. The scheduler is

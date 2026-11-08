@@ -695,3 +695,62 @@ fn a_late_emulation_finalize_still_proves_the_root() {
     }
     println!("{SLOW_FINALIZE_MARKER}");
 }
+
+const DEFERRED_CHILD_VAR: &str = "PICO_PROVER_GPU_DEFERRED_CHILD";
+const DEFERRED_MARKER: &str = "[gpu] the emulation parked on the deferred bound and still proved";
+/// Rounds enough for the guest's deferred records to outrun a bound of one, in chunks of
+/// [`DEFERRED_CHUNK`] cycles, small enough for whitelist shapes.
+const DEFERRED_ROUNDS: u32 = 500;
+const DEFERRED_CHUNK: u32 = 1 << 20;
+
+/// With the deferred-record bound at one, the emulation parks on it and the run still proves; and
+/// a run that fails while it is parked drains instead of hanging, and the next prove works.
+/// Named to sort before the tests that hold the card's memory in this process.
+#[test]
+#[ignore = "needs a GPU"]
+fn a_deferred_bound_of_one_parks_the_emulation_and_still_proves() {
+    if std::env::var(DEFERRED_CHILD_VAR).is_err() {
+        for (child, failure) in [("prove", None), ("fail", Some("oom:prove:2"))] {
+            let mut envs = vec![
+                (DEFERRED_CHILD_VAR, child.to_string()),
+                ("MLE_DEFERRED_RECORDS", "1".to_string()),
+            ];
+            if let Some(plan) = failure {
+                envs.push(("MLE_INJECT_FAILURE", plan.to_string()));
+            }
+            run_child_within(
+                "tests::gpu::a_deferred_bound_of_one_parks_the_emulation_and_still_proves",
+                DEFERRED_MARKER,
+                &envs,
+                std::time::Duration::from_secs(900),
+            );
+        }
+        return;
+    }
+
+    let (map, root) = shipped_whitelist();
+    let mut guest = Prover::builder(POSEIDON2_ELF)
+        .log_stacked_height(WHITELIST_LOG_STACKED_HEIGHT)
+        .verify_keys(true)
+        .vk_map(map)
+        .trusted_vk_root(root)
+        .chunk_size(DEFERRED_CHUNK)
+        .build()
+        .expect("whitelist prover");
+    if std::env::var(DEFERRED_CHILD_VAR).as_deref() == Ok("fail") {
+        let err = guest
+            .prove(Stdin::from(&DEFERRED_ROUNDS))
+            .expect_err("an injected out-of-memory");
+        assert!(matches!(err, ProveError::GpuOutOfMemory(_)), "got {err}");
+    }
+    guest
+        .prove(Stdin::from(&DEFERRED_ROUNDS))
+        .expect("poseidon2 under a deferred bound of one");
+    let (peak, parked) = distributed_vm::mle::last_run_deferred_records();
+    println!("[gpu] deferred records: at most {peak} waiting, parked {parked:?}");
+    assert!(
+        peak == 1 && !parked.is_zero(),
+        "the emulation never parked: {peak} waiting, parked {parked:?}"
+    );
+    println!("{DEFERRED_MARKER}");
+}
