@@ -15,7 +15,7 @@ use pico_cli::aot_helper::{CACHE_ENV, HELPER_ENV};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    assert_error, cargo_pico, fib_sha256, from_release, git, output, release_refusal,
+    assert_execute_error, cargo_pico, fib_sha256, from_release, git, output, release_refusal,
     scratch::{scratch_dir, ScratchDir},
     stand_in_pico, FIB_ELF, VERSION,
 };
@@ -279,7 +279,7 @@ fn a_release_entry_is_created_only_for_a_release_with_aot_and_its_tag() {
         let (output, _, stderr) = fixture.run("execute", |command| {
             from_release(command, &tagged);
         });
-        assert_error(&output, &stderr, refusal);
+        assert_execute_error(&output, &stderr, refusal);
         assert_eq!(
             fixture.log("cargo"),
             None,
@@ -292,7 +292,7 @@ fn a_release_entry_is_created_only_for_a_release_with_aot_and_its_tag() {
     let (output, _, stderr) = fixture.run("execute", |command| {
         from_release(command, &untagged);
     });
-    assert_error(&output, &stderr, &format!("has no tag `v{VERSION}`"));
+    assert_execute_error(&output, &stderr, &format!("has no tag `v{VERSION}`"));
     assert_eq!(fixture.log("cargo"), None, "cargo ran for a missing tag");
     assert!(!fixture.cache().exists(), "an entry for a missing tag");
 
@@ -367,7 +367,7 @@ fn a_helper_never_builds_another() {
     let (output, _, stderr) = fixture.run("execute", |command| {
         command.env(HELPER_ENV, "1");
     });
-    assert_error(&output, &stderr, "carries no AOT program");
+    assert_execute_error(&output, &stderr, "carries no AOT program");
     assert_eq!(fixture.log("cargo"), None, "a helper ran cargo");
     assert!(!fixture.cache().exists(), "a helper wrote to the cache");
 }
@@ -378,7 +378,7 @@ fn a_failed_build_is_an_error() {
     let (output, _, stderr) = fixture.run("execute", |command| {
         command.env("PICO_TEST_CARGO_EXIT", "3");
     });
-    assert_error(&output, &stderr, "building the AOT helper");
+    assert_execute_error(&output, &stderr, "building the AOT helper");
     assert_eq!(
         fixture.log("helper"),
         None,

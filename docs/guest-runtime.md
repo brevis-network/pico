@@ -209,3 +209,5 @@ instruction-address-misaligned exception semantics). A runtime failure passes it
 in `a1` (`error::halt_reason`); a guest's own non-zero exit leaves it `0`. The tags carry a prefix,
 so whatever an older runtime left in `a1` reads as a plain `Exit`.
 
+`cargo pico execute` exits with status 1 when the guest fails and 2 when the run cannot be
+executed; `--exit-code-file <file>` writes the exit code in decimal (0 for a successful halt).

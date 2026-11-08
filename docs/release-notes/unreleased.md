@@ -32,6 +32,9 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
   (m = 31, too large to prove in practice) ends the prove with `ProveError::CatchAllShape`: on
   the CPU before anything is proved, where it used to run out of memory, and on the GPU, where it
   used to panic; the GPU pipeline drains and the next prove runs normally. `MLE_FORCE_CATCH_ALL=1` still proves it on the CPU.
+- **`cargo pico execute` exits 2 when the run cannot be executed** (a bad ELF, missing input, a
+  failed AOT helper build), where it used to exit 1. Status 1 now means only that the guest
+  failed: a non-zero exit, a panic, a fault, or a syscall it may not make.
 - **GPU kernels.** The `cuda` build pins pico-gpu at `edd0ceb`, its kernels for the code-range
   and stack-guard columns; the 3.1 kernels do not match this tree.
 
@@ -44,7 +47,9 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
   (`shipped_compress_vk`, from `vm/src/mle/shape_vk_bins/mle_compress_vk.bin`).
 - **Compress on the GPU.** In a `cuda` build, a whitelist-mode `prove_to(Phase::Compress)` proves
   the root on the multi-card GPU pipeline, as `prove` does, then the compress layer on card 0.
-
+- **`cargo pico execute` serves a test harness.** `--public-output <file>` writes the committed
+  bytes, `--exit-code-file <file>` the guest's exit code, and `--pure` runs the guest without
+  chunking it, in constant memory.
 - The `zkvm_accelerators.h` functions in `libpico_zkvm.a` (`examples/c-accelerators`).
 - `malloc` for C guests on newlib, through the runtime's `sbrk`, which shares its heap with the Rust
   allocator (`examples/c-guest/malloc.c`).

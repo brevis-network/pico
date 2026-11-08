@@ -926,3 +926,100 @@ fn evm_proves_to_groth16_and_writes_what_the_verifier_is_called_with() {
         assert!(keys.join(file).is_file(), "the setup wrote no `{file}`");
     }
 }
+
+/// A one-segment RV64 ELF at 0x10000 that halts with exit code 7: `li a0, 7`, `li t0, 0` (the HALT
+/// syscall), `ecall`.
+fn exit_7_elf() -> Vec<u8> {
+    elf_of(&[0x0070_0513, 0x0000_0293, 0x0000_0073])
+}
+
+/// A one-segment RV64 ELF at 0x10000 holding `words`.
+fn elf_of(words: &[u32]) -> Vec<u8> {
+    const VADDR: u64 = 0x10000;
+    const EHDR: u64 = 64;
+    const PHDR: u64 = 56;
+    let code: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+    let mut elf = vec![0x7F, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    elf.extend_from_slice(&2u16.to_le_bytes()); // ET_EXEC
+    elf.extend_from_slice(&243u16.to_le_bytes()); // EM_RISCV
+    elf.extend_from_slice(&1u32.to_le_bytes()); // e_version
+    elf.extend_from_slice(&VADDR.to_le_bytes()); // e_entry
+    elf.extend_from_slice(&EHDR.to_le_bytes()); // e_phoff
+    elf.extend_from_slice(&0u64.to_le_bytes()); // e_shoff
+    elf.extend_from_slice(&0u32.to_le_bytes()); // e_flags
+    elf.extend_from_slice(&(EHDR as u16).to_le_bytes());
+    elf.extend_from_slice(&(PHDR as u16).to_le_bytes());
+    elf.extend_from_slice(&1u16.to_le_bytes()); // e_phnum
+    elf.extend_from_slice(&64u16.to_le_bytes()); // e_shentsize
+    elf.extend_from_slice(&[0; 4]); // e_shnum, e_shstrndx
+    elf.extend_from_slice(&1u32.to_le_bytes()); // PT_LOAD
+    elf.extend_from_slice(&5u32.to_le_bytes()); // PF_R | PF_X
+    elf.extend_from_slice(&(EHDR + PHDR).to_le_bytes()); // p_offset
+    elf.extend_from_slice(&VADDR.to_le_bytes()); // p_vaddr
+    elf.extend_from_slice(&VADDR.to_le_bytes()); // p_paddr
+    elf.extend_from_slice(&(code.len() as u64).to_le_bytes()); // p_filesz
+    elf.extend_from_slice(&(code.len() as u64).to_le_bytes()); // p_memsz
+    elf.extend_from_slice(&4u64.to_le_bytes()); // p_align
+    elf.extend_from_slice(&code);
+    elf
+}
+
+/// `execute`'s exit status says how the guest ended: 0 for a successful halt, with the committed
+/// bytes and code 0 written out; 1 when the guest fails, with its exit code written and no output;
+/// 2 when the run cannot be executed.
+#[test]
+fn execute_exits_with_how_the_guest_ended() {
+    for pure in [false, true] {
+        execute_exits_with_how_the_guest_ended_on(pure);
+    }
+}
+
+fn execute_exits_with_how_the_guest_ended_on(pure: bool) {
+    let dir = scratch_dir(if pure {
+        "execute_exit_pure"
+    } else {
+        "execute_exit"
+    });
+    let output = dir.join("public-output.bin");
+    let code = dir.join("exit-code.txt");
+    let files = |args: &[&str]| -> Vec<String> {
+        let mut all: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+        if pure {
+            all.push("--pure".into());
+        }
+        all.extend([
+            "--log-stacked-height".into(),
+            SMALL_LOG_STACKED_HEIGHT.into(),
+            "--public-output".into(),
+            output.display().to_string(),
+            "--exit-code-file".into(),
+            code.display().to_string(),
+        ]);
+        all
+    };
+    let execute = |args: &[&str]| {
+        let _ = std::fs::remove_file(&output);
+        let _ = std::fs::remove_file(&code);
+        let args = files(args);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        run(&mut cargo_pico(&args))
+    };
+
+    let (out, stdout, stderr) = execute(&["execute", "--elf", FIB_ELF, "--input", "u32:10"]);
+    assert_eq!(out.status.code(), Some(0), "{stdout}\n{stderr}");
+    assert_eq!(std::fs::read(&output).expect("output"), fib_commit(10));
+    assert_eq!(std::fs::read_to_string(&code).expect("code"), "0");
+
+    let elf = dir.join("exit-7-elf");
+    std::fs::write(&elf, exit_7_elf()).expect("write ELF");
+    let (out, stdout, stderr) = execute(&["execute", "--elf", elf.to_str().expect("utf-8")]);
+    assert_eq!(out.status.code(), Some(1), "{stdout}\n{stderr}");
+    assert_eq!(std::fs::read_to_string(&code).expect("code"), "7");
+    assert!(!output.exists(), "an abnormal end wrote public output");
+    assert!(stderr.contains("exit code 7"), "{stderr}");
+
+    // The fib guest reads past its empty input: an error with no exit code.
+    let (out, stdout, stderr) = execute(&["execute", "--elf", FIB_ELF]);
+    assert_eq!(out.status.code(), Some(2), "{stdout}\n{stderr}");
+    assert!(!code.exists(), "a host error wrote an exit code");
+}

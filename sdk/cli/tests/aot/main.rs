@@ -51,7 +51,16 @@ fn output(command: &mut Command) -> (Output, String, String) {
 
 /// A clean error, which `main` reports with exit code 1, where a panic exits with 101.
 fn assert_error(output: &Output, stderr: &str, message: &str) {
-    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert_error_status(output, stderr, message, 1);
+}
+
+/// A clean error from `execute`, which exits 2 for a run it could not execute.
+fn assert_execute_error(output: &Output, stderr: &str, message: &str) {
+    assert_error_status(output, stderr, message, 2);
+}
+
+fn assert_error_status(output: &Output, stderr: &str, message: &str, status: i32) {
+    assert_eq!(output.status.code(), Some(status), "{stderr}");
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert!(stderr.contains(message), "no `{message}` in:\n{stderr}");
 }

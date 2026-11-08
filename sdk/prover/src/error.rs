@@ -330,6 +330,31 @@ impl ProveError {
         Self::Emulate(error)
     }
 
+    /// The guest's exit code when the run ended abnormally (`EmulationError::AbnormalTermination`):
+    /// a non-zero exit, a panic, or a fault the emulator found. `None` for every other error.
+    pub fn exit_code(&self) -> Option<u32> {
+        match self {
+            Self::Emulate(EmulateError::Emulation(e)) => e.exit_code(),
+            _ => None,
+        }
+    }
+
+    /// Whether the guest itself failed: it terminated abnormally ([`Self::exit_code`]), or made a
+    /// syscall or a hint read it may not. A limit, missing input or a host failure is not one.
+    pub fn is_guest_fault(&self) -> bool {
+        match self {
+            Self::UnsupportedSyscall { .. } => true,
+            Self::Emulate(EmulateError::Emulation(e)) => matches!(
+                e,
+                EmulationError::AbnormalTermination(_)
+                    | EmulationError::InvalidHintRead(_)
+                    | EmulationError::InvalidSyscallUsage(_)
+                    | EmulationError::UnconstrainedEnd
+            ),
+            _ => false,
+        }
+    }
+
     /// Lift a GPU pipeline failure, keeping a poisoned process distinguishable.
     #[cfg(feature = "cuda")]
     pub(crate) fn from_embed(error: distributed_vm::mle::embed::EmbedError) -> Self {
@@ -413,5 +438,37 @@ mod tests {
             pico_vm::emulator::riscv::emulator::AbnormalTermination::halt(1, 0).into(),
         ));
         assert!(matches!(lifted, ProveError::Emulate(_)), "got {lifted}");
+    }
+
+    /// A guest that fails is told apart from a run that could not be executed.
+    #[test]
+    fn a_guest_fault_is_told_from_a_host_failure() {
+        let emulation = |e| ProveError::Emulate(EmulateError::Emulation(e));
+        for (error, fault) in [
+            (
+                ProveError::UnsupportedSyscall {
+                    code: 0x7ff,
+                    name: "unrecognised".into(),
+                },
+                true,
+            ),
+            (
+                emulation(EmulationError::InvalidHintRead("ptr".into())),
+                true,
+            ),
+            (emulation(EmulationError::UnconstrainedEnd), true),
+            (
+                emulation(EmulationError::InsufficientInput {
+                    stream_ptr: 0,
+                    stream_len: 0,
+                }),
+                false,
+            ),
+            (emulation(EmulationError::ExceededCycleLimit(1)), false),
+            (ProveError::InvalidElf("not one".into()), false),
+        ] {
+            assert_eq!(error.is_guest_fault(), fault, "{error}");
+            assert_eq!(error.exit_code(), None, "{error}");
+        }
     }
 }
