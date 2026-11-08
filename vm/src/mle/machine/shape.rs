@@ -1519,8 +1519,8 @@ pub fn select_core_rung(
 }
 
 /// Whether a core shape is the catch-all row: every air at its `MLE_RISCV_MAIN_LOG_HEIGHTS`
-/// height. The catch-all is a CPU-only shape (its GKR leaf buffer is 64 GiB), so a GPU prover
-/// asks this before it commits to a chunk.
+/// height. Its GKR leaf buffer is 64 GiB, so the provers refuse a chunk that selects it (see
+/// `riscv::CatchAllShape`).
 pub fn is_core_catch_all(shape: &[(String, usize)]) -> bool {
     shape
         .iter()

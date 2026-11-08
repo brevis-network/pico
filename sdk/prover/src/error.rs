@@ -50,6 +50,11 @@ pub enum ProveError {
     #[error("{0}")]
     InconsistentOptions(String),
 
+    /// A chunk of the run fits no whitelist shape but the catch-all, which is too large to prove.
+    /// Reported instead of running out of memory; on the CPU path, before anything is proved.
+    #[error(transparent)]
+    CatchAllShape(#[from] pico_vm::mle::machine::riscv::CatchAllShape),
+
     /// [`crate::ProverBuilder::aot`] was given the bootstrap stub, which has no compiled code.
     #[cfg(feature = "aot")]
     #[error(
@@ -336,6 +341,7 @@ impl ProveError {
                 Self::from_emulate(pico_vm::mle::machine::riscv::EmulateError::Emulation(e))
             }
             EmbedError::Guest(GuestFailure::Panicked(message)) => Self::EmulationAborted(message),
+            EmbedError::Guest(GuestFailure::CatchAllShape(e)) => Self::CatchAllShape(e),
             other => Self::Gpu(other.to_string()),
         }
     }

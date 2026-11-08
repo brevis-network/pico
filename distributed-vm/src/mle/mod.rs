@@ -159,12 +159,13 @@ pub struct BlockOutcome {
     /// The bytes the guest committed, from the emulation. Bound to a proof only by the root's
     /// `committed_value_digest`, which a verifier checks.
     pub committed: Vec<u8>,
-    /// Embedded runs only: the guest's emulation failed, and the run was drained rather than
-    /// proved. Nothing it held is left behind, so the next block proves normally.
+    /// Embedded runs only: the guest failed, or a chunk of it was refused, and the run was
+    /// drained rather than proved. Nothing it held is left behind, so the next block proves normally.
     pub guest_failure: Option<GuestFailure>,
 }
 
-/// Why a guest ended an embedded run early: its emulation, not the provers, failed.
+/// Why a guest ended an embedded run early: its emulation failed, or a chunk of it cannot be
+/// proved. The provers themselves did not fail.
 #[derive(Debug)]
 pub enum GuestFailure {
     /// The emulator's own error: a non-zero exit, a limit, a bad syscall, short stdin.
@@ -172,6 +173,8 @@ pub enum GuestFailure {
     /// The emulation panicked before any other pipeline thread had failed. Any emulator panic
     /// counts, a host-side emulator bug included: it ends the run without poisoning.
     Panicked(String),
+    /// A chunk selects the catch-all whitelist shape, which no card can prove.
+    CatchAllShape(pico_vm::mle::machine::riscv::CatchAllShape),
 }
 
 impl fmt::Display for GuestFailure {
@@ -179,6 +182,7 @@ impl fmt::Display for GuestFailure {
         match self {
             Self::Emulation(e) => write!(f, "{e}"),
             Self::Panicked(message) => write!(f, "the emulation panicked: {message}"),
+            Self::CatchAllShape(e) => write!(f, "{e}"),
         }
     }
 }
@@ -2634,10 +2638,14 @@ fn run_pipeline(
     let (record_tx, record_rx) = crossbeam::channel::unbounded::<(usize, EmulationRecord)>();
     // Set once the guest's emulation fails in an embedded run: the run drains instead of proving.
     let guest_failed = Arc::new(AtomicBool::new(false));
+    // Set by a riscv preparer that refuses a chunk's shape in an embedded run; drains the same way.
+    let refused_shape = Arc::new(std::sync::Mutex::new(
+        None::<pico_vm::mle::machine::riscv::CatchAllShape>,
+    ));
+    let embedded_run = embedded.is_some();
     let emulate_handle = {
         let program = program.clone();
         let guest_failed = Arc::clone(&guest_failed);
-        let embedded_run = embedded.is_some();
         thread::Builder::new()
             .name("mle-emulate".into())
             .spawn_watched(move || {
@@ -2653,10 +2661,15 @@ fn run_pipeline(
             vram_probe("emu_witness", iteration.unwrap_or(0), prover_count);
             let emulated = {
                 let corrupted = Arc::clone(&corrupted);
+                let refused = Arc::clone(&guest_failed);
                 let on_record = move |mut record: EmulationRecord, _done: bool| {
                     // Nothing downstream will take it: end the emulation rather than run on.
                     if watch::failed() {
                         panic!("emulation stopped: the pipeline failed");
+                    }
+                    // A preparer refused a chunk's shape: the run fails whatever comes next.
+                    if refused.load(Ordering::SeqCst) {
+                        panic!("emulation stopped: a chunk's shape was refused");
                     }
                     if corrupt_memory && !corrupted.load(Ordering::Relaxed) {
                         // Tamper the first tamperable record (exactly one).
@@ -2764,6 +2777,7 @@ fn run_pipeline(
             let store = Arc::clone(&store);
             let shaper = Arc::clone(&provers[0]);
             let guest_failed = Arc::clone(&guest_failed);
+            let refused_shape = Arc::clone(&refused_shape);
             hs.push(
                 thread::Builder::new()
                     .name(format!("mle-riscv-preparer-{pidx}"))
@@ -2799,7 +2813,24 @@ fn run_pipeline(
                             // Whitelist mode: the shape goes on the record before the device
                             // event staging copies it (decided from the event counter the
                             // packaging computes anyway); plain packaging otherwise.
-                            let chunk = shaper.prepare_chunk_shaped(record);
+                            let chunk = match shaper.try_prepare_chunk_shaped(record) {
+                                Ok(chunk) => chunk,
+                                // An embedded caller gets the refusal back and the run drains,
+                                // as for a failed guest; the CLI still stops on it.
+                                Err(e) if embedded_run => {
+                                    let mut slot =
+                                        refused_shape.lock().unwrap_or_else(|e| e.into_inner());
+                                    // The earliest chunk, whichever preparer got there first.
+                                    if slot.as_ref().is_none_or(|kept| e.chunk < kept.chunk) {
+                                        *slot = Some(e);
+                                    }
+                                    drop(slot);
+                                    guest_failed.store(true, Ordering::SeqCst);
+                                    mle_abort_run();
+                                    continue;
+                                }
+                                Err(e) => panic!("{e}"),
+                            };
                             let cost = chunk.cost;
                             // Stamps need not arrive ascending: the store is a map and
                             // `register_chunk` keeps only a min/max. They must be distinct — an
@@ -3500,6 +3531,13 @@ fn run_pipeline(
         watch::join(emulate_handle, "emulate thread");
     vram_probe("emulate_joined", iteration.unwrap_or(0), prover_count);
     let (chunk_count, prepare_wall) = watch::join(preparer_handle, "preparer thread");
+    // A refusal stops the emulation, so it outranks the failure that stop reports.
+    let guest_failure = refused_shape
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+        .map(GuestFailure::CatchAllShape)
+        .or(guest_failure);
     vram_probe("after_preparer", iteration.unwrap_or(0), prover_count);
     info!(
         "MLE emulate done in {:.3}s, prepare in {:.3}s ({chunk_count} chunk(s))",

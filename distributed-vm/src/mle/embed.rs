@@ -241,7 +241,8 @@ static POISONED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 
 /// Proves `program` on `stdin` to one complete whitelist-mode root on all visible cards, and
 /// verifies it with the apex before returning. One call at a time per process. A guest whose
-/// emulation fails returns [`EmbedError::Guest`] and leaves the process able to prove; after any
+/// emulation fails, or with a chunk refused as [`super::GuestFailure::CatchAllShape`], returns
+/// [`EmbedError::Guest`] and leaves the process able to prove; after any
 /// other failed run every later call returns [`EmbedError::Poisoned`].
 ///
 /// The memory tier is latched as [`init_memory_tier`] does; a caller that emulates before its

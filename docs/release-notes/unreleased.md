@@ -28,6 +28,10 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
   bytes, the cycles, the misaligned-access count and the reason a run ends.
 - **AOT code must be regenerated.** `AOT_CODEGEN_STAMP` is 7, and the pure-mode ABI is version 2:
   run `cargo pico aot` again, and rebuild cached pure-mode libraries.
+- **The catch-all shape is refused.** A chunk that fits no whitelist shape but the catch-all
+  (m = 31, too large to prove in practice) ends the prove with `ProveError::CatchAllShape`: on
+  the CPU before anything is proved, where it used to run out of memory, and on the GPU, where it
+  used to panic; the GPU pipeline drains and the next prove runs normally. `MLE_FORCE_CATCH_ALL=1` still proves it on the CPU.
 - **GPU kernels.** The `cuda` build pins pico-gpu at `edd0ceb`, its kernels for the code-range
   and stack-guard columns; the 3.1 kernels do not match this tree.
 

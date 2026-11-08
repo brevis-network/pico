@@ -300,9 +300,18 @@ pub fn chunk_trace_cells(
 /// asserts the shapes agree.
 pub fn prepare_chunk_shaped(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
-    #[cfg_attr(not(feature = "cuda"), allow(unused_mut))] mut record: EmulationRecord,
+    record: EmulationRecord,
     bucket: bool,
 ) -> PreparedChunk {
+    try_prepare_chunk_shaped(chips, record, bucket).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// [`prepare_chunk_shaped`], returning a chunk that selects the catch-all shape as an error.
+pub fn try_prepare_chunk_shaped(
+    chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
+    #[cfg_attr(not(feature = "cuda"), allow(unused_mut))] mut record: EmulationRecord,
+    bucket: bool,
+) -> Result<PreparedChunk, CatchAllShape> {
     #[cfg(feature = "cuda")]
     {
         use crate::instances::preparer::{precompute_event_size, PreparedGpuEvents};
@@ -318,10 +327,11 @@ pub fn prepare_chunk_shaped(
         }
         let t1 = std::time::Instant::now();
         if bucket && record.shape.is_none() {
-            let shape = select_shape_from_counter(chips, &record, &counter);
+            let shape = select_shape_from_counter(chips, &record, &counter)?;
             if crate::mle::env_flag("MLE_SHAPE_CROSSCHECK") {
                 let augmented = augmented_record(chips, &record);
-                let want = select_shape_for_augmented(chips, &augmented);
+                let want =
+                    select_shape_for_augmented(chips, &augmented).unwrap_or_else(|e| panic!("{e}"));
                 assert_eq!(
                     shape.inner, want.inner,
                     "the counter-derived shape differs from the augmented-record shape"
@@ -354,18 +364,18 @@ pub fn prepare_chunk_shaped(
                 t2.elapsed().as_micros()
             );
         }
-        PreparedChunk {
+        Ok(PreparedChunk {
             record,
             prepared,
             cost,
-        }
+        })
     }
     // The CPU build leaves the shape to `build_ctx`, which picks it from the augmented record
     // it builds anyway.
     #[cfg(not(feature = "cuda"))]
     {
         let _ = (chips, bucket);
-        PreparedChunk { record, cost: 0 }
+        Ok(PreparedChunk { record, cost: 0 })
     }
 }
 
@@ -1291,7 +1301,8 @@ pub(crate) fn build_ctx_augmented(
     // A record that reached the GPU path already carries the shape `shape_record` chose for it;
     // choose it here otherwise (the CPU path, and the trace-compare probe).
     if record.shape.is_none() {
-        record.shape = Some(select_shape_for_augmented(chips, &record));
+        record.shape =
+            Some(select_shape_for_augmented(chips, &record).unwrap_or_else(|e| panic!("{e}")));
     }
     build_ctx_inner(chips, &record)
 }
@@ -1301,7 +1312,7 @@ pub(crate) fn build_ctx_augmented(
 fn select_shape_for_augmented(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
     record: &EmulationRecord,
-) -> crate::instances::compiler::shapes::riscv_shape::RiscvPadShape {
+) -> Result<crate::instances::compiler::shapes::riscv_shape::RiscvPadShape, CatchAllShape> {
     let t_shape = ledger::ProveMark::now();
     let natural = crate::mle::machine::shape::mle_natural_heights(record);
     shape_of(chips, record, &natural, t_shape)
@@ -1358,13 +1369,34 @@ fn select_shape_from_counter(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
     record: &EmulationRecord,
     counter: &crate::instances::preparer::EventCounter,
-) -> crate::instances::compiler::shapes::riscv_shape::RiscvPadShape {
+) -> Result<crate::instances::compiler::shapes::riscv_shape::RiscvPadShape, CatchAllShape> {
     let t_shape = ledger::ProveMark::now();
     let natural = crate::mle::machine::shape::mle_natural_heights_from_counter(record, counter);
     shape_of(chips, record, &natural, t_shape)
 }
 
-/// Presence from the record, the ladder / enumeration match on `natural`, and the GPU catch-all
+/// A core chunk whose events fit no ladder class, so it selects the catch-all whitelist shape.
+/// That shape pads to m = 31: a 64 GiB GKR leaf buffer no card holds, and hundreds of GB of host
+/// memory on the CPU. Both provers refuse such a chunk rather than run out of memory on it.
+#[derive(Clone, Debug, thiserror::Error)]
+#[error(
+    "chunk {chunk} selects the catch-all whitelist shape (m = 31), which is too large to prove; \
+     natural heights: {natural}"
+)]
+pub struct CatchAllShape {
+    /// The chunk's 1-based index, as the emulator numbers it.
+    pub chunk: usize,
+    /// The chunk's natural heights, `name=rows` per chip.
+    pub natural: String,
+}
+
+/// Whether the catch-all is refused. Always on a GPU build; on the CPU only without
+/// `MLE_FORCE_CATCH_ALL=1`, the switch a gate sets to prove the catch-all on purpose.
+fn refuses_catch_all() -> bool {
+    cfg!(feature = "cuda") || !std::env::var("MLE_FORCE_CATCH_ALL").is_ok_and(|v| v == "1")
+}
+
+/// Presence from the record, the ladder / enumeration match on `natural`, and the catch-all
 /// refusal. `t_shape` is where the caller started deriving `natural`: the `prove.shape` stage
 /// brackets that derivation and the match together, as the host path does.
 fn shape_of(
@@ -1372,7 +1404,7 @@ fn shape_of(
     record: &EmulationRecord,
     natural: &std::collections::BTreeMap<String, usize>,
     t_shape: ledger::ProveMark,
-) -> crate::instances::compiler::shapes::riscv_shape::RiscvPadShape {
+) -> Result<crate::instances::compiler::shapes::riscv_shape::RiscvPadShape, CatchAllShape> {
     let present: Vec<String> = chips
         .iter()
         .filter(|chip| bucketed_presence(chip, record))
@@ -1380,21 +1412,18 @@ fn shape_of(
         .collect();
     let selected =
         crate::mle::machine::shape::select_riscv_shape(&present, natural, record.is_cpu_chunk);
-    // The catch-all core shape pads to m = 31 (a 64 GiB GKR leaf buffer): no 32 GB card holds
-    // it. A GPU build refuses the chunk here, legibly, instead of dying in a device allocation.
-    if cfg!(feature = "cuda")
-        && record.is_cpu_chunk
+    if record.is_cpu_chunk
         && crate::mle::machine::shape::is_core_catch_all(&selected)
+        && refuses_catch_all()
     {
-        panic!(
-            "core chunk selects the catch-all whitelist shape, which no GPU holds (m = 31); \
-             prove this chunk on the CPU path or extend the ladder. natural heights: {}",
-            natural
+        return Err(CatchAllShape {
+            chunk: record.chunk_index(),
+            natural: natural
                 .iter()
                 .map(|(name, rows)| format!("{name}={rows}"))
                 .collect::<Vec<_>>()
-                .join(" ")
-        );
+                .join(" "),
+        });
     }
     if ledger::in_prove_slot() {
         ledger::prove_stage("prove.shape", t_shape, || {
@@ -1405,9 +1434,11 @@ fn shape_of(
             })
         });
     }
-    crate::instances::compiler::shapes::riscv_shape::RiscvPadShape {
-        inner: selected.into_iter().collect(),
-    }
+    Ok(
+        crate::instances::compiler::shapes::riscv_shape::RiscvPadShape {
+            inner: selected.into_iter().collect(),
+        },
+    )
 }
 
 /// Whitelist mode: pin the record's proof shape before it is packaged for the GPU. The device
@@ -1420,7 +1451,20 @@ pub fn shape_record(chips: &[MetaChip<Kb, RiscvChipType<Kb>>], record: &mut Emul
         return;
     }
     let augmented = augmented_record(chips, record);
-    record.shape = Some(select_shape_for_augmented(chips, &augmented));
+    record.shape =
+        Some(select_shape_for_augmented(chips, &augmented).unwrap_or_else(|e| panic!("{e}")));
+}
+
+/// Whitelist mode: refuse a chunk that selects the catch-all shape (see [`CatchAllShape`]),
+/// before anything is proved. A record that already carries a shape passes.
+pub fn check_chunk_shape(
+    chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
+    record: &EmulationRecord,
+) -> Result<(), CatchAllShape> {
+    if record.shape.is_some() {
+        return Ok(());
+    }
+    select_shape_for_augmented(chips, &augmented_record(chips, record)).map(drop)
 }
 
 /// Trace assembly over a (possibly shape-set) record: generate each active chip's main trace
@@ -2297,6 +2341,25 @@ impl RiscvMachine {
     /// pipeline calls per record.
     pub fn prepare_chunk_shaped(&self, record: EmulationRecord) -> PreparedChunk {
         prepare_chunk_shaped(&self.chips, record, self.bucket)
+    }
+
+    /// [`try_prepare_chunk_shaped`] with this machine's chips and mode.
+    pub fn try_prepare_chunk_shaped(
+        &self,
+        record: EmulationRecord,
+    ) -> Result<PreparedChunk, CatchAllShape> {
+        try_prepare_chunk_shaped(&self.chips, record, self.bucket)
+    }
+
+    /// Whitelist mode: refuse the first record that selects the catch-all shape (see
+    /// [`check_chunk_shape`]). A no-op with the whitelist off.
+    pub fn check_chunk_shapes(&self, records: &[EmulationRecord]) -> Result<(), CatchAllShape> {
+        if !self.bucket {
+            return Ok(());
+        }
+        records
+            .iter()
+            .try_for_each(|record| check_chunk_shape(&self.chips, record))
     }
 
     pub fn prove(&self, records: &[EmulationRecord]) -> Result<RiscvProof, ProveRiscvError> {
@@ -3253,5 +3316,42 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A core chunk past every ladder class selects the catch-all and is refused, naming the
+    /// chunk; one inside the ladder takes its class.
+    #[test]
+    fn a_core_chunk_past_the_ladder_is_refused() {
+        use crate::mle::machine::shape::{bucket_log_height, is_core_catch_all};
+        // The switch skips the ladder and, on the CPU, the refusal: nothing to test under it.
+        if std::env::var("MLE_FORCE_CATCH_ALL").is_ok_and(|v| v == "1") {
+            return;
+        }
+        let chips = RiscvChipType::<Kb>::all_chips();
+        let mut record = EmulationRecord {
+            is_cpu_chunk: true,
+            ..Default::default()
+        };
+        record.public_values.chunk = 3;
+
+        let small = BTreeMap::from([("Cpu".to_string(), 1 << 10)]);
+        let shape = shape_of(&chips, &record, &small, ledger::ProveMark::now())
+            .expect("a small chunk takes a ladder class");
+        let shape: Vec<_> = shape.inner.into_iter().collect();
+        assert!(!is_core_catch_all(&shape));
+
+        // Every air of the chunk at its catch-all height: no ladder class holds that.
+        let full: BTreeMap<String, usize> = shape
+            .iter()
+            .map(|(name, _)| (name.clone(), 1 << bucket_log_height(name, true)))
+            .collect();
+        let refused = shape_of(&chips, &record, &full, ledger::ProveMark::now())
+            .expect_err("the catch-all is refused");
+        assert_eq!(refused.chunk, 3);
+        assert!(
+            refused.natural.contains(&format!("Cpu={}", 1 << 23)),
+            "{refused}"
+        );
+        assert!(refused.to_string().contains("catch-all"), "{refused}");
     }
 }

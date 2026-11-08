@@ -78,7 +78,7 @@
 //! | `CHUNK_EVENT_LIMITS_OFF`, `CHUNK_EVENT_LIMIT_SCALE` | chunk splitting | **yes, and refused by [`ProverBuilder::build`]**: switched off, or scaled above 1, the event limits let a chunk's memory events outgrow `2^log_stacked_height`, which depends on the guest's data and so cannot be checked before proving. [`ProverBuilder::execute_chunked`] refuses them too, so it chunks as a built prover would. A scale the VM does not parse, or outside 1 to 16, it reads as 1, and so does the check |
 //! | `CHUNK_COMMIT_TAIL_HOLD_OFF` | chunk splitting | **yes, and it breaks proving**: `1` lets a chunk end inside the guest's commit tail, which the recursion rejects; it exists for tests that need such a cut |
 //! | `DEFERRED_TAIL_MERGE` | the deferred memory split | **yes, and it changes the proof**: `0` gives every deferred bucket its own record |
-//! | `MLE_FORCE_CATCH_ALL` | whitelist-mode shape selection | **yes, and it changes the proof**: every chunk takes the catch-all shape |
+//! | `MLE_FORCE_CATCH_ALL` | whitelist-mode shape selection | **yes, and it changes the proof**: every chunk takes the catch-all shape, which only the CPU proves; a `cuda` build refuses it |
 //! | `RECURSION_EARLY_EXIT_TS` | recursion emulation | **yes, and it breaks proving**: it truncates the recursion run, and a value that does not parse aborts |
 //! | `MLE_WITNESS_HASH`, `MLE_TRANSCRIPT_PROF`, `MLE_WALKER_XCHECK` | recursion witness generation | **yes**, and deliberately |
 //! | `MLE_REC_PARALLEL_CHILDREN`, `MLE_REC_WAVEFRONT` | recursion node interpretation | **yes**, and deliberately |

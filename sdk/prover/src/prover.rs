@@ -1445,6 +1445,7 @@ impl Prover {
         phase: Phase,
     ) -> Result<Proof, ProveError> {
         check_chips_provable(records)?;
+        self.riscv.check_chunk_shapes(records)?;
         let bundle = self
             .riscv
             .prove(records)
