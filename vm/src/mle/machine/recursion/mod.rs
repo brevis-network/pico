@@ -30,7 +30,7 @@ pub use chips::{
 };
 pub use layout::{
     compress_proof_layout, extract_recursion_vk_layout, extract_recursion_vk_layout_from_heights,
-    recursion_vk_layouts_equal, stacking_layout_for_commit,
+    recursion_tier_log_heights, recursion_vk_layouts_equal, stacking_layout_for_commit,
 };
 pub use root_check::{check_complete_root_public_values, recursion_public_values};
 pub use witness::{

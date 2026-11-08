@@ -153,7 +153,8 @@ jobs:
           # The shipped vk map is a per-config artifact. Its digest and leaf count must be this
           # binary's, and the keys this binary derives (the riscv vk, one convert VK per shape
           # family, a combine node, the deferred node, the compress node) must be members, and
-          # the embed key it derives must be the soundness manifest's: a change to the shape
+          # the embed key it derives, and the compress and embed proof shapes, must be the
+          # soundness manifest's: a change to the shape
           # tables, the params or the recursion compiler that leaves the artifact stale fails
           # here, not at a prover's first lookup; an AIR change is caught by the constraint
           # parity step above.

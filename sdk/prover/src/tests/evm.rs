@@ -5,11 +5,14 @@
 
 use std::num::NonZeroUsize;
 
-use pico_mle_core::p3_field::PrimeCharacteristicRing;
+use pico_mle_core::{
+    codec::Encode, p3_field::PrimeCharacteristicRing, protocol::proof_size::ProofShape,
+};
 use pico_vm::{
     compiler::recursion::circuit::wrap_mle::wrap_public_inputs,
     emulator::recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP,
-    mle::machine::wrap::WrapArtifacts, primitives::consts::RECURSION_NUM_PVS,
+    mle::machine::{embed::EmbedSc, wrap::WrapArtifacts},
+    primitives::consts::RECURSION_NUM_PVS,
 };
 
 use super::fixture::{
@@ -183,6 +186,18 @@ fn a_wrap_proof_gives_the_program_id_and_the_bundle_the_circuits_public_inputs()
     let Payload::Wrap { embed, artifacts } = &mut proof.payload else {
         panic!("a Phase::Wrap proof carries the wrap artifacts");
     };
+    // The embed proof's wire size is the one its shape gives under the embed (BN254) encoding.
+    let shape =
+        ProofShape::from_proof(&embed.1.inner, &embed.0).expect("the embed proof's heights");
+    assert_eq!(
+        shape.encoded_len::<EmbedSc>(&embed.1.inner.params),
+        embed
+            .0
+            .encode_to_vec()
+            .expect("encode the embed proof")
+            .len(),
+        "the embed proof's wire size is not the one its shape gives ({shape:?})"
+    );
 
     let (vkey_hash, committed_values_digest) = wrap_public_inputs(&embed.0);
     assert_eq!(vkey_hash, artifacts.vkey_hash);
@@ -388,6 +403,29 @@ fn prove_evm_under_the_shipped_whitelist() {
         merged,
         row.get("merged_preprocessed_commit").map(decimals),
         "{stale}"
+    );
+    // A whitelist-mode embed proof has the embed row's shape: the one embed shape the manifest
+    // records, at the recorded wire size.
+    let shape =
+        ProofShape::from_proof(&embed.1.inner, &embed.0).expect("the embed proof's heights");
+    let bytes = embed
+        .0
+        .encode_to_vec()
+        .expect("encode the embed proof")
+        .len() as u64;
+    let recorded = &manifest["proof_shapes"]["embed"];
+    assert_eq!(
+        recorded["shapes"].as_u64(),
+        Some(1),
+        "the soundness manifest records other than one embed proof shape"
+    );
+    assert_eq!(
+        (
+            serde_json::from_value::<ProofShape>(recorded["largest"]["shape"].clone()).ok(),
+            recorded["largest"]["bytes"].as_u64()
+        ),
+        (Some(shape), Some(bytes)),
+        "prove_evm's embed proof is not the shape and size the soundness manifest records"
     );
     let (vkey_hash, committed_values_digest) = wrap_public_inputs(&embed.0);
     assert_eq!(bundle.program_id().vkey_hash(), be32(vkey_hash));

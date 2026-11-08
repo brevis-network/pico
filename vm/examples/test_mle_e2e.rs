@@ -19,6 +19,11 @@
 //! default (`VK_VERIFICATION`), again matching the prover; turning it on needs a bucket table
 //! that reaches the chosen height.
 //!
+//! Every proof's wire size is held against the size its shape gives
+//! (`pico_mle_core::protocol::proof_size`). With the whitelist on, the compress and embed proofs
+//! are also held against the shapes the soundness manifest records, so a circuit change fails here
+//! until the manifest is regenerated.
+//!
 //! Cross-build check (env vars):
 //!   MLE_DUMP_ROOT=<path>   after the root verifies, write it plus its VK and child layouts there
 //!   MLE_VERIFY_ROOT=<path> verify such a dump and exit — no emulation, no proving, and `--step`
@@ -101,6 +106,7 @@ use pico_mle_core::{
         compress_params_with_128_bits_security, recursion_params_with_128_bits_security,
         riscv_params_with_128_bits_security,
     },
+    protocol::proof_size::ProofShape,
     StarkEngine,
 };
 #[cfg(feature = "cuda")]
@@ -126,6 +132,51 @@ use tracing::info;
 
 #[path = "common/parse_args.rs"]
 mod parse_args;
+
+/// The wire size of `proof` is the one its shape gives ([`ProofShape`]): the size model the
+/// soundness manifest records proof sizes with. Returns the shape and the size.
+fn assert_priced<SC: pico_mle_core::codec::EncodableConfig>(
+    label: &str,
+    vk: &pico_mle_core::keygen::types::MultiStarkVerifyingKey<SC>,
+    proof: &pico_mle_core::proof::Proof<SC>,
+) -> (ProofShape, usize) {
+    let bytes = proof.encode_to_vec().expect("encode").len();
+    let shape = ProofShape::from_proof(&vk.inner, proof).unwrap_or_else(|e| panic!("{label}: {e}"));
+    assert_eq!(
+        shape.encoded_len::<SC>(&vk.inner.params),
+        bytes,
+        "{label}: the proof's wire size is not the one its shape gives ({shape:?})"
+    );
+    (shape, bytes)
+}
+
+/// In whitelist mode a compress or embed proof has its row's shape: the one shape the soundness
+/// manifest records for that machine, at the recorded wire size.
+fn assert_manifest_shape(machine: &str, shape: &ProofShape, bytes: usize) {
+    const REGENERATE: &str =
+        "regenerate it: cargo run --release -p pico-vm --example mle_soundness_manifest";
+    let manifest: serde_json::Value =
+        serde_json::from_str(include_str!("../../mle-core/tests/soundness_manifest.json"))
+            .expect("the soundness manifest parses");
+    let recorded = &manifest["proof_shapes"][machine];
+    assert_eq!(
+        recorded["shapes"].as_u64(),
+        Some(1),
+        "the soundness manifest records other than one {machine} proof shape; {REGENERATE}"
+    );
+    let largest = &recorded["largest"];
+    let recorded_shape: ProofShape = serde_json::from_value(largest["shape"].clone())
+        .unwrap_or_else(|e| {
+            panic!("the soundness manifest records no {machine} proof shape ({e}); {REGENERATE}")
+        });
+    assert_eq!(
+        (&recorded_shape, largest["bytes"].as_u64()),
+        (shape, Some(bytes as u64)),
+        "a whitelist-mode {machine} proof of another shape or size than the soundness manifest \
+         records; {REGENERATE}"
+    );
+    info!("{machine}: {bytes} bytes, the shape and size the soundness manifest records ✓");
+}
 
 fn main() {
     setup_logger();
@@ -365,6 +416,9 @@ fn main() {
         "RISCV: {} chunk proof(s) proved + verified ✓",
         riscv_proofs.len()
     );
+    for (i, proof) in riscv_proofs.iter().enumerate() {
+        assert_priced(&format!("riscv chunk {i}"), &riscv_vk, proof);
+    }
     if args.step == "riscv" {
         return;
     }
@@ -541,6 +595,9 @@ fn main() {
         "Convert: {} proof(s) proved + verified on the MLE/WHIR backend ✓",
         convert_proofs.len()
     );
+    for (i, (proof, vk)) in convert_proofs.iter().enumerate() {
+        assert_priced(&format!("convert {i}"), vk, proof);
+    }
     if args.step == "convert" {
         return;
     }
@@ -683,6 +740,7 @@ fn main() {
     // list exists once (`recursion::log_proof_size`); measures the proof only — the vk is a
     // fixed, separately known artifact.
     pico_vm::mle::machine::recursion::log_proof_size("Combine: root", &root.0);
+    assert_priced("combine root", &root.1, &root.0);
     if args.step == "combine" {
         return;
     }
@@ -875,6 +933,11 @@ fn run_compress_step(
         t_verify.elapsed().as_millis(),
     );
     pico_vm::mle::machine::recursion::log_proof_size("Compress:", &compress_proof.0);
+    let (compress_shape, compress_bytes) =
+        assert_priced("compress", &compress_proof.1, &compress_proof.0);
+    if vk_verification {
+        assert_manifest_shape("compress", &compress_shape, compress_bytes);
+    }
     // Standalone apex (as for the root above): the compress key authenticated by membership, then
     // the six checks under the compress engine.
     if let Some(apex) = compress_apex(&vk_map, &trusted_vm_vk) {
@@ -1022,7 +1085,6 @@ fn run_embed_step(
     vk_map: Option<std::sync::Arc<MleVkMap>>,
     wrap_committed: Option<&[u8]>,
 ) {
-    use pico_mle_core::codec::Encode;
     use pico_vm::mle::machine::recursion::{
         compress_proof_layout, extract_recursion_vk_layout, recursion_vk_layouts_equal,
     };
@@ -1138,17 +1200,16 @@ fn run_embed_step(
         embed.num_distinct_shapes(),
         t_verify.elapsed().as_millis(),
     );
-    let embed_bytes = embed_proof
-        .0
-        .encode_to_vec()
-        .expect("encode embed proof")
-        .len();
+    let (embed_shape, embed_bytes) = assert_priced("embed", &embed_proof.1, &embed_proof.0);
     info!(
         "Embed: proof serialized size = {} bytes ({:.2} KiB)",
         embed_bytes,
         embed_bytes as f64 / 1024.0
     );
     log_stacked_widths("Embed:", &embed_proof.0);
+    if vk_verification {
+        assert_manifest_shape("embed", &embed_shape, embed_bytes);
+    }
     fn sz<T: serde::Serialize>(v: &T) -> usize {
         postcard::to_allocvec(v).map(|b| b.len()).unwrap_or(0)
     }
