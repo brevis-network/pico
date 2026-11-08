@@ -20,7 +20,7 @@ use pico_mle_core::{
 };
 
 use super::{witness::digest_to_u32s, Sc};
-use crate::mle::machine::riscv::RISCV_APP_PREP_AIR_IDS;
+use crate::mle::machine::{riscv::RISCV_APP_PREP_AIR_IDS, shape::RecursionTier};
 
 // ─── Stacking layout ─────────────────────────────────────────────────────────
 
@@ -185,32 +185,39 @@ pub fn extract_recursion_vk_layout(
 /// so the preprocessed heights are not held against the row here. A key from another row shows up
 /// as the artifact unit test's stale-embed-key failure.
 pub fn compress_proof_layout(compress_vk: &MultiStarkVerifyingKey<Sc>) -> RecursionVkLayout {
-    use crate::{
-        instances::chiptype::recursion_chiptype::RecursionChipType, machine::chip::ChipBehavior,
-        mle::machine::shape::MLE_RECURSION_COMPRESS_LOG_HEIGHTS,
-    };
-    let chips = RecursionChipType::<super::Kb>::mle_recursion_chips();
+    let heights = recursion_tier_log_heights(RecursionTier::Compress);
     assert_eq!(
         compress_vk.inner.per_air.len(),
-        chips.len(),
+        heights.len(),
         "compress_proof_layout: the key has {} AIRs, the recursion machine {} chips",
         compress_vk.inner.per_air.len(),
-        chips.len()
+        heights.len()
     );
-    let heights: Vec<Option<usize>> = chips
+    extract_recursion_vk_layout_from_heights(compress_vk, Some(&heights))
+}
+
+/// The per-air log2 heights of a whitelist-mode proof made at `tier`, in the recursion machine's
+/// chip order (the order of every recursion key's AIRs): the program pads each chip to the tier's
+/// row, so the proof's heights are the row's. What [`compress_proof_layout`] reads for compress;
+/// the soundness manifest prices each tier's proof from it
+/// ([`pico_mle_core::protocol::proof_size::ProofShape::from_heights`]).
+pub fn recursion_tier_log_heights(tier: RecursionTier) -> Vec<Option<usize>> {
+    use crate::{
+        instances::chiptype::recursion_chiptype::RecursionChipType, machine::chip::ChipBehavior,
+        mle::machine::shape::mle_recursion_pad_shape_for,
+    };
+    let row = mle_recursion_pad_shape_for(tier);
+    RecursionChipType::<super::Kb>::mle_recursion_chips()
         .iter()
         .map(|chip| {
             let name = ChipBehavior::<super::Kb>::name(chip);
             Some(
-                MLE_RECURSION_COMPRESS_LOG_HEIGHTS
-                    .iter()
-                    .find(|(n, _)| *n == name)
-                    .map(|(_, h)| *h)
-                    .unwrap_or_else(|| panic!("chip `{name}` missing from the compress tier")),
+                *row.inner
+                    .get(&name)
+                    .unwrap_or_else(|| panic!("chip `{name}` missing from the {tier:?} tier")),
             )
         })
-        .collect();
-    extract_recursion_vk_layout_from_heights(compress_vk, Some(&heights))
+        .collect()
 }
 
 /// Layout from an explicit per-air (presence, log_height) vector: `Some(log)` = present at that

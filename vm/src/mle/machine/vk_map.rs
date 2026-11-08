@@ -703,7 +703,8 @@ mod tests {
     /// names the root it carries. A machine or config change that invalidates the whitelist
     /// fails here rather than at a prover's first whitelist lookup. It also keygens the
     /// whitelist-mode embed key, which neither the digest nor a leaf covers, and holds it against
-    /// the soundness manifest.
+    /// the soundness manifest; and it holds the compress and embed proof shapes the manifest
+    /// records against those of this binary's keys.
     #[test]
     fn the_shipped_artifact_matches_this_binary() {
         use p3_field::PrimeField32;
@@ -856,6 +857,37 @@ mod tests {
              compress preset or the combine tier changed since the artifact was built; rebuild it \
              with `cargo run --release -p pico-vm --example mle_build_vk_map`"
         );
+        // The compress and embed proof shapes the manifest records are those of this binary's keys
+        // at their rows (embed's under `multi-field-transcript`). The riscv, convert, combine and
+        // deferred records follow from keys the membership checks above already hold.
+        use crate::mle::machine::{recursion::recursion_tier_log_heights, shape::RecursionTier};
+        use pico_mle_core::protocol::proof_size::ProofShape;
+        let recorded = |machine: &str| -> (usize, ProofShape) {
+            let largest = &manifest["proof_shapes"][machine]["largest"];
+            let missing =
+                format!("the soundness manifest records no {machine} proof shape; {regenerate}");
+            (
+                largest["bytes"]
+                    .as_u64()
+                    .unwrap_or_else(|| panic!("{missing}")) as usize,
+                serde_json::from_value(largest["shape"].clone())
+                    .unwrap_or_else(|_| panic!("{missing}")),
+            )
+        };
+        let compress_shape = ProofShape::from_heights(
+            &node.inner,
+            &recursion_tier_log_heights(RecursionTier::Compress),
+        )
+        .expect("the compress row fits the compress preset");
+        assert_eq!(
+            recorded("compress"),
+            (
+                compress_shape.encoded_len::<Sc>(&node.inner.params),
+                compress_shape
+            ),
+            "the soundness manifest records another compress proof shape than this binary's \
+             compress key gives; {regenerate}"
+        );
         // The embed key is no leaf and its row is not in the digest either, so nothing
         // above notices an embed row or preset that moved while the soundness manifest did not;
         // yet the wrap circuit, and its Groth16 setup, bake that key in. Keygen embed over the
@@ -910,6 +942,21 @@ mod tests {
                     .map(|c| c.iter().map(|x| x.to_string()).collect::<Vec<_>>()),
                 row.get("merged_preprocessed_commit").map(decimals),
                 "{stale}"
+            );
+            let embed_shape = ProofShape::from_heights(
+                &embed_vk.inner,
+                &recursion_tier_log_heights(RecursionTier::Embed),
+            )
+            .expect("the embed row fits the embed preset");
+            assert_eq!(
+                recorded("embed"),
+                (
+                    embed_shape
+                        .encoded_len::<crate::mle::machine::embed::EmbedSc>(&embed_vk.inner.params),
+                    embed_shape
+                ),
+                "the soundness manifest records another embed proof shape than this binary's embed \
+                 key gives; {regenerate}"
             );
         }
     }

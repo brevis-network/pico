@@ -26,8 +26,8 @@
 //!              it has no KoalaBear identity to be a leaf, and no apex verifies an embed proof.
 //!
 //! `MLE_SOUNDNESS_MANIFEST_RISCV_ONLY=1` writes a riscv-only manifest: both sets stop after the riscv
-//! key and the header lists the machines not generated (a transition mode, used while the
-//! recursion machines did not yet run on the 128-bit field).
+//! key, `proof_shapes` holds riscv only, and the header lists the machines not generated (a
+//! transition mode, used while the recursion machines did not yet run on the 128-bit field).
 //!
 //! Embed's key is BN254-hashed, so its pre-hash is written as decimal strings. Compress is the
 //! final compression layer; its one whitelist-mode key is a whitelist member. Embed verifies the
@@ -37,6 +37,16 @@
 //! The header records the identities an apex verifier is built from in whitelist mode: the
 //! shipped whitelist's root (`MLE_VK_ROOT`) and the whitelist-mode riscv key's pre-hash. The
 //! shipped whitelist must load, since membership is recorded against it.
+//!
+//! It also records, per machine, the shapes a whitelist-mode proof takes at that layer
+//! (`proof_shapes`), enumerated over each riscv shape, each convert ladder row, each combine node,
+//! the deferred node, and compress and embed at their rows: `shapes`, the number of distinct proof
+//! shapes; `max`, each per-proof shape input soundcalc scores at its largest over them (present
+//! AIRs, constraints and interactions of a present AIR, present columns, tallest trace, stacked
+//! width), unlike a row's `shape`, which counts every AIR of the key; and `largest`, the shape and
+//! wire size of the largest proof (`pico_mle_core::protocol::proof_size`), named after the first
+//! enumerated shape that gives it. Nothing is proved: a whitelist-mode proof's heights are its
+//! shape's. These are what EF's soundcalc scores Pico's soundness and proof sizes from.
 //!
 //! It also records the on-chain test keys (`contracts/test/dev/manifest.json`): the wrap circuit's
 //! hash, its constraint count, gnark's version and the whitelist root the setup pinned into the
@@ -58,7 +68,7 @@
 //!   MLE_SOUNDNESS_MANIFEST_OUT         output path, default mle-core/tests/soundness_manifest.json
 //!   MLE_SOUNDNESS_MANIFEST_RISCV_ONLY  `1` writes the riscv-only manifest described above
 
-use std::{process::Command, sync::Arc, time::Instant};
+use std::{collections::HashSet, process::Command, sync::Arc, time::Instant};
 
 use p3_field::PrimeField32;
 use pico_mle_core::{
@@ -69,6 +79,7 @@ use pico_mle_core::{
         StarkProtocolConfig,
     },
     keygen::types::MultiStarkVerifyingKey,
+    protocol::{codec::EncodableConfig, proof_size::ProofShape},
     StarkEngine, SystemParams,
 };
 use pico_vm::{
@@ -86,17 +97,17 @@ use pico_vm::{
             compress::CompressMachine,
             convert::ConvertMachine,
             deferred::DeferredMachine,
-            embed::EmbedMachine,
+            embed::{EmbedMachine, EmbedSc},
             exe::RiscvVmVk,
             recursion::{
                 compress_proof_layout, extract_recursion_vk_layout, recursion_natural_rows,
-                select_convert_row, Engine,
+                recursion_tier_log_heights, select_convert_row, Engine,
             },
             riscv::{self, Sc},
-            shape::{mle_riscv_shapes, MLE_RECURSION_CONVERT_LADDER},
+            shape::{mle_riscv_shapes, RecursionTier, MLE_RECURSION_CONVERT_LADDER},
             vk_map::{
-                synthesized_convert_layout, vk_identity, whitelist_convert_vk, whitelist_riscv_vk,
-                MleVkMap,
+                synthesize_riscv_child_heights, synthesized_convert_layout, vk_identity,
+                whitelist_convert_vk, whitelist_riscv_vk, MleVkMap,
             },
         },
     },
@@ -137,6 +148,71 @@ fn object(fields: &[(&str, String)]) -> String {
 
 /// One manifest row: `(field, JSON text)` in the order they are written.
 type Row = Vec<(&'static str, String)>;
+
+/// The proof shapes of one machine's whitelist-mode proofs: the distinct shapes, each per-proof
+/// shape input at its largest over them (not necessarily one shape's), and the largest proof by
+/// wire size, named after the first shape added that gives it.
+#[derive(Default)]
+struct LayerShapes {
+    shapes: HashSet<ProofShape>,
+    num_airs_present: usize,
+    max_constraints_per_air: usize,
+    max_interactions_per_air: usize,
+    num_trace_columns: usize,
+    max_log_height: usize,
+    stacked_width: usize,
+    largest: Option<(String, usize, ProofShape)>,
+}
+
+impl LayerShapes {
+    fn add(&mut self, name: String, shape: ProofShape, bytes: usize) {
+        self.num_airs_present = self.num_airs_present.max(shape.num_airs_present);
+        self.max_constraints_per_air = self
+            .max_constraints_per_air
+            .max(shape.max_constraints_per_air);
+        self.max_interactions_per_air = self
+            .max_interactions_per_air
+            .max(shape.max_interactions_per_air);
+        self.num_trace_columns = self.num_trace_columns.max(shape.num_trace_columns);
+        self.max_log_height = self.max_log_height.max(shape.max_log_height);
+        self.stacked_width = self.stacked_width.max(shape.stacked_width());
+        if self.largest.as_ref().is_none_or(|(_, b, _)| bytes > *b) {
+            self.largest = Some((name, bytes, shape.clone()));
+        }
+        self.shapes.insert(shape);
+    }
+
+    /// A whitelist-mode proof of `vk` at `tier`'s row.
+    fn add_tier<SC: EncodableConfig>(
+        &mut self,
+        name: String,
+        vk: &MultiStarkVerifyingKey<SC>,
+        tier: RecursionTier,
+    ) {
+        let shape = ProofShape::from_heights(&vk.inner, &recursion_tier_log_heights(tier))
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let bytes = shape.encoded_len::<SC>(&vk.inner.params);
+        self.add(name, shape, bytes);
+    }
+
+    /// One field per line, as a row's.
+    fn json(&self) -> String {
+        let (name, bytes, shape) = self.largest.as_ref().expect("a machine with no shapes");
+        let max = object(&[
+            ("num_airs_present", j(self.num_airs_present)),
+            ("max_constraints_per_air", j(self.max_constraints_per_air)),
+            ("max_interactions_per_air", j(self.max_interactions_per_air)),
+            ("num_trace_columns", j(self.num_trace_columns)),
+            ("max_log_height", j(self.max_log_height)),
+            ("stacked_width", j(self.stacked_width)),
+        ]);
+        let largest = object(&[("name", j(name)), ("bytes", j(bytes)), ("shape", j(shape))]);
+        format!(
+            "{{\n      \"shapes\": {},\n      \"max\": {max},\n      \"largest\": {largest}\n    }}",
+            self.shapes.len()
+        )
+    }
+}
 
 fn row(
     machine: &str,
@@ -448,6 +524,18 @@ fn main() {
         &wl_riscv_vk,
         None,
     ));
+    // Every riscv shape the whitelist admits, at the heights its convert key bakes.
+    let shapes = mle_riscv_shapes();
+    let mut proof_shapes: Vec<(&str, LayerShapes)> = Vec::new();
+    let mut riscv_shapes = LayerShapes::default();
+    for (label, shape) in &shapes {
+        let heights = synthesize_riscv_child_heights(&wl_riscv_vk, shape);
+        let shape = ProofShape::from_heights(&wl_riscv_vk.inner, &heights)
+            .unwrap_or_else(|e| panic!("riscv shape `{label}`: {e}"));
+        let bytes = shape.encoded_len::<Sc>(&wl_riscv_vk.inner.params);
+        riscv_shapes.add(label.clone(), shape, bytes);
+    }
+    proof_shapes.push(("riscv", riscv_shapes));
 
     if !riscv_only {
         // A convert program's row follows from its natural heights, so the first shape of each row is
@@ -455,7 +543,6 @@ fn main() {
         // last row with its catch-all.
         let rows_n = MLE_RECURSION_CONVERT_LADDER.len();
         let mut first_on_row: Vec<Option<usize>> = vec![None; rows_n];
-        let shapes = mle_riscv_shapes();
         for (i, (_, shape)) in shapes.iter().enumerate() {
             let program = ConvertVerifierCircuit::build_verify_program(&ConvertProgramInput {
                 vk: synthesized_convert_layout(&wl_riscv_vk, shape),
@@ -468,11 +555,17 @@ fn main() {
         }
         let engine: Engine = StarkEngine::new(recursion_params_with_128_bits_security());
         let mut convert_vk_row0 = None;
+        let mut convert_shapes = LayerShapes::default();
         for (r, first) in first_on_row.iter().enumerate() {
             let i = first.unwrap_or_else(|| panic!("no whitelist shape pads to convert row {r}"));
             let (label, shape) = &shapes[i];
             let vk = whitelist_convert_vk(&engine, &wl_riscv_vk, label, shape)
                 .unwrap_or_else(|e| panic!("{e}"));
+            convert_shapes.add_tier::<Sc>(
+                format!("ladder row {r}"),
+                &vk,
+                RecursionTier::Convert(r),
+            );
             rows.push(row(
                 "convert",
                 "whitelist",
@@ -483,6 +576,7 @@ fn main() {
             convert_vk_row0.get_or_insert(vk);
         }
         let convert_vk_row0 = convert_vk_row0.expect("the convert ladder is empty");
+        proof_shapes.push(("convert", convert_shapes));
 
         let wl_vm_vk = RiscvVmVk::from_program_and_vk(&program, &wl_riscv_vk);
         let mut combine = CombineMachine::new(
@@ -511,9 +605,12 @@ fn main() {
         }
         roles.extend(kinds.iter().map(|k| format!("root over [{k}]")));
         assert_eq!(roles.len(), combine_vks.len());
+        let mut combine_shapes = LayerShapes::default();
         for (role, vk) in roles.into_iter().zip(&combine_vks) {
+            combine_shapes.add_tier::<Sc>(role.clone(), vk, RecursionTier::Combine);
             rows.push(row("combine", "whitelist", role, vk, Some(&shipped)));
         }
+        proof_shapes.push(("combine", combine_shapes));
 
         let mut deferred = DeferredMachine::new(
             recursion_params_with_128_bits_security(),
@@ -533,6 +630,9 @@ fn main() {
             &deferred_vk,
             Some(&shipped),
         ));
+        let mut deferred_shapes = LayerShapes::default();
+        deferred_shapes.add_tier::<Sc>("node".to_string(), &deferred_vk, RecursionTier::Combine);
+        proof_shapes.push(("deferred", deferred_shapes));
         // The compress node over the same child: the whitelist's last leaf.
         let mut compress = CompressMachine::new(
             compress_params_with_128_bits_security(),
@@ -571,6 +671,12 @@ fn main() {
             &compress_vk,
             Some(&shipped),
         ));
+        let mut compress_shapes = LayerShapes::default();
+        compress_shapes.add_tier::<Sc>("node".to_string(), &compress_vk, RecursionTier::Compress);
+        proof_shapes.push(("compress", compress_shapes));
+        let mut embed_shapes = LayerShapes::default();
+        embed_shapes.add_tier::<EmbedSc>("node".to_string(), &embed_vk, RecursionTier::Embed);
+        proof_shapes.push(("embed", embed_shapes));
     }
     info!("whitelist keys: {:.0} s", t1.elapsed().as_secs_f64());
 
@@ -636,6 +742,17 @@ fn main() {
             ]),
         ),
         ("not_generated", format!("[{}]", not_generated.join(", "))),
+        (
+            "proof_shapes",
+            format!(
+                "{{\n{}\n  }}",
+                proof_shapes
+                    .iter()
+                    .map(|(machine, shapes)| format!("    {}: {}", j(machine), shapes.json()))
+                    .collect::<Vec<_>>()
+                    .join(",\n")
+            ),
+        ),
     ];
     std::fs::write(&out_path, render(&header, &rows))
         .unwrap_or_else(|e| panic!("cannot write `{out_path}`: {e}"));

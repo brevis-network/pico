@@ -1,6 +1,6 @@
 {
   "generated_by": "cargo run --release -p pico-vm --example mle_soundness_manifest",
-  "commit": "1af104eac9ee8436de79d86918d33c3a9e8c6b6e",
+  "commit": "d9fdba6140fcf4e9c00c5a039b51454e3c7e3b50",
   "dirty": false,
   "dirty_paths": [],
   "calculator": "closed-form",
@@ -9,6 +9,38 @@
   "apex": {"vk_root": [1216878882, 1112908309, 718797239, 1060637411, 22230319, 902859945, 1600756132, 39358577], "riscv_vk_pre_hash": [765135143, 1891470150, 474595485, 509116181, 226199990, 873466720, 1090231796, 1789441959]},
   "onchain_test_keys": {"source": "contracts/test/dev/manifest.json", "vk_root": [1216878882, 1112908309, 718797239, 1060637411, 22230319, 902859945, 1600756132, 39358577], "circuit_sha256": "8666c4fca488cc8239069daf3b0e58473566019dac04261e0acf9874f8ad0766", "nb_constraints": 7243820, "gnark": "v0.14.0", "note": "test keys from a single-process Groth16 setup (contracts/README.md); a deployment needs a setup ceremony"},
   "not_generated": [],
+  "proof_shapes": {
+    "riscv": {
+      "shapes": 1191,
+      "max": {"num_airs_present": 19, "max_constraints_per_air": 2989, "max_interactions_per_air": 1843, "num_trace_columns": 3877, "max_log_height": 23, "stacked_width": 640},
+      "largest": {"name": "core:catch-all", "bytes": 11580555, "shape": {"num_airs":50,"num_airs_present":19,"max_log_height":23,"num_column_openings":1624,"num_opening_parts":21,"num_cached_commitments":0,"num_public_values":261,"num_gkr_rounds":31,"stacking_widths":[635,4,1],"num_trace_columns":1450,"max_constraints_per_air":556,"max_interactions_per_air":121}}
+    },
+    "convert": {
+      "shapes": 3,
+      "max": {"num_airs_present": 21, "max_constraints_per_air": 170, "max_interactions_per_air": 34, "num_trace_columns": 1409, "max_log_height": 19, "stacked_width": 92},
+      "largest": {"name": "ladder row 2", "bytes": 1403063, "shape": {"num_airs":21,"num_airs_present":21,"max_log_height":19,"num_column_openings":1554,"num_opening_parts":42,"num_cached_commitments":0,"num_public_values":119,"num_gkr_rounds":25,"stacking_widths":[75,17],"num_trace_columns":1409,"max_constraints_per_air":170,"max_interactions_per_air":34}}
+    },
+    "combine": {
+      "shapes": 1,
+      "max": {"num_airs_present": 21, "max_constraints_per_air": 170, "max_interactions_per_air": 34, "num_trace_columns": 1409, "max_log_height": 17, "stacked_width": 27},
+      "largest": {"name": "non-root node over [C0, C0]", "bytes": 732983, "shape": {"num_airs":21,"num_airs_present":21,"max_log_height":17,"num_column_openings":1554,"num_opening_parts":42,"num_cached_commitments":0,"num_public_values":119,"num_gkr_rounds":23,"stacking_widths":[21,6],"num_trace_columns":1409,"max_constraints_per_air":170,"max_interactions_per_air":34}}
+    },
+    "deferred": {
+      "shapes": 1,
+      "max": {"num_airs_present": 21, "max_constraints_per_air": 170, "max_interactions_per_air": 34, "num_trace_columns": 1409, "max_log_height": 17, "stacked_width": 27},
+      "largest": {"name": "node", "bytes": 732983, "shape": {"num_airs":21,"num_airs_present":21,"max_log_height":17,"num_column_openings":1554,"num_opening_parts":42,"num_cached_commitments":0,"num_public_values":119,"num_gkr_rounds":23,"stacking_widths":[21,6],"num_trace_columns":1409,"max_constraints_per_air":170,"max_interactions_per_air":34}}
+    },
+    "compress": {
+      "shapes": 1,
+      "max": {"num_airs_present": 21, "max_constraints_per_air": 170, "max_interactions_per_air": 34, "num_trace_columns": 1409, "max_log_height": 16, "stacked_width": 25},
+      "largest": {"name": "node", "bytes": 299179, "shape": {"num_airs":21,"num_airs_present":21,"max_log_height":16,"num_column_openings":1554,"num_opening_parts":42,"num_cached_commitments":0,"num_public_values":119,"num_gkr_rounds":22,"stacking_widths":[20,5],"num_trace_columns":1409,"max_constraints_per_air":170,"max_interactions_per_air":34}}
+    },
+    "embed": {
+      "shapes": 1,
+      "max": {"num_airs_present": 21, "max_constraints_per_air": 170, "max_interactions_per_air": 34, "num_trace_columns": 1409, "max_log_height": 16, "stacked_width": 11},
+      "largest": {"name": "node", "bytes": 239319, "shape": {"num_airs":21,"num_airs_present":21,"max_log_height":16,"num_column_openings":1554,"num_opening_parts":42,"num_cached_commitments":0,"num_public_values":119,"num_gkr_rounds":21,"stacking_widths":[8,3],"num_trace_columns":1409,"max_constraints_per_air":170,"max_interactions_per_air":34}}
+    }
+  },
   "keys": [
     {
       "machine": "riscv",

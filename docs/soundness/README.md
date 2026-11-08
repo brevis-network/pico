@@ -146,8 +146,9 @@ tree, that every whitelist-mode recursion key, the compress key included, is in 
 whitelist (embed's is scored but is no member: its BN254-hashed key has no KoalaBear identity to be
 a leaf, and no apex verifies an embed proof), that it records
 the test keys `contracts/test/dev` holds, and (in
-`pico-vm`'s `the_shipped_artifact_matches_this_binary`) that its apex identities are this tree's
-and that its whitelist-set embed key is the one this binary keygens.
+`pico-vm`'s `the_shipped_artifact_matches_this_binary`) that its apex identities are this tree's,
+that its whitelist-set embed key is the one this binary keygens, and that the compress and embed
+proof shapes it records are those of this binary's keys.
 A preset or calculator change that was not followed by a regeneration fails:
 
 ```bash
@@ -163,6 +164,20 @@ and again with `soundness-bchks25-optimized`, where the parity test is skipped:
 ```bash
 cargo test -p pico-mle-core --test soundness_upstream_parity -- --nocapture
 ```
+
+The manifest also records, per machine, the shapes a whitelist-mode proof takes at that layer
+(`proof_shapes`), over each riscv shape, each convert ladder row, each combine node, the deferred
+node, and compress and embed at their rows: `shapes` counts the distinct proof shapes; `max` holds
+each per-proof shape input at its largest (present AIRs, constraints and interactions of a present
+AIR, present columns, tallest trace, stacked width), where a key's `shape` counts every AIR of the
+key; and `largest` holds the shape and wire size of the largest proof. A whitelist-mode proof's
+trace heights are its shape's, so `ProofShape::from_heights` (`mle-core/src/protocol/proof_size.rs`)
+gives its size without proving: 299,179 bytes for compress and 239,319 for embed. In CI,
+`test_mle_e2e` (dev mode, through compress) holds every proof it makes against the size its shape
+gives, as the wrap test does its embed proof, and the artifact test holds the recorded compress and
+embed shapes against this binary's keys. A whitelist-mode run of `test_mle_e2e` and the ignored
+whitelist-mode EVM test hold the real compress and embed proofs against the records; both are run
+by hand. These records are for EF's soundcalc to score Pico's soundness and proof sizes from.
 
 ## 3. Results
 
