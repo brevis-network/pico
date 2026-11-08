@@ -35,6 +35,11 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
 - **`cargo pico execute` exits 2 when the run cannot be executed** (a bad ELF, missing input, a
   failed AOT helper build), where it used to exit 1. Status 1 now means only that the guest
   failed: a non-zero exit, a panic, a fault, or a syscall it may not make.
+- **Rust guests link the toolchain's prebuilt `std`.** `cargo pico build` no longer builds `std`
+  from source when the toolchain ships one, so a guest builds offline, as other zkVMs' guests do;
+  `pico-sdk` supplies the `__atomic_*` functions that `std` calls. The guest's ELF, and so its
+  program vk, now depends on whether the installed toolchain ships a prebuilt `std` (the build
+  prints which it used): with one, a rebuilt guest's ELF changes.
 - **GPU kernels.** The `cuda` build pins pico-gpu at `edd0ceb`, its kernels for the code-range
   and stack-guard columns; the 3.1 kernels do not match this tree.
 

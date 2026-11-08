@@ -69,6 +69,7 @@ pub fn build_program(args: &BuildArgs, program_dir: Option<PathBuf>) -> Result<P
     println!("Build directory: {:?}", build_dir.display());
     println!("Found binary file: {:?}", binary_file.display());
     super::memory_functions::check_memory_functions(&binary_file)?;
+    super::memory_functions::check_no_atomic_instructions(&binary_file)?;
 
     let output_dir = program_dir.join(&args.output_directory);
     println!("Copying binary file to {:?}", output_dir);
@@ -99,8 +100,42 @@ fn cargo_build_args(args: &BuildArgs, pkg: &Package, target_dir: &Path) -> Vec<S
     cargo_args
 }
 
-/// A `cargo` command that builds for the guest target. `std_mem` builds `compiler_builtins` with
-/// its `memcpy` family, which a Rust guest takes; the static library brings its own instead.
+/// Whether the guest toolchain ships a prebuilt `std` for the guest target. A toolchain that
+/// cannot be asked counts as not shipping one, and `std` is built from source.
+fn toolchain_has_prebuilt_std() -> bool {
+    let out = clean_command_env("rustc")
+        .args([
+            format!("+{RUSTUP_TOOLCHAIN_NAME}").as_str(),
+            "--print",
+            "sysroot",
+        ])
+        .output();
+    let out = match out {
+        Ok(out) if out.status.success() => out,
+        Ok(out) => {
+            eprintln!("warning: `rustc --print sysroot` failed ({})", out.status);
+            return false;
+        }
+        Err(e) => {
+            eprintln!("warning: cannot run rustc to find the sysroot: {e}");
+            return false;
+        }
+    };
+    let sysroot = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+    let lib = sysroot.join("lib/rustlib").join(TARGET_TRIPLE).join("lib");
+    fs::read_dir(lib).is_ok_and(|entries| {
+        entries.flatten().any(|e| {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with("libstd-") && name.ends_with(".rlib")
+        })
+    })
+}
+
+/// A `cargo` command that builds for the guest target. A Rust guest (`std_mem`) links the
+/// toolchain's prebuilt `std` when there is one, so it builds offline like other zkVMs' guests;
+/// otherwise, and for the static library, which brings its own `memcpy` family, `std` is built
+/// from source.
 pub fn create_cargo_build_command(subcmd: &str, rust_flags: &[&str], std_mem: bool) -> Command {
     let toolchain = format!("+{RUSTUP_TOOLCHAIN_NAME}");
     let std_features = if std_mem {
@@ -110,16 +145,34 @@ pub fn create_cargo_build_command(subcmd: &str, rust_flags: &[&str], std_mem: bo
     };
 
     let mut cmd = clean_command_env("cargo");
-    let args = vec![
-        &toolchain,
+    let mut args = vec![
+        &toolchain as &str,
         subcmd,
         "--release",
         "--target",
         TARGET_TRIPLE,
-        "-Z",
-        "build-std=alloc,core,proc_macro,panic_abort,std",
-        "-Z",
-        std_features,
+    ];
+    // Which one decides the guest's ELF, and so its program vk.
+    let prebuilt = std_mem && toolchain_has_prebuilt_std();
+    if std_mem {
+        println!(
+            "Guest std: {}",
+            if prebuilt {
+                "the toolchain's prebuilt std"
+            } else {
+                "built from source (-Z build-std)"
+            }
+        );
+    }
+    if !prebuilt {
+        args.extend([
+            "-Z",
+            "build-std=alloc,core,proc_macro,panic_abort,std",
+            "-Z",
+            std_features,
+        ]);
+    }
+    args.extend([
         // Panic locations and `file!()` are string data in the ELF, and its memory image is the
         // program id. Trimmed, the toolchain, the cargo home and every dependency outside the
         // workspace appear by name and version, not by where this machine keeps them.
@@ -127,7 +180,7 @@ pub fn create_cargo_build_command(subcmd: &str, rust_flags: &[&str], std_mem: bo
         "trim-paths",
         "--config",
         "profile.release.trim-paths=\"all\"",
-    ];
+    ]);
 
     println!("Building guest package: cargo {}", args.join(" "));
 

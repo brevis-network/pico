@@ -3,11 +3,13 @@
 //! Documentation for these syscalls can be found in the zkVM entrypoint
 //! `pico_sdk::riscv_ecalls` module.
 
-// The C failure entry points are weak symbols (`c_runtime`).
+// The C failure entry points and the `__atomic_*` functions are weak symbols.
 #![cfg_attr(target_os = "zkvm", feature(linkage))]
 
 extern crate alloc;
 
+#[cfg(target_os = "zkvm")]
+mod atomics;
 #[cfg(target_os = "zkvm")]
 mod c_runtime;
 
