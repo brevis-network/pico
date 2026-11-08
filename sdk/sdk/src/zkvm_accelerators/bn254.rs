@@ -86,8 +86,15 @@ pub unsafe extern "C" fn zkvm_bn254_pairing(
     ZKVM_EOK
 }
 
+/// The base field modulus, big-endian.
+pub(super) const P: [u8; 32] =
+    super::hex_literal(b"30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47");
+
 /// A field element: big-endian and below the modulus.
 fn fq(bytes: &[u8]) -> Option<Fq> {
+    if !super::below(bytes, &P) {
+        return None;
+    }
     Fq::from_slice(bytes).ok()
 }
 

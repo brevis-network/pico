@@ -210,8 +210,16 @@ pub(super) const MAP_FP2_TO_G2_ZERO: [u8; 192] = super::hex_literal(
       04c69777a43f0bda07679d5805e63f18cf4e0e7c6112ac7f70266d199b4f76ae27c6269a3ceebdae30806e9a76aadf5c",
 );
 
+/// The base field modulus, big-endian.
+pub(super) const P: [u8; 48] = super::hex_literal(
+    b"1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab",
+);
+
 /// A field element: 48 bytes, big-endian, below the modulus.
 fn fp(bytes: &[u8]) -> Option<Fp> {
+    if !super::below(bytes, &P) {
+        return None;
+    }
     Fp::from_bytes(bytes.try_into().unwrap()).into()
 }
 

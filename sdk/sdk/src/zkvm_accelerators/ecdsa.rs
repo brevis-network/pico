@@ -34,7 +34,7 @@ pub unsafe extern "C" fn zkvm_secp256k1_verify(
         (|| {
             let sig = K256Signature::from_slice(&sig).ok()?;
             let sig = sig.normalize_s().unwrap_or(sig);
-            let key = K256VerifyingKey::from_sec1_bytes(&sec1(&pubkey)).ok()?;
+            let key = K256VerifyingKey::from_sec1_bytes(&sec1(&pubkey, &SECP256K1_P)?).ok()?;
             Some(key.verify_prehash(&msg, &sig).is_ok())
         })()
         .unwrap_or(false),
@@ -104,7 +104,7 @@ pub unsafe extern "C" fn zkvm_secp256r1_verify(
     verified.write(
         (|| {
             let sig = P256Signature::from_slice(&sig).ok()?;
-            let key = P256VerifyingKey::from_sec1_bytes(&sec1(&pubkey)).ok()?;
+            let key = P256VerifyingKey::from_sec1_bytes(&sec1(&pubkey, &SECP256R1_P)?).ok()?;
             Some(key.verify_prehash(&msg, &sig).is_ok())
         })()
         .unwrap_or(false),
@@ -112,9 +112,17 @@ pub unsafe extern "C" fn zkvm_secp256r1_verify(
     ZKVM_EOK
 }
 
-/// `x || y` as an uncompressed SEC1 key.
-fn sec1(xy: &[u8; 64]) -> [u8; 65] {
+pub(super) const SECP256K1_P: [u8; 32] =
+    super::hex_literal(b"fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f");
+const SECP256R1_P: [u8; 32] =
+    super::hex_literal(b"ffffffff00000001000000000000000000000000ffffffffffffffffffffffff");
+
+/// `x || y` as an uncompressed SEC1 key, if both coordinates are below the field modulus `p`.
+fn sec1(xy: &[u8; 64], p: &[u8; 32]) -> Option<[u8; 65]> {
+    if !super::below(&xy[..32], p) || !super::below(&xy[32..], p) {
+        return None;
+    }
     let mut key = [0x04; 65];
     key[1..].copy_from_slice(xy);
-    key
+    Some(key)
 }

@@ -452,3 +452,30 @@ fn run_case(function: &str, case: &Value) -> Result<(), String> {
         (e, Got::Verdict(s, v)) => Err(format!("expected {e}: status {s}, verified {v}")),
     }
 }
+
+/// A BLS12-381 field element equal to the modulus is refused, as one below it is accepted. The
+/// library refuses the same values: the check only keeps its multiplication by R2 out of a run
+/// that has to be proved (see `below`).
+#[test]
+fn a_field_element_at_the_modulus_is_refused() {
+    assert!(below(&[0, 1], &[0, 2]) && !below(&[0, 2], &[0, 2]) && !below(&[1, 0], &[0, 2]));
+
+    let p = bls12_381::P;
+    let mut g1 = [0u8; 96];
+    assert_eq!(unsafe { zkvm_bls12_map_fp_to_g1(&p, &mut g1) }, ZKVM_EFAIL);
+    let mut below_p = p;
+    below_p[47] -= 1;
+    assert_eq!(
+        unsafe { zkvm_bls12_map_fp_to_g1(&below_p, &mut g1) },
+        ZKVM_EOK
+    );
+
+    // A compressed KZG commitment whose x is p, under the compression flag.
+    let mut commitment = p;
+    commitment[0] |= 0x80;
+    let mut verified = true;
+    assert_eq!(
+        unsafe { zkvm_kzg_point_eval(&commitment, &[0; 32], &[0; 32], &commitment, &mut verified) },
+        ZKVM_EFAIL
+    );
+}

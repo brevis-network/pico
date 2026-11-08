@@ -60,3 +60,11 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
 - The AOT replay workers run recording blocks that write the records themselves.
 - The chunk split counts what a precompile costs the RISC-V chunk, not each of its memory accesses.
 - The GPU pipeline holds 16 history slots by default.
+
+## Fixed
+
+- The BLS12-381 accelerators (`zkvm_bls12_*`, `zkvm_kzg_point_eval`) refuse a field element at or
+  above the modulus before the curve library parses it. The library's parser multiplies even a
+  value it then rejects, and inside the zkVM that multiplication is a field syscall that cannot be
+  proved with such an operand: a guest that passed one ran, and was refused correctly, but its run
+  could not be proved.

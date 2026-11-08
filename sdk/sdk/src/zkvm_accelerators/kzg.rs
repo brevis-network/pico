@@ -35,10 +35,10 @@ pub unsafe extern "C" fn zkvm_kzg_point_eval(
     let verified = out(verified, F, "verified");
     let decoded = (|| {
         Some((
-            Option::<G1Affine>::from(G1Affine::from_compressed(&commitment))?,
+            g1_compressed(&commitment)?,
             field_element(&z)?,
             field_element(&y)?,
-            Option::<G1Affine>::from(G1Affine::from_compressed(&proof))?,
+            g1_compressed(&proof)?,
         ))
     })();
     let Some((commitment, z, y, proof)) = decoded else {
@@ -60,8 +60,24 @@ fn verify(commitment: G1Affine, z: Scalar, y: Scalar, proof: G1Affine) -> bool {
     multi_miller_loop(&terms).final_exponentiation() == Gt::identity()
 }
 
+/// A compressed G1 point. Its x is checked against the modulus first: the library parses it with
+/// `Fp::from_bytes`, which multiplies even a value it then rejects (see `super::below`).
+fn g1_compressed(bytes: &[u8; 48]) -> Option<G1Affine> {
+    let mut x = *bytes;
+    x[0] &= 0x1f;
+    if !super::below(&x, &super::bls12_381::P) {
+        return None;
+    }
+    G1Affine::from_compressed(bytes).into()
+}
+
 /// A BLS scalar field element: 32 bytes, big-endian, below the modulus.
 fn field_element(bytes: &[u8; 32]) -> Option<Scalar> {
+    const R: [u8; 32] =
+        super::hex_literal(b"73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001");
+    if !super::below(bytes, &R) {
+        return None;
+    }
     let mut le = *bytes;
     le.reverse();
     Scalar::from_bytes(&le).into()

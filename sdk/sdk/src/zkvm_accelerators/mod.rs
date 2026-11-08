@@ -108,6 +108,16 @@ fn is_zero(bytes: &[u8]) -> bool {
     bytes.iter().all(|&b| b == 0)
 }
 
+/// Whether `bytes` is below `modulus`, both big-endian and of one length.
+///
+/// Checked before BLS12-381's `Fp::from_bytes` parses the bytes: it multiplies even a value it
+/// then rejects, and inside the zkVM that multiplication is a field syscall, which cannot be
+/// proved with an operand at or above the modulus.
+fn below(bytes: &[u8], modulus: &[u8]) -> bool {
+    debug_assert_eq!(bytes.len(), modulus.len());
+    bytes < modulus
+}
+
 /// Lowercase hex as bytes, at compile time.
 const fn hex_literal<const N: usize>(hex: &[u8]) -> [u8; N] {
     assert!(hex.len() == 2 * N);
