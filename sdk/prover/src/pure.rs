@@ -276,13 +276,15 @@ mod build {
         /// without network access, fetch `runtime` once when the host is set up (for a `git`
         /// entry, `cargo fetch` on any manifest that names it) and build offline after.
         pub offline: bool,
-        /// The cargo to run; `cargo` on the `PATH` when `None`.
+        /// The cargo to run; `cargo` on the `PATH` when `None`. Pico's lockfile is version 4, which
+        /// takes cargo 1.78 or later.
         pub cargo: Option<PathBuf>,
     }
 
     /// Generates `elf`'s pure-mode code and builds it into a dynamic library under `cache_dir`,
     /// keyed by the ELF's SHA-256, its decoded instructions, the pure ABI, the generator's and
-    /// `pico-aot-pure`'s sources and the runtime entry; returns the library's path. A library
+    /// `pico-aot-pure`'s sources, the runtime entry and Pico's lockfile; returns the library's
+    /// path. A library
     /// already there is returned as it is. A failed build leaves nothing behind. Bytes that are not
     /// an ELF return [`ProveError::InvalidElf`], as `execute` does; a failed generation or cargo run
     /// returns [`ProveError::PureAotBuild`].
@@ -317,9 +319,10 @@ mod build {
             ),
         };
         let key = format!(
-            "{}-{decoded:016x}-abi{ABI_VERSION}-gen{GENERATOR_FINGERPRINT}-rt{SOURCE_FINGERPRINT:016x}-{:016x}",
+            "{}-{decoded:016x}-abi{ABI_VERSION}-gen{GENERATOR_FINGERPRINT}-rt{SOURCE_FINGERPRINT:016x}-{:016x}-lock{:016x}",
             hex(&sha),
-            fnv(runtime.as_bytes())
+            fnv(runtime.as_bytes()),
+            fnv(PICO_LOCKFILE.as_bytes())
         );
         let file = format!(
             "{}{}{}",
@@ -352,6 +355,11 @@ mod build {
         let _ = fs::remove_dir_all(&scratch);
         installed.map(|()| library)
     }
+
+    /// The workspace lockfile of the Pico checkout `pico-prover` was compiled from. Read from
+    /// outside the crate, so `pico-prover` builds from a checkout, not from a packaged crate.
+    const PICO_LOCKFILE: &str =
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock"));
 
     /// Generates `program`'s crates under `scratch` and builds them; returns where the library is.
     fn generate_and_build(
@@ -387,6 +395,10 @@ mod build {
             .open(&manifest)
             .and_then(|mut file| std::io::Write::write_all(&mut file, b"\n[workspace]\n"))
             .map_err(|e| fail("cannot write the dispatch manifest", &e))?;
+        // Pico's own lockfile: the crates build against the dependency versions Pico was tested
+        // with, not whatever the registry has today. Cargo drops the entries they do not use.
+        fs::write(crates.join("Cargo.lock"), PICO_LOCKFILE)
+            .map_err(|e| fail("cannot write the lockfile", &e))?;
 
         let mut cargo = Command::new(options.cargo.as_deref().unwrap_or(Path::new("cargo")));
         cargo

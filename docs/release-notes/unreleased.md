@@ -63,6 +63,10 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
 
 ## Fixed
 
+- `build_pure_library` builds the generated crates against the lockfile of the Pico checkout
+  `pico-prover` was compiled from, rather than whatever versions the registry has that day. The
+  lockfile is version 4, so the build needs cargo 1.78 or later; the lockfile joins the library
+  cache key, so libraries cached by an earlier version rebuild once.
 - The GPU pipeline's emulation runs at most `MLE_DEFERRED_RECORDS` (512) deferred (precompile and
   memory) records ahead of proving them, as the history slots bound it on CPU chunks. A
   precompile-heavy guest used to queue them without limit: BLS12-381 G2 MSM grew past 500 GB of
