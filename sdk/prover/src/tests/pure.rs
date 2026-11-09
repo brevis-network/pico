@@ -95,6 +95,16 @@ fn guests() -> Vec<(&'static str, &'static [u8], Stdin)> {
     ]
 }
 
+/// The abnormal termination behind a failed run, if that is what failed it.
+fn termination(error: &ProveError) -> Option<String> {
+    match error {
+        ProveError::Emulate(pico_vm::mle::machine::riscv::EmulateError::Emulation(e)) => {
+            e.abnormal_termination().map(|t| format!("{t:?}"))
+        }
+        _ => None,
+    }
+}
+
 /// `pure`'s `execute` agrees with `execute_chunked` on `stdin`.
 fn assert_agrees(name: &str, elf: &[u8], pure: &ProverBuilder, stdin: Stdin) {
     let chunked = Prover::builder(elf).execute_chunked(stdin.clone());
@@ -106,12 +116,22 @@ fn assert_agrees(name: &str, elf: &[u8], pure: &ProverBuilder, stdin: Stdin) {
                 "{name}: the committed bytes differ"
             );
             assert_eq!(executed.cycles, chunked.cycles, "{name}: the cycles differ");
+            assert_eq!(
+                executed.misaligned_accesses, chunked.misaligned_accesses,
+                "{name}: the misaligned-access counts differ"
+            );
         }
-        (Err(chunked), Err(executed)) => assert_eq!(
-            discriminant(&executed),
-            discriminant(&chunked),
-            "{name}: the failures differ: execute {executed}, execute_chunked {chunked}"
-        ),
+        (Err(chunked), Err(executed)) => {
+            assert_eq!(
+                discriminant(&executed),
+                discriminant(&chunked),
+                "{name}: the failures differ: execute {executed}, execute_chunked {chunked}"
+            );
+            // An abnormal termination is held to its reason, pc and address included.
+            if let (Some(e), Some(c)) = (termination(&executed), termination(&chunked)) {
+                assert_eq!(e, c, "{name}: the terminations differ");
+            }
+        }
         (chunked, executed) => panic!(
             "{name}: only one completes: execute_chunked {:?}, execute {:?}",
             chunked.map(|e| e.cycles),
@@ -163,16 +183,12 @@ fn the_guests_call_every_precompile_family() {
     }
 }
 
-/// Every ACT4 test, the known failures included: the stepping interpreter decodes and runs each
+/// Every ACT4 test: the stepping interpreter decodes and runs each
 /// instruction as the chunked emulation does.
 #[test]
 fn interpreter_agrees_with_chunked_on_act4() {
-    use super::act4::{suite, KNOWN_FAILURES, MUST_PASS};
-    let suites = MUST_PASS
-        .iter()
-        .chain([&KNOWN_FAILURES])
-        .map(|(name, _)| *name);
-    for name in suites {
+    use super::act4::{suite, MUST_PASS};
+    for (name, _) in MUST_PASS {
         for (test, path) in suite(name) {
             let elf = std::fs::read(&path).expect("ACT4 ELF");
             assert_agrees(
@@ -323,4 +339,81 @@ fn pure_aot_library_agrees_with_chunked() {
             );
         }
     }
+}
+
+/// Two builders of one key at once, sharing a cache: one runs cargo, both get the library.
+#[cfg(feature = "pure-build")]
+#[test]
+#[ignore = "builds a library with cargo; run with --ignored --features pure-build"]
+fn concurrent_builders_of_one_key_share_one_build() {
+    use std::{fs, path::PathBuf};
+
+    use crate::{build_pure_library, pure::CARGO_RUNS, PureBuildOptions, PureLibrary};
+
+    let cache = super::fixture::scratch_dir("pure-concurrent");
+    let paths: Vec<PathBuf> = std::thread::scope(|scope| {
+        let builders: Vec<_> = (0..2)
+            .map(|_| {
+                let cache = &cache;
+                scope
+                    .spawn(move || build_pure_library(FIB_ELF, cache, &PureBuildOptions::default()))
+            })
+            .collect();
+        builders
+            .into_iter()
+            .map(|b| b.join().unwrap().expect("build"))
+            .collect()
+    });
+    assert_eq!(paths[0], paths[1]);
+    let builds = CARGO_RUNS
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|scratch| scratch.starts_with(&cache))
+        .count();
+    assert_eq!(builds, 1, "one build");
+    // SAFETY: built just now by the generator.
+    unsafe { PureLibrary::load(&paths[0]) }.expect("load");
+    let leftovers = fs::read_dir(&cache)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().contains(".build-"))
+        .count();
+    assert_eq!(leftovers, 0, "no scratch directory left behind");
+}
+
+/// An opt-out runs the interpreter and says why, without the missing-program warning.
+#[test]
+fn a_disabled_pure_mode_runs_the_interpreter() {
+    let builder = Prover::builder(FIB_ELF).disable_pure_aot();
+    assert_eq!(builder.execute_engine(), ExecuteEngine::Interpreter);
+    assert_eq!(
+        builder.execute_fallback_reason(),
+        Some("pure-mode execution is disabled")
+    );
+    builder.execute(Stdin::from(&20u32)).expect("execute");
+}
+
+/// The opt-out wins over a program set before it, and a program set after it wins over it.
+#[test]
+fn the_last_of_a_program_and_the_opt_out_wins() {
+    unsafe extern "C" fn never_run(_: *mut pico_aot_pure::PureState, _: u64) -> u32 {
+        unreachable!("the opt-out runs the interpreter")
+    }
+    static PROGRAM: pico_aot_pure::PureProgram = pico_aot_pure::PureProgram {
+        abi_version: pico_aot_pure::ABI_VERSION,
+        source_fingerprint: pico_aot_pure::SOURCE_FINGERPRINT,
+        elf_sha256: [0; 32],
+        run: never_run,
+    };
+    let off = Prover::builder(FIB_ELF)
+        .pure_aot(&PROGRAM)
+        .disable_pure_aot();
+    assert_eq!(off.execute_engine(), ExecuteEngine::Interpreter);
+    off.execute(Stdin::from(&20u32)).expect("execute");
+    let on = Prover::builder(FIB_ELF)
+        .disable_pure_aot()
+        .pure_aot(&PROGRAM);
+    assert_eq!(on.execute_engine(), ExecuteEngine::Aot);
+    assert_eq!(on.execute_fallback_reason(), None);
 }

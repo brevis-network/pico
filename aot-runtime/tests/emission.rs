@@ -15,17 +15,23 @@ use pico_vm::{
     emulator::{
         opts::EmulatorOpts,
         riscv::{
-            chunk_split::ChunkSplitConfig, memory::ContiguousRiscvMemory,
-            public_values_compat::encode_public_value_pc_limbs, record::EmulationRecord,
-            record_digest::field_digests, record_slots::hold_records_unbounded,
+            chunk_split::ChunkSplitConfig,
+            history_view::unaligned_len,
+            memory::ContiguousRiscvMemory,
+            public_values_compat::encode_public_value_pc_limbs,
+            record::EmulationRecord,
+            record_digest::field_digests,
+            record_slots::hold_records_unbounded,
+            riscv_emulator::{AbnormalTermination, EmulationError, TerminationReason},
         },
         stdin::EmulatorStdin,
     },
-    mle::machine::riscv::emulate_with_opts,
+    mle::machine::{riscv::emulate_with_opts, shape::MLE_MEMORY_UNALIGNED_LOG_HEIGHT},
 };
 
 const PC_BASE: u64 = 0x1000;
-const DATA: u64 = 0x2000;
+/// Data at or above `MIN_SEGMENT_ADDR`: an access below it ends the run.
+const DATA: u64 = 0x2_0000;
 
 /// The rows of `field_digests` the emulator writes while it runs: not the public values, of which
 /// the emulator writes only the chunk's boundary and the digest words, compared on their own, nor
@@ -45,9 +51,11 @@ fn s(opcode: Opcode, value: u8, base: u64, imm: i64) -> Instruction {
     Instruction::new(opcode, value, base, imm as u64, false, true)
 }
 
-/// A program at `PC_BASE` that runs `body` and halts: `JALR x0, x0, 0` jumps to pc 0.
+/// A program at `PC_BASE` that runs `body` and halts: `a0 = 0`, then `HALT`. (A jump to pc 0 no
+/// longer halts; it ends the run abnormally.)
 fn program(mut body: Vec<Instruction>) -> Arc<Program> {
-    body.push(i(Opcode::JALR, 0, 0, 0));
+    body.push(i(Opcode::ADD, 10, 0, 0));
+    body.extend(syscall(0));
     Arc::new(Program::new(body, PC_BASE, PC_BASE))
 }
 
@@ -224,6 +232,40 @@ fn inline_forms() -> Vec<Instruction> {
     ]
 }
 
+/// Misaligned loads and stores of every width (Zicclsm), inside a dword and across into
+/// the next, over bytes aligned stores lay down first, and the stores' bytes read back. The first
+/// misaligned access is the `LH` at `DATA + 1`.
+fn misaligned() -> Vec<Instruction> {
+    use Opcode::*;
+    vec![
+        i(ADD, 1, 0, DATA as i64),
+        i(ADD, 2, 0, 0x7654_3210),
+        i(ADD, 3, 0, -0x1234_5679),
+        s(SW, 2, 1, 0),
+        s(SW, 3, 1, 4),
+        s(SW, 2, 1, 8),
+        s(SW, 3, 1, 12),
+        i(LH, 4, 1, 1),
+        i(LHU, 5, 1, 7),
+        i(LW, 6, 1, 2),
+        i(LWU, 7, 1, 6),
+        i(LD, 8, 1, 3),
+        s(SH, 2, 1, 9),
+        s(SH, 3, 1, 15),
+        s(SW, 3, 1, 13),
+        s(SW, 2, 1, 17),
+        s(SD, 8, 1, 21),
+        i(LD, 9, 1, 8),
+        i(LD, 10, 1, 16),
+        i(LD, 11, 1, 24),
+        i(LW, 12, 1, 23),
+        i(LD, 13, 1, 26),
+    ]
+}
+
+/// The misaligned accesses in [`misaligned`].
+const MISALIGNED_ACCESSES: u64 = 12;
+
 /// The interpreter's record of the program's one chunk.
 fn interpreted(program: Arc<Program>) -> EmulationRecord {
     let stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>().finalize();
@@ -307,10 +349,9 @@ fn core_state(emu: &AotEmulatorCore) -> String {
     };
     let split = &emu.chunk_split_state;
     format!(
-        "{:?} {:?} {:?} {:?} {:?} {:?} {:#x} {} {} {} {:?} {:?}",
+        "{:?} {:?} {:?} {:?} {:?} {:#x} {} {} {} {:?} {:?}",
         emu.registers,
-        emu.register_records,
-        emu.accessed_regs,
+        emu.touched_registers,
         cells(&emu.memory),
         cells(&emu.memory_snapshot),
         (
@@ -350,19 +391,16 @@ fn boundary(record: &EmulationRecord) -> ([u32; 3], [u32; 3], u32) {
 }
 
 // The paths the code generator writes out inline, copied from `instruction_translator.rs` statement
-// for statement, with the chunk-boundary and yield checks left out: the chunk never fills here.
-
-/// `sign_extend_imm32_to_u64`: the generator's immediates are the low 32 bits of the operand.
-fn imm32(value: u64) -> u64 {
-    value as u32 as i32 as i64 as u64
-}
+// for statement, with the chunk-boundary and yield checks left out: the chunk never fills here. An
+// immediate is the instruction's, as the generated code hands it on. A `JALR` entry's error, which
+// the generated code returns, is unwrapped: the programs here jump inside themselves.
 
 /// `gen_jal`.
 fn jal(emu: &mut AotEmulatorCore, pc: u64, inst: &Instruction) {
     let (rd, imm) = (inst.op_a as usize, inst.op_b);
     let emitting = emu.is_emitting();
     emu.jal_no_count(emitting, rd, pc, imm);
-    emu.pc = pc.wrapping_add(imm32(imm));
+    emu.pc = pc.wrapping_add(imm);
     emu.update_insn_clock();
 }
 
@@ -370,7 +408,9 @@ fn jal(emu: &mut AotEmulatorCore, pc: u64, inst: &Instruction) {
 fn jalr(emu: &mut AotEmulatorCore, pc: u64, inst: &Instruction) {
     let (rd, rs1, imm) = (inst.op_a as usize, inst.op_b as usize, inst.op_c);
     let emitting = emu.is_emitting();
-    let target = emu.jalr_no_count(emitting, rd, rs1, pc, imm);
+    let target = emu
+        .jalr_no_count(emitting, rd, rs1, pc, imm)
+        .expect("a jump inside the program");
     emu.pc = target;
     emu.update_insn_clock();
 }
@@ -389,11 +429,7 @@ fn branch(emu: &mut AotEmulatorCore, pc: u64, inst: &Instruction) {
         BGEU => emu.bgeu_no_count(emitting, rs1, rs2, pc, imm),
         other => panic!("not a branch: {other:?}"),
     };
-    emu.pc = if taken {
-        pc.wrapping_add(imm32(imm))
-    } else {
-        pc + 4
-    };
+    emu.pc = if taken { pc.wrapping_add(imm) } else { pc + 4 };
     emu.update_insn_clock();
 }
 
@@ -417,7 +453,7 @@ fn ecall(emu: &mut AotEmulatorCore, pc: u64) {
 /// `gen_alu_helper` on an instruction whose two operands are immediates, as a constant is.
 fn folded_alu(emu: &mut AotEmulatorCore, pc: u64, inst: &Instruction) {
     use Opcode::*;
-    let (rd, b, c) = (inst.op_a as usize, imm32(inst.op_b), imm32(inst.op_c));
+    let (rd, b, c) = (inst.op_a as usize, inst.op_b, inst.op_c);
     let a = match inst.opcode {
         ADD => b.wrapping_add(c),
         SUB => b.wrapping_sub(c),
@@ -451,7 +487,7 @@ fn word(opcode: Opcode, lhs: u32, rhs: u32) -> u64 {
 /// `gen_word_alu_helper` on two immediates.
 fn folded_word(emu: &mut AotEmulatorCore, pc: u64, inst: &Instruction) {
     let result = word(inst.opcode, inst.op_b as u32, inst.op_c as u32);
-    let (b, c) = (imm32(inst.op_b), imm32(inst.op_c));
+    let (b, c) = (inst.op_b, inst.op_c);
     let emitting = emu.is_emitting();
     emu.constant_no_count(emitting, inst.op_a as usize, result, b, c, pc + 4);
 }
@@ -471,7 +507,7 @@ fn word_immediate(emu: &mut AotEmulatorCore, pc: u64, inst: &Instruction) {
 }
 
 /// Runs `program` through the `_no_count` helpers, one call per instruction as the code generator
-/// writes them, and its closing `JALR` as the generator inlines it.
+/// writes them, and its `JALR`s and closing `HALT` as the generator inlines them.
 fn run_helpers(emu: &mut AotEmulatorCore, program: &Program) {
     run_helpers_from(emu, &program.instructions, PC_BASE);
 }
@@ -480,10 +516,10 @@ fn run_helpers(emu: &mut AotEmulatorCore, program: &Program) {
 fn run_helpers_from(emu: &mut AotEmulatorCore, instructions: &[Instruction], pc_base: u64) {
     for (index, inst) in instructions.iter().enumerate() {
         let pc = pc_base + 4 * index as u64;
-        if inst.opcode == Opcode::JALR {
-            jalr(emu, pc, inst);
-        } else {
-            helper(emu, pc, inst);
+        match inst.opcode {
+            Opcode::JALR => jalr(emu, pc, inst),
+            Opcode::ECALL => ecall(emu, pc),
+            _ => helper(emu, pc, inst),
         }
     }
 }
@@ -572,12 +608,12 @@ fn helper(emu: &mut AotEmulatorCore, pc: u64, inst: &Instruction) {
         (LWU, true) => emu.lwu_no_count(emitting, rd, rs1, imm, next).unwrap(),
         (LH, true) => emu.lh_no_count(emitting, rd, rs1, imm, next).unwrap(),
         (LHU, true) => emu.lhu_no_count(emitting, rd, rs1, imm, next).unwrap(),
-        (LB, true) => emu.lb_no_count(emitting, rd, rs1, imm, next),
-        (LBU, true) => emu.lbu_no_count(emitting, rd, rs1, imm, next),
+        (LB, true) => emu.lb_no_count(emitting, rd, rs1, imm, next).unwrap(),
+        (LBU, true) => emu.lbu_no_count(emitting, rd, rs1, imm, next).unwrap(),
         (SD, true) => emu.sd_no_count(emitting, rd, rs1, imm, next).unwrap(),
         (SW, true) => emu.sw_no_count(emitting, rd, rs1, imm, next).unwrap(),
         (SH, true) => emu.sh_no_count(emitting, rd, rs1, imm, next).unwrap(),
-        (SB, true) => emu.sb_no_count(emitting, rd, rs1, imm, next),
+        (SB, true) => emu.sb_no_count(emitting, rd, rs1, imm, next).unwrap(),
         (AUIPC, _) => emu.apc_no_count(emitting, rd, pc, inst.op_b, next),
         other => panic!("no helper for {other:?}"),
     }
@@ -750,4 +786,179 @@ fn the_fallback_writes_the_interpreters_records() {
         );
         assert_same_events(&interpreter, &chunk.record, chunk.cycles as usize);
     }
+}
+
+/// Misaligned loads and stores in a run whose records are proven: the AOT core writes the
+/// interpreter's records for them, through the generated code's paths and through the fallback,
+/// the next dword's access a local memory event and the history's unaligned step; it counts them;
+/// and the sink changes nothing else.
+#[test]
+fn a_misaligned_access_writes_the_interpreters_records() {
+    hold_records_unbounded();
+    type Driver = fn(&mut AotEmulatorCore, &Program);
+    let program = program(misaligned());
+    let interpreter = interpreted(program.clone());
+    let drivers: [(&str, Driver); 2] = [
+        ("generated", run_generated),
+        ("fallback", |emu, _| run_fallback(emu)),
+    ];
+    for (driver, run) in drivers {
+        let core = |emitting: bool| {
+            let mut emu = AotEmulatorCore::new(program.clone(), Vec::new());
+            if emitting {
+                emu.emit_records();
+            }
+            run(&mut emu, &program);
+            assert_eq!(emu.pc, 0, "{driver}: the program ran to its halt");
+            assert_eq!(emu.misaligned_accesses, MISALIGNED_ACCESSES, "{driver}");
+            emu
+        };
+        let mut emu = core(true);
+        assert_eq!(
+            core_state(&emu),
+            core_state(&core(false)),
+            "{driver}, the emitting run first"
+        );
+        emu.finish_emitted_chunk();
+        let chunks = emu.take_emitted_chunks();
+        let [chunk] = chunks.as_slice() else {
+            panic!("{driver}: {} chunks", chunks.len());
+        };
+        assert_same_events(&interpreter, &chunk.record, chunk.cycles as usize);
+        let history = chunk
+            .record
+            .history
+            .as_ref()
+            .expect("a CPU chunk's history");
+        assert_eq!(
+            history.unaligned.len() as u64,
+            MISALIGNED_ACCESSES,
+            "{driver}: the history's unaligned steps"
+        );
+    }
+}
+
+/// In an unconstrained region nothing is proven, so a run whose records are proven executes a
+/// misaligned access there, counts none, and rolls it back with the region: the AOT core as the
+/// interpreter does.
+#[test]
+fn a_misaligned_access_in_an_unconstrained_region_is_rolled_back() {
+    use Opcode::*;
+    let mut body = vec![i(ADD, 1, 0, DATA as i64), i(ADD, 10, 0, 11)];
+    body.extend(syscall(3));
+    // The branch past the region once it has run, as in [`unconstrained`].
+    body.push(b(BEQ, 5, 0, 24));
+    body.push(i(ADD, 10, 0, -0x1234_5679));
+    body.push(s(SD, 10, 1, 5));
+    body.push(i(LW, 12, 1, 6));
+    body.extend(syscall(4));
+    body.push(i(LD, 14, 1, 8));
+    body.push(i(ADD, 10, 0, 0));
+    body.extend(syscall(0));
+    let program = Arc::new(Program::new(body, PC_BASE, PC_BASE));
+
+    let interpreter = interpreted(program.clone());
+    let mut emu = AotEmulatorCore::new(program.clone(), Vec::new());
+    emu.emit_records();
+    run_generated(&mut emu, &program);
+    assert_eq!(emu.misaligned_accesses, 0);
+    assert_eq!(
+        emu.registers[14].value, 0,
+        "the region's store is rolled back"
+    );
+    emu.finish_emitted_chunk();
+    let chunks = emu.take_emitted_chunks();
+    let [chunk] = chunks.as_slice() else {
+        panic!("{} chunks", chunks.len());
+    };
+    assert_same_events(&interpreter, &chunk.record, chunk.cycles as usize);
+}
+
+/// A chunk holds as many misaligned accesses as its `MemoryUnaligned` trace has rows, and closes
+/// right after the one that fills it, mid-iteration here: the AOT core's fallback cuts each chunk
+/// where the interpreter does. The loop's two loads an iteration, an instruction apart, are a `LW`
+/// inside its dword and a `LD` across into the next; 1500 iterations make 3000.
+#[test]
+fn a_chunk_closes_at_its_misaligned_cap_where_the_interpreter_closes_it() {
+    use Opcode::*;
+    const CAP: usize = 1 << MLE_MEMORY_UNALIGNED_LOG_HEIGHT;
+    const CHUNK_SIZE: u32 = 1 << 22;
+    let program = program(vec![
+        i(ADD, 1, 0, DATA as i64),
+        i(ADD, 2, 0, 1500),
+        i(LW, 3, 1, 2),
+        r(ADD, 4, 3, 0),
+        i(LD, 5, 1, 3),
+        i(ADD, 2, 2, -1),
+        b(BNE, 2, 0, -16),
+    ]);
+    let stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>().finalize();
+    let opts = EmulatorOpts {
+        chunk_size: CHUNK_SIZE,
+        chunk_batch_size: 1,
+        ..EmulatorOpts::test_opts()
+    };
+    let output = emulate_with_opts(program.clone(), &stdin, opts).expect("the interpreter runs it");
+    let interpreter: Vec<(usize, usize)> = output
+        .records
+        .iter()
+        .filter(|record| record.is_cpu_chunk)
+        .map(|record| (record.cpu_steps().len(), unaligned_len(record)))
+        .collect();
+    // Two instructions before the loop and five an iteration: the 1024th access is the `LD` of
+    // the 512th iteration, and the next chunk starts on the instruction after it.
+    let full = 2 + 5 * 511 + 3;
+    assert_eq!(
+        interpreter,
+        [
+            (full, CAP),
+            (full, CAP),
+            // The last chunk ends with `program`'s three closing steps, `a0 = 0` and HALT.
+            (2 + 7500 + 3 - 2 * full, 3000 - 2 * CAP)
+        ]
+    );
+
+    let mut emu = AotEmulatorCore::new(program, Vec::new());
+    emu.emit_records();
+    emu.chunk_split_config = ChunkSplitConfig::for_chunk_size(CHUNK_SIZE, emu.max_syscall_cycles);
+    run_fallback(&mut emu);
+    assert_eq!(emu.pc, 0, "the program ran to its halt");
+    emu.finish_emitted_chunk();
+    let aot: Vec<(usize, usize)> = emu
+        .take_emitted_chunks()
+        .iter()
+        .map(|chunk| (chunk.record.cpu_steps().len(), unaligned_len(&chunk.record)))
+        .collect();
+    assert_eq!(aot, interpreter);
+}
+
+/// A store below the segments ends the run with the same fault in the interpreter and in the AOT
+/// core, through the generated code's helper and through the fallback.
+#[test]
+fn a_store_below_the_segments_ends_the_run_alike() {
+    let program = program(vec![i(Opcode::ADD, 1, 0, 0x100), s(Opcode::SD, 1, 1, 0)]);
+    let fault = TerminationReason::NullAccess {
+        opcode: Opcode::SD,
+        addr: 0x100,
+    };
+    let expected = EmulationError::from(AbnormalTermination::fault(fault)).to_string();
+    let stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>().finalize();
+    let opts = EmulatorOpts {
+        chunk_size: 1 << 22,
+        chunk_batch_size: 1,
+        ..EmulatorOpts::test_opts()
+    };
+    let err = emulate_with_opts(program.clone(), &stdin, opts).expect_err("the interpreter");
+    assert_eq!(err.to_string(), expected);
+
+    let mut emu = AotEmulatorCore::new(program.clone(), Vec::new());
+    run_helpers_from(&mut emu, &program.instructions[..1], PC_BASE);
+    let err = emu
+        .sd_no_count(false, 1, 1, 0, PC_BASE + 8)
+        .expect_err("the helper");
+    assert_eq!(err, expected, "generated");
+
+    let mut emu = AotEmulatorCore::new(program, Vec::new());
+    let err = AotProgram::STUB.run(&mut emu).expect_err("the fallback");
+    assert!(err.contains(&expected), "fallback: {err}");
 }

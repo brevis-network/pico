@@ -18,7 +18,8 @@ serde = { version = "1.0", features = ["derive"] }
 # The history census's capacity table.
 serde_json = "1.0"
 sha2 = "0.10.8"
-# `getrusage`, for the minor page faults an emulation arm takes.
+# `getrusage`: an emulation arm's minor page faults, and `replay-chunk`'s per replay
+# (`RUSAGE_THREAD`, Linux only).
 libc = "0.2"
 
 [features]
@@ -36,5 +37,8 @@ bigint-rug = ["pico-vm/bigint-rug", "pico-aot-dispatch/bigint-rug"]
 # jemalloc`) the instruments compile out as they do in a shipped build, for an arm that measures
 # what they cost.
 stage-ledger = ["pico-vm/stage-ledger"]
+# The checking build of the recording blocks (`aot_bench.sh -C`): every row a block writes
+# directly is checked against the shared writer's generic close as it is written. Never for timing.
+recorder-check = ["pico-aot-runtime/recorder-check"]
 # The device round trip of the arena arm, on a card.
 cuda = ["pico-vm/cuda"]

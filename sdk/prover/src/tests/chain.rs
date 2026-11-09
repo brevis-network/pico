@@ -187,6 +187,7 @@ fn as_proof(facts: &Facts, phase: Phase, payload: Payload) -> Proof {
         committed_value_digest: facts.committed_value_digest,
         chunk_count: Some(facts.chunk_count),
         distinct_shapes: Some(1),
+        misaligned_accesses: None,
         payload,
     }
 }
@@ -211,6 +212,8 @@ fn the_facade_proves_what_the_direct_chain_proves() {
     let riscv_proof = prover
         .prove_to(Stdin::from(&N), Phase::Riscv)
         .expect("facade riscv");
+    // Every proof this prover makes reports the run's misaligned accesses: fib makes none.
+    assert_eq!(riscv_proof.misaligned_accesses(), Some(0));
     let combine_proof = prover.prove(Stdin::from(&N)).expect("facade combine");
     let compress_proof = prover
         .prove_to(Stdin::from(&N), Phase::Compress)
@@ -306,9 +309,14 @@ fn the_facade_proves_what_the_direct_chain_proves() {
     )
     .write(&direct_riscv_file)
     .expect("write the direct bundle");
-    prover
+    let verified = prover
         .verify_artifact(ProofArtifact::read(&direct_riscv_file).expect("read"))
         .expect("the direct path's RISC-V bundle must verify through the facade's entry point");
+    assert_eq!(
+        verified.misaligned_accesses(),
+        None,
+        "a proof file does not carry the emulation's count"
+    );
 
     let direct_root_file = dir.join("direct_combine.pico");
     as_proof(

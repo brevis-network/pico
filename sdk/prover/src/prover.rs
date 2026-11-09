@@ -210,6 +210,9 @@ pub struct Execution {
     /// `BLS12381_FP_MUL` into `BLS12381_FP_ADD`, through `SyscallCode::count_map` — and these do
     /// not. A precompile the run never called has no entry.
     pub precompile_calls: BTreeMap<SyscallCode, u64>,
+    /// Loads and stores whose address is not a multiple of their width (Zicclsm), outside
+    /// unconstrained blocks: the count the standard RISC-V target asks every proof to report.
+    pub misaligned_accesses: u64,
 }
 
 /// One emulation: the records proving needs, and what [`Execution`] reports about them.
@@ -261,7 +264,7 @@ pub struct ProverBuilder {
     #[cfg(feature = "aot")]
     aot: Option<&'static AotProgram>,
     #[cfg(feature = "aot")]
-    aot_workers: bool,
+    replay_workers: ReplayWorkers,
     emulation_workers: Option<NonZeroUsize>,
     serial_emulation: bool,
     #[cfg(feature = "cuda")]
@@ -288,7 +291,7 @@ impl ProverBuilder {
             #[cfg(feature = "aot")]
             aot: None,
             #[cfg(feature = "aot")]
-            aot_workers: false,
+            replay_workers: ReplayWorkers::Interpreter,
             emulation_workers: None,
             serial_emulation: false,
             #[cfg(feature = "cuda")]
@@ -403,11 +406,12 @@ impl ProverBuilder {
     }
 
     /// Replay the snapshot pipeline's chunks on [`Self::aot`]'s program too, rather than on
-    /// interpreters: the replay workers run the AOT core, which writes the records the interpreter
-    /// would. Needs `aot`; [`Self::build`] and [`Self::execute_chunked`] refuse it without.
+    /// interpreters: its recording blocks write the records the interpreter would. Needs `aot` with
+    /// a program that has a recording entry point, which `cargo pico aot` always generates;
+    /// [`Self::build`] and [`Self::execute_chunked`] refuse it otherwise.
     #[cfg(feature = "aot")]
     pub fn aot_workers(mut self) -> Self {
-        self.aot_workers = true;
+        self.replay_workers = ReplayWorkers::Aot;
         self
     }
 
@@ -496,6 +500,14 @@ impl ProverBuilder {
     /// as a warning now, and [`Self::execute_fallback_reason`] reports it.
     pub fn pure_aot_unavailable(mut self, reason: impl Into<String>) -> Self {
         self.pure.unavailable(reason.into());
+        self
+    }
+
+    /// Turn pure-mode AOT code off on purpose: [`Self::execute`] runs the stepping interpreter
+    /// without the warning a missing program logs. For a caller with an opt-out switch. It drops a
+    /// program set before it; one set after it turns pure mode back on.
+    pub fn disable_pure_aot(mut self) -> Self {
+        self.pure.disable();
         self
     }
 
@@ -790,7 +802,7 @@ impl ProverBuilder {
     /// emulate alike; neither registers the program before its last fallible step.
     fn resolved_emulation(&self, chunk_size: u32) -> Result<EmulationPath, ProveError> {
         #[cfg(feature = "aot")]
-        if self.aot_workers && self.aot.is_none() {
+        if self.aot.is_none() && self.replay_workers == ReplayWorkers::Aot {
             return Err(ProveError::InconsistentOptions(
                 "aot_workers() was set without aot(program); the replay workers run the program \
                  aot registers"
@@ -831,11 +843,7 @@ impl ProverBuilder {
             SnapshotMainMode::Interpreter
         };
         #[cfg(feature = "aot")]
-        let replay_workers = if self.aot_workers {
-            ReplayWorkers::Aot
-        } else {
-            ReplayWorkers::Interpreter
-        };
+        let replay_workers = self.replay_workers;
         #[cfg(not(feature = "aot"))]
         let replay_workers = ReplayWorkers::Interpreter;
 
@@ -873,6 +881,16 @@ impl ProverBuilder {
                     generated_from: program.elf_sha256(),
                     elf,
                 });
+            }
+            // Refused before anything registers; the pipeline would refuse it only once a prove
+            // has started. Nothing falls back.
+            if self.replay_workers == ReplayWorkers::Aot && program.record_entry().is_none() {
+                return Err(ProveError::InconsistentOptions(
+                    "aot_workers() was set with a program that has no recording entry point, \
+                     which the AOT replay workers run; regenerate it from the guest's ELF with \
+                     `cargo pico aot`"
+                        .into(),
+                ));
             }
         }
         Ok(EmulationPath::Pipeline {
@@ -957,6 +975,11 @@ fn emulate_program(
     for record in &emulated.records {
         count_precompile_calls(&mut precompile_calls, record);
     }
+    // Each report carries the running count; the last one ends the run.
+    let misaligned_accesses = emulated
+        .reports
+        .last()
+        .map_or(0, |report| report.misaligned_accesses);
     Ok(Emulation {
         records: emulated.records,
         execution: Execution {
@@ -965,6 +988,7 @@ fn emulate_program(
             chunks: emulated.chunks,
             reports: emulated.reports,
             precompile_calls,
+            misaligned_accesses,
         },
     })
 }
@@ -1005,12 +1029,18 @@ fn execute_program(
     .map_err(ProveError::from_emulate)?;
     // Ends the ledger run, as dropping a prove's records does.
     pico_vm::mle::ledger::drop_records(Vec::new());
+    // Each report carries the running count; the last one ends the run.
+    let misaligned_accesses = executed
+        .reports
+        .last()
+        .map_or(0, |report| report.misaligned_accesses);
     Ok(Execution {
         committed_bytes: executed.committed_bytes,
         cycles: executed.cycles,
         chunks: executed.chunks,
         reports: executed.reports,
         precompile_calls: calls,
+        misaligned_accesses,
     })
 }
 
@@ -1271,7 +1301,7 @@ impl Prover {
         )
     }
 
-    /// Whether the snapshot pipeline's replay workers run the AOT program
+    /// Whether the snapshot pipeline's replay workers run the AOT program's recording blocks
     /// ([`ProverBuilder::aot_workers`]) rather than interpreters; `false` when this prover
     /// emulates serially.
     pub fn replays_with_aot(&self) -> bool {
@@ -1323,9 +1353,10 @@ impl Prover {
     /// obtain an unverified one.
     ///
     /// A `cuda` build proves a whitelist-mode [`Phase::Combine`] through the GPU pipeline on every
-    /// visible card. Any other phase takes the path below, where the feature swaps the RISC-V and
-    /// compress proving engine for the GPU's on card 0, while convert, combine and embed prove on
-    /// the CPU. Build without `cuda` to prove everything on the CPU.
+    /// visible card, and a whitelist-mode [`Phase::Compress`] the same way to the root, then the
+    /// compress layer on card 0. Any other mode or phase takes the path below, where the feature
+    /// swaps the RISC-V and compress proving engine for the GPU's on card 0, while convert, combine
+    /// and embed prove on the CPU. Build without `cuda` to prove everything on the CPU.
     ///
     /// A [`Phase::Wrap`] proof made with `verify_keys(false)` is not accepted by the on-chain
     /// verifier: the wrap circuit bakes in the whitelist root only when there is one, so without it
@@ -1333,17 +1364,19 @@ impl Prover {
     pub fn prove_to(&mut self, stdin: Stdin, phase: Phase) -> Result<Proof, ProveError> {
         phase.ensure_available()?;
 
-        // Whitelist Combine goes to every visible card; the rest prove on card 0 (see `cuda`).
+        // Whitelist Combine and Compress go to every visible card; the rest prove on card 0 (see
+        // `cuda`).
         #[cfg(feature = "cuda")]
-        if matches!(phase, Phase::Combine) && self.vk_map.is_some() {
-            return self.prove_combine_gpu(stdin);
+        if matches!(phase, Phase::Combine | Phase::Compress) && self.vk_map.is_some() {
+            return self.prove_gpu(stdin, phase);
         }
 
         let emulated = self.emulate(stdin)?;
         let committed = emulated.execution.committed_bytes;
+        let misaligned = emulated.execution.misaligned_accesses;
         let proved = self.prove_records(&emulated.records, committed, phase);
         pico_vm::mle::ledger::drop_records(emulated.records);
-        proved
+        proved.map(|proof| proof.counting(misaligned))
     }
 
     /// Prove to [`Phase::Wrap`] for the on-chain verifier, and return the gnark inputs with the
@@ -1360,9 +1393,11 @@ impl Prover {
             return Err(ProveError::EvmRequiresWhitelist);
         };
         let emulated = self.emulate(stdin)?;
+        let misaligned = emulated.execution.misaligned_accesses;
         let proved = if binding::commits(&emulated.records) {
             let committed = emulated.execution.committed_bytes;
             self.prove_records(&emulated.records, committed, Phase::Wrap)
+                .map(|proof| proof.counting(misaligned))
         } else {
             Err(ProveError::EvmNoCommittedDigest)
         };
@@ -1418,6 +1453,7 @@ impl Prover {
         phase: Phase,
     ) -> Result<Proof, ProveError> {
         check_chips_provable(records)?;
+        self.riscv.check_chunk_shapes(records)?;
         let bundle = self
             .riscv
             .prove(records)
@@ -1739,10 +1775,24 @@ impl Prover {
         ))
     }
 
-    /// [`Phase::Combine`] on every visible GPU, in whitelist mode. The root is verified by the GPU
-    /// pipeline and again here, by the checks [`Self::verify_artifact`] runs on a loaded root.
+    /// [`Phase::Combine`] or [`Phase::Compress`] in whitelist mode: the root on every visible GPU,
+    /// then for `Compress` the compress layer over it, as the CPU path proves it.
     #[cfg(feature = "cuda")]
-    fn prove_combine_gpu(&mut self, stdin: Stdin) -> Result<Proof, ProveError> {
+    fn prove_gpu(&mut self, stdin: Stdin, phase: Phase) -> Result<Proof, ProveError> {
+        let (root, committed) = self.prove_root_gpu(stdin)?;
+        if phase == Phase::Combine {
+            return self.combine_proof(root, committed, None, None);
+        }
+        let (compress, shapes) = self.compress_root(*root)?;
+        self.bound_key_caches();
+        self.compress_proof(Box::new(compress), committed, None, Some(shapes))
+    }
+
+    /// The complete root on every visible GPU, in whitelist mode, and the committed bytes. The root
+    /// is verified by the GPU pipeline and again here, by the checks [`Self::verify_artifact`] runs
+    /// on a loaded root.
+    #[cfg(feature = "cuda")]
+    fn prove_root_gpu(&mut self, stdin: Stdin) -> Result<(Box<ProofWithVk>, Vec<u8>), ProveError> {
         use pico_mle_core::codec::Decode;
 
         let Some(vk_map) = &self.vk_map else {
@@ -1784,7 +1834,7 @@ impl Prover {
         let root: Box<ProofWithVk> = Box::new((proof, Arc::new(vk)));
 
         self.verify_root(&root)?;
-        self.combine_proof(root, out.committed, None, None)
+        Ok((root, out.committed))
     }
 
     /// A root this prover did not just prove on the CPU: it must be complete, then pass the apex
@@ -1852,6 +1902,7 @@ impl Prover {
             committed_value_digest,
             chunk_count,
             distinct_shapes,
+            misaligned_accesses: None,
             payload,
         }
     }

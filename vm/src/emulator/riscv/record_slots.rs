@@ -35,9 +35,9 @@ use std::{
     num::NonZeroUsize,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Condvar, Mutex, MutexGuard, OnceLock,
+        Condvar, Mutex, MutexGuard, OnceLock, PoisonError,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use super::history_arena::{HistoryArena, HistoryCapacity, SlotLayout, SpillPolicy, ROW_SHAPES};
@@ -50,7 +50,7 @@ pub const SLOTS_VAR: &str = "MLE_HISTORY_SLOTS";
 pub const LEGACY_SLOTS_VAR: &str = "MLE_EVENT_POOL_SIZE";
 
 /// The bound a bounded process gets when nothing sized it before its first take and neither
-/// variable is set. The launch scripts pin the same count.
+/// variable is set. The launch scripts set a count of their own.
 pub const DEFAULT_RECORD_SLOTS: usize = 64;
 
 static ARENA: OnceLock<HistoryArena> = OnceLock::new();
@@ -219,6 +219,38 @@ pub(crate) fn history_arena() -> Option<&'static HistoryArena> {
         let count = record_slots_from_env().unwrap_or_else(|e| panic!("{e}"));
         pin(count.get())
     }))
+}
+
+/// How the slots were used over a stretch of a process, for its log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SlotOccupancy {
+    pub slots: usize,
+    pub max_in_use: usize,
+    /// Slots taken, those takes that waited for one, and how long they waited.
+    pub takes: u64,
+    pub blocked_takes: u64,
+    pub blocked: Duration,
+}
+
+/// The slots' use since the previous call, or since pinning; `None` while nothing is pinned. Pins
+/// nothing. One call per pipeline run gives that run's figures.
+pub fn take_occupancy() -> Option<SlotOccupancy> {
+    static TAKEN: Mutex<(u64, u64, Duration)> = Mutex::new((0, 0, Duration::ZERO));
+    let arena = ARENA.get()?;
+    // Held across the read and the save, so two callers cannot interleave and leave a saved count
+    // ahead of the next one read.
+    let mut taken = TAKEN.lock().unwrap_or_else(PoisonError::into_inner);
+    let max_in_use = arena.take_max_in_use();
+    let stats = arena.stats();
+    let (takes, blocked_takes, blocked) = *taken;
+    *taken = (stats.acquisitions, stats.blocked_takes, stats.blocked);
+    Some(SlotOccupancy {
+        slots: stats.slots,
+        max_in_use,
+        takes: stats.acquisitions - takes,
+        blocked_takes: stats.blocked_takes - blocked_takes,
+        blocked: stats.blocked.saturating_sub(blocked),
+    })
 }
 
 /// The bound in force, in records: `None` in a process that is not bounded, or whose bound is

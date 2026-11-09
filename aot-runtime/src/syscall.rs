@@ -118,6 +118,10 @@ impl AotEmulatorCore {
         let fd = syscall_leaf_u32(fd, "write fd")?;
         let nbytes = usize::try_from(self.read_reg_snapshot(Register::X12 as usize))
             .map_err(|_| "write syscall byte count does not fit usize".to_string())?;
+        // An empty write reads nothing, so its pointer may dangle, as an empty Rust slice's does.
+        if nbytes > 0 && !self.syscall_access_allowed(write_buf, nbytes as u64, false) {
+            return Ok(());
+        }
 
         // Pre-allocate buffer with exact capacity
         let mut bytes = Vec::with_capacity(nbytes);
@@ -148,7 +152,10 @@ impl AotEmulatorCore {
         }
 
         if fd == 4 {
-            self.input_stream.push(slice.to_vec());
+            // A hint is read next, ahead of any input the guest has not read yet; hints written
+            // before one read come out newest first.
+            self.input_stream
+                .insert(self.input_stream_ptr, slice.to_vec());
             return Ok(());
         }
 
@@ -202,6 +209,12 @@ impl AotEmulatorCore {
             return Err(self.fail(EmulationError::InvalidHintRead(format!(
                 "address 0x{ptr:016x} is not aligned to 8 bytes"
             ))));
+        }
+        // The dwords the hint lands in are written like a store's, and an empty one writes
+        // nothing, so its pointer may dangle, as an empty Rust vector's does.
+        if supplied > 0 && !self.syscall_access_allowed(ptr, 8 * supplied.div_ceil(8) as u64, true)
+        {
+            return Ok(());
         }
 
         let chunk_count = supplied.div_ceil(8);
@@ -307,6 +320,21 @@ impl AotEmulatorCore {
     ///
     /// Returns (return_value, next_pc, extra_cycles, should_halt)
     pub fn execute_syscall(
+        &mut self,
+        syscall_id: u64,
+        arg1: u64,
+        arg2: u64,
+    ) -> Result<(u64, u64, u32, bool), String> {
+        let returned = self.run_syscall(syscall_id, arg1, arg2)?;
+        // A refused memory access let the syscall run on with zero in its place; its
+        // fault ends the run here, where the interpreter's dispatcher ends it.
+        if let Some(fault) = &self.fault {
+            return Err(fault.to_string());
+        }
+        Ok(returned)
+    }
+
+    fn run_syscall(
         &mut self,
         syscall_id: u64,
         arg1: u64,
@@ -773,28 +801,28 @@ mod tests {
     fn phase5_hint_read_writes_exact_dword_for_eight_byte_input() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4, 5, 6, 7, 8]]);
 
-        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 8)
+        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0100, 8)
             .expect("hint read should succeed");
 
         assert_eq!(
-            emu.uninitialized_memory.get(0x100),
+            emu.uninitialized_memory.get(0x1_0100),
             Some(&0x0807_0605_0403_0201)
         );
-        assert_eq!(emu.memory.get(0x100).value, 0x0807_0605_0403_0201);
+        assert_eq!(emu.memory.get(0x1_0100).value, 0x0807_0605_0403_0201);
     }
 
     #[test]
     fn phase5_hint_read_zero_pads_short_tail() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![9, 8, 7]]);
 
-        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 3)
+        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0100, 3)
             .expect("hint read should succeed");
 
         assert_eq!(
-            emu.uninitialized_memory.get(0x100),
+            emu.uninitialized_memory.get(0x1_0100),
             Some(&0x0000_0000_0007_0809)
         );
-        assert_eq!(emu.memory.get(0x100).value, 0x0000_0000_0007_0809);
+        assert_eq!(emu.memory.get(0x1_0100).value, 0x0000_0000_0007_0809);
         assert_eq!(emu.input_stream_ptr, 1);
     }
 
@@ -803,19 +831,19 @@ mod tests {
         let mut emu =
             AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
 
-        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 10)
+        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0100, 10)
             .expect("hint read should succeed");
 
         assert_eq!(
-            emu.uninitialized_memory.get(0x100),
+            emu.uninitialized_memory.get(0x1_0100),
             Some(&0x0807_0605_0403_0201)
         );
         assert_eq!(
-            emu.uninitialized_memory.get(0x108),
+            emu.uninitialized_memory.get(0x1_0108),
             Some(&0x0000_0000_0000_0A09)
         );
-        assert_eq!(emu.memory.get(0x100).value, 0x0807_0605_0403_0201);
-        assert_eq!(emu.memory.get(0x108).value, 0x0000_0000_0000_0A09);
+        assert_eq!(emu.memory.get(0x1_0100).value, 0x0807_0605_0403_0201);
+        assert_eq!(emu.memory.get(0x1_0108).value, 0x0000_0000_0000_0A09);
     }
 
     /// The typed error a failed syscall recorded for the batch, which has to be the one whose
@@ -842,7 +870,7 @@ mod tests {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
 
         let err = emu
-            .handle_hint_read(SyscallCode::HINT_READ as u64, 0x104, 4)
+            .handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0104, 4)
             .expect_err("unaligned hint read should fail");
         assert_invalid_hint_read(&mut emu, &err, "is not aligned to 8 bytes");
     }
@@ -852,7 +880,7 @@ mod tests {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
 
         let err = emu
-            .handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 8)
+            .handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0100, 8)
             .expect_err("a length other than the element's should fail");
         assert_invalid_hint_read(&mut emu, &err, "length mismatch");
         assert_eq!(emu.input_stream_ptr, 0, "the element is not consumed");
@@ -863,12 +891,12 @@ mod tests {
         let mut emu =
             AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4], vec![5, 6, 7, 8]]);
 
-        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 4)
+        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0100, 4)
             .expect("first hint read should succeed");
         assert!(emu.fault.is_none(), "a well-formed read records nothing");
 
         let err = emu
-            .handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 4)
+            .handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0100, 4)
             .expect_err("duplicate initialization should fail");
         assert_invalid_hint_read(&mut emu, &err, "initialized already (uninitialized_memory)");
     }
@@ -876,10 +904,10 @@ mod tests {
     #[test]
     fn phase5_hint_read_rejects_an_address_memory_already_holds() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
-        emu.write_mem_dword(0x100, 0x55);
+        emu.write_mem_dword(0x1_0100, 0x55);
 
         let err = emu
-            .handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 4)
+            .handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0100, 4)
             .expect_err("a hint over written memory should fail");
         assert_invalid_hint_read(&mut emu, &err, "initialized already (memory)");
     }
@@ -890,7 +918,7 @@ mod tests {
         emu.input_stream_ptr = 1;
 
         let err = emu
-            .handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 4)
+            .handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0100, 4)
             .expect_err("no element is left to read");
         assert!(matches!(
             recorded_fault(&mut emu, &err),
@@ -904,17 +932,17 @@ mod tests {
     #[test]
     fn phase5_write_fd4_replenishes_input_before_next_hint_cycle() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
-        install_write_bytes(&mut emu, 0x200, &[9, 8, 7]);
+        install_write_bytes(&mut emu, 0x1_0200, &[9, 8, 7]);
 
         emu.handle_hint_len(SyscallCode::HINT_LEN as u64)
             .expect("hint len should succeed");
-        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 4)
+        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0100, 4)
             .expect("hint read should succeed");
         assert_eq!(emu.input_stream_ptr, 1);
         assert_eq!(emu.input_stream.len(), 1);
 
         emu.write_reg(12, 3);
-        emu.handle_write(4, 0x200)
+        emu.handle_write(4, 0x1_0200)
             .expect("write to fd 4 should succeed");
 
         assert_eq!(emu.input_stream_ptr, 1);
@@ -924,22 +952,38 @@ mod tests {
                 .expect("hint len should succeed"),
             3
         );
-        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x108, 3)
+        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0108, 3)
             .expect("hint read should succeed");
         assert_eq!(emu.input_stream_ptr, 2);
-        assert_eq!(emu.memory.get(0x100).value, 0x0000_0000_0403_0201);
-        assert_eq!(emu.memory.get(0x108).value, 0x0000_0000_0007_0809);
+        assert_eq!(emu.memory.get(0x1_0100).value, 0x0000_0000_0403_0201);
+        assert_eq!(emu.memory.get(0x1_0108).value, 0x0000_0000_0007_0809);
+    }
+
+    #[test]
+    fn phase5_hint_write_goes_ahead_of_unread_input() {
+        let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
+        install_write_bytes(&mut emu, 0x1_0200, &[9, 8, 7]);
+
+        emu.write_reg(12, 3);
+        emu.handle_write(4, 0x1_0200)
+            .expect("write to fd 4 should succeed");
+
+        assert_eq!(emu.input_stream, vec![vec![9, 8, 7], vec![1, 2, 3, 4]]);
+        assert_eq!(emu.input_stream_ptr, 0);
+        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0100, 3)
+            .expect("hint read should succeed");
+        assert_eq!(emu.memory.get(0x1_0100).value, 0x0000_0000_0007_0809);
     }
 
     #[test]
     fn phase5_write_hook_splices_results_at_current_input_cursor() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![0xaa], vec![0xbb]]);
-        install_write_bytes(&mut emu, 0x200, &[0xde, 0xad, 0xbe, 0xef]);
+        install_write_bytes(&mut emu, 0x1_0200, &[0xde, 0xad, 0xbe, 0xef]);
         emu.input_stream_ptr = 1;
         emu.hook_map.insert(TEST_HOOK_FD, test_hook as Hook);
 
         emu.write_reg(12, 4);
-        emu.handle_write(TEST_HOOK_FD as u64, 0x200)
+        emu.handle_write(TEST_HOOK_FD as u64, 0x1_0200)
             .expect("hook write should succeed");
 
         assert_eq!(
@@ -952,7 +996,7 @@ mod tests {
                 .expect("hint len should succeed"),
             2
         );
-        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 2)
+        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0100, 2)
             .expect("hint read should succeed");
         assert_eq!(emu.input_stream_ptr, 2);
         assert_eq!(
@@ -965,10 +1009,10 @@ mod tests {
     #[test]
     fn phase5_write_to_an_unknown_fd_is_ignored_as_the_interpreter_does() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![0xaa]]);
-        install_write_bytes(&mut emu, 0x200, &[1, 2, 3]);
+        install_write_bytes(&mut emu, 0x1_0200, &[1, 2, 3]);
 
         emu.write_reg(12, 3);
-        emu.handle_write(9, 0x200)
+        emu.handle_write(9, 0x1_0200)
             .expect("a write to an fd without a hook is not an error");
 
         assert_eq!(emu.input_stream, vec![vec![0xaa]]);
@@ -985,7 +1029,7 @@ mod tests {
                 .expect("hint len should succeed"),
             4
         );
-        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 4)
+        emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0100, 4)
             .expect("hint read should succeed");
 
         let err = emu
@@ -1021,9 +1065,9 @@ mod tests {
             .expect("sign-extended HINT_LEN should decode");
         assert_eq!(hint_len, 4);
 
-        emu.execute_syscall(0xffff_ffff_ffff_fff1, 0x100, 4)
+        emu.execute_syscall(0xffff_ffff_ffff_fff1, 0x1_0100, 4)
             .expect("sign-extended HINT_READ should decode");
-        assert_eq!(emu.memory.get(0x100).value, 0x0000_0000_0403_0201);
+        assert_eq!(emu.memory.get(0x1_0100).value, 0x0000_0000_0403_0201);
     }
 
     #[test]

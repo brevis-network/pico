@@ -113,7 +113,7 @@ impl<F: PrimeField32> GpuChipBehavior<F> for AddwChip<F> {
     }
 
     fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
-        record.event_counter.num_add_sub_events > 0
+        record.event_counter.num_addw_events > 0
     }
 }
 

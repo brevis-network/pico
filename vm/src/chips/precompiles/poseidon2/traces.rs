@@ -31,6 +31,7 @@ use crate::{
     machine::chip::ChipBehavior,
     primitives::consts::PERMUTATION_WIDTH,
 };
+use core::ops::Range;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
@@ -93,12 +94,13 @@ impl<
         // Generate the trace rows & corresponding records for each chunk of events concurrently.
         let mut new_byte_lookup_events = Vec::new();
 
+        let code = input.program.code();
         let mut rows: Vec<Vec<F>> = events
             .iter()
             .map(|event| {
                 // use a Vec because the size is too large to make a generic array
                 let mut row = Vec::new();
-                self.event_to_row(event, Some(&mut row), &mut new_byte_lookup_events);
+                self.event_to_row(event, &code, Some(&mut row), &mut new_byte_lookup_events);
 
                 row
             })
@@ -220,13 +222,14 @@ impl<
             })
             .collect();
 
+        let code = input.program.code();
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
         events
             .pico_chunks(chunk_size)
             .map(|events| {
                 let mut blu: Vec<ByteLookupEvent> = Vec::new();
                 events.iter().for_each(|event| {
-                    self.event_to_row(event, None, &mut blu);
+                    self.event_to_row(event, &code, None, &mut blu);
                 });
                 blu
             })
@@ -236,6 +239,7 @@ impl<
     fn event_to_row(
         &self,
         event: &Poseidon2PermuteEvent,
+        code: &Range<u64>,
         input_row: Option<&mut Vec<F>>,
         blu: &mut impl ByteRecordBehavior,
     ) {
@@ -255,6 +259,8 @@ impl<
             .populate(blu, event.input_memory_ptr, STATE_NUM_BYTES as u64);
         cols.output_memory_ptr
             .populate(blu, event.output_memory_ptr, STATE_NUM_BYTES as u64);
+        cols.code_range
+            .populate(event.output_memory_ptr, STATE_NUM_BYTES as u64, code, blu);
         for i in 0..STATE_NUM_DWORDS {
             cols.input_addrs[i].populate(blu, event.input_memory_ptr, 8 * i as u64);
             cols.output_addrs[i].populate(blu, event.output_memory_ptr, 8 * i as u64);

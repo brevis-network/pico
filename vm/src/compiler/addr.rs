@@ -286,8 +286,10 @@ pub const PC_SIZE: usize = 2;
 #[repr(C)]
 pub struct Pc<T>(pub [T; PC_SIZE]);
 
-/// Whether `value` fits a [`Pc`]. `Pc::try_from` and the emulators' end-of-run check share this
-/// bound, so a run that ends without error never hands the CPU trace a pc it cannot hold.
+/// Whether `value` fits a [`Pc`]. No run reaches a pc outside it: the emulators fetch only the
+/// program's own instructions (`Program::try_fetch`) and refuse a jump to anywhere else
+/// (`jump_target`, `check_jump_target`), so every pc is one of the program's, which the
+/// disassembler keeps below `0x7800_0000`, or the 0 `HALT` leaves.
 #[inline(always)]
 pub const fn fits_pc(value: u64) -> bool {
     value >> 32 == 0

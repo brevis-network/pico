@@ -857,6 +857,13 @@ mod tests {
              compress preset or the combine tier changed since the artifact was built; rebuild it \
              with `cargo run --release -p pico-vm --example mle_build_vk_map`"
         );
+        // A compress envelope carries no key: verifiers take the one shipped beside the root.
+        assert!(
+            bincode::serialize(&node).expect("compress vk encode")
+                == pico_verifier::whitelist::SHIPPED_COMPRESS_VK_BIN,
+            "mle_compress_vk.bin is not the compress key this binary keygens; rebuild it with \
+             `cargo run --release -p pico-vm --example mle_build_vk_map`"
+        );
         // The compress and embed proof shapes the manifest records are those of this binary's keys
         // at their rows (embed's under `multi-field-transcript`). The riscv, convert, combine and
         // deferred records follow from keys the membership checks above already hold.

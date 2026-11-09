@@ -1,11 +1,14 @@
 use hashbrown::HashMap;
 use pico_vm::{
     chips::chips::riscv_memory::event::MemoryRecord,
-    compiler::riscv::program::Program,
+    compiler::riscv::{opcode::Opcode, program::Program},
     emulator::riscv::{
         chunk_split::{ChunkSplitConfig, ChunkSplitState},
         memory::{ContiguousRiscvMemory, Memory},
-        riscv_emulator::{AbnormalTermination, EmulationError, TerminationReason},
+        riscv_emulator::{
+            guard::{access_fault, access_width},
+            AbnormalTermination, EmulationError, TerminationReason,
+        },
     },
     mle::ledger::CoreRole,
     primitives::consts::{CHUNK_CLK_START, DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
@@ -19,7 +22,7 @@ use crate::{
     types::BlockFn,
 };
 
-use super::{types::RegisterRecord, AotSink};
+use super::{types::RegisterFile, AotSink};
 
 /// Running totals over a run's batches. A first touch is the one access per batch that records an
 /// address's prior state in the batch's prestate. A load and a store narrower than the doubleword
@@ -51,14 +54,16 @@ pub(crate) enum Touch {
 pub struct AotEmulatorCore {
     /// Compiled program containing instruction stream for interpreter fallback.
     pub(crate) program: Arc<Program>,
-    /// 32 general-purpose registers (x0-x31)
-    pub registers: [u64; 32],
-    /// Tracks whether a register has ever been accessed (read or written).
-    pub(crate) reg_present: [bool; 32],
+    /// The 32 general-purpose registers (x0-x31), each with its last access, as the interpreter
+    /// keeps them.
+    pub registers: RegisterFile,
     /// Program counter
     pub pc: u64,
     /// Instruction counter for comparison with Pico's `state.global_clk`
     pub insn_count: u64,
+    /// Loads and stores whose address is not a multiple of their width (Zicclsm), outside
+    /// unconstrained blocks: `RiscvEmulationState::misaligned_accesses`, counted the same way.
+    pub misaligned_accesses: u64,
     /// Current chunk number (starts at 1; chunk 0 reserved for memory init)
     pub current_chunk: u32,
     /// Current batch number (snapshot batching)
@@ -86,15 +91,11 @@ pub struct AotEmulatorCore {
     pub batch_chunks_emulated: u32,
     pub batch_stop: bool,
     pub chunk_split_config: ChunkSplitConfig,
-    /// Snapshot (rollback) register data for the current batch
-    pub batch_start_registers: [u64; 32],
-    pub batch_start_reg_present: [bool; 32],
-    /// Register metadata (chunk/timestamp) for current state.
-    pub register_records: [RegisterRecord; 32],
-    /// Register metadata at batch start.
-    pub batch_start_register_records: [RegisterRecord; 32],
-    /// Lightweight tracking: which registers were accessed
-    pub accessed_regs: [bool; 32],
+    /// The registers at batch start, the prestate the snapshot restores a touched register to.
+    pub batch_start_registers: RegisterFile,
+    /// The registers accessed in the batch. Kept apart from the records, since an unconstrained
+    /// block rolls the records back but not these, as the interpreter's snapshot keeps its touches.
+    pub touched_registers: [bool; 32],
     /// Memory snapshot of pre-batch values (only addresses accessed in this batch).
     pub memory_snapshot: ContiguousRiscvMemory,
     /// True iff `memory_snapshot`'s bitmap is currently all-zero (clean). Maintained at batch
@@ -122,13 +123,21 @@ pub struct AotEmulatorCore {
     pub chunk_split_state: ChunkSplitState,
     /// Saved state for unconstrained execution blocks.
     pub(crate) unconstrained_state: Option<UnconstrainedState>,
-    /// Compiled blocks entered by `run_blocks`, so a run can show it executed generated code.
+    /// Compiled blocks entered by `run_blocks` or `run_record_blocks`, so a run can show it
+    /// executed generated code.
     pub(crate) compiled_block_dispatches: u64,
     /// Instructions the fallback interpreter ran. A generated block that does not fit what is left
     /// of the chunk falls back, so a run that cuts chunks interprets some of its instructions; how
     /// many, against its cycles, is what shows the generated code ran the rest. An unconstrained
     /// region rolls it back with `insn_count`, so it counts cycles.
     pub(crate) fallback_insns: u64,
+    /// Recording blocks that ran their bodies, and their instructions; unlike
+    /// `compiled_block_dispatches`, a block that fell back on entry is not counted, nor anything
+    /// inside an unconstrained region.
+    pub(crate) recorder_body_dispatches: u64,
+    pub(crate) recorder_body_insns: u64,
+    /// Of `recorder_body_insns`, those whose rows the recording blocks wrote directly.
+    pub(crate) recorder_direct_insns: u64,
     /// Where the instructions' events go.
     pub(crate) sink: AotSink,
     /// What the snapshot thread's batches cost in prestate, for the stage ledger.
@@ -139,6 +148,8 @@ pub struct AotEmulatorCore {
     /// The typed error behind the `Err` the run is returning. The generated entry point carries
     /// only a `String`, so the batch takes the error the interpreter would have returned from here.
     pub(crate) fault: Option<EmulationError>,
+    /// `Program::code`, which no store may touch.
+    pub(crate) code: core::ops::Range<u64>,
 }
 
 #[derive(Debug)]
@@ -150,10 +161,8 @@ pub struct UnconstrainedState {
     pub(crate) current_chunk: u32,
     pub(crate) batch_chunks_emulated: u32,
     pub(crate) batch_stop: bool,
-    pub(crate) registers: [u64; 32],
-    pub(crate) reg_present: [bool; 32],
-    pub(crate) register_records: [RegisterRecord; 32],
-    // Note: accessed_regs is intentionally NOT saved/restored.
+    pub(crate) registers: RegisterFile,
+    // Note: touched_registers is intentionally NOT saved/restored.
     // They persist across unconstrained mode to match baseline behavior where
     // memory_snapshot accumulates all accesses during the batch.
     pub(crate) memory_diff: HashMap<u64, MemoryRecord>,
@@ -196,10 +205,10 @@ impl AotEmulatorCore {
 
         Self {
             program: program.clone(),
-            registers: [0; 32],
-            reg_present: [false; 32],
+            registers: RegisterFile::default(),
             pc: program.pc_start,
             insn_count: 0,
+            misaligned_accesses: 0,
             current_chunk: 1,
             current_batch: 0,
             clk: CHUNK_CLK_START,
@@ -215,11 +224,8 @@ impl AotEmulatorCore {
             batch_chunks_emulated: 0,
             batch_stop: false,
             chunk_split_config: ChunkSplitConfig::disabled(max_syscall_cycles),
-            batch_start_registers: [0; 32],
-            batch_start_reg_present: [false; 32],
-            register_records: [RegisterRecord::default(); 32],
-            batch_start_register_records: [RegisterRecord::default(); 32],
-            accessed_regs: [false; 32],
+            batch_start_registers: RegisterFile::default(),
+            touched_registers: [false; 32],
             memory_snapshot: ContiguousRiscvMemory::new(),
             memory_snapshot_clean: true,
             next_sub_yield: u64::MAX,
@@ -232,10 +238,14 @@ impl AotEmulatorCore {
             unconstrained_state: None,
             compiled_block_dispatches: 0,
             fallback_insns: 0,
+            recorder_body_dispatches: 0,
+            recorder_body_insns: 0,
+            recorder_direct_insns: 0,
             sink: AotSink::Off,
             snapshot_counts: SnapshotCounts::default(),
             role: CoreRole::Snapshot,
             fault: None,
+            code: program.code(),
         }
     }
 
@@ -253,8 +263,6 @@ impl AotEmulatorCore {
     #[inline(always)]
     pub fn save_batch_start_state(&mut self) {
         self.batch_start_registers = self.registers;
-        self.batch_start_reg_present = self.reg_present;
-        self.batch_start_register_records = self.register_records;
         // `memory_snapshot` is normally already clean here (the previous batch's
         // `fill_snapshot_memory_*` swapped in fresh pooled memory), so skip the redundant
         // ~31.5 MB bitmap scan. Only clear when the flag says it may be dirty (defensive).
@@ -262,7 +270,7 @@ impl AotEmulatorCore {
             self.memory_snapshot.clear();
             self.memory_snapshot_clean = true;
         }
-        self.clear_accessed_regs();
+        self.clear_touched_registers();
     }
 
     /// Look up a block function for the given program counter.
@@ -278,6 +286,52 @@ impl AotEmulatorCore {
         let message = error.to_string();
         self.fault = Some(error);
         message
+    }
+
+    /// Ends the run if a load or store at `addr` lands where no guest access may, the way
+    /// the interpreter ends it: see `guard::access_fault`.
+    #[inline(always)]
+    pub(crate) fn check_access(&mut self, opcode: Opcode, addr: u64) -> Result<(), String> {
+        let store = matches!(opcode, Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SD);
+        match access_fault(opcode, addr, access_width(opcode), store, &self.code) {
+            None => Ok(()),
+            Some(reason) => Err(self.fault_at(reason)),
+        }
+    }
+
+    /// Whether a syscall's `width`-byte access at `addr` may happen. One that may not
+    /// records the fault, as the interpreter's syscall context does, and does not happen: the
+    /// syscall runs on with zero in its place, and `execute_syscall` ends the run when it returns.
+    #[inline(always)]
+    pub(crate) fn syscall_access_allowed(&mut self, addr: u64, width: u64, store: bool) -> bool {
+        match access_fault(Opcode::ECALL, addr, width, store, &self.code) {
+            None => true,
+            Some(reason) => {
+                if self.fault.is_none() {
+                    self.fault_at(reason);
+                }
+                false
+            }
+        }
+    }
+
+    #[cold]
+    fn fault_at(&mut self, reason: TerminationReason) -> String {
+        self.fail(AbnormalTermination::fault(reason).into())
+    }
+
+    /// A jump or taken branch at `pc` to `target`, checked as the interpreter checks it
+    /// (`RiscvEmulator::jump_target`): a misaligned target, or one outside the program, 0
+    /// included, ends the run with the same abnormal termination.
+    #[inline(always)]
+    pub fn check_jump_target(&mut self, pc: u64, target: u64) -> Result<(), String> {
+        if !target.is_multiple_of(4) {
+            return Err(self.fail(EmulationError::misaligned_jump(pc, target)));
+        }
+        if !self.program.contains_pc(target) {
+            return Err(self.fail(EmulationError::outside_program(target)));
+        }
+        Ok(())
     }
 
     /// `ebreak` at `pc`, failed the way the interpreter fails it.
@@ -297,7 +351,11 @@ impl AotEmulatorCore {
 mod tests {
     use super::AotEmulatorCore;
     use crate::types::NextStep;
-    use pico_vm::compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program};
+    use pico_vm::{
+        chips::chips::riscv_memory::event::MemoryRecord,
+        compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program},
+        emulator::riscv::{riscv_emulator::TerminationReason, state::RuntimeRegisterRecord},
+    };
     use std::{collections::BTreeMap, sync::Arc};
 
     fn test_program_with_instructions(
@@ -430,6 +488,32 @@ mod tests {
         assert_eq!(snapshot.registers[2].value, 0x2222);
     }
 
+    /// The touched marks outlive the block, so the batch still restores and counts a register only
+    /// the block touched.
+    #[test]
+    fn an_unconstrained_block_rolls_the_records_back_and_keeps_the_touched_marks() {
+        let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
+        emu.write_reg(1, 0x1111);
+        emu.update_insn_clock();
+        emu.save_batch_start_state();
+        let before = emu.registers;
+
+        emu.enter_unconstrained_mode();
+        emu.write_reg(1, 0x2222);
+        emu.write_reg(2, 0x3333);
+        emu.exit_unconstrained_mode().unwrap();
+        assert_eq!(emu.registers, before);
+        assert_eq!(emu.registers[2], RuntimeRegisterRecord::default());
+
+        let mut snapshot = emu.build_snapshot_state();
+        emu.fill_snapshot_memory_delta(&mut snapshot);
+        assert_eq!(snapshot.registers, before.0);
+        assert_eq!(
+            emu.snapshot_counts.first_touch_registers, 1,
+            "x1, touched in the block and present at batch start; x2 was absent"
+        );
+    }
+
     #[test]
     fn phase5_snapshot_reads_capture_prestate_for_precompile_inputs() {
         let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
@@ -474,9 +558,9 @@ mod tests {
     #[test]
     fn phase3_memory_helpers_support_lw_lwu_ld_sd_round_trip() {
         let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        emu.write_reg(1, 0x100);
-        emu.write_mem_word(0x100, 0xffff_ff80);
-        emu.write_mem_word(0x104, 0x1234_5678);
+        emu.write_reg(1, 0x1_0100);
+        emu.write_mem_word(0x1_0100, 0xffff_ff80);
+        emu.write_mem_word(0x1_0104, 0x1234_5678);
 
         emu.lw_no_count(false, 2, 1, 0, 0x1004).unwrap();
         assert_eq!(emu.read_reg_unsafe(2), 0xffff_ffff_ffff_ff80);
@@ -489,18 +573,18 @@ mod tests {
 
         emu.write_reg(5, 0x0123_4567_89ab_cdef);
         emu.sd_no_count(false, 5, 1, 8, 0x1010).unwrap();
-        assert_eq!(emu.read_mem_word_unsafe(0x108), 0x89ab_cdef);
-        assert_eq!(emu.read_mem_word_unsafe(0x10c), 0x0123_4567);
+        assert_eq!(emu.read_mem_word_unsafe(0x1_0108), 0x89ab_cdef);
+        assert_eq!(emu.read_mem_word_unsafe(0x1_010c), 0x0123_4567);
     }
 
     #[test]
     fn phase3_subword_helpers_use_dword_backing_layout() {
         let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        emu.write_reg(1, 0x100);
-        emu.write_mem_dword(0x100, 0x8877_6655_4433_2211);
+        emu.write_reg(1, 0x1_0100);
+        emu.write_mem_dword(0x1_0100, 0x8877_6655_4433_2211);
 
-        emu.lb_no_count(false, 2, 1, 4, 0x1004);
-        emu.lbu_no_count(false, 3, 1, 5, 0x1008);
+        emu.lb_no_count(false, 2, 1, 4, 0x1004).unwrap();
+        emu.lbu_no_count(false, 3, 1, 5, 0x1008).unwrap();
         emu.lh_no_count(false, 4, 1, 6, 0x100c).unwrap();
         emu.lhu_no_count(false, 5, 1, 2, 0x1010).unwrap();
         assert_eq!(emu.read_reg_unsafe(2), 0x55);
@@ -509,10 +593,10 @@ mod tests {
         assert_eq!(emu.read_reg_unsafe(5), 0x4433);
 
         emu.write_reg(6, 0xaa);
-        emu.sb_no_count(false, 6, 1, 5, 0x1014);
+        emu.sb_no_count(false, 6, 1, 5, 0x1014).unwrap();
         emu.write_reg(7, 0xbbcc);
         emu.sh_no_count(false, 7, 1, 6, 0x1018).unwrap();
-        assert_eq!(emu.read_mem_dword_unsafe(0x100), 0xbbcc_aa55_4433_2211);
+        assert_eq!(emu.read_mem_dword_unsafe(0x1_0100), 0xbbcc_aa55_4433_2211);
     }
 
     #[test]
@@ -526,14 +610,18 @@ mod tests {
         assert_eq!(emu.read_reg_unsafe(4), 1);
     }
 
+    /// A helper takes its immediate as the program holds it: a negative one already 64 bits wide,
+    /// and one past 32 bits whole.
     #[test]
-    fn phase3_helper_immediates_sign_extend_from_low_32_bits() {
+    fn phase3_helper_immediates_are_taken_as_the_program_holds_them() {
         let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
         emu.write_reg(1, 0x20f1f8);
-        emu.adi_no_count(false, 2, 1, u64::from(0xffff_fef8u32), 0x1004);
-        emu.apc_no_count(false, 3, 0x2021f8, u64::from(0x0000_d000u32), 0x1008);
+        emu.adi_no_count(false, 2, 1, -264_i64 as u64, 0x1004);
+        emu.apc_no_count(false, 3, 0x2021f8, 0xd000, 0x1008);
+        emu.adi_no_count(false, 4, 1, 1 << 32, 0x100c);
         assert_eq!(emu.read_reg_unsafe(2), 0x20f0f0);
         assert_eq!(emu.read_reg_unsafe(3), 0x20f1f8);
+        assert_eq!(emu.read_reg_unsafe(4), 0x1_0020_f1f8);
     }
 
     #[test]
@@ -579,7 +667,7 @@ mod tests {
             0x1000,
             vec![
                 Instruction::new(Opcode::SLL, 3, 1, 2, false, false),
-                Instruction::new(Opcode::JALR, 0, 0, 0, false, true),
+                Instruction::new(Opcode::JALR, 0, 0, 0x1000, false, true),
             ],
         );
         let mut emu = AotEmulatorCore::new(sll_program, Vec::new());
@@ -593,7 +681,7 @@ mod tests {
             0x1000,
             vec![
                 Instruction::new(Opcode::SRA, 5, 4, 63, false, true),
-                Instruction::new(Opcode::JALR, 0, 0, 0, false, true),
+                Instruction::new(Opcode::JALR, 0, 0, 0x1000, false, true),
             ],
         );
         let mut emu = AotEmulatorCore::new(sra_program, Vec::new());
@@ -607,23 +695,21 @@ mod tests {
         let program = test_program_with_instructions(
             0x1000,
             0x1000,
-            vec![Instruction::new(
-                Opcode::JALR,
-                2,
-                1,
-                2_i64 as u64,
-                false,
-                true,
-            )],
+            vec![
+                Instruction::new(Opcode::JALR, 2, 1, 2_i64 as u64, false, true),
+                Instruction::new(Opcode::ADD, 0, 0, 0, false, false),
+            ],
         );
         let mut emu = AotEmulatorCore::new(program, Vec::new());
-        emu.write_reg(1, 0x1235);
+        // 0x1003 + 2 = 0x1005: bit 0 cleared lands on the second instruction. (A target with bit 1
+        // set is misaligned and ends the run; see `check_jump_target`.)
+        emu.write_reg(1, 0x1003);
 
         match emu.interpret_from_current_pc().unwrap() {
-            NextStep::Dynamic(pc) => assert_eq!(pc, 0x1236),
+            NextStep::Dynamic(pc) => assert_eq!(pc, 0x1004),
             _ => unreachable!(),
         }
-        assert_eq!(emu.pc, 0x1236);
+        assert_eq!(emu.pc, 0x1004);
         assert_eq!(emu.read_reg_unsafe(2), 0x1004);
     }
 
@@ -688,7 +774,7 @@ mod tests {
                 Instruction::new(Opcode::DIVUW, 17, 8, 0, false, false),
                 Instruction::new(Opcode::REMW, 18, 8, 9, false, false),
                 Instruction::new(Opcode::REMUW, 19, 8, 0, false, false),
-                Instruction::new(Opcode::JALR, 0, 0, 0, false, true),
+                Instruction::new(Opcode::JALR, 0, 0, 0x1000, false, true),
             ],
         );
         let mut emu = AotEmulatorCore::new(program, Vec::new());
@@ -699,7 +785,7 @@ mod tests {
         emu.write_reg(9, u64::MAX);
 
         match emu.interpret_from_current_pc().unwrap() {
-            NextStep::Dynamic(pc) => assert_eq!(pc, 0),
+            NextStep::Dynamic(pc) => assert_eq!(pc, 0x1000),
             _ => unreachable!(),
         }
 
@@ -715,40 +801,267 @@ mod tests {
         assert_eq!(emu.read_reg_unsafe(19), 0xffff_ffff_8000_0000);
     }
 
-    #[test]
-    fn phase4_unaligned_dword_accesses_return_errors() {
-        let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        emu.write_reg(1, 0x104);
+    fn dword(value: u64) -> MemoryRecord {
+        MemoryRecord {
+            value,
+            chunk: 0,
+            timestamp: 0,
+        }
+    }
+
+    /// An LD at 0x1_0004, which runs into the next dword, then an SD back over it.
+    fn misaligned_program() -> Arc<Program> {
+        test_program_with_instructions(
+            0x1000,
+            0x1000,
+            vec![
+                Instruction::new(Opcode::LD, 3, 1, 0, false, true),
+                Instruction::new(Opcode::SD, 2, 1, 0, false, true),
+            ],
+        )
+    }
+
+    /// A core for [`misaligned_program`]: the two dwords it runs across hold distinct bytes, `x1`
+    /// the address and `x2` the value stored.
+    fn misaligned_core() -> AotEmulatorCore {
+        let mut emu = AotEmulatorCore::new(misaligned_program(), Vec::new());
+        emu.memory.insert(0x1_0000, dword(0x8877_6655_4433_2211));
+        emu.memory.insert(0x1_0008, dword(0xffee_ddcc_bbaa_9900));
+        emu.write_reg(1, 0x1_0004);
         emu.write_reg(2, 0x0123_4567_89ab_cdef);
-        assert!(emu
-            .ld_no_count(false, 3, 1, 0, 0x1004)
-            .unwrap_err()
-            .contains("Unaligned LD"));
-        assert!(emu
-            .sd_no_count(false, 2, 1, 0, 0x1008)
-            .unwrap_err()
-            .contains("Unaligned SD"));
+        // The program's reads come after these writes.
+        emu.update_insn_clock();
+        emu
+    }
 
-        let load_program = test_program_with_instructions(
-            0x1000,
-            0x1000,
-            vec![Instruction::new(Opcode::LD, 3, 1, 0, false, true)],
+    /// What [`misaligned_program`] leaves: the LD's bytes from both dwords, the SD's in both.
+    fn assert_ran_misaligned(emu: &AotEmulatorCore, path: &str) {
+        assert_eq!(emu.registers[3].value, 0xbbaa_9900_8877_6655, "{path}");
+        assert_eq!(
+            emu.memory.peek_dword(0x1_0000),
+            0x89ab_cdef_4433_2211,
+            "{path}"
         );
-        let mut load_emu = AotEmulatorCore::new(load_program, Vec::new());
-        load_emu.write_reg(1, 0x104);
-        let load_err = load_emu.interpret_from_current_pc().err().unwrap();
-        assert!(load_err.contains("Unaligned doubleword access"));
+        assert_eq!(
+            emu.memory.peek_dword(0x1_0008),
+            0xffee_ddcc_0123_4567,
+            "{path}"
+        );
+        assert_eq!(emu.misaligned_accesses, 2, "{path}");
+    }
 
-        let store_program = test_program_with_instructions(
-            0x1000,
-            0x1000,
-            vec![Instruction::new(Opcode::SD, 2, 1, 0, false, true)],
+    /// A misaligned LD and SD that run into the next dword execute where no events are written,
+    /// through the compiled blocks' helpers and the fallback interpreter alike, and are counted.
+    #[test]
+    fn a_misaligned_access_executes_where_no_event_is_written() {
+        let mut emu = misaligned_core();
+        emu.ld_no_count(false, 3, 1, 0, 0x1004).unwrap();
+        emu.sd_no_count(false, 2, 1, 0, 0x1008).unwrap();
+        assert_ran_misaligned(&emu, "helpers");
+
+        let mut emu = misaligned_core();
+        emu.debug_interpret_single_step().unwrap();
+        emu.debug_interpret_single_step().unwrap();
+        assert_ran_misaligned(&emu, "fallback");
+    }
+
+    /// A core that writes events to prove executes a misaligned access too, and counts it: the
+    /// `MemoryUnaligned` chip proves it.
+    #[test]
+    fn a_misaligned_access_executes_where_the_events_are_proven() {
+        type Step = fn(&mut AotEmulatorCore) -> Result<(), String>;
+        let paths: [(&str, Step); 2] = [
+            ("helpers", |emu| emu.ld_no_count(true, 3, 1, 0, 0x1004)),
+            ("fallback", |emu| emu.debug_interpret_single_step()),
+        ];
+        for (path, step) in paths {
+            let mut emu = misaligned_core();
+            emu.emit_records();
+            step(&mut emu).unwrap_or_else(|e| panic!("{path}: {e}"));
+            assert_eq!(emu.registers[3].value, 0xbbaa_9900_8877_6655, "{path}");
+            assert_eq!(emu.misaligned_accesses, 1, "{path}");
+        }
+    }
+
+    /// The reason `emu` ended the run for, which must be an abnormal end with SIGSEGV's code.
+    fn segfault(emu: &mut AotEmulatorCore, message: &str) -> TerminationReason {
+        let fault = emu
+            .fault
+            .take()
+            .expect("a refused access records its typed error");
+        assert_eq!(fault.to_string(), message);
+        let termination = *fault
+            .abnormal_termination()
+            .unwrap_or_else(|| panic!("not an abnormal termination: {fault}"));
+        assert_eq!(termination.exit_code, 139, "{termination}");
+        termination.reason
+    }
+
+    /// A load or store that lands where no guest access may ends the run as the interpreter ends
+    /// it, through the compiled blocks' helpers and the fallback alike, before it touches
+    /// memory; and a syscall's access too, once the syscall returns.
+    #[test]
+    fn an_access_where_none_may_land_ends_the_run() {
+        use pico_vm::primitives::layout::{HEAP_END, MIN_SEGMENT_ADDR};
+        use TerminationReason::{NullAccess, StackOverflow, StoreToCode};
+        let program = test_program_with_instructions(
+            0x2_0000,
+            0x2_0000,
+            vec![
+                Instruction::new(Opcode::LW, 3, 1, 0, false, true),
+                Instruction::new(Opcode::SB, 2, 1, 0, false, true),
+                Instruction::new(Opcode::SD, 2, 1, 0, false, true),
+            ],
         );
-        let mut store_emu = AotEmulatorCore::new(store_program, Vec::new());
-        store_emu.write_reg(1, 0x104);
-        store_emu.write_reg(2, 0x0123_4567_89ab_cdef);
-        let store_err = store_emu.interpret_from_current_pc().err().unwrap();
-        assert!(store_err.contains("Unaligned doubleword store"));
+        let code = program.code();
+        type Step = fn(&mut AotEmulatorCore) -> Result<(), String>;
+        let cases: [(Step, Step, u64, TerminationReason); 3] = [
+            (
+                |emu| emu.lw_no_count(false, 3, 1, 0, 0x2_0004),
+                |emu| emu.debug_interpret_single_step(),
+                MIN_SEGMENT_ADDR - 4,
+                NullAccess {
+                    opcode: Opcode::LW,
+                    addr: MIN_SEGMENT_ADDR - 4,
+                },
+            ),
+            (
+                |emu| emu.sb_no_count(false, 2, 1, 0, 0x2_0008),
+                |emu| {
+                    emu.pc = 0x2_0004;
+                    emu.debug_interpret_single_step()
+                },
+                code.start + 4,
+                StoreToCode {
+                    opcode: Opcode::SB,
+                    addr: code.start + 4,
+                },
+            ),
+            (
+                |emu| emu.sd_no_count(false, 2, 1, 0, 0x2_000c),
+                |emu| {
+                    emu.pc = 0x2_0008;
+                    emu.debug_interpret_single_step()
+                },
+                HEAP_END - 4,
+                StackOverflow {
+                    opcode: Opcode::SD,
+                    addr: HEAP_END - 4,
+                },
+            ),
+        ];
+        for (helper, fallback, addr, reason) in cases {
+            for (path, run) in [("helpers", helper), ("fallback", fallback)] {
+                let mut emu = AotEmulatorCore::new(program.clone(), Vec::new());
+                emu.write_reg(1, addr);
+                emu.write_reg(2, 0x1234);
+                let message = run(&mut emu).expect_err(path);
+                assert_eq!(segfault(&mut emu, &message), reason, "{path}");
+                assert_eq!(emu.registers[3].value, 0, "{path}: nothing loaded");
+                assert_eq!(
+                    emu.memory.get(addr & !7).timestamp,
+                    0,
+                    "{path}: memory untouched"
+                );
+            }
+        }
+
+        // `WRITE` from a buffer below the segments, and an empty one, which reads nothing.
+        let mut emu = AotEmulatorCore::new(program.clone(), Vec::new());
+        emu.write_reg(12, 4);
+        let write = pico_vm::emulator::riscv::syscalls::SyscallCode::WRITE as u64;
+        let message = emu
+            .execute_syscall(write, 1, 0x8)
+            .expect_err("a null buffer");
+        assert_eq!(
+            segfault(&mut emu, &message),
+            NullAccess {
+                opcode: Opcode::ECALL,
+                addr: 0x8
+            }
+        );
+        let mut emu = AotEmulatorCore::new(program, Vec::new());
+        emu.write_reg(12, 0);
+        emu.execute_syscall(write, 1, 0x8).expect("an empty write");
+    }
+
+    /// A precompile handed a pointer into the code, below the segments or into the stack guard ends
+    /// the run with the same fault, at the same address, whether the core runs the compute-only
+    /// copy (no records) or the interpreter's implementation (records): the first operand is
+    /// checked as one span, the rest dword by dword, in the interpreter's order.
+    #[test]
+    fn a_precompile_faults_alike_with_and_without_records() {
+        use pico_vm::{emulator::riscv::syscalls::SyscallCode, primitives::layout::HEAP_END};
+        use SyscallCode::*;
+        let program = test_program_with_instructions(
+            0x2_0000,
+            0x2_0000,
+            vec![Instruction::new(Opcode::ADD, 0, 0, 0, false, false); 256],
+        );
+        let code = program.code();
+        // An operand away from every forbidden range. The Weierstrass adds and the decompressions
+        // are left out: the zeros a refused read gives make two equal points or an invalid
+        // encoding, which panic both copies, as the same zeros from valid memory do.
+        let scratch = 0x10_0000;
+        let guard = HEAP_END - 8;
+        // (syscall, whether it takes a second pointer)
+        let syscalls = [
+            (KECCAK_PERMUTE, false),
+            (SHA_EXTEND, false),
+            (SHA_COMPRESS, true),
+            (POSEIDON2_PERMUTE, true),
+            (UINT256_MUL, true),
+            (ED_ADD, true),
+            (SECP256K1_DOUBLE, false),
+            (BN254_DOUBLE, false),
+            (BLS12381_FP_ADD, true),
+        ];
+        let mut cases = Vec::new();
+        for (syscall, two_pointers) in syscalls {
+            let arg2 = if two_pointers { scratch } else { 0 };
+            // The first operand in each region, and one running into the code from below it.
+            for (region, ptr) in [
+                ("code", code.start),
+                ("null", 0x1000),
+                ("guard", guard),
+                ("into code", code.start - 8),
+            ] {
+                cases.push((syscall, ptr, arg2, region));
+            }
+            // The second operand running into the guard.
+            if two_pointers {
+                cases.push((syscall, scratch, guard, "second into guard"));
+            }
+        }
+        let run = |syscall: SyscallCode, arg1: u64, arg2: u64, records: bool| {
+            let mut emu = AotEmulatorCore::new(program.clone(), Vec::new());
+            if records {
+                emu.emit_records();
+            }
+            emu.execute_syscall(syscall as u64, arg1, arg2)
+                .map_err(|message| segfault(&mut emu, &message))
+                .map(|_| ())
+        };
+        let mismatches: Vec<String> = cases
+            .into_iter()
+            .filter_map(|(syscall, arg1, arg2, region)| {
+                let compute_only = run(syscall, arg1, arg2, false);
+                let interpreter = run(syscall, arg1, arg2, true);
+                // Only SHA_COMPRESS and POSEIDON2 leave their first operand unwritten, so only
+                // they may read the code without faulting.
+                let reads_only_code =
+                    matches!(syscall, SHA_COMPRESS | POSEIDON2_PERMUTE) && region.ends_with("code");
+                (compute_only != interpreter || compute_only.is_ok() != reads_only_code).then(
+                    || {
+                        format!(
+                            "{syscall:?} {region}: no records {compute_only:?}, records \
+                             {interpreter:?}"
+                        )
+                    },
+                )
+            })
+            .collect();
+        assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
     }
 
     /// An instruction that reads one register twice leaves it at the interpreter's later read: `b`
@@ -770,7 +1083,7 @@ mod tests {
         let setup = || {
             let mut emu = AotEmulatorCore::new(program.clone(), Vec::new());
             emu.write_reg(2, 7);
-            emu.write_reg(4, 0x200);
+            emu.write_reg(4, 0x1_0200);
             emu.update_insn_clock();
             emu
         };
@@ -783,19 +1096,19 @@ mod tests {
             |emu| emu.divw_no_count(false, 3, 2, 2, 0x1008),
             |emu| emu.rem_no_count(false, 3, 2, 2, 0x100c),
             |emu| emu.sd_no_count(false, 4, 4, 0, 0x1010).unwrap(),
-            |emu| emu.sb_no_count(false, 4, 4, 9, 0x1014),
+            |emu| emu.sb_no_count(false, 4, 4, 9, 0x1014).unwrap(),
         ];
         for (helper, (reg, offset)) in helpers.into_iter().zip(expected) {
             let clk = emu.clk;
             helper(&mut emu);
-            assert_eq!(emu.register_records[reg].timestamp, clk + offset);
+            assert_eq!(emu.registers[reg].timestamp, clk + offset);
         }
 
         let mut emu = setup();
         for (reg, offset) in expected {
             let clk = emu.clk;
             emu.debug_interpret_single_step().unwrap();
-            assert_eq!(emu.register_records[reg].timestamp, clk + offset);
+            assert_eq!(emu.registers[reg].timestamp, clk + offset);
         }
     }
 
@@ -804,15 +1117,15 @@ mod tests {
     #[test]
     fn a_first_touch_is_counted_as_the_access_that_made_it() {
         let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
-        emu.write_reg_no_count(1, 0x200);
+        emu.write_reg_no_count(1, 0x1_0200);
         emu.write_reg_no_count(2, 0x7f);
         emu.lw_no_count(false, 3, 1, 0, 0x1004).unwrap();
-        emu.sb_no_count(false, 2, 1, 8, 0x1008);
+        emu.sb_no_count(false, 2, 1, 8, 0x1008).unwrap();
         emu.sh_no_count(false, 2, 1, 16, 0x100c).unwrap();
         emu.sw_no_count(false, 2, 1, 24, 0x1010).unwrap();
         emu.sd_no_count(false, 2, 1, 32, 0x1014).unwrap();
-        emu.write_mem_word_constrained(0x228, 1);
-        emu.write_mem_word_syscall(0x230, 1);
+        emu.write_mem_word_constrained(0x1_0228, 1);
+        emu.write_mem_word_syscall(0x1_0230, 1);
         // A second touch of an address the batch has seen records nothing.
         emu.sd_no_count(false, 2, 1, 0, 0x1018).unwrap();
 
@@ -824,6 +1137,95 @@ mod tests {
                 counts.first_touch_full_stores,
             ),
             (1, 5, 1)
+        );
+    }
+
+    // ── the same outcomes as the interpreter's `jump_target` tests ──
+
+    /// Runs `instructions` at 0x1000 with `x5 = x5`: the termination reason it fails with, and
+    /// `x1`, which the jumps link into.
+    fn aot_fault(
+        instructions: Vec<Instruction>,
+        x5: u64,
+    ) -> (
+        Option<pico_vm::emulator::riscv::riscv_emulator::TerminationReason>,
+        u64,
+    ) {
+        let program = test_program_with_instructions(0x1000, 0x1000, instructions);
+        let mut emu = AotEmulatorCore::new(program, Vec::new());
+        emu.write_reg(5, x5);
+        assert!(
+            emu.interpret_from_current_pc().is_err(),
+            "the run must fail"
+        );
+        let reason = emu
+            .fault
+            .take()
+            .and_then(|e| e.abnormal_termination().map(|t| t.reason));
+        (reason, emu.read_reg_unsafe(1))
+    }
+
+    #[test]
+    fn a_misaligned_or_outside_jump_fails_as_in_the_interpreter() {
+        use pico_vm::emulator::riscv::riscv_emulator::TerminationReason::{
+            MisalignedJumpTarget, OutsideProgram,
+        };
+        let nop = Instruction::new(Opcode::ADD, 0, 0, 0, false, false);
+        let program = |first: Instruction| vec![first, nop, nop, nop];
+        let jal = |offset: i64| Instruction::new(Opcode::JAL, 1, offset as u64, 0, true, true);
+        let beq = |offset: i64| Instruction::new(Opcode::BEQ, 0, 0, offset as u64, false, true);
+        let jalr = Instruction::new(Opcode::JALR, 1, 5, 0, false, true);
+        for (first, x5, want) in [
+            (
+                jal(6),
+                0,
+                MisalignedJumpTarget {
+                    pc: 0x1000,
+                    target: 0x1006,
+                },
+            ),
+            (
+                beq(2),
+                0,
+                MisalignedJumpTarget {
+                    pc: 0x1000,
+                    target: 0x1002,
+                },
+            ),
+            (
+                jalr,
+                0x1006,
+                MisalignedJumpTarget {
+                    pc: 0x1000,
+                    target: 0x1006,
+                },
+            ),
+            (jal(0x100), 0, OutsideProgram { pc: 0x1100 }),
+            (jal(-8), 0, OutsideProgram { pc: 0xff8 }),
+            // A jump to 0 is not a halt.
+            (jalr, 0, OutsideProgram { pc: 0 }),
+        ] {
+            let (reason, x1) = aot_fault(program(first), x5);
+            assert_eq!(reason, Some(want), "{first:?}");
+            assert_eq!(
+                x1, 0,
+                "{first:?}: the faulting jump wrote its link register"
+            );
+        }
+    }
+
+    /// Running past the last instruction used to end the run as if it had halted.
+    #[test]
+    fn falling_off_the_end_fails_as_in_the_interpreter() {
+        let nop = Instruction::new(Opcode::ADD, 0, 0, 0, false, false);
+        let (reason, _) = aot_fault(vec![nop, nop], 0);
+        assert_eq!(
+            reason,
+            Some(
+                pico_vm::emulator::riscv::riscv_emulator::TerminationReason::OutsideProgram {
+                    pc: 0x1008
+                }
+            )
         );
     }
 }

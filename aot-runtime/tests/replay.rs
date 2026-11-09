@@ -5,8 +5,9 @@
 //! and every record a replay cuts, the deferred records the run leaves (precompile events, and the
 //! memory initialize and finalize events of the final state), and each replay's report have to
 //! agree field by field. The AOT core replays twice: through the registered replay factory and the
-//! VM's worker, running the bootstrap stub's code, which interprets every block; and on its own,
-//! running stand-in compiled blocks, so that a segment's target falls inside a block.
+//! VM's worker, running the bootstrap stub's code on its recording entry point, which interprets
+//! every block; and on its own, running stand-in compiled blocks, so that a segment's target falls
+//! inside a block.
 
 use std::{
     cell::{Cell, RefCell},
@@ -64,30 +65,45 @@ type Chips = RiscvChips<KoalaBearPoseidon2>;
 type Witness = ProvingWitness<KoalaBearPoseidon2, Chips, Vec<u8>>;
 
 /// The bootstrap stub's code under a digest `register` takes: every block interpreted. The snapshot
-/// thread runs it, so its cuts land on any instruction, and so does the factory's replay worker.
+/// thread runs its ordinary entry point, so its cuts land on any instruction, and the factory's
+/// replay worker its recording one.
 static STUB_CODE: AotProgram =
-    AotProgram::stamped([0x5a; 32], AotProgram::CODEGEN_STAMP, interpret_every_block);
+    AotProgram::stamped([0x5a; 32], AotProgram::CODEGEN_STAMP, interpret_every_block)
+        .with_recorder(record_every_block);
 
-/// Runs of the stub's code with a sink set: a replay worker's, which writes records, and never the
-/// snapshot thread's, which writes none.
+/// Runs of the stub's ordinary entry point: the snapshot thread's.
+static PLAIN_RUNS: AtomicU64 = AtomicU64::new(0);
+
+/// Of those, runs with a sink set: none expected, since the replay workers run the recording
+/// entry point.
 static EMITTING_RUNS: AtomicU64 = AtomicU64::new(0);
+
+/// Runs of the stub's recording entry point, which only an AOT replay worker makes.
+static RECORDING_RUNS: AtomicU64 = AtomicU64::new(0);
 
 /// Counts replays down to one that fails: 1 fails the next, 0 none.
 static FAIL_IN: AtomicU64 = AtomicU64::new(0);
 
 fn interpret_every_block(emu: &mut AotEmulatorCore) -> Result<(), String> {
+    PLAIN_RUNS.fetch_add(1, Ordering::Relaxed);
     if emu.is_emitting() {
         EMITTING_RUNS.fetch_add(1, Ordering::Relaxed);
-        if FAIL_IN.try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)) == Ok(1) {
-            return Err("injected replay failure".into());
-        }
     }
     emu.run_blocks(|_| None)
 }
 
+/// No recording block, so every instruction runs in the fallback interpreter, on the core's sink.
+fn record_every_block(emu: &mut AotEmulatorCore) -> Result<(), String> {
+    RECORDING_RUNS.fetch_add(1, Ordering::Relaxed);
+    if FAIL_IN.try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)) == Ok(1) {
+        return Err("injected replay failure".into());
+    }
+    emu.run_record_blocks(|_| None)
+}
+
 /// Split replay on for every chunk and the stub's code registered. Both are read once per process,
 /// so this runs before anything reads them. The guard runs this file's tests one at a time, so
-/// [`EMITTING_RUNS`] counts one test's runs.
+/// the run counters count one test's runs.
 fn setup() -> MutexGuard<'static, ()> {
     static ONCE: Once = Once::new();
     static SERIAL: Mutex<()> = Mutex::new(());
@@ -142,7 +158,7 @@ fn stand_in_block(emu: &mut AotEmulatorCore) -> Result<NextStep, String> {
             emu.pc,
         )
     });
-    if !emu.can_fit_block(len, 0, 0, 0) {
+    if !emu.can_fit_block(len, 0, 0, 0, 0) {
         CROSSINGS.set(CROSSINGS.get() + 1);
         return emu.interpret_from_current_pc();
     }
@@ -164,7 +180,8 @@ fn run_stand_in_blocks(emu: &mut AotEmulatorCore) -> Result<(), String> {
 enum Replayer {
     /// The interpreter's worker: `MetaEmulator::recover_riscv` and `try_next_record_batch`.
     Interpreter,
-    /// The AOT core behind the registered replay factory and the VM's worker, recovered in place.
+    /// The AOT core behind the registered replay factory and the VM's worker, on the stub's
+    /// recording entry point, recovered in place.
     AotWorker,
     /// The AOT core on its own, running stand-in compiled blocks, recovered in place.
     AotStandIn,
@@ -461,8 +478,8 @@ fn a_run_replayed_in_one_batch_emits_the_interpreters_records() {
 
 /// The pipeline with AOT replay workers, each recovered in place across its batches, hands on the
 /// interpreter workers' records: the same records in the same order, deferred ones included. The
-/// AOT workers are shown to have run, since equal records would also come from interpreters
-/// running under the AOT option.
+/// AOT workers are shown to have run the recording entry point, since interpreters under the AOT
+/// option would give equal records, and the snapshot thread the ordinary one, with no sink.
 #[test]
 fn the_pipeline_with_aot_workers_emits_the_interpreter_workers_records() {
     let _serial = setup();
@@ -473,7 +490,11 @@ fn the_pipeline_with_aot_workers_emits_the_interpreter_workers_records() {
         let opts = witness.opts.expect("the witness has options");
         let workers = NonZeroUsize::new(2).expect("two workers");
         let run = |replay_workers| {
-            let before = EMITTING_RUNS.load(Ordering::Relaxed);
+            let runs = || {
+                [&PLAIN_RUNS, &EMITTING_RUNS, &RECORDING_RUNS]
+                    .map(|runs| runs.load(Ordering::Relaxed))
+            };
+            let before = runs();
             let output = emulate_with_pipeline(
                 program.clone(),
                 &stdin,
@@ -481,20 +502,30 @@ fn the_pipeline_with_aot_workers_emits_the_interpreter_workers_records() {
                 workers,
             )
             .expect("the pipeline runs the guest");
-            (output, EMITTING_RUNS.load(Ordering::Relaxed) - before)
+            let after = runs();
+            (output, [0, 1, 2].map(|at| after[at] - before[at]))
         };
-        let (interpreter, interpreted_replays) = run(ReplayWorkers::Interpreter);
-        let (aot, aot_replays) = run(ReplayWorkers::Aot);
-
+        let (interpreter, [plain, emitting, recording]) = run(ReplayWorkers::Interpreter);
         assert!(interpreter.chunks >= 3, "{} chunks", interpreter.chunks);
+        assert!(
+            plain > 0,
+            "the AOT snapshot thread ran no ordinary entry point"
+        );
         assert_eq!(
-            interpreted_replays, 0,
+            [emitting, recording],
+            [0, 0],
             "an interpreter worker ran the AOT code"
         );
+        let chunks = u64::from(interpreter.chunks);
+        let (aot, [plain, emitting, recording]) = run(ReplayWorkers::Aot);
         assert!(
-            aot_replays >= u64::from(interpreter.chunks),
-            "{aot_replays} AOT replays for {} chunks",
-            interpreter.chunks
+            plain > 0 && emitting == 0,
+            "the ordinary entry point ran {plain} times, {emitting} with a sink: only the \
+             snapshot thread may run it"
+        );
+        assert!(
+            recording >= chunks,
+            "{recording} replays of the recording entry point for {chunks} chunks"
         );
         assert_eq!(
             (aot.chunks, aot.cycles, &aot.committed_bytes),
@@ -674,13 +705,17 @@ static STARTED: AtomicU64 = AtomicU64::new(0);
 /// The replays in flight when the armed failure came.
 static IN_FLIGHT_AT_FAILURE: AtomicU64 = AtomicU64::new(0);
 
+/// Every block interpreted, as [`STUB_CODE`]; only the recording entry point, which only the AOT
+/// replay workers run, meets the failure.
 static SEGMENT_FAILING_CODE: AotProgram =
-    AotProgram::stamped([0x5b; 32], AotProgram::CODEGEN_STAMP, fail_a_segment);
+    AotProgram::stamped([0x5b; 32], AotProgram::CODEGEN_STAMP, interpret_a_segment)
+        .with_recorder(fail_a_segment);
+
+fn interpret_a_segment(emu: &mut AotEmulatorCore) -> Result<(), String> {
+    emu.run_blocks(|_| None)
+}
 
 fn fail_a_segment(emu: &mut AotEmulatorCore) -> Result<(), String> {
-    if !emu.is_emitting() {
-        return emu.run_blocks(|_| None);
-    }
     let later_segment_of_first_chunk = emu.current_chunk == 1 && emu.insn_count > 0;
     if later_segment_of_first_chunk && FAIL_A_SEGMENT.swap(false, Ordering::Relaxed) {
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -691,7 +726,7 @@ fn fail_a_segment(emu: &mut AotEmulatorCore) -> Result<(), String> {
         return Err("injected replay failure".into());
     }
     STARTED.fetch_add(1, Ordering::Relaxed);
-    emu.run_blocks(|_| None)
+    emu.run_record_blocks(|_| None)
 }
 
 /// Two history slots, every chunk cut into two segments, four AOT workers (a CI runner's cores), and

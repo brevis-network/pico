@@ -78,7 +78,7 @@ pub trait SyscallHost {
     fn dword_slice_unsafe(&mut self, addr: RvAddr, len: usize) -> Vec<RvValue>;
 
     /// Count `count` syscall memory events no access counted: a precompile whose ABI is in
-    /// words but which reads them a dword at a time owes the difference.
+    /// words but which reads them a dword at a time adds the difference, as AOT counts it.
     fn add_syscall_memory_events(&mut self, count: usize);
 
     /// The record the syscall's event goes into.

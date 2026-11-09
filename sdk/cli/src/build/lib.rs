@@ -37,7 +37,7 @@ pub fn build_library(output: &Path) -> Result<PathBuf> {
     let dir = cache_root()?;
     write_crate(&dir, &pico_dependency(pico_source()?.as_deref(), "sdk/sdk"))?;
 
-    let mut build = create_cargo_build_command("build", &[]);
+    let mut build = create_cargo_build_command("build", &[], false);
     build.arg("--manifest-path").arg(dir.join("Cargo.toml"));
     execute_command(build)?;
 
@@ -75,7 +75,7 @@ fn write_crate(dir: &Path, pico_sdk: &str) -> Result<()> {
     let manifest = format!(
         "[package]\nname = \"pico-zkvm\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\
          publish = false\n\n[lib]\nname = \"{LIBRARY}\"\npath = \"lib.rs\"\n\
-         crate-type = [\"staticlib\"]\n\n[dependencies]\npico-sdk = {{ {pico_sdk} }}\n\n\
+         crate-type = [\"staticlib\"]\n\n[dependencies]\npico-sdk = {{ {pico_sdk}, features = [\"c-memory-functions\"] }}\n\n\
          # Its own workspace, so a cache inside another project is not taken for part of it.\n\
          [workspace]\n"
     );

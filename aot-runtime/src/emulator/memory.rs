@@ -1,5 +1,14 @@
-use super::{constants::BYTES_PER_WORD, sink::by_sink, state::Touch, AotEmulatorCore};
-use pico_vm::chips::chips::riscv_memory::event::MemoryRecord;
+use super::{
+    constants::BYTES_PER_WORD,
+    sink::{by_sink, LentSink},
+    state::Touch,
+    AotEmulatorCore,
+};
+use pico_vm::{
+    chips::chips::riscv_memory::event::MemoryRecord,
+    compiler::riscv::opcode::Opcode,
+    emulator::riscv::riscv_emulator::util::{dword_bytes, splice_dword, straddling_bytes},
+};
 
 impl AotEmulatorCore {
     #[inline(always)]
@@ -249,16 +258,21 @@ impl AotEmulatorCore {
     /// This variant skips the in_syscall() check and always accounts syscall memory events.
     #[inline(always)]
     pub fn read_mem_word_syscall(&mut self, addr: u64) -> u64 {
+        if !self.syscall_access_allowed(addr, 4, false) {
+            return 0;
+        }
         Self::extract_word(
             self.read_mem_dword_syscall_impl(Self::dword_addr(addr)),
             addr,
         )
     }
 
-    /// Read an aligned dword from memory in constrained mode, the access written when `EMIT`.
+    /// Read an aligned dword from memory in constrained mode, the access written into `sink` when
+    /// `EMIT`.
     #[inline(always)]
     pub(crate) fn read_mem_dword_constrained_impl<const EMIT: bool>(
         &mut self,
+        sink: LentSink<'_>,
         addr: u64,
         touch: Touch,
     ) -> u64 {
@@ -273,7 +287,7 @@ impl AotEmulatorCore {
         };
         self.snapshot_addr_if_needed(addr, &prev_record, touch);
         if EMIT {
-            self.record_mem_read(addr, value, prev_record);
+            self.record_mem_read(sink, addr, value, prev_record);
         }
         value
     }
@@ -328,6 +342,9 @@ impl AotEmulatorCore {
     /// This variant skips the in_syscall() check and always accounts syscall memory events.
     #[inline(always)]
     pub fn write_mem_word_syscall(&mut self, addr: u64, value: u64) {
+        if !self.syscall_access_allowed(addr, 4, true) {
+            return;
+        }
         let dword_addr = Self::dword_addr(addr);
         let current = self.read_mem_dword_unsafe(dword_addr);
         self.write_mem_dword_syscall_impl(
@@ -347,14 +364,15 @@ impl AotEmulatorCore {
         by_sink!(self.write_mem_word_no_count_impl(addr, value))
     }
 
-    /// [`Self::write_mem_word_no_count`], the access written when `EMIT`.
+    /// [`Self::write_mem_word_no_count`], the access written into `sink` when `EMIT`.
     #[inline(always)]
     pub(crate) fn write_mem_word_no_count_impl<const EMIT: bool>(
         &mut self,
+        sink: LentSink<'_>,
         addr: u64,
         value: u64,
     ) -> u64 {
-        self.write_mem_dword_merged_no_count::<EMIT>(Self::dword_addr(addr), |current| {
+        self.write_mem_dword_merged_no_count::<EMIT>(sink, Self::dword_addr(addr), |current| {
             Self::insert_word(current, addr, value)
         })
     }
@@ -402,6 +420,9 @@ impl AotEmulatorCore {
 
     #[inline(always)]
     pub fn read_mem_dword_syscall(&mut self, addr: u64) -> u64 {
+        if !self.syscall_access_allowed(addr, 8, false) {
+            return 0;
+        }
         self.read_mem_dword_syscall_impl(addr)
     }
 
@@ -428,6 +449,9 @@ impl AotEmulatorCore {
 
     #[inline(always)]
     pub fn write_mem_dword_syscall(&mut self, addr: u64, value: u64) {
+        if !self.syscall_access_allowed(addr, 8, true) {
+            return;
+        }
         self.write_mem_dword_syscall_impl(addr, value, Touch::FullStore);
     }
 
@@ -459,10 +483,11 @@ impl AotEmulatorCore {
         by_sink!(self.write_mem_dword_no_count_impl(addr, value));
     }
 
-    /// [`Self::write_mem_dword_no_count`], the access written when `EMIT`.
+    /// [`Self::write_mem_dword_no_count`], the access written into `sink` when `EMIT`.
     #[inline(always)]
     pub(crate) fn write_mem_dword_no_count_impl<const EMIT: bool>(
         &mut self,
+        sink: LentSink<'_>,
         addr: u64,
         value: u64,
     ) {
@@ -477,17 +502,18 @@ impl AotEmulatorCore {
         };
         self.snapshot_addr_if_needed(addr, &prev_record, Touch::FullStore);
         if EMIT {
-            self.record_mem_write(addr, value, prev_record);
+            self.record_mem_write(sink, addr, value, prev_record);
         }
     }
 
     /// Stores into part of the dword at `addr`, `merge` turning the dword into what is written,
     /// and returns that. The dword is read without an access of its own and written once: the
     /// interpreter's one write access, whose record carries the dword's state before the store,
-    /// written when `EMIT`.
+    /// written into `sink` when `EMIT`.
     #[inline(always)]
     pub(crate) fn write_mem_dword_merged_no_count<const EMIT: bool>(
         &mut self,
+        sink: LentSink<'_>,
         addr: u64,
         merge: impl FnOnce(u64) -> u64,
     ) -> u64 {
@@ -504,9 +530,212 @@ impl AotEmulatorCore {
         };
         self.snapshot_addr_if_needed(addr, &prev_record, Touch::PartialStore);
         if EMIT {
-            self.record_mem_write(addr, value, prev_record);
+            self.record_mem_write(sink, addr, value, prev_record);
         }
         value
+    }
+
+    // ========================================================================
+    // Misaligned Accesses (Zicclsm)
+    // ========================================================================
+    //
+    // A load or store whose address is not a multiple of its width reads or writes the dword at
+    // the aligned address, as an aligned one does, and, when it runs into the next dword, that one
+    // too, at the C position (`clk + 1`), which a load or a store leaves free: the interpreter's
+    // `RiscvEmulator::loaded` and `stored`. The aligned dword's access is the instruction's memory
+    // access; the next dword's is written as a local memory event and the step's next-dword
+    // access, which fills no slot (`ExecutionSink::next_dword`), into the sink the instruction
+    // writes into: lent to a compiled block's emitting body, the core's for the fallback (through
+    // `by_sink!`). The `_no_count` pair is the compiled blocks', which run in constrained mode
+    // only and count the instruction's own write at the block's end; the other pair is the
+    // fallback interpreter's, counted as it goes and kept for the rollback in unconstrained mode.
+    // The next dword's write is counted where it happens in both, as the interpreter counts it; a
+    // block's static counts assume aligned accesses, and its loads and stores bound what these
+    // add (`chunk_split::can_fit_block`).
+
+    /// Counts a misaligned access, as the interpreter does, for the run and for the chunk
+    /// split: the `MemoryUnaligned` chip proves it, and its height caps how many a chunk holds. An
+    /// unconstrained block's accesses are not proven, so they are not counted.
+    #[cold]
+    pub(crate) fn misaligned(&mut self, _opcode: Opcode, _addr: u64) -> Result<(), String> {
+        if !self.is_unconstrained_mode() {
+            self.misaligned_accesses += 1;
+            self.chunk_split_state.num_misaligned += 1;
+        }
+        Ok(())
+    }
+
+    /// A misaligned load at `addr` in a compiled block: the `width` bytes it reads, in the low
+    /// bytes, and the aligned dword, the instruction's memory access, its accesses written into
+    /// `sink` when `EMIT`.
+    #[cold]
+    pub(crate) fn misaligned_load_no_count<const EMIT: bool>(
+        &mut self,
+        mut sink: LentSink<'_>,
+        opcode: Opcode,
+        addr: u64,
+        width: u64,
+    ) -> Result<(u64, u64), String> {
+        self.misaligned(opcode, addr)?;
+        let dword = self.read_mem_dword_constrained_impl::<EMIT>(
+            sink.as_deref_mut(),
+            Self::dword_addr(addr),
+            Touch::Load,
+        );
+        Ok((
+            self.misaligned_bytes::<EMIT>(sink, dword, addr, width),
+            dword,
+        ))
+    }
+
+    /// [`Self::misaligned_load_no_count`] for the fallback interpreter.
+    #[cold]
+    pub(crate) fn misaligned_load(
+        &mut self,
+        opcode: Opcode,
+        addr: u64,
+        width: u64,
+    ) -> Result<(u64, u64), String> {
+        self.misaligned(opcode, addr)?;
+        let dword = self.read_mem_dword(Self::dword_addr(addr));
+        let bytes = by_sink!(self.misaligned_bytes(dword, addr, width));
+        Ok((bytes, dword))
+    }
+
+    /// The `width` bytes at `addr`, `dword` being the dword at the aligned address: the next dword
+    /// is read too when they run into it, its access written into `sink` when `EMIT`.
+    fn misaligned_bytes<const EMIT: bool>(
+        &mut self,
+        sink: LentSink<'_>,
+        dword: u64,
+        addr: u64,
+        width: u64,
+    ) -> u64 {
+        let offset = addr % 8;
+        if offset + width <= 8 {
+            return dword_bytes(dword, offset, width);
+        }
+        let next = self.read_next_dword::<EMIT>(sink, Self::dword_addr(addr) + 8);
+        straddling_bytes(dword, next, offset, width)
+    }
+
+    /// Writes the low `width` bytes of `value` at a misaligned `addr` in a compiled block, and
+    /// returns what the aligned dword, the instruction's memory access, holds after it, its
+    /// accesses written into `sink` when `EMIT`.
+    #[cold]
+    pub(crate) fn misaligned_store_no_count<const EMIT: bool>(
+        &mut self,
+        mut sink: LentSink<'_>,
+        opcode: Opcode,
+        addr: u64,
+        value: u64,
+        width: u64,
+    ) -> Result<u64, String> {
+        self.misaligned(opcode, addr)?;
+        let (offset, low) = Self::misaligned_split(addr, width);
+        let dword = self.write_mem_dword_merged_no_count::<EMIT>(
+            sink.as_deref_mut(),
+            Self::dword_addr(addr),
+            |dword| splice_dword(dword, offset, low, value),
+        );
+        if low < width {
+            let (next, high) = (Self::dword_addr(addr) + 8, value >> (8 * low));
+            self.write_next_dword::<EMIT>(sink, next, width - low, high);
+        }
+        Ok(dword)
+    }
+
+    /// [`Self::misaligned_store_no_count`] for the fallback interpreter.
+    #[cold]
+    pub(crate) fn misaligned_store(
+        &mut self,
+        opcode: Opcode,
+        addr: u64,
+        value: u64,
+        width: u64,
+    ) -> Result<u64, String> {
+        self.misaligned(opcode, addr)?;
+        let (offset, low) = Self::misaligned_split(addr, width);
+        let dword = self.write_mem_dword_merged(Self::dword_addr(addr), |dword| {
+            splice_dword(dword, offset, low, value)
+        });
+        if low < width {
+            let (next, high) = (Self::dword_addr(addr) + 8, value >> (8 * low));
+            by_sink!(self.write_next_dword(next, width - low, high));
+        }
+        Ok(dword)
+    }
+
+    /// An access's byte offset in its aligned dword, and how many of its `width` bytes land there.
+    #[inline(always)]
+    fn misaligned_split(addr: u64, width: u64) -> (u64, u64) {
+        let offset = addr % 8;
+        (offset, width.min(8 - offset))
+    }
+
+    /// Reads the dword at `addr`, the one after a misaligned load's aligned dword, at the C
+    /// position, its access written into `sink` when `EMIT`.
+    fn read_next_dword<const EMIT: bool>(&mut self, sink: LentSink<'_>, addr: u64) -> u64 {
+        self.track_chunk_split_address(addr);
+        let clk = self.clk + 1;
+        let is_unconstrained = self.is_unconstrained_mode();
+        let (value, prev_chunk, prev_timestamp) = if is_unconstrained {
+            self.memory
+                .read_and_update_metadata_no_mark(addr, self.current_chunk, clk)
+        } else {
+            self.memory
+                .read_and_update_metadata(addr, self.current_chunk, clk)
+        };
+        let prev_record = MemoryRecord {
+            value,
+            chunk: prev_chunk,
+            timestamp: prev_timestamp,
+        };
+        if is_unconstrained {
+            self.record_unconstrained_memory_access(addr, prev_record);
+        }
+        self.snapshot_addr_if_needed(addr, &prev_record, Touch::Load);
+        if EMIT {
+            self.record_next_dword(sink, addr, value, prev_record, clk, false);
+        }
+        value
+    }
+
+    /// Replaces the low `width` bytes of the dword at `addr`, the one after a misaligned store's
+    /// aligned dword, with those of `value`, at the C position, its access written into `sink`
+    /// when `EMIT`.
+    fn write_next_dword<const EMIT: bool>(
+        &mut self,
+        sink: LentSink<'_>,
+        addr: u64,
+        width: u64,
+        value: u64,
+    ) {
+        self.track_chunk_split_address(addr);
+        self.account_memory_access(addr);
+        let current = self.memory.peek_dword(addr);
+        let new = splice_dword(current, 0, width, value);
+        let clk = self.clk + 1;
+        let is_unconstrained = self.is_unconstrained_mode();
+        let (_, prev_chunk, prev_timestamp) = if is_unconstrained {
+            self.memory
+                .write_and_capture_prev_no_mark(addr, new, self.current_chunk, clk)
+        } else {
+            self.memory
+                .write_and_capture_prev(addr, new, self.current_chunk, clk)
+        };
+        let prev_record = MemoryRecord {
+            value: current,
+            chunk: prev_chunk,
+            timestamp: prev_timestamp,
+        };
+        if is_unconstrained {
+            self.record_unconstrained_memory_access(addr, prev_record);
+        }
+        self.snapshot_addr_if_needed(addr, &prev_record, Touch::PartialStore);
+        if EMIT {
+            self.record_next_dword(sink, addr, new, prev_record, clk, true);
+        }
     }
 
     // ========================================================================
@@ -575,6 +804,31 @@ impl AotEmulatorCore {
     #[inline(always)]
     pub fn write_mem_low32_slot_at_clk(&mut self, addr: u64, value: u32, clk: u32) {
         self.write_mem_dword_value_at_clk(addr, u64::from(value), clk);
+    }
+
+    // ========================================================================
+    // Span-Checked Precompile Reads
+    // ========================================================================
+    //
+    // The interpreter's precompiles read their first operand as one access (`dword_slice_unsafe`),
+    // so an operand that runs into a forbidden range faults at its start; every other access is
+    // checked dword by dword, as `read_mem_dword_syscall` / `write_mem_dword_syscall` check it.
+
+    /// [`Self::read_mem_dword_span_snapshot`], the span checked as one load first.
+    #[inline]
+    pub fn read_mem_dword_span_snapshot_syscall(&mut self, addr: u64, out: &mut [u64]) {
+        if self.load_span_allowed(addr, out.len()) {
+            self.read_mem_dword_span_snapshot(addr, out);
+        } else {
+            out.fill(0);
+        }
+    }
+
+    /// Whether `dwords` 8-byte slots at `addr` may be loaded as one access, recording the fault if
+    /// not; an empty span always may.
+    #[inline(always)]
+    pub(crate) fn load_span_allowed(&mut self, addr: u64, dwords: usize) -> bool {
+        dwords == 0 || self.syscall_access_allowed(addr, 8 * dwords as u64, false)
     }
 
     #[inline(always)]
@@ -672,12 +926,15 @@ mod tests {
             (
                 "generated",
                 |emu, addr, merge| {
-                    let current =
-                        emu.read_mem_dword_constrained_impl::<false>(addr, Touch::PartialStore);
+                    let current = emu.read_mem_dword_constrained_impl::<false>(
+                        None,
+                        addr,
+                        Touch::PartialStore,
+                    );
                     emu.write_mem_dword_no_count(addr, merge(current));
                 },
                 |emu, addr, merge| {
-                    emu.write_mem_dword_merged_no_count::<false>(addr, merge);
+                    emu.write_mem_dword_merged_no_count::<false>(None, addr, merge);
                 },
             ),
             (
@@ -786,23 +1043,23 @@ mod tests {
     fn phase5_low32_slot_helpers_use_eight_byte_spacing() {
         let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
 
-        emu.write_mem_low32_slot_span_at_clk(0x100, &[0x1122_3344, 0x5566_7788], 0);
+        emu.write_mem_low32_slot_span_at_clk(0x1_0100, &[0x1122_3344, 0x5566_7788], 0);
 
         let mut slots = [0u32; 2];
-        emu.read_mem_low32_slot_span_snapshot(0x100, &mut slots);
+        emu.read_mem_low32_slot_span_snapshot(0x1_0100, &mut slots);
 
         assert_eq!(slots, [0x1122_3344, 0x5566_7788]);
-        assert_eq!(emu.memory.get(0x100).value, 0x1122_3344);
-        assert_eq!(emu.memory.get(0x108).value, 0x5566_7788);
+        assert_eq!(emu.memory.get(0x1_0100).value, 0x1122_3344);
+        assert_eq!(emu.memory.get(0x1_0108).value, 0x5566_7788);
     }
 
     #[test]
     fn phase5_contiguous_word_span_read_reuses_single_backing_dword() {
         let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
-        emu.write_mem_dword(0x100, 0x5566_7788_1122_3344);
+        emu.write_mem_dword(0x1_0100, 0x5566_7788_1122_3344);
 
         let mut words = [0u32; 2];
-        emu.read_mem_word_span_at_clk(0x100, &mut words, 7);
+        emu.read_mem_word_span_at_clk(0x1_0100, &mut words, 7);
 
         assert_eq!(words, [0x1122_3344, 0x5566_7788]);
     }
@@ -810,20 +1067,20 @@ mod tests {
     #[test]
     fn phase5_contiguous_word_span_write_reuses_single_backing_dword() {
         let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
-        emu.write_mem_dword(0x100, 0);
+        emu.write_mem_dword(0x1_0100, 0);
 
-        emu.write_mem_word_span_at_clk(0x100, &[0x1122_3344, 0x5566_7788], 9);
+        emu.write_mem_word_span_at_clk(0x1_0100, &[0x1122_3344, 0x5566_7788], 9);
 
-        assert_eq!(emu.memory.get(0x100).value, 0x5566_7788_1122_3344);
+        assert_eq!(emu.memory.get(0x1_0100).value, 0x5566_7788_1122_3344);
     }
 
     #[test]
     fn syscall_word_write_counts_one_chunk_split_event_per_logical_word() {
         let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
-        emu.write_mem_dword(0x100, 0);
+        emu.write_mem_dword(0x1_0100, 0);
         emu.enter_syscall();
 
-        emu.write_mem_word_syscall(0x104, 0x1122_3344);
+        emu.write_mem_word_syscall(0x1_0104, 0x1122_3344);
 
         assert_eq!(emu.chunk_split_state.num_syscall_memory_events, 1);
     }
@@ -831,15 +1088,15 @@ mod tests {
     #[test]
     fn syscall_word_span_counts_one_event_per_logical_word() {
         let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
-        emu.write_mem_dword(0x100, 0);
+        emu.write_mem_dword(0x1_0100, 0);
         emu.enter_syscall();
 
         let mut words = [0u32; 2];
-        emu.read_mem_word_span_at_clk(0x100, &mut words, 7);
+        emu.read_mem_word_span_at_clk(0x1_0100, &mut words, 7);
         assert_eq!(emu.chunk_split_state.num_syscall_memory_events, 2);
 
         emu.chunk_split_state.clear();
-        emu.write_mem_word_span_at_clk(0x100, &[0x1122_3344, 0x5566_7788], 9);
+        emu.write_mem_word_span_at_clk(0x1_0100, &[0x1122_3344, 0x5566_7788], 9);
         assert_eq!(emu.chunk_split_state.num_syscall_memory_events, 2);
     }
 }

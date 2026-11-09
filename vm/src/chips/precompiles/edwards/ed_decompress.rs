@@ -12,6 +12,7 @@ use crate::{
         },
         gadgets::{
             addr_add::AddrAddGadget,
+            code_range::CodeRangeCols,
             curves::edwards::{
                 ed25519::{ed25519_sqrt, Ed25519BaseField},
                 EdwardsParameters, WordsFieldElement, NUM_LIMBS, WORDS_FIELD_ELEMENT,
@@ -54,6 +55,7 @@ use crate::{
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
+    ops::Range,
 };
 use hybrid_array::Array;
 use num::{BigUint, One, Zero};
@@ -100,12 +102,16 @@ pub struct EdDecompressCols<T> {
     pub(crate) neg_x_range: FieldLtCols<T, Ed25519BaseField>,
     /// Gadget to check if x is zero. This is used to ensure that when x is zero, sign must be 0.
     pub(crate) x_is_zero: IsZeroGadget<T>,
+
+    /// `x` is written to the slice's first half, which may not lie on the program's code.
+    pub code_range: CodeRangeCols<T>,
 }
 
 impl<F: PrimeField32> EdDecompressCols<F> {
     pub fn populate<E: EdwardsParameters>(
         &mut self,
         event: &EdDecompressEvent,
+        code: &Range<u64>,
         blu: &mut impl ByteRecordBehavior,
     ) {
         self.is_real = F::from_bool(true);
@@ -113,6 +119,8 @@ impl<F: PrimeField32> EdDecompressCols<F> {
         self.clk = F::from_u32(checked_u64_to_u32(event.clk, "edwards decompress clk"));
         self.sign = F::from_bool(event.sign);
         self.ptr.populate(blu, event.ptr, NUM_LIMBS as u64 * 2);
+        self.code_range
+            .populate(event.ptr, NUM_LIMBS as u64, code, blu);
 
         for i in 0..WORDS_FIELD_ELEMENT {
             self.x_access[i]
@@ -258,6 +266,16 @@ impl<V: Copy> EdDecompressCols<V> {
             self.ptr,
             self.is_real.into(),
         );
+        // `x` is written to the slice's first half, which may not lie on the program's code;
+        // `y`, the second half, is only read. The third limb is zero at any address the
+        // finalize check admits.
+        CodeRangeCols::<CB::F>::eval(
+            builder,
+            &self.code_range,
+            [ptr[0].into(), ptr[1].into()],
+            CB::Expr::from_u32(NUM_LIMBS as u32),
+            self.is_real.into(),
+        );
         let base = |ptr: &[CB::Var; 3]| {
             Word([ptr[0].into(), ptr[1].into(), ptr[2].into(), CB::Expr::ZERO])
         };
@@ -394,11 +412,12 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
+        let code = input.program.code();
         let mut blu_events = Vec::new();
         for event in Self::events(input) {
             let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];
             let cols: &mut EdDecompressCols<F> = row.as_mut_slice().borrow_mut();
-            cols.populate::<E>(event, &mut blu_events);
+            cols.populate::<E>(event, &code, &mut blu_events);
         }
         extra.add_byte_lookup_events(blu_events);
     }
@@ -416,12 +435,13 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
             events.len()
         );
 
+        let code = input.program.code();
         let mut blu_events = Vec::new();
         let mut rows = Vec::new();
         for event in events {
             let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];
             let cols: &mut EdDecompressCols<F> = row.as_mut_slice().borrow_mut();
-            cols.populate::<E>(event, &mut blu_events);
+            cols.populate::<E>(event, &code, &mut blu_events);
             rows.push(row);
         }
         output.add_byte_lookup_events(blu_events);

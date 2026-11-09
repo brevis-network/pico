@@ -501,15 +501,12 @@ impl<F> EventCapture for CpuChip<F> {
         if steps.is_empty() {
             return;
         }
-        let (cpu_add, cpu_lt) = steps
-            .par_runs(|event, (add, lt): &mut (usize, usize)| {
-                let c = Self::count_cpu_event(event);
-                *add += c.add;
-                *lt += c.lt;
+        let cpu_lt: usize = steps
+            .par_runs(|event, lt: &mut usize| {
+                *lt += Self::count_cpu_event(event).lt;
             })
             .into_iter()
-            .fold((0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1));
-        event_counter.num_add_sub_events += cpu_add;
+            .sum();
         event_counter.num_lt_events += cpu_lt;
     }
 }
@@ -531,12 +528,9 @@ impl<F> CpuChip<F> {
         // in-chip by four boolean carry expressions (`jump/constraints.rs`), so no Cpu row
         // synthesizes an Add event. No AUIPC arm either: since X12 the transpiler re-encodes
         // `AUIPC rd, imm` as the two-immediate `ADD rd, imm, pc`, so that row's Add event is the
-        // history's own, on its add list. The `add` field is always 0.
+        // history's own, on its add list.
 
-        CpuExtraEventIndices {
-            add: 0,
-            lt: lt_events,
-        }
+        CpuExtraEventIndices { lt: lt_events }
     }
 }
 

@@ -95,8 +95,9 @@ pub fn get_buffer(device_id: usize) -> &'static Mutex<HostAllocation<KoalaBear>>
     buffers[device_id].get_or_init(|| {
         set_device(device_id as i32).unwrap();
 
-        let alloc =
-            HostAllocation::alloc(2 * PING_PONG_BUFFER_SIZE, CudaHostAllocFlags::DEFAULT).unwrap();
+        // Named for the host: pinned host memory fails with the same CUDA status as a card.
+        let alloc = HostAllocation::alloc(2 * PING_PONG_BUFFER_SIZE, CudaHostAllocFlags::DEFAULT)
+            .unwrap_or_else(|e| panic!("pinned host allocation failed: {e:?}"));
 
         Mutex::new(alloc)
     })

@@ -1,11 +1,10 @@
-//! Standalone apex verification: accept a root combine proof from nothing but shipped artifacts.
+//! Standalone apex verification: accept a root combine proof, or the compress proof that re-proves
+//! one, from nothing but shipped artifacts.
 //!
 //! The apex is the top of the recursion tree: the final check of a complete root proof.
 //!
-//! TODO(compress-apex): `pico-vm` keeps its own apex (`pico_vm::mle::machine::apex`), which also
-//! verifies the compress proof over the root, so the combine-root checks are in both. Move the
-//! compress verification here, so that ere can verify compress proofs, and have `pico-vm`
-//! re-export this apex.
+//! TODO(compress-apex): `pico-vm` keeps its own apex (`pico_vm::mle::machine::apex`) with the same
+//! checks; have it re-export this one.
 //!
 //! The caller supplies the proof WITH its vk, the trusted whitelist and the trusted exe identity.
 //! Trust comes from the whitelist: the supplied vk's identity must be a member, and the STARK
@@ -15,7 +14,9 @@
 
 use std::sync::Arc;
 
-use pico_mle_core::{keygen::compute_vk_pre_hash, StarkEngine, SystemParams};
+use pico_mle_core::{
+    compress_params_with_128_bits_security, keygen::compute_vk_pre_hash, StarkEngine, SystemParams,
+};
 
 use crate::{
     public_values::{check_complete_root_public_values, recursion_public_values},
@@ -27,6 +28,9 @@ use crate::{
 /// the exe identity of the guest being attested, and the recursion system params.
 pub struct MleApexVerifier {
     engine: Engine,
+    /// What a compress proof verifies under: the compress preset is not the recursion preset, and
+    /// a STARK verify reads its engine's config.
+    compress_engine: Engine,
     whitelist: Whitelist,
     riscv_vk_digest: [Kb; 8],
     /// Handed in explicitly rather than read off the whitelist, so the trust lives in the
@@ -58,6 +62,7 @@ impl MleApexVerifier {
         );
         Self {
             engine: StarkEngine::new(params),
+            compress_engine: StarkEngine::new(compress_params_with_128_bits_security()),
             whitelist: Whitelist::Lookup(whitelist),
             riscv_vk_digest: vm_vk.into().digest(),
             trusted_root,
@@ -78,10 +83,17 @@ impl MleApexVerifier {
         }
         Ok(Self {
             engine: StarkEngine::new(params),
+            compress_engine: StarkEngine::new(compress_params_with_128_bits_security()),
             whitelist: Whitelist::Members(members),
             riscv_vk_digest: vm_vk.into().digest(),
             trusted_root,
         })
+    }
+
+    /// The compress preset [`Self::verify_compress`] verifies under, in place of the 128-bit one.
+    pub fn with_compress_params(mut self, params: SystemParams) -> Self {
+        self.compress_engine = StarkEngine::new(params);
+        self
     }
 
     fn is_whitelisted(&self, id: &VkIdentity) -> bool {
@@ -98,7 +110,25 @@ impl MleApexVerifier {
     ///   3. The complete-root public values (see [`check_complete_root_public_values`]):
     ///      `flag_complete`, `riscv_vk_digest`, `vk_root` against the pinned root, PV digest.
     pub fn verify(&self, root: &ProofWithVk) -> Result<(), VerifyError> {
-        let (proof, vk) = root;
+        self.verify_under(&self.engine, root, "root")
+    }
+
+    /// Accept a compress proof: the complete root re-proved under the compress preset, with the
+    /// root's public values. The checks of [`Self::verify`], under the compress engine; the
+    /// compress key is a whitelist leaf, so it is authenticated the same way. A root proof does
+    /// not verify here, nor a compress proof in [`Self::verify`]: each fails the other's STARK
+    /// verify.
+    pub fn verify_compress(&self, proof: &ProofWithVk) -> Result<(), VerifyError> {
+        self.verify_under(&self.compress_engine, proof, "compress")
+    }
+
+    fn verify_under(
+        &self,
+        engine: &Engine,
+        proof_with_vk: &ProofWithVk,
+        what: &str,
+    ) -> Result<(), VerifyError> {
+        let (proof, vk) = proof_with_vk;
 
         // Fail typed on a non-recursion vk rather than panicking on attacker-shaped input.
         if vk.inner.merged_preprocessed_commit.is_none() {
@@ -107,20 +137,25 @@ impl MleApexVerifier {
         // The whitelist indexes the STORED pre_hash and the STARK verify only observes it; without
         // this recompute a weakened body under an honest identity would pass. Merged mode excludes
         // every commitment from the preimage, so no app-prep ids.
-        if compute_vk_pre_hash(self.engine.config(), &vk.inner, &[]) != vk.pre_hash {
+        // The whitelist holds root and compress keys alike; the preset each was made for is part of
+        // its authenticated body, so it is what tells the two kinds apart.
+        if vk.inner.params != *engine.params() {
+            return Err(VerifyError::WrongPreset { what: what.into() });
+        }
+        if compute_vk_pre_hash(engine.config(), &vk.inner, &[]) != vk.pre_hash {
             return Err(VerifyError::VkBodyMismatch);
         }
         if !self.is_whitelisted(&vk_identity(vk)) {
             return Err(VerifyError::NotWhitelisted);
         }
 
-        self.engine
+        engine
             .verify(vk, proof)
             .map_err(|e| VerifyError::Stark(format!("{e:?}")))?;
 
         let pvs = recursion_public_values(&proof.public_values)?;
         check_complete_root_public_values(
-            "root",
+            what,
             pvs,
             &self.riscv_vk_digest,
             Some(&self.trusted_root),

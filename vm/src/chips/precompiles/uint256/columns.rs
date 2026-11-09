@@ -2,6 +2,7 @@ use crate::chips::{
     chips::riscv_memory::read_write::columns::{MemoryReadColsU8, MemoryWriteColsU8},
     gadgets::{
         addr_add::AddrAddGadget,
+        code_range::CodeRangeCols,
         field::{field_lt::FieldLtCols, field_op::FieldOpCols},
         is_zero::IsZeroGadget,
         syscall_addr::SyscallAddrGadget,
@@ -58,4 +59,7 @@ pub struct Uint256MulCols<T> {
     pub output_range_check: FieldLtCols<T, U256Field>,
 
     pub is_real: T,
+
+    /// The result is written to `x`, which may not lie on the program's code.
+    pub code_range: CodeRangeCols<T>,
 }

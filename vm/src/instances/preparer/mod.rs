@@ -4,6 +4,7 @@ mod event_counter;
 mod host_tracegen_tests;
 mod memory;
 mod prepared_gpu_events;
+#[cfg(test)]
 mod utils;
 
 pub use event_counter::{
@@ -24,4 +25,5 @@ pub use memory::{
     gpu_allocate_byte_trace, gpu_finalize_byte_trace, GpuMemoryError, PreallocatedGpuMemory,
 };
 
+#[cfg(test)]
 pub use utils::{verify_global_events, verify_poseidon2_events};

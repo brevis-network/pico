@@ -37,7 +37,8 @@ use crate::{remove_path, run_captured, RUSTUP_TOOLCHAIN_NAME};
 
 const REPO: &str = "brevis-network/rust";
 const TOOLCHAIN_VERSION_TAG: &str = "pico-ae9fd31";
-/// The nightly `TOOLCHAIN_VERSION_TAG` is built from. Guests build `std` from source
+/// The nightly `TOOLCHAIN_VERSION_TAG` is built from. Rust guests link the toolchain's prebuilt
+/// `std`; the static library, and a toolchain without one, build `std` from source
 /// (`-Z build-std`), and a compiler builds only its own version's `std`, so the `rust-src` linked
 /// into the guest toolchain comes from this nightly. It moves with the guest compiler, not with
 /// the workspace's `rust-toolchain`.

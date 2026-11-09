@@ -5,6 +5,16 @@ use super::{
     },
     ProgramChip,
 };
+use crate::{
+    chips::gadgets::code_range::code_range_lookups,
+    compiler::{addr::Pc, riscv::program::Program},
+    emulator::riscv::record::EmulationRecord,
+    iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator},
+    machine::{
+        chip::ChipBehavior,
+        utils::{pad_to_power_of_two, pad_to_power_of_two_repeating_first_row},
+    },
+};
 #[cfg(feature = "cuda")]
 use crate::{
     chips::{
@@ -16,15 +26,6 @@ use crate::{
     machine::chip::GpuChipBehavior,
     mle::{machine::trace_oracle::history_launch, spans::device},
 };
-use crate::{
-    compiler::{addr::Pc, riscv::program::Program},
-    emulator::riscv::record::EmulationRecord,
-    iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator},
-    machine::{
-        chip::ChipBehavior,
-        utils::{pad_to_power_of_two, pad_to_power_of_two_repeating_first_row},
-    },
-};
 #[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
@@ -33,6 +34,8 @@ use cudart::{
 };
 #[cfg(feature = "cuda")]
 use cudart_sys::*;
+#[cfg(feature = "cuda")]
+use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 #[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
@@ -126,6 +129,11 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
                 cols.pc_carry = F::from_bool((row_pc & 0xFFFF) >= 0xFFFC);
                 cols.instruction.populate(*source);
                 cols.selectors.populate(*source);
+                // The code's range, the same on every row.
+                let limbs = |value: u64| [value as u16, (value >> 16) as u16].map(F::from_u16);
+                let code = program.code();
+                cols.code_start = limbs(code.start);
+                cols.code_end = limbs(code.end);
 
                 row
             })
@@ -154,6 +162,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         let instruction_counts = input.cpu_steps().pc_counts();
+        let code_range_lookups = code_range_lookups(input);
 
         // Generate rows in parallel
         let rows: Vec<[F; NUM_PROGRAM_MULT_COLS]> = input
@@ -166,6 +175,9 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
                 let mut row = [F::ZERO; NUM_PROGRAM_MULT_COLS];
                 let cols: &mut ProgramMultiplicityCols<F> = row.as_mut_slice().borrow_mut();
                 cols.multiplicity = F::from_usize(*instruction_counts.get(&pc).unwrap_or(&0));
+                if i == 0 {
+                    cols.code_range_multiplicity = F::from_usize(code_range_lookups);
+                }
                 row
             })
             .collect();
@@ -280,7 +292,7 @@ impl<F: PrimeField32> GpuChipBehavior<F> for ProgramChip<F> {
         _prepared_gpu_events: &PreparedGpuEvents,
         preallocated_gpu_memory: &mut PreallocatedGpuMemory,
     ) -> TraceData<'_, F> {
-        // A deferred record carries no history and runs no instruction: every multiplicity is 0.
+        // A deferred record carries no history and runs no instruction: every execution count is 0.
         if preallocated_gpu_memory.d_history.is_some() {
             return self.gpu_generate_from_history(device_id, input, preallocated_gpu_memory);
         }
@@ -310,6 +322,8 @@ impl<F: PrimeField32> GpuChipBehavior<F> for ProgramChip<F> {
                 stream.into(),
             );
         }
+        // A deferred record's writing rows are its precompile events'.
+        put_code_range_lookups(&mut d_trace, code_range_lookups(input), stream);
         device::filled(fill, stream);
 
         let sync_stream = get_global_stream_pool(device_id);
@@ -322,6 +336,27 @@ impl<F: PrimeField32> GpuChipBehavior<F> for ProgramChip<F> {
         info!("[riscv-program-chip] generate_extra_record_and_main on GPU, no instruction run");
 
         TraceData::Gpu(NUM_PROGRAM_MULT_COLS, d_trace)
+    }
+}
+
+/// Row 0's code-range multiplicity: the record's writing rows, put behind the kernels that
+/// zero the trace and count the executions on `stream`, which leave that column alone.
+#[cfg(feature = "cuda")]
+fn put_code_range_lookups(
+    d_trace: &mut DevicePoolAllocation<'_, KoalaBear>,
+    lookups: usize,
+    stream: &CudaStream,
+) {
+    let value = KoalaBear::from_usize(lookups);
+    // From pageable memory, so the driver has staged `value` by the time this returns.
+    unsafe {
+        let _ = cudaMemcpyAsync(
+            (d_trace.as_mut_ptr() as *mut KoalaBear).add(1) as *mut _,
+            (&raw const value).cast(),
+            size_of::<KoalaBear>(),
+            CudaMemoryCopyKind::HostToDevice,
+            stream.into(),
+        );
     }
 }
 
@@ -371,6 +406,7 @@ impl<F: PrimeField32> ProgramChip<F> {
             err.code, 0,
             "cuda_riscv_program_generate_main_history failed: {err}"
         );
+        put_code_range_lookups(&mut d_trace, code_range_lookups(input), stream);
         history_launch::note(&self.name());
         drop(reader);
 

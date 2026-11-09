@@ -318,6 +318,13 @@ fn report(proof: &Proof, groth16: bool) {
             .map_or_else(|| "unknown".into(), |n| n.to_string()),
         proof.proof_count()
     );
+    // Zicclsm: every proof states how many misaligned loads and stores it covers.
+    println!(
+        "misaligned accesses: {}",
+        proof
+            .misaligned_accesses()
+            .map_or_else(|| "unknown".into(), |n| n.to_string())
+    );
     let committed = proof.committed();
     println!(
         "committed ({} byte(s)): {}",

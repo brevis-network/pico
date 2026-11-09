@@ -4,7 +4,7 @@
 //! ahead-of-time compilation. It identifies block leaders (entry points),
 //! analyzes control flow, and generates optimal block layouts.
 
-use crate::types::{sign_extend_imm32_to_u64, Opcode, ProgramInfo};
+use crate::types::{Opcode, ProgramInfo};
 use std::collections::HashSet;
 
 /// Analyzes basic blocks in a RISC-V program for AOT compilation.
@@ -62,7 +62,7 @@ impl BlockAnalyzer {
             match inst.opcode {
                 Opcode::JAL => {
                     let (_, imm) = inst.j_type();
-                    leaders.insert(pc.wrapping_add(sign_extend_imm32_to_u64(imm)));
+                    leaders.insert(pc.wrapping_add(imm));
                     leaders.insert(pc.wrapping_add(4));
                 }
                 Opcode::BEQ
@@ -72,7 +72,7 @@ impl BlockAnalyzer {
                 | Opcode::BLTU
                 | Opcode::BGEU => {
                     let (_, _, imm) = inst.b_type();
-                    leaders.insert(pc.wrapping_add(sign_extend_imm32_to_u64(imm)));
+                    leaders.insert(pc.wrapping_add(imm));
                     leaders.insert(pc.wrapping_add(4));
                 }
                 Opcode::JALR | Opcode::ECALL | Opcode::EBREAK => {

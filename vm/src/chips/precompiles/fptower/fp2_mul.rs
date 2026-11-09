@@ -2,6 +2,8 @@
 use super::ffi::FfiFp2MulEvent;
 use super::words_to_bytes_le_slice;
 #[cfg(feature = "cuda")]
+use crate::chips::gadgets::code_range::{fill_on_device, NUM_CODE_RANGE_COLS};
+#[cfg(feature = "cuda")]
 use crate::mle::spans::device;
 use crate::{
     chips::{
@@ -11,6 +13,7 @@ use crate::{
         },
         gadgets::{
             addr_add::AddrAddGadget,
+            code_range::CodeRangeCols,
             field::{
                 field_lt::FieldLtCols,
                 field_op::{FieldOpCols, FieldOperation},
@@ -123,6 +126,9 @@ where
     pub(crate) c1: FieldOpCols<F, P>,
     pub(crate) c0_range: FieldLtCols<F, P>,
     pub(crate) c1_range: FieldLtCols<F, P>,
+
+    /// The result is written to `x`, which may not lie on the program's code.
+    pub code_range: CodeRangeCols<F>,
 }
 
 impl<F, P> Fp2MulChip<F, P>
@@ -231,6 +237,7 @@ where
             _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
         };
 
+        let code = input.program.code();
         let mut rows = Vec::new();
         let mut new_byte_lookup_events = Vec::new();
 
@@ -258,6 +265,12 @@ where
                 &mut new_byte_lookup_events,
                 event.x_ptr,
                 P::NUM_LIMBS as u64 * 2,
+            );
+            cols.code_range.populate(
+                event.x_ptr,
+                P::NUM_LIMBS as u64 * 2,
+                &code,
+                &mut new_byte_lookup_events,
             );
             cols.y_ptr.populate(
                 &mut new_byte_lookup_events,
@@ -447,6 +460,21 @@ where
             _ => unreachable!(),
         }
 
+        // The code range, the last columns of the chip's row, which the kernel leaves zero.
+        // The result goes to `x`.
+        let writes: Vec<u64> = events.iter().map(|event| u64::from(event.x_ptr)).collect();
+        fill_on_device(
+            &mut d_trace,
+            num_cols_per_row,
+            num_cols_per_row - NUM_CODE_RANGE_COLS,
+            &writes,
+            P::NUM_LIMBS as u64 * 2,
+            &input.program.code(),
+            d_byte_trace,
+            mem_pool,
+            stream,
+        );
+
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
         device::launched(kernels, stream);
@@ -627,6 +655,15 @@ where
             builder,
             P::NUM_LIMBS as u32 * 2,
             local.x_ptr,
+            local.is_real.into(),
+        );
+        // The result goes to `x`, both coordinates, which may not lie on the program's code.
+        // The third limb is zero at any address the finalize check admits.
+        CodeRangeCols::<CB::F>::eval(
+            builder,
+            &local.code_range,
+            [x_ptr[0].into(), x_ptr[1].into()],
+            CB::Expr::from_u32(P::NUM_LIMBS as u32 * 2),
             local.is_real.into(),
         );
         let y_ptr = SyscallAddrGadget::<CB::F>::eval(
@@ -1155,8 +1192,12 @@ mod tests {
                 continue;
             }
 
+            // The kernel's own columns: the code range is filled after it.
+            use crate::chips::gadgets::code_range::{kernel_columns, NUM_CODE_RANGE_COLS};
+            let offset = num_cols - NUM_CODE_RANGE_COLS;
             assert_eq!(
-                cpu_trace, gpu_trace,
+                kernel_columns(&cpu_trace.values, num_cols, offset),
+                kernel_columns(&gpu_trace.values, num_cols, offset),
                 "Main trace mismatch at bench size {}",
                 num_events
             );

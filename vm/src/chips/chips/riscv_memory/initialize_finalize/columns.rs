@@ -51,4 +51,7 @@ pub struct MemoryInitializeFinalizeCols<T> {
     /// A witness to assert whether or not the previous address is zero.
     /// Uses the sum of prev_addr u16 limbs as input.
     pub is_prev_addr_zero: IsZeroGadget<T>,
+
+    /// `1 / (addr[1] - 0x777f)`: the address is not in the stack guard.
+    pub guard_inv: T,
 }

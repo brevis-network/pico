@@ -1,10 +1,14 @@
 use super::ShaExtendControlChip;
 #[cfg(feature = "cuda")]
+use crate::chips::gadgets::code_range::{fill_on_device, NUM_CODE_RANGE_COLS};
+#[cfg(feature = "cuda")]
 use crate::mle::spans::device;
 use crate::{
     chips::{
         chips::byte::event::ByteRecordBehavior,
-        gadgets::{addr_add::AddrAddGadget, syscall_addr::SyscallAddrGadget},
+        gadgets::{
+            addr_add::AddrAddGadget, code_range::CodeRangeCols, syscall_addr::SyscallAddrGadget,
+        },
         utils::pad_rows_fixed,
     },
     compiler::{riscv::program::Program, word::Word},
@@ -34,7 +38,7 @@ use crate::{
     instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::chip::GpuChipBehavior,
 };
-use core::borrow::Borrow;
+use core::{borrow::Borrow, ops::Range};
 #[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
@@ -73,6 +77,9 @@ pub struct ShaExtendControlCols<T> {
     pub w_64th_addr: AddrAddGadget<T>,
 
     pub is_real: T,
+
+    /// `w[16..64]` is written, from `w_17th_addr` on, which may not lie on the program's code.
+    pub code_range: CodeRangeCols<T>,
 }
 
 impl<F: PrimeField32> BaseAir<F> for ShaExtendControlChip<F> {
@@ -92,6 +99,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendControlChip<F> {
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
         let rows = vec![];
 
+        let code = input.program.code();
         let mut wrapped_rows = Some(rows);
         for (_, event) in input.get_precompile_events(SyscallCode::SHA_EXTEND) {
             let event = if let PrecompileEvent::ShaExtend(event) = event {
@@ -99,7 +107,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendControlChip<F> {
             } else {
                 unreachable!()
             };
-            self.event_to_row(event, &mut wrapped_rows, &mut vec![]);
+            self.event_to_row(event, &code, &mut wrapped_rows, &mut vec![]);
         }
 
         let mut rows = wrapped_rows.unwrap();
@@ -131,13 +139,14 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendControlChip<F> {
             })
             .collect();
 
+        let code = input.program.code();
         let chunk_size = std::cmp::max(extend_events.len() / num_cpus::get(), 1);
         let blu_batches = extend_events
             .par_chunks(chunk_size)
             .flat_map(|events| {
                 let mut blu = vec![];
                 events.iter().for_each(|event| {
-                    self.event_to_row(event, &mut None, &mut blu);
+                    self.event_to_row(event, &code, &mut None, &mut blu);
                 });
                 blu
             })
@@ -226,6 +235,21 @@ impl<F: PrimeField32> GpuChipBehavior<F> for ShaExtendControlChip<F> {
             );
         }
 
+        // The code range, the last columns of the chip's row, which the kernel leaves zero.
+        // `w[16..64]` is written.
+        let writes: Vec<u64> = events.iter().map(|event| event.w_ptr + 16 * 8).collect();
+        fill_on_device(
+            &mut d_trace,
+            num_cols_per_row,
+            num_cols_per_row - NUM_CODE_RANGE_COLS,
+            &writes,
+            48 * 8,
+            &input.program.code(),
+            d_byte_trace,
+            mem_pool,
+            stream,
+        );
+
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
         device::launched(kernels, stream);
@@ -242,6 +266,7 @@ impl<F: PrimeField32> ShaExtendControlChip<F> {
     fn event_to_row(
         &self,
         event: &ShaExtendEvent,
+        code: &Range<u64>,
         rows: &mut Option<Vec<[F; NUM_SHA_EXTEND_CONTROL_COLS]>>,
         blu: &mut impl ByteRecordBehavior,
     ) {
@@ -258,6 +283,9 @@ impl<F: PrimeField32> ShaExtendControlChip<F> {
         cols.w_17th_addr.populate(blu, event.w_ptr, 16 * 8);
         // Address of 64th element of W, last written element
         cols.w_64th_addr.populate(blu, event.w_ptr, 63 * 8);
+        // The 48 written elements, `w[16..64]`; the first 16 are only read.
+        cols.code_range
+            .populate(event.w_ptr + 16 * 8, 48 * 8, code, blu);
         cols.is_real = F::ONE;
 
         if rows.as_ref().is_some() {
@@ -335,6 +363,20 @@ where
                 CB::Expr::ZERO,
             ]),
             local.w_64th_addr,
+            local.is_real.into(),
+        );
+
+        // `w[16..64]` is written, from the 17th element on, which may not lie on the program's
+        // code; `w[0..16]` is only read. The third limb is zero at any address the finalize check
+        // admits.
+        CodeRangeCols::<CB::F>::eval(
+            builder,
+            &local.code_range,
+            [
+                local.w_17th_addr.value[0].into(),
+                local.w_17th_addr.value[1].into(),
+            ],
+            CB::Expr::from_u32(48 * 8),
             local.is_real.into(),
         );
 

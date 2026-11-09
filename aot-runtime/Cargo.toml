@@ -42,3 +42,8 @@ libc = { version = "0.2", optional = true }
 [features]
 bigint-rug = ["pico-vm/bigint-rug"]
 mmap-memory = ["pico-vm/mmap-memory", "dep:memmap2", "dep:libc"]
+# A checking build, for gates and never for timing: every step a recording block writes directly is
+# also closed by the shared writer's generic code, and the run panics where the two layouts differ
+# or an instruction constant is not the program's at its pc. Both see the same values, so a value
+# wrong yet consistent across the step passes; only comparing with the interpreter catches that.
+recorder-check = ["pico-vm/test-utils"]

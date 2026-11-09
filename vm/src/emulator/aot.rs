@@ -10,7 +10,7 @@ use crate::{
     machine::report::EmulationReport,
 };
 use alloc::{boxed::Box, sync::Arc};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 use crate::mle::{chosen_segments, env_u32};
 use std::num::NonZeroU32;
@@ -131,9 +131,14 @@ type AotFactory = fn(
 
 static AOT_FACTORY: OnceLock<AotFactory> = OnceLock::new();
 
+/// Held by every install of either factory, so [`register_aot_factories`] fills both slots as one
+/// step. Readers do not take it.
+static INSTALL: Mutex<()> = Mutex::new(());
+
 /// Installs `factory` unless the process already holds one, and says whether it did: the first
 /// install wins, and `false` means another caller's factory holds the slot.
 pub fn register_aot_factory(factory: AotFactory) -> bool {
+    let _install = INSTALL.lock().unwrap_or_else(PoisonError::into_inner);
     AOT_FACTORY.set(factory).is_ok()
 }
 
@@ -152,8 +157,9 @@ pub fn create_aot_emulator(
         .map(|factory| factory(program, input_stream, opts, final_pvs_state))
 }
 
-/// The AOT core as a replay worker: it starts from a snapshot and runs to the snapshot's target
-/// global clock, exactly, writing the interpreter's records.
+/// The AOT core as a replay worker, on the registered program's recording blocks: it starts from a
+/// snapshot and runs to the snapshot's target global clock, exactly, writing the interpreter's
+/// records.
 ///
 /// Where a chunk ends was decided by the snapshot thread, so a replay makes no cut of its own: the
 /// one record it cuts is the segment's, at the target. Only a final segment rolls the chunk over,
@@ -182,6 +188,17 @@ pub trait AotReplayEmulator: Send {
     /// Instructions the fallback interpreter ran, over every replay this worker ran.
     fn fallback_insns(&self) -> u64;
 
+    /// Recording blocks that ran their instructions, over every replay this worker ran.
+    fn recorder_body_dispatches(&self) -> u64;
+
+    /// Instructions recording blocks ran, over every replay this worker ran. With
+    /// [`Self::fallback_insns`], every instruction the worker replayed.
+    fn recorder_body_insns(&self) -> u64;
+
+    /// Of [`Self::recorder_body_insns`], those whose rows the recording blocks wrote directly; the
+    /// rest ran the ordinary blocks' recording code.
+    fn recorder_direct_insns(&self) -> u64;
+
     /// Puts `memory` in place of the one the core runs on and returns that one: how a worker
     /// that keeps its core gives a replay's memory back.
     fn replace_memory(&mut self, memory: ContiguousRiscvMemory) -> ContiguousRiscvMemory;
@@ -195,9 +212,30 @@ type AotReplayFactory =
 
 static AOT_REPLAY_FACTORY: OnceLock<AotReplayFactory> = OnceLock::new();
 
-/// [`register_aot_factory`] for the replay workers.
+/// [`register_aot_factory`] for the replay workers, which run a program's recording entry point:
+/// installed only for a program that has one, so a process can hold a snapshot factory without it.
 pub fn register_aot_replay_factory(factory: AotReplayFactory) -> bool {
+    let _install = INSTALL.lock().unwrap_or_else(PoisonError::into_inner);
     AOT_REPLAY_FACTORY.set(factory).is_ok()
+}
+
+/// Installs `snapshot`, and `replay` beside it when given, only if the process holds neither
+/// factory, and says whether it did: both or neither, whatever other installs run meanwhile.
+///
+/// The replay factory goes in first. The snapshot factory is the one whose presence turns AOT on,
+/// so a reader that finds it also finds the replay factory installed with it, and a reader between
+/// the two, finding no snapshot factory, finds no AOT program.
+pub fn register_aot_factories(snapshot: AotFactory, replay: Option<AotReplayFactory>) -> bool {
+    let _install = INSTALL.lock().unwrap_or_else(PoisonError::into_inner);
+    if AOT_FACTORY.get().is_some() || AOT_REPLAY_FACTORY.get().is_some() {
+        return false;
+    }
+    // Neither `set` can fail: every install holds `INSTALL`, and a slot is never emptied.
+    if let Some(replay) = replay {
+        let _ = AOT_REPLAY_FACTORY.set(replay);
+    }
+    let _ = AOT_FACTORY.set(snapshot);
+    true
 }
 
 pub fn is_aot_replay_factory_registered() -> bool {
@@ -292,6 +330,15 @@ mod tests {
             0
         }
         fn fallback_insns(&self) -> u64 {
+            0
+        }
+        fn recorder_body_dispatches(&self) -> u64 {
+            0
+        }
+        fn recorder_body_insns(&self) -> u64 {
+            0
+        }
+        fn recorder_direct_insns(&self) -> u64 {
             0
         }
         fn replace_memory(&mut self, memory: ContiguousRiscvMemory) -> ContiguousRiscvMemory {

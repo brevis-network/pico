@@ -88,13 +88,11 @@ pub const fn get_msb(a: u64) -> u8 {
     ((a >> 63) & 1) as u8
 }
 
-/// ALU events one DivRem event adds. Shared with the GPU kernels, which index the ALU buffers
-/// by it.
+/// ALU events one DivRem event adds, for the cost estimator; the device kernels size their rows
+/// from the chunk's history instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(C)]
 pub struct DivremExtraEventIndices {
     pub add: usize,
-    pub lt: usize,
 }
 
 /// The ADD rows a div/rem of `opcode` on `b` and `c` appends to the add chip: one for each of the

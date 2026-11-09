@@ -2,6 +2,7 @@ use crate::{
     chips::{
         chips::{riscv_cpu::event::CpuEvent, riscv_memory::event::MemoryRecordEnum},
         ffi::FfiOption,
+        gadgets::code_range::CodeRangeCols,
     },
     compiler::{riscv::opcode::Opcode, word::Word},
     primitives::consts::MEMORY_RW_DATAPAR,
@@ -26,7 +27,7 @@ pub const NUM_MEMORY_CHIP_VALUE_COLS: usize = size_of::<MemoryChipValueCols<u8>>
 // Pinned on both sides: the CUDA mirror asserts the same width (pico-gpu's
 // `src/tracegen/riscv/history_cpu_memory_lt.cuh`), so a field added or removed on one side only
 // fails the build instead of silently shifting every column.
-const _: () = assert!(NUM_MEMORY_CHIP_VALUE_COLS == 49);
+const _: () = assert!(NUM_MEMORY_CHIP_VALUE_COLS == 57);
 
 #[derive(AlignedBorrow, Clone, Copy, Debug, Default)]
 #[repr(C)]
@@ -118,6 +119,9 @@ pub struct MemoryChipValueCols<F> {
     // eval_memory_load.
     /// Memory instructions
     pub instruction: MemoryInstructionCols<F>,
+
+    /// A store misses the program's code; free on a load row.
+    pub code_range: CodeRangeCols<F>,
 }
 
 impl<F: Copy> MemoryChipValueCols<F> {

@@ -57,7 +57,8 @@ impl SubCommands {
 ///
 /// It builds its own tokio runtime, so it panics if called from inside one; and on a usage error,
 /// `--help` or `--version` clap prints and exits the process rather than returning. So does an
-/// `--aot` run outside a helper when the helper fails, with the helper's exit code.
+/// `--aot` run outside a helper when the helper fails, with the helper's exit code, and `execute`
+/// whenever it does not succeed, with the status it documents.
 #[tokio::main]
 pub async fn run<I, T>(args: I) -> Result<()>
 where
@@ -71,7 +72,14 @@ where
 
     if let Some(elf) = cli.command.aot_elf() {
         if !aot_helper::has_program() {
-            return aot_helper::build_and_run(elf, &args[1..]);
+            let executing = matches!(cli.command, SubCommands::Execute(_));
+            return aot_helper::build_and_run(elf, &args[1..]).inspect_err(|e| {
+                // The helper never ran the guest: for `execute`, a run that could not be executed.
+                if executing {
+                    eprintln!("Error: {e:?}");
+                    std::process::exit(2);
+                }
+            });
         }
     }
 

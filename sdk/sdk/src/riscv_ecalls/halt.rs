@@ -17,8 +17,8 @@ pub mod exit_code {
     pub const ABORT: u32 = 134;
 }
 
-// The host's own values, which a guest cannot name: it does not compile `pico-vm`.
-#[cfg(not(target_os = "zkvm"))]
+// The host's own values, checked in the host tests: a guest does not compile `pico-vm`.
+#[cfg(all(test, not(target_os = "zkvm")))]
 const _: () = {
     use pico_vm::emulator::riscv::emulator::error as host;
     assert!(

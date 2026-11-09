@@ -6,7 +6,8 @@ use crate::{
     chips::{
         chips::riscv_memory::read_write::columns::{MemoryReadCols, MemoryWriteCols},
         gadgets::{
-            addr_add::AddrAddGadget, field_range_check::word_range::FieldWordRangeChecker,
+            addr_add::AddrAddGadget, code_range::CodeRangeCols,
+            field_range_check::word_range::FieldWordRangeChecker,
             poseidon2::columns::Poseidon2ValueCols, syscall_addr::SyscallAddrGadget,
         },
     },
@@ -67,4 +68,7 @@ pub struct Poseidon2Cols<T, Config: Poseidon2Config> {
 
     // TODO: is it safe to remove state_linear_layer cols?
     pub value_cols: Poseidon2ValueCols<T, Config>,
+
+    /// The permuted state is written to the output buffer, which may not lie on the program's code.
+    pub code_range: CodeRangeCols<T>,
 }

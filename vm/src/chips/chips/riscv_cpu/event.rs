@@ -160,12 +160,10 @@ impl CpuEvent {
     }
 }
 
-/// ALU events one CPU row adds (see `CpuChip::count_cpu_event`). Shared with the GPU kernels,
-/// which index the ALU buffers by it.
+/// ALU events one CPU row adds (see `CpuChip::count_cpu_event`), for the cost estimator; the
+/// device kernels size their rows from the chunk's history instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(C)]
 pub struct CpuExtraEventIndices {
-    pub add: usize,
     pub lt: usize,
 }
 

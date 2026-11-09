@@ -64,13 +64,27 @@ pub enum TerminationReason {
     Abort,
     /// The heap is exhausted.
     OutOfMemory,
-    /// An access the emulator does not allow.
+    /// An access past the top of guest memory.
     InvalidMemoryAccess { opcode: Opcode, addr: u64 },
+    /// An access below the lowest segment address: no segment loads there, and no access there is
+    /// provable.
+    NullAccess { opcode: Opcode, addr: u64 },
+    /// An access into the stack guard, the gap between the heap and the stack: the stack ran past
+    /// its bottom, or the heap past its end.
+    StackOverflow { opcode: Opcode, addr: u64 },
+    /// A store into the program's code.
+    StoreToCode { opcode: Opcode, addr: u64 },
     /// `unimp` at `pc`, which is also what `core::intrinsics::abort` and `std::process::abort`
     /// emit.
     IllegalInstruction { pc: u64 },
     /// `ebreak` at `pc`.
     Breakpoint { pc: u64 },
+    /// A jump or taken branch at `pc` to `target`, which is not 4-aligned: RISC-V's
+    /// instruction-address-misaligned exception, raised on the jump. Never rounded down.
+    MisalignedJumpTarget { pc: u64, target: u64 },
+    /// Execution would continue at `pc`, which holds none of the program's instructions: a jump
+    /// or branch out of the code, or a fall-through past its last instruction.
+    OutsideProgram { pc: u64 },
 }
 
 impl TerminationReason {
@@ -89,9 +103,14 @@ impl TerminationReason {
             Self::Exit => 1,
             Self::Panic => exit_code::PANIC,
             Self::Abort | Self::OutOfMemory => exit_code::ABORT,
-            Self::InvalidMemoryAccess { .. } => 128 + 11, // SIGSEGV
-            Self::IllegalInstruction { .. } => 128 + 4,   // SIGILL
-            Self::Breakpoint { .. } => 128 + 5,           // SIGTRAP
+            Self::InvalidMemoryAccess { .. }
+            | Self::NullAccess { .. }
+            | Self::StackOverflow { .. }
+            | Self::StoreToCode { .. }
+            | Self::OutsideProgram { .. } => 128 + 11, // SIGSEGV
+            Self::IllegalInstruction { .. } => 128 + 4, // SIGILL
+            Self::Breakpoint { .. } => 128 + 5,         // SIGTRAP
+            Self::MisalignedJumpTarget { .. } => 128 + 7, // SIGBUS
         }
     }
 }
@@ -106,8 +125,26 @@ impl fmt::Display for TerminationReason {
             Self::InvalidMemoryAccess { opcode, addr } => {
                 write!(f, "invalid memory access: {opcode} at {addr:#x}")
             }
+            Self::NullAccess { opcode, addr } => {
+                write!(f, "null access: {opcode} at {addr:#x}")
+            }
+            Self::StackOverflow { opcode, addr } => {
+                write!(
+                    f,
+                    "stack overflow: {opcode} at {addr:#x}, in the stack guard"
+                )
+            }
+            Self::StoreToCode { opcode, addr } => {
+                write!(f, "store into code: {opcode} at {addr:#x}")
+            }
             Self::IllegalInstruction { pc } => write!(f, "illegal instruction at {pc:#x}"),
             Self::Breakpoint { pc } => write!(f, "breakpoint at {pc:#x}"),
+            Self::MisalignedJumpTarget { pc, target } => {
+                write!(f, "jump at {pc:#x} to the misaligned address {target:#x}")
+            }
+            Self::OutsideProgram { pc } => {
+                write!(f, "execution reached {pc:#x}, outside the program")
+            }
         }
     }
 }
@@ -193,12 +230,6 @@ pub enum EmulationError {
     /// before any thread starts, rather than run on interpreters under an AOT label.
     #[error("the snapshot pipeline cannot run AOT replay workers: {0}")]
     UnsupportedReplayWorkers(String),
-
-    /// The program ended on a jump to a pc the CPU trace's two-limb pc cannot hold. The last
-    /// chunk's `next_pc` is that pc, so no proof can state where the run ended. Raised where the
-    /// run ends, so every mode and every thread fails the same way.
-    #[error("ended at pc 0x{0:016x}, beyond the 32-bit proof pc range")]
-    EndPcBeyondProofAddress(u64),
 }
 
 // By hand rather than `#[from]`, which would also make the termination the error's source and
@@ -213,6 +244,16 @@ impl EmulationError {
     /// A load or store the emulator does not allow.
     pub fn invalid_memory_access(opcode: Opcode, addr: u64) -> Self {
         AbnormalTermination::fault(TerminationReason::InvalidMemoryAccess { opcode, addr }).into()
+    }
+
+    /// A jump or taken branch at `pc` to a `target` that is not 4-aligned.
+    pub fn misaligned_jump(pc: u64, target: u64) -> Self {
+        AbnormalTermination::fault(TerminationReason::MisalignedJumpTarget { pc, target }).into()
+    }
+
+    /// Execution reaching `pc`, outside the program's instructions.
+    pub fn outside_program(pc: u64) -> Self {
+        AbnormalTermination::fault(TerminationReason::OutsideProgram { pc }).into()
     }
 
     /// An `unimp` at `pc`.
@@ -267,6 +308,9 @@ mod tests {
         assert_eq!(code(TerminationReason::IllegalInstruction { pc: 0 }), 132);
         assert_eq!(code(TerminationReason::Breakpoint { pc: 0 }), 133);
         assert_eq!(code(TerminationReason::OutOfMemory), 134);
+        let misaligned = TerminationReason::MisalignedJumpTarget { pc: 0, target: 2 };
+        assert_eq!(code(misaligned), 135);
+        assert_eq!(code(TerminationReason::OutsideProgram { pc: 0 }), 139);
         let access = TerminationReason::InvalidMemoryAccess {
             opcode: Opcode::LW,
             addr: 0x10,

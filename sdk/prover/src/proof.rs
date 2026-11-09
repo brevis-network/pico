@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use pico_mle_core::{codec::Encode, p3_field::PrimeField32};
-use pico_verifier::envelope::{encode_v3, MleRootProofV3};
+use pico_verifier::envelope::{encode_compress_v4, encode_v3, MleCompressProofV4, MleRootProofV3};
 use pico_vm::mle::machine::{convert::ProofWithVk, riscv::RiscvProof};
 
 use crate::{
@@ -55,10 +55,19 @@ pub struct Proof {
     pub(crate) committed_value_digest: [u8; 32],
     pub(crate) chunk_count: Option<usize>,
     pub(crate) distinct_shapes: Option<usize>,
+    pub(crate) misaligned_accesses: Option<u64>,
     pub(crate) payload: Payload,
 }
 
 impl Proof {
+    /// This proof, produced from a run that made `misaligned` misaligned accesses.
+    pub(crate) fn counting(self, misaligned: u64) -> Self {
+        Self {
+            misaligned_accesses: Some(misaligned),
+            ..self
+        }
+    }
+
     /// The phase this proof stops at.
     pub fn phase(&self) -> Phase {
         self.phase
@@ -91,6 +100,14 @@ impl Proof {
     /// it emulated.
     pub fn chunk_count(&self) -> Option<usize> {
         self.chunk_count
+    }
+
+    /// How many misaligned loads and stores (Zicclsm) the proved run made outside unconstrained
+    /// blocks, which the standard RISC-V target asks every proof to report. `None` on a
+    /// proof that was verified rather than produced: the count is the emulation's, and a proof
+    /// file does not store it.
+    pub fn misaligned_accesses(&self) -> Option<u64> {
+        self.misaligned_accesses
     }
 
     /// How many distinct circuit shapes the prover holds for the phase this proof stops at.
@@ -152,6 +169,15 @@ impl Proof {
         }
     }
 
+    /// The key a [`Phase::Compress`] proof verifies under, which its v4 envelope does not carry:
+    /// `pico_verifier::verify_compress_with` takes it, for a whitelist other than the shipped one.
+    pub fn compress_vk(&self) -> Option<std::sync::Arc<VerifyingKey>> {
+        match &self.payload {
+            Payload::Compress(compress) => Some(std::sync::Arc::clone(&compress.1)),
+            _ => None,
+        }
+    }
+
     /// Log2 of the stacked trace height the chain was proved at.
     pub fn log_stacked_height(&self) -> usize {
         self.log_stacked_height
@@ -166,8 +192,8 @@ impl Proof {
     /// (`pico_verifier::envelope`) and the committed bytes it binds. With the prover's
     /// [`crate::Prover::vk_bundle`] they verify by `pico_verifier::verify(bundle, envelope,
     /// committed)` under the shipped whitelist, or `verify_with_root` under another. A
-    /// whitelist-mode [`Phase::Combine`] proof only: `pico_verifier` verifies no compress proof yet
-    /// (`TODO(compress-apex)`). Nothing is written to disk.
+    /// whitelist-mode [`Phase::Combine`] proof only; a compress proof exports with
+    /// [`Self::export_compress_v4`]. Nothing is written to disk.
     pub fn export_v3(&self) -> Result<(Vec<u8>, Vec<u8>), ProveError> {
         if !self.verify_keys {
             return Err(ProveError::WhitelistModeRequired {
@@ -180,6 +206,25 @@ impl Proof {
         let envelope = MleRootProofV3::from_root(root)
             .and_then(|body| encode_v3(&body))
             .map_err(|e| ProveError::Format(format!("cannot encode the v3 envelope: {e}")))?;
+        Ok((envelope, self.committed.clone()))
+    }
+
+    /// A whitelist-mode compress proof as a v4 envelope, and the committed bytes:
+    /// `pico_verifier::verify_compress(bundle, envelope, committed)` checks them, with the bundle
+    /// from [`crate::Prover::vk_bundle`]. The envelope carries no key: the verifier holds the
+    /// whitelist's compress key.
+    pub fn export_compress_v4(&self) -> Result<(Vec<u8>, Vec<u8>), ProveError> {
+        if !self.verify_keys {
+            return Err(ProveError::WhitelistModeRequired {
+                what: "a compress envelope",
+            });
+        }
+        let Payload::Compress(compress) = &self.payload else {
+            return Err(ProveError::NotACompressProof { phase: self.phase });
+        };
+        let envelope = MleCompressProofV4::from_proof(&compress.0)
+            .and_then(|body| encode_compress_v4(&body))
+            .map_err(|e| ProveError::Format(format!("cannot encode the compress envelope: {e}")))?;
         Ok((envelope, self.committed.clone()))
     }
 
@@ -366,6 +411,7 @@ impl std::fmt::Debug for Proof {
             .field("verify_keys", &self.verify_keys)
             .field("chunk_count", &self.chunk_count)
             .field("distinct_shapes", &self.distinct_shapes)
+            .field("misaligned_accesses", &self.misaligned_accesses)
             .field(
                 "committed",
                 &format_args!("{} byte(s)", self.committed.len()),

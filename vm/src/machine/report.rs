@@ -13,4 +13,7 @@ pub struct EmulationReport {
     pub done: bool,
     pub cycle_tracker: Option<HashMap<String, Vec<u64>>>,
     pub host_cycle_estimator: Option<Vec<CycleEstimator>>,
+    /// Misaligned loads and stores run so far (Zicclsm), outside unconstrained blocks: the
+    /// count a proof reports.
+    pub misaligned_accesses: u64,
 }

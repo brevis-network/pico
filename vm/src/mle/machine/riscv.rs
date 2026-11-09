@@ -44,6 +44,7 @@ use crate::{
                 initialize_finalize::{MemoryChipType, MemoryInitializeFinalizeChip},
                 local::MemoryLocalChip,
                 read_write::MemoryReadWriteChip,
+                unaligned::MemoryUnalignedChip,
             },
             riscv_poseidon2::FieldSpecificPoseidon2Chip,
             riscv_program::ProgramChip,
@@ -299,9 +300,18 @@ pub fn chunk_trace_cells(
 /// asserts the shapes agree.
 pub fn prepare_chunk_shaped(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
-    #[cfg_attr(not(feature = "cuda"), allow(unused_mut))] mut record: EmulationRecord,
+    record: EmulationRecord,
     bucket: bool,
 ) -> PreparedChunk {
+    try_prepare_chunk_shaped(chips, record, bucket).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// [`prepare_chunk_shaped`], returning a chunk that selects the catch-all shape as an error.
+pub fn try_prepare_chunk_shaped(
+    chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
+    #[cfg_attr(not(feature = "cuda"), allow(unused_mut))] mut record: EmulationRecord,
+    bucket: bool,
+) -> Result<PreparedChunk, CatchAllShape> {
     #[cfg(feature = "cuda")]
     {
         use crate::instances::preparer::{precompute_event_size, PreparedGpuEvents};
@@ -317,10 +327,11 @@ pub fn prepare_chunk_shaped(
         }
         let t1 = std::time::Instant::now();
         if bucket && record.shape.is_none() {
-            let shape = select_shape_from_counter(chips, &record, &counter);
+            let shape = select_shape_from_counter(chips, &record, &counter)?;
             if crate::mle::env_flag("MLE_SHAPE_CROSSCHECK") {
                 let augmented = augmented_record(chips, &record);
-                let want = select_shape_for_augmented(chips, &augmented);
+                let want =
+                    select_shape_for_augmented(chips, &augmented).unwrap_or_else(|e| panic!("{e}"));
                 assert_eq!(
                     shape.inner, want.inner,
                     "the counter-derived shape differs from the augmented-record shape"
@@ -353,18 +364,18 @@ pub fn prepare_chunk_shaped(
                 t2.elapsed().as_micros()
             );
         }
-        PreparedChunk {
+        Ok(PreparedChunk {
             record,
             prepared,
             cost,
-        }
+        })
     }
     // The CPU build leaves the shape to `build_ctx`, which picks it from the augmented record
     // it builds anyway.
     #[cfg(not(feature = "cuda"))]
     {
         let _ = (chips, bucket);
-        PreparedChunk { record, cost: 0 }
+        Ok(PreparedChunk { record, cost: 0 })
     }
 }
 
@@ -424,6 +435,9 @@ pub mod air_id {
     /// after the poseidon2 precompile, in the order the three came back.
     pub const ED_ADD: usize = 48;
     pub const ED_DECOMPRESS: usize = 49;
+    /// The loads and stores whose address is not a multiple of their width; appended last
+    /// for the same reason.
+    pub const MEM_UNALIGNED: usize = 50;
 }
 
 /// Maps brevis chip `name()` → AIR id for the core set. Chips not listed are excluded from both
@@ -481,6 +495,7 @@ const INCLUDED: &[(&str, usize)] = &[
     ("Poseidon2Permute", air_id::POSEIDON2_PERMUTE),
     ("EdAddAssign", air_id::ED_ADD),
     ("EdDecompress", air_id::ED_DECOMPRESS),
+    ("MemoryUnaligned", air_id::MEM_UNALIGNED),
 ];
 
 pub fn air_id_for(name: &str) -> Option<usize> {
@@ -799,6 +814,7 @@ pub fn mle_riscv_air_refs(program: Arc<Program>, bucket: bool) -> Vec<AirRef<Sc>
         Arc::new(FieldSpecificPrecompilePoseidon2Chip::<Kb>::default()), // 47
         Arc::new(EdAddAssignChip::<Kb, Ed25519>::default()),            // 48
         Arc::new(EdDecompressChip::<Kb, Ed25519Parameters>::default()), // 49
+        Arc::new(MemoryUnalignedChip::<Kb>::default()),                 // 50
     ]
 }
 
@@ -1152,29 +1168,35 @@ pub fn augmented_record(
     let record = record.clone();
     if ledger::in_prove_slot() {
         ledger::prove_stage("prove.augment.clone", t_clone, || {
-            let history = record.history.as_ref();
-            json!({
-                "record_bytes": record_bytes(&record),
-                "trace_source": "history",
-                "branch_compares": "indices",
-                "history_bytes": history.map(ExecutionHistory::bytes),
-                "history_steps": history.map(|history| history.steps.len()),
-                "history_accesses": history.map(|history| history.reads.len() + history.writes.len()),
-                "history_reads": history.map(|history| history.reads.len()),
-                "history_writes": history.map(|history| history.writes.len()),
-                "history_operand_exceptions": history.map(|history| history.operand_exceptions.len()),
-                "history_table_bytes": history.map(|history| {
-                    history
-                        .table_bytes()
-                        .into_iter()
-                        .map(|(table, bytes)| (table.to_string(), json!(bytes)))
-                        .collect::<serde_json::Map<String, serde_json::Value>>()
-                }),
-                "streams": { "add_events": record.add_events.len() },
-            })
+            augment_clone_facts(&record)
         });
     }
     augment_record(chips, record)
+}
+
+/// The `prove.augment.clone` line's facts. `trace_source` is null on a record without a history,
+/// as a deferred record is; `perf/ledger/trace_digest.py` fails a CPU chunk whose line does not
+/// name the history.
+fn augment_clone_facts(record: &EmulationRecord) -> serde_json::Value {
+    let history = record.history.as_ref();
+    json!({
+        "record_bytes": record_bytes(record),
+        "trace_source": history.map(|_| "history"),
+        "history_bytes": history.map(ExecutionHistory::bytes),
+        "history_steps": history.map(|history| history.steps.len()),
+        "history_accesses": history.map(|history| history.reads.len() + history.writes.len()),
+        "history_reads": history.map(|history| history.reads.len()),
+        "history_writes": history.map(|history| history.writes.len()),
+        "history_operand_exceptions": history.map(|history| history.operand_exceptions.len()),
+        "history_table_bytes": history.map(|history| {
+            history
+                .table_bytes()
+                .into_iter()
+                .map(|(table, bytes)| (table.to_string(), json!(bytes)))
+                .collect::<serde_json::Map<String, serde_json::Value>>()
+        }),
+        "streams": { "add_events": record.add_events.len() },
+    })
 }
 
 /// [`augmented_record`] on a record the caller gives up, without the clone.
@@ -1279,7 +1301,8 @@ pub(crate) fn build_ctx_augmented(
     // A record that reached the GPU path already carries the shape `shape_record` chose for it;
     // choose it here otherwise (the CPU path, and the trace-compare probe).
     if record.shape.is_none() {
-        record.shape = Some(select_shape_for_augmented(chips, &record));
+        record.shape =
+            Some(select_shape_for_augmented(chips, &record).unwrap_or_else(|e| panic!("{e}")));
     }
     build_ctx_inner(chips, &record)
 }
@@ -1289,7 +1312,7 @@ pub(crate) fn build_ctx_augmented(
 fn select_shape_for_augmented(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
     record: &EmulationRecord,
-) -> crate::instances::compiler::shapes::riscv_shape::RiscvPadShape {
+) -> Result<crate::instances::compiler::shapes::riscv_shape::RiscvPadShape, CatchAllShape> {
     let t_shape = ledger::ProveMark::now();
     let natural = crate::mle::machine::shape::mle_natural_heights(record);
     shape_of(chips, record, &natural, t_shape)
@@ -1346,13 +1369,34 @@ fn select_shape_from_counter(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
     record: &EmulationRecord,
     counter: &crate::instances::preparer::EventCounter,
-) -> crate::instances::compiler::shapes::riscv_shape::RiscvPadShape {
+) -> Result<crate::instances::compiler::shapes::riscv_shape::RiscvPadShape, CatchAllShape> {
     let t_shape = ledger::ProveMark::now();
     let natural = crate::mle::machine::shape::mle_natural_heights_from_counter(record, counter);
     shape_of(chips, record, &natural, t_shape)
 }
 
-/// Presence from the record, the ladder / enumeration match on `natural`, and the GPU catch-all
+/// A core chunk whose events fit no ladder class, so it selects the catch-all whitelist shape.
+/// That shape pads to m = 31: a 64 GiB GKR leaf buffer no card holds, and hundreds of GB of host
+/// memory on the CPU. Both provers refuse such a chunk rather than run out of memory on it.
+#[derive(Clone, Debug, thiserror::Error)]
+#[error(
+    "chunk {chunk} selects the catch-all whitelist shape (m = 31), which is too large to prove; \
+     natural heights: {natural}"
+)]
+pub struct CatchAllShape {
+    /// The chunk's 1-based index, as the emulator numbers it.
+    pub chunk: usize,
+    /// The chunk's natural heights, `name=rows` per chip.
+    pub natural: String,
+}
+
+/// Whether the catch-all is refused. Always on a GPU build; on the CPU only without
+/// `MLE_FORCE_CATCH_ALL=1`, the switch a gate sets to prove the catch-all on purpose.
+fn refuses_catch_all() -> bool {
+    cfg!(feature = "cuda") || !std::env::var("MLE_FORCE_CATCH_ALL").is_ok_and(|v| v == "1")
+}
+
+/// Presence from the record, the ladder / enumeration match on `natural`, and the catch-all
 /// refusal. `t_shape` is where the caller started deriving `natural`: the `prove.shape` stage
 /// brackets that derivation and the match together, as the host path does.
 fn shape_of(
@@ -1360,7 +1404,7 @@ fn shape_of(
     record: &EmulationRecord,
     natural: &std::collections::BTreeMap<String, usize>,
     t_shape: ledger::ProveMark,
-) -> crate::instances::compiler::shapes::riscv_shape::RiscvPadShape {
+) -> Result<crate::instances::compiler::shapes::riscv_shape::RiscvPadShape, CatchAllShape> {
     let present: Vec<String> = chips
         .iter()
         .filter(|chip| bucketed_presence(chip, record))
@@ -1368,21 +1412,18 @@ fn shape_of(
         .collect();
     let selected =
         crate::mle::machine::shape::select_riscv_shape(&present, natural, record.is_cpu_chunk);
-    // The catch-all core shape pads to m = 31 (a 64 GiB GKR leaf buffer): no 32 GB card holds
-    // it. A GPU build refuses the chunk here, legibly, instead of dying in a device allocation.
-    if cfg!(feature = "cuda")
-        && record.is_cpu_chunk
+    if record.is_cpu_chunk
         && crate::mle::machine::shape::is_core_catch_all(&selected)
+        && refuses_catch_all()
     {
-        panic!(
-            "core chunk selects the catch-all whitelist shape, which no GPU holds (m = 31); \
-             prove this chunk on the CPU path or extend the ladder. natural heights: {}",
-            natural
+        return Err(CatchAllShape {
+            chunk: record.chunk_index(),
+            natural: natural
                 .iter()
                 .map(|(name, rows)| format!("{name}={rows}"))
                 .collect::<Vec<_>>()
-                .join(" ")
-        );
+                .join(" "),
+        });
     }
     if ledger::in_prove_slot() {
         ledger::prove_stage("prove.shape", t_shape, || {
@@ -1393,9 +1434,11 @@ fn shape_of(
             })
         });
     }
-    crate::instances::compiler::shapes::riscv_shape::RiscvPadShape {
-        inner: selected.into_iter().collect(),
-    }
+    Ok(
+        crate::instances::compiler::shapes::riscv_shape::RiscvPadShape {
+            inner: selected.into_iter().collect(),
+        },
+    )
 }
 
 /// Whitelist mode: pin the record's proof shape before it is packaged for the GPU. The device
@@ -1408,7 +1451,20 @@ pub fn shape_record(chips: &[MetaChip<Kb, RiscvChipType<Kb>>], record: &mut Emul
         return;
     }
     let augmented = augmented_record(chips, record);
-    record.shape = Some(select_shape_for_augmented(chips, &augmented));
+    record.shape =
+        Some(select_shape_for_augmented(chips, &augmented).unwrap_or_else(|e| panic!("{e}")));
+}
+
+/// Whitelist mode: refuse a chunk that selects the catch-all shape (see [`CatchAllShape`]),
+/// before anything is proved. A record that already carries a shape passes.
+pub fn check_chunk_shape(
+    chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
+    record: &EmulationRecord,
+) -> Result<(), CatchAllShape> {
+    if record.shape.is_some() {
+        return Ok(());
+    }
+    select_shape_for_augmented(chips, &augmented_record(chips, record)).map(drop)
 }
 
 /// Trace assembly over a (possibly shape-set) record: generate each active chip's main trace
@@ -2287,11 +2343,35 @@ impl RiscvMachine {
         prepare_chunk_shaped(&self.chips, record, self.bucket)
     }
 
+    /// [`try_prepare_chunk_shaped`] with this machine's chips and mode.
+    pub fn try_prepare_chunk_shaped(
+        &self,
+        record: EmulationRecord,
+    ) -> Result<PreparedChunk, CatchAllShape> {
+        try_prepare_chunk_shaped(&self.chips, record, self.bucket)
+    }
+
+    /// Whitelist mode: refuse the first record that selects the catch-all shape (see
+    /// [`check_chunk_shape`]). A no-op with the whitelist off.
+    pub fn check_chunk_shapes(&self, records: &[EmulationRecord]) -> Result<(), CatchAllShape> {
+        if !self.bucket {
+            return Ok(());
+        }
+        records
+            .iter()
+            .try_for_each(|record| check_chunk_shape(&self.chips, record))
+    }
+
     pub fn prove(&self, records: &[EmulationRecord]) -> Result<RiscvProof, ProveRiscvError> {
         let chunk_proofs = par_in_prove_slots::<_, ProveRiscvError>(
             records,
             resolved_concurrency(self.concurrency),
             |idx, record| {
+                // One span per chunk, around its context build and prove: under
+                // `RUST_LOGGER=forest` it is the chunk's proving time, the prover's phases below it.
+                // With chunks proved concurrently, a worker can interleave two chunks' work.
+                let _span = tracing::info_span!("riscv_chunk_prove", chunk = idx).entered();
+                let started = Instant::now();
                 // Only the GPU staging needs the record owned; the CPU build proves it borrowed.
                 // The shape choice is part of the record's prove job, so its stage lands in the
                 // slot too.
@@ -2305,7 +2385,10 @@ impl RiscvMachine {
                     record.public_values.chunk,
                     false,
                 )?;
-                tracing::info!("chunk {idx}: MLE prove OK");
+                tracing::info!(
+                    "chunk {idx}: MLE prove OK ({} ms)",
+                    started.elapsed().as_millis()
+                );
                 Ok(proof)
             },
         )?;
@@ -2704,6 +2787,27 @@ mod tests {
             );
             assert!(report.traces >= report.cpu_chunks, "bucket={bucket}");
         }
+    }
+
+    #[test]
+    fn augment_clone_facts_name_the_history_only_on_a_record_that_carries_one() {
+        let out = emulate_with_opts(fib_program(), &fib_stdin(10), fixed_opts(2048))
+            .expect("split fib emulation");
+        let chunk = out
+            .records
+            .iter()
+            .find(|record| record.is_cpu_chunk)
+            .expect("a CPU chunk");
+        assert!(chunk.history.is_some(), "a CPU chunk without a history");
+        let facts = augment_clone_facts(chunk);
+        assert_eq!(facts["trace_source"], "history");
+        assert!(facts["history_bytes"]
+            .as_u64()
+            .is_some_and(|bytes| bytes > 0));
+
+        let facts = augment_clone_facts(&EmulationRecord::default());
+        assert!(facts["trace_source"].is_null(), "{facts}");
+        assert!(facts["history_bytes"].is_null(), "{facts}");
     }
 
     /// With no CPU chip the CPU chunks reach no trace generation, and the report says so rather
@@ -3166,7 +3270,8 @@ mod tests {
             "GPU-generated chips with no MLE RISC-V air: {unplaceable:?}"
         );
 
-        // `BYTE_CHIP_INDEX`, `ECALL_CHIP_INDEX` and `HOST_TRACEGEN_PRECOMPILE_INDICES`.
+        // `BYTE_CHIP_INDEX`, `ECALL_CHIP_INDEX`, `HOST_TRACEGEN_PRECOMPILE_INDICES` and
+        // `MEMORY_UNALIGNED_CHIP_INDEX`.
         assert_eq!(
             listed[45..],
             [
@@ -3174,7 +3279,8 @@ mod tests {
                 "Ecall",
                 "Poseidon2Permute",
                 "EdAddAssign",
-                "EdDecompress"
+                "EdDecompress",
+                "MemoryUnaligned"
             ],
             "the orchestrator's positional tail moved"
         );
@@ -3210,5 +3316,42 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A core chunk past every ladder class selects the catch-all and is refused, naming the
+    /// chunk; one inside the ladder takes its class.
+    #[test]
+    fn a_core_chunk_past_the_ladder_is_refused() {
+        use crate::mle::machine::shape::{bucket_log_height, is_core_catch_all};
+        // The switch skips the ladder and, on the CPU, the refusal: nothing to test under it.
+        if std::env::var("MLE_FORCE_CATCH_ALL").is_ok_and(|v| v == "1") {
+            return;
+        }
+        let chips = RiscvChipType::<Kb>::all_chips();
+        let mut record = EmulationRecord {
+            is_cpu_chunk: true,
+            ..Default::default()
+        };
+        record.public_values.chunk = 3;
+
+        let small = BTreeMap::from([("Cpu".to_string(), 1 << 10)]);
+        let shape = shape_of(&chips, &record, &small, ledger::ProveMark::now())
+            .expect("a small chunk takes a ladder class");
+        let shape: Vec<_> = shape.inner.into_iter().collect();
+        assert!(!is_core_catch_all(&shape));
+
+        // Every air of the chunk at its catch-all height: no ladder class holds that.
+        let full: BTreeMap<String, usize> = shape
+            .iter()
+            .map(|(name, _)| (name.clone(), 1 << bucket_log_height(name, true)))
+            .collect();
+        let refused = shape_of(&chips, &record, &full, ledger::ProveMark::now())
+            .expect_err("the catch-all is refused");
+        assert_eq!(refused.chunk, 3);
+        assert!(
+            refused.natural.contains(&format!("Cpu={}", 1 << 23)),
+            "{refused}"
+        );
+        assert!(refused.to_string().contains("catch-all"), "{refused}");
     }
 }

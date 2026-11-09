@@ -29,6 +29,7 @@ use crate::runtime::error::{check, CudaError};
 #[link(name = "cudart")]
 extern "C" {
     fn cudaDeviceSynchronize() -> i32;
+    fn cudaGetLastError() -> i32;
     fn cudaEventCreate(out: *mut cudaEvent_t) -> i32;
     fn cudaEventDestroy(ev: cudaEvent_t) -> i32;
     fn cudaEventElapsedTime(out_ms: *mut f32, from: cudaEvent_t, to: cudaEvent_t) -> i32;
@@ -45,6 +46,13 @@ extern "C" {
 pub fn device_synchronize() -> Result<(), CudaError> {
     // SAFETY: `cudaDeviceSynchronize` has no preconditions beyond a live CUDA context.
     check(unsafe { cudaDeviceSynchronize() })
+}
+
+/// The calling thread's last CUDA error on the bound device, which this clears (a sticky error
+/// stays and returns again).
+pub fn take_last_error() -> Result<(), CudaError> {
+    // SAFETY: `cudaGetLastError` has no preconditions.
+    check(unsafe { cudaGetLastError() })
 }
 
 #[allow(non_camel_case_types)]

@@ -50,6 +50,11 @@ pub enum ProveError {
     #[error("{0}")]
     InconsistentOptions(String),
 
+    /// A chunk of the run fits no whitelist shape but the catch-all, which is too large to prove.
+    /// Reported instead of running out of memory; on the CPU path, before anything is proved.
+    #[error(transparent)]
+    CatchAllShape(#[from] pico_vm::mle::machine::riscv::CatchAllShape),
+
     /// [`crate::ProverBuilder::aot`] was given the bootstrap stub, which has no compiled code.
     #[cfg(feature = "aot")]
     #[error(
@@ -161,13 +166,19 @@ pub enum ProveError {
     #[error("GPU proving failed: {0}")]
     Gpu(String),
 
-    /// A previous GPU prove failed in this process other than by its guest (a device error, a
-    /// failed pipeline stage) and may have left the pipeline mid-run; restart the process to prove
-    /// on the GPU again. A guest whose emulation fails is reported as on the CPU path, and does not
-    /// poison the process.
+    /// A previous GPU prove failed in this process other than by its guest or a card running out
+    /// of memory (a device error, a failed pipeline stage); restart the process to prove on the GPU
+    /// again. A guest whose emulation fails is reported as on the CPU path, and does not poison the
+    /// process.
     #[cfg(feature = "cuda")]
     #[error("a previous GPU prove failed in this process; restart the process to prove again")]
     GpuPoisoned,
+
+    /// A card ran out of memory proving this run. The run was drained, and the process can prove
+    /// again: a smaller guest, or a larger card, proves.
+    #[cfg(feature = "cuda")]
+    #[error("a card ran out of memory: {0}")]
+    GpuOutOfMemory(String),
 
     /// The container was written by a different container format.
     #[error("proof artifact format version mismatch: expected {expected}, file claims {found}")]
@@ -267,6 +278,10 @@ pub enum ProveError {
     #[error("only a Combine root exports as a v3 envelope; this proof stops at {phase:?}")]
     NotARootProof { phase: Phase },
 
+    /// [`crate::Proof::export_compress_v4`] on a proof that does not stop at [`Phase::Compress`].
+    #[error("only a Compress proof exports as a compress envelope; this proof stops at {phase:?}")]
+    NotACompressProof { phase: Phase },
+
     /// The phase has no verification path that works from a container alone, in any configuration.
     #[error("a {phase:?} proof cannot be verified from a file in a fresh process")]
     UnverifiableInFreshProcess { phase: Phase },
@@ -321,17 +336,44 @@ impl ProveError {
         Self::Emulate(error)
     }
 
+    /// The guest's exit code when the run ended abnormally (`EmulationError::AbnormalTermination`):
+    /// a non-zero exit, a panic, or a fault the emulator found. `None` for every other error.
+    pub fn exit_code(&self) -> Option<u32> {
+        match self {
+            Self::Emulate(EmulateError::Emulation(e)) => e.exit_code(),
+            _ => None,
+        }
+    }
+
+    /// Whether the guest itself failed: it terminated abnormally ([`Self::exit_code`]), or made a
+    /// syscall or a hint read it may not. A limit, missing input or a host failure is not one.
+    pub fn is_guest_fault(&self) -> bool {
+        match self {
+            Self::UnsupportedSyscall { .. } => true,
+            Self::Emulate(EmulateError::Emulation(e)) => matches!(
+                e,
+                EmulationError::AbnormalTermination(_)
+                    | EmulationError::InvalidHintRead(_)
+                    | EmulationError::InvalidSyscallUsage(_)
+                    | EmulationError::UnconstrainedEnd
+            ),
+            _ => false,
+        }
+    }
+
     /// Lift a GPU pipeline failure, keeping a poisoned process distinguishable.
     #[cfg(feature = "cuda")]
     pub(crate) fn from_embed(error: distributed_vm::mle::embed::EmbedError) -> Self {
         use distributed_vm::mle::{embed::EmbedError, GuestFailure};
         match error {
             EmbedError::Poisoned => Self::GpuPoisoned,
+            EmbedError::OutOfMemory(message) => Self::GpuOutOfMemory(message),
             // The guest's own failure, reported as the CPU path reports it.
             EmbedError::Guest(GuestFailure::Emulation(e)) => {
                 Self::from_emulate(pico_vm::mle::machine::riscv::EmulateError::Emulation(e))
             }
             EmbedError::Guest(GuestFailure::Panicked(message)) => Self::EmulationAborted(message),
+            EmbedError::Guest(GuestFailure::CatchAllShape(e)) => Self::CatchAllShape(e),
             other => Self::Gpu(other.to_string()),
         }
     }
@@ -403,5 +445,37 @@ mod tests {
             pico_vm::emulator::riscv::emulator::AbnormalTermination::halt(1, 0).into(),
         ));
         assert!(matches!(lifted, ProveError::Emulate(_)), "got {lifted}");
+    }
+
+    /// A guest that fails is told apart from a run that could not be executed.
+    #[test]
+    fn a_guest_fault_is_told_from_a_host_failure() {
+        let emulation = |e| ProveError::Emulate(EmulateError::Emulation(e));
+        for (error, fault) in [
+            (
+                ProveError::UnsupportedSyscall {
+                    code: 0x7ff,
+                    name: "unrecognised".into(),
+                },
+                true,
+            ),
+            (
+                emulation(EmulationError::InvalidHintRead("ptr".into())),
+                true,
+            ),
+            (emulation(EmulationError::UnconstrainedEnd), true),
+            (
+                emulation(EmulationError::InsufficientInput {
+                    stream_ptr: 0,
+                    stream_len: 0,
+                }),
+                false,
+            ),
+            (emulation(EmulationError::ExceededCycleLimit(1)), false),
+            (ProveError::InvalidElf("not one".into()), false),
+        ] {
+            assert_eq!(error.is_guest_fault(), fault, "{error}");
+            assert_eq!(error.exit_code(), None, "{error}");
+        }
     }
 }

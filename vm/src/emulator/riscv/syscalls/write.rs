@@ -26,7 +26,7 @@ impl Syscall for WriteSyscall {
     /// - Update the public value stream.
     ///
     /// If fd = 4:
-    /// - Update the input stream.
+    /// - Put a hint into the input stream, as its next element.
     ///
     /// If the fd matches a hook in the hook registry, invoke the hook.
     ///
@@ -40,10 +40,14 @@ impl Syscall for WriteSyscall {
         arg2: RvValue,
     ) -> Option<RvValue> {
         let a2 = Register::X12;
-        let rt = &mut ctx.rt;
         let fd = u32::try_from(arg1).unwrap_or_else(|_| panic!("write fd overflow: {}", arg1));
         let write_buf = arg2;
-        let nbytes = Self::decode_len_usize(rt.register(a2));
+        let nbytes = Self::decode_len_usize(ctx.rt.register(a2));
+        // An empty write reads nothing, so its pointer may dangle, as an empty Rust slice's does.
+        if nbytes > 0 && !ctx.allowed(write_buf, nbytes as u64, false) {
+            return None;
+        }
+        let rt = &mut ctx.rt;
         // Read nbytes from memory starting at write_buf.
         let bytes = (0..nbytes)
             .map(|i| {
@@ -60,7 +64,10 @@ impl Syscall for WriteSyscall {
         } else if fd == 3 {
             rt.state.public_values_stream.extend_from_slice(slice);
         } else if fd == 4 {
-            rt.state.input_stream.push(slice.to_vec());
+            // A hint is read next, ahead of any input the guest has not read yet; hints written
+            // before one read come out newest first.
+            let ptr = rt.state.input_stream_ptr;
+            rt.state.input_stream.insert(ptr, slice.to_vec());
         } else if let Some(hook) = rt.hook_map.get(&fd) {
             let result = hook(rt, slice);
             let ptr = rt.state.input_stream_ptr;

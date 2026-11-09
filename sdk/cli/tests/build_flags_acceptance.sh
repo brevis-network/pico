@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Real guest builds through `cargo pico build`: the cargo flags it forwards, `--bin` selection, and
-# its errors. It needs the pico guest toolchain (`cargo pico install`), which no CI job installs, so
-# it is run by hand rather than as a cargo test.
+# its errors. It needs the pico guest toolchain (`cargo pico install`), which only the C guest CI
+# job installs, so it is run by hand rather than as a cargo test.
 #
 # The fixture guest is written to a temporary directory rather than committed: a guest package
 # needs its own `[workspace]`, which would make it another workspace root for the fmt loop and the

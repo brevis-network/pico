@@ -4,7 +4,8 @@
 //! --test-threads=1 --nocapture tests::gpu`.
 
 use super::fixture::{
-    assert_is_fib_output, run_child, shipped_whitelist, FIB_ELF, N, OTHER_ELF, POSEIDON2_ELF,
+    assert_is_fib_output, run_child, run_child_within, shipped_whitelist, FIB_ELF, N, OTHER_ELF,
+    POSEIDON2_ELF,
 };
 use crate::{prover::WHITELIST_LOG_STACKED_HEIGHT, Phase, ProveError, Prover, Stdin};
 
@@ -485,4 +486,271 @@ fn a_failing_guest_leaves_the_process_able_to_prove() {
         .expect("fib after another guest failed");
     assert_is_fib_output(proof.committed().as_bytes(), N);
     println!("{GUEST_MARKER}");
+}
+
+const OOM_CHILD_VAR: &str = "PICO_PROVER_GPU_OOM_CHILD";
+const OOM_MARKER: &str = "[gpu] a run that ran out of device memory left the process able to prove";
+
+/// A card running out of memory in any stage drains the run and leaves the process able to prove:
+/// no history slot held, and the next prove works. The failure is injected
+/// (`MLE_INJECT_FAILURE`), once per stage and once more by message alone, each in a child
+/// process; `keygen` fails a recursion
+/// pk-cache miss inside the cache's lock. A panicking emulation is the guest's own failure, as
+/// before. Then several proves in a row. Named to sort before the tests
+/// that hold the card's memory in this process, which the children would run out of for real.
+#[test]
+#[ignore = "needs a GPU"]
+fn a_run_that_runs_out_of_device_memory_leaves_the_process_able_to_prove() {
+    use pico_vm::emulator::riscv::record_slots::slots_outstanding;
+
+    let Ok(stage) = std::env::var(OOM_CHILD_VAR) else {
+        // `oom` is told apart by the allocator's mark on the thread; `oom-text`, the allocator's
+        // message without the mark, exercises the classifier's fallback once.
+        let plans = ["prove", "convert", "combine", "keygen", "emulate"]
+            .map(|stage| (stage, format!("oom:{stage}:1")))
+            .into_iter()
+            .chain([("prove", "oom-text:prove:1".to_string())]);
+        for (stage, plan) in plans {
+            run_child(
+                "tests::gpu::a_run_that_runs_out_of_device_memory_leaves_the_process_able_to_prove",
+                OOM_MARKER,
+                &[
+                    (OOM_CHILD_VAR, stage.to_string()),
+                    ("MLE_INJECT_FAILURE", plan),
+                ],
+            );
+        }
+        return;
+    };
+
+    let pools = || pico_vm::mle::cuda_mle::runtime::memory_manager::pool_bytes_for(0).used_total();
+    let before = pools();
+    let mut fib = whitelist_prover(FIB_ELF);
+    let err = fib
+        .prove(Stdin::from(&N))
+        .expect_err("an injected out-of-memory");
+    // The first prove built the resident machines, which outlive the failed run: more than the
+    // drain's margin, so a drain held to the cards as they were before them would poison.
+    let resident = pools().saturating_sub(before);
+    assert!(
+        resident > 256 << 20,
+        "the resident machines hold only {resident} bytes; this guest no longer shows a drain \
+         held to before them"
+    );
+    if stage == "emulate" {
+        assert!(matches!(err, ProveError::EmulationAborted(_)), "got {err}");
+    } else {
+        assert!(matches!(err, ProveError::GpuOutOfMemory(_)), "got {err}");
+    }
+    assert!(
+        matches!(slots_outstanding(), None | Some(0)),
+        "{:?} history slots still held",
+        slots_outstanding()
+    );
+    // Several in a row: whatever the failed run left would show on a later one.
+    for _ in 0..3 {
+        let proof = fib
+            .prove(Stdin::from(&N))
+            .expect("fib after running out of memory");
+        assert_is_fib_output(proof.committed().as_bytes(), N);
+    }
+    println!("{OOM_MARKER}");
+}
+
+const STAGE_PANIC_CHILD_VAR: &str = "PICO_PROVER_GPU_STAGE_PANIC_CHILD";
+const STAGE_PANIC_MARKER: &str = "[gpu] a stage's own panic poisoned the process";
+
+/// A stage that panics other than by running out of memory still poisons the process: the run
+/// drains and fails, and the next prove is refused.
+#[test]
+#[ignore = "needs a GPU"]
+fn a_stage_panic_still_poisons_the_process() {
+    if std::env::var(STAGE_PANIC_CHILD_VAR).is_err() {
+        run_child(
+            "tests::gpu::a_stage_panic_still_poisons_the_process",
+            STAGE_PANIC_MARKER,
+            &[
+                (STAGE_PANIC_CHILD_VAR, "1".to_string()),
+                ("MLE_INJECT_FAILURE", "panic:prove:1".to_string()),
+            ],
+        );
+        return;
+    }
+
+    let mut fib = whitelist_prover(FIB_ELF);
+    let first = fib.prove(Stdin::from(&N)).expect_err("an injected panic");
+    assert!(matches!(first, ProveError::Gpu(_)), "got {first}");
+    let second = fib.prove(Stdin::from(&N)).expect_err("a poisoned process");
+    assert!(matches!(second, ProveError::GpuPoisoned), "got {second}");
+    println!("{STAGE_PANIC_MARKER}");
+}
+
+const LATE_REFUSAL_CHILD_VAR: &str = "PICO_PROVER_GPU_LATE_REFUSAL_CHILD";
+const LATE_REFUSAL_MARKER: &str = "[gpu] a late refusal drained with its history slots full";
+
+/// A chunk refused late in a long run, with every history slot held by prepared chunks, drains
+/// rather than hangs, and the next prove works. Few slots and small chunks, so the slots fill.
+#[test]
+#[ignore = "needs a GPU"]
+fn a_late_refusal_drains_with_its_slots_full() {
+    use std::num::NonZeroUsize;
+
+    use pico_vm::emulator::riscv::record_slots::slots_outstanding;
+
+    use super::fixture::SMALL_CHUNK;
+
+    const SLOTS: usize = 4;
+    // Long enough for several times the slots in chunks, and the refused one late among them.
+    const LONG_N: u32 = 20_000;
+    const REFUSED: u32 = 3 * SLOTS as u32;
+    let builder = || {
+        let (map, root) = shipped_whitelist();
+        Prover::builder(FIB_ELF)
+            .log_stacked_height(WHITELIST_LOG_STACKED_HEIGHT)
+            .verify_keys(true)
+            .vk_map(map)
+            .trusted_vk_root(root)
+            .chunk_size(SMALL_CHUNK)
+            .gpu_event_pool_size(NonZeroUsize::new(SLOTS).unwrap())
+    };
+    // Nothing on the card in this process: the children after it need all of it.
+    if std::env::var(LATE_REFUSAL_CHILD_VAR).is_err() {
+        run_child_within(
+            "tests::gpu::a_late_refusal_drains_with_its_slots_full",
+            LATE_REFUSAL_MARKER,
+            &[
+                (LATE_REFUSAL_CHILD_VAR, "1".to_string()),
+                ("MLE_INJECT_FAILURE", format!("refuse:{REFUSED}")),
+            ],
+            std::time::Duration::from_secs(600),
+        );
+        return;
+    }
+
+    let chunks = builder()
+        .execute_chunked(Stdin::from(&LONG_N))
+        .expect("execute")
+        .chunks;
+    assert!(
+        chunks > REFUSED,
+        "{chunks} chunks end before the refused one"
+    );
+    let mut fib = builder().build().expect("whitelist prover");
+    let err = fib
+        .prove(Stdin::from(&LONG_N))
+        .expect_err("a refused chunk");
+    assert!(matches!(err, ProveError::CatchAllShape(_)), "got {err}");
+    assert!(
+        matches!(slots_outstanding(), None | Some(0)),
+        "{:?} history slots still held",
+        slots_outstanding()
+    );
+    let proof = fib
+        .prove(Stdin::from(&LONG_N))
+        .expect("fib after a late refusal");
+    assert_is_fib_output(proof.committed().as_bytes(), LONG_N);
+    println!("{LATE_REFUSAL_MARKER}");
+}
+
+const SLOW_FINALIZE_CHILD_VAR: &str = "PICO_PROVER_GPU_SLOW_FINALIZE_CHILD";
+const SLOW_FINALIZE_MARKER: &str = "[gpu] a late emulation finalize still proved the root";
+
+/// The tree can collapse before the emulation is finalized, when its teardown is slow (a large
+/// guest's memory): the node over every chunk waits for the finalize and is proved as the root,
+/// rather than as an inner node that leaves the run without one.
+#[test]
+#[ignore = "needs a GPU"]
+fn a_late_emulation_finalize_still_proves_the_root() {
+    if std::env::var(SLOW_FINALIZE_CHILD_VAR).is_err() {
+        run_child(
+            "tests::gpu::a_late_emulation_finalize_still_proves_the_root",
+            SLOW_FINALIZE_MARKER,
+            &[
+                (SLOW_FINALIZE_CHILD_VAR, "1".to_string()),
+                ("MLE_INJECT_FAILURE", "slow-finalize:10000".to_string()),
+            ],
+        );
+        return;
+    }
+
+    // Small chunks, so the tree has execution chunks to collapse over.
+    let builder = || {
+        let (map, root) = shipped_whitelist();
+        Prover::builder(FIB_ELF)
+            .log_stacked_height(WHITELIST_LOG_STACKED_HEIGHT)
+            .verify_keys(true)
+            .vk_map(map)
+            .trusted_vk_root(root)
+            .chunk_size(super::fixture::SMALL_CHUNK)
+    };
+    let chunks = builder()
+        .execute_chunked(Stdin::from(&N))
+        .expect("execute")
+        .chunks;
+    assert!(chunks >= 2, "{chunks} chunk(s): no combine node to hold");
+    let mut fib = builder().build().expect("whitelist prover");
+    for _ in 0..2 {
+        let proof = fib.prove(Stdin::from(&N)).expect("fib");
+        assert_is_fib_output(proof.committed().as_bytes(), N);
+    }
+    println!("{SLOW_FINALIZE_MARKER}");
+}
+
+const DEFERRED_CHILD_VAR: &str = "PICO_PROVER_GPU_DEFERRED_CHILD";
+const DEFERRED_MARKER: &str = "[gpu] the emulation parked on the deferred bound and still proved";
+/// Rounds enough for the guest's deferred records to outrun a bound of one, in chunks of
+/// [`DEFERRED_CHUNK`] cycles, small enough for whitelist shapes.
+const DEFERRED_ROUNDS: u32 = 500;
+const DEFERRED_CHUNK: u32 = 1 << 20;
+
+/// With the deferred-record bound at one, the emulation parks on it and the run still proves; and
+/// a run that fails while it is parked drains instead of hanging, and the next prove works.
+/// Named to sort before the tests that hold the card's memory in this process.
+#[test]
+#[ignore = "needs a GPU"]
+fn a_deferred_bound_of_one_parks_the_emulation_and_still_proves() {
+    if std::env::var(DEFERRED_CHILD_VAR).is_err() {
+        for (child, failure) in [("prove", None), ("fail", Some("oom:prove:2"))] {
+            let mut envs = vec![
+                (DEFERRED_CHILD_VAR, child.to_string()),
+                ("MLE_DEFERRED_RECORDS", "1".to_string()),
+            ];
+            if let Some(plan) = failure {
+                envs.push(("MLE_INJECT_FAILURE", plan.to_string()));
+            }
+            run_child_within(
+                "tests::gpu::a_deferred_bound_of_one_parks_the_emulation_and_still_proves",
+                DEFERRED_MARKER,
+                &envs,
+                std::time::Duration::from_secs(900),
+            );
+        }
+        return;
+    }
+
+    let (map, root) = shipped_whitelist();
+    let mut guest = Prover::builder(POSEIDON2_ELF)
+        .log_stacked_height(WHITELIST_LOG_STACKED_HEIGHT)
+        .verify_keys(true)
+        .vk_map(map)
+        .trusted_vk_root(root)
+        .chunk_size(DEFERRED_CHUNK)
+        .build()
+        .expect("whitelist prover");
+    if std::env::var(DEFERRED_CHILD_VAR).as_deref() == Ok("fail") {
+        let err = guest
+            .prove(Stdin::from(&DEFERRED_ROUNDS))
+            .expect_err("an injected out-of-memory");
+        assert!(matches!(err, ProveError::GpuOutOfMemory(_)), "got {err}");
+    }
+    guest
+        .prove(Stdin::from(&DEFERRED_ROUNDS))
+        .expect("poseidon2 under a deferred bound of one");
+    let (peak, parked) = distributed_vm::mle::last_run_deferred_records();
+    println!("[gpu] deferred records: at most {peak} waiting, parked {parked:?}");
+    assert!(
+        peak == 1 && !parked.is_zero(),
+        "the emulation never parked: {peak} waiting, parked {parked:?}"
+    );
+    println!("{DEFERRED_MARKER}");
 }

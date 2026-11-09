@@ -107,7 +107,7 @@ pub struct ArenaStats {
     /// Takes that found no free slot or had to wait for their turn, and how long they waited.
     pub blocked_takes: u64,
     pub blocked: Duration,
-    /// The most slots held at once.
+    /// The most slots held at once, since pinning or the last [`HistoryArena::take_max_in_use`].
     pub max_in_use: usize,
     /// Per table, in [`Table::ALL`] order, the histories that spilled it.
     pub spills: [u64; TABLE_COUNT],
@@ -227,9 +227,10 @@ impl HistoryArena {
         }
         self.counters.acquisitions.fetch_add(1, Ordering::Relaxed);
         let in_use = self.counters.in_use.fetch_add(1, Ordering::Relaxed) + 1;
+        // Release: a `take_max_in_use` that reads this peak then reads this slot as held.
         self.counters
             .max_in_use
-            .fetch_max(in_use, Ordering::Relaxed);
+            .fetch_max(in_use, Ordering::Release);
         Some(in_slot(
             chunk,
             slot,
@@ -286,6 +287,20 @@ impl HistoryArena {
             list.try_extend_from_slice(rows)?;
         }
         Ok(filled)
+    }
+
+    /// The most slots held at once since the previous call, or since pinning; the peak then
+    /// restarts from the slots held now. Exact only with no take in flight: one still raising the
+    /// peak counts towards the next call.
+    pub fn take_max_in_use(&self) -> usize {
+        // Cleared before `in_use` is read, never after: a take in between raises the new peak
+        // itself, and writing back an earlier reading would undo it.
+        let peak = self.counters.max_in_use.swap(0, Ordering::Acquire);
+        let held_now = self.counters.in_use.load(Ordering::Relaxed);
+        self.counters
+            .max_in_use
+            .fetch_max(held_now, Ordering::Relaxed);
+        peak.max(held_now)
     }
 
     #[must_use]
@@ -576,6 +591,9 @@ fn in_slot(
         },
         operand_exceptions: region(Table::OperandExceptions).rows(policy, &lease),
         syscalls: region(Table::Syscalls).rows(policy, &lease),
+        // The misaligned accesses: at most `1 << MLE_MEMORY_UNALIGNED_LOG_HEIGHT` a chunk,
+        // read on the host alone, so on the heap rather than in a region of the slot.
+        unaligned: Rows::new(),
     }
 }
 

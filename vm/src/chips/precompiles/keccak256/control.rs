@@ -15,6 +15,8 @@ use super::{
     KeccakControlChip, KECCAK_STATE_BUS_INPUT_TAG, KECCAK_STATE_BUS_OUTPUT_TAG, STATE_NUM_WORDS,
 };
 #[cfg(feature = "cuda")]
+use crate::chips::gadgets::code_range::{fill_on_device, NUM_CODE_RANGE_COLS};
+#[cfg(feature = "cuda")]
 use crate::mle::spans::device;
 use crate::{
     chips::{
@@ -22,7 +24,9 @@ use crate::{
             byte::event::ByteRecordBehavior,
             riscv_memory::read_write::columns::{MemoryCols, MemoryReadCols, MemoryWriteCols},
         },
-        gadgets::{addr_add::AddrAddGadget, syscall_addr::SyscallAddrGadget},
+        gadgets::{
+            addr_add::AddrAddGadget, code_range::CodeRangeCols, syscall_addr::SyscallAddrGadget,
+        },
         precompiles::checked_u64_to_u32,
         utils::pad_rows_fixed,
     },
@@ -51,7 +55,7 @@ use crate::{
     instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::chip::GpuChipBehavior,
 };
-use core::borrow::Borrow;
+use core::{borrow::Borrow, ops::Range};
 #[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
@@ -92,6 +96,9 @@ pub struct KeccakControlCols<T> {
     /// The post-permutation state, written at `clk + 1`.
     pub state_write: [MemoryWriteCols<T>; STATE_NUM_WORDS],
     pub is_real: T,
+
+    /// The permuted state is written back over the input, which may not lie on the program's code.
+    pub code_range: CodeRangeCols<T>,
 }
 
 impl<F: PrimeField32> BaseAir<F> for KeccakControlChip<F> {
@@ -111,6 +118,7 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakControlChip<F> {
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
         let rows = vec![];
 
+        let code = input.program.code();
         let mut wrapped_rows = Some(rows);
         for (_, event) in input.get_precompile_events(SyscallCode::KECCAK_PERMUTE) {
             let event = if let PrecompileEvent::KeccakPermute(event) = event {
@@ -118,7 +126,7 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakControlChip<F> {
             } else {
                 unreachable!()
             };
-            self.event_to_row(event, &mut wrapped_rows, &mut vec![]);
+            self.event_to_row(event, &code, &mut wrapped_rows, &mut vec![]);
         }
 
         let mut rows = wrapped_rows.unwrap();
@@ -146,13 +154,14 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakControlChip<F> {
             })
             .collect();
 
+        let code = input.program.code();
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
         let blu_batches = events
             .par_chunks(chunk_size)
             .flat_map(|events| {
                 let mut blu = vec![];
                 events.iter().for_each(|event| {
-                    self.event_to_row(event, &mut None, &mut blu);
+                    self.event_to_row(event, &code, &mut None, &mut blu);
                 });
                 blu
             })
@@ -241,6 +250,24 @@ impl<F: PrimeField32> GpuChipBehavior<F> for KeccakControlChip<F> {
             );
         }
 
+        // The code range, the last columns of the chip's row, which the kernel leaves zero.
+        // The state is written back over the input.
+        let writes: Vec<u64> = events
+            .iter()
+            .map(|event| u64::from(event.state_addr))
+            .collect();
+        fill_on_device(
+            &mut d_trace,
+            num_cols_per_row,
+            num_cols_per_row - NUM_CODE_RANGE_COLS,
+            &writes,
+            u64::from(STATE_NUM_BYTES),
+            &input.program.code(),
+            d_byte_trace,
+            mem_pool,
+            stream,
+        );
+
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
         device::launched(kernels, stream);
@@ -255,11 +282,13 @@ impl<F: PrimeField32> GpuChipBehavior<F> for KeccakControlChip<F> {
 
 impl<F: PrimeField32> KeccakControlChip<F> {
     /// One row per event. Byte lookups: the two address gadgets (once per event, not once per
-    /// round as the old in-AIR gadgets did) and the 50 memory-access timestamp checks; none for
-    /// the state limbs (see the module doc). Mirrored by `keccak_control.cuh` on the GPU.
+    /// round as the old in-AIR gadgets did), the 50 memory-access timestamp checks and the
+    /// code range's two distance limbs; none for the state limbs (see the module doc).
+    /// Mirrored by `keccak_control.cuh` on the GPU.
     fn event_to_row(
         &self,
         event: &KeccakPermuteEvent,
+        code: &Range<u64>,
         rows: &mut Option<Vec<[F; NUM_KECCAK_CONTROL_COLS]>>,
         blu: &mut impl ByteRecordBehavior,
     ) {
@@ -270,6 +299,8 @@ impl<F: PrimeField32> KeccakControlChip<F> {
         cols.clk = F::from_u32(checked_u64_to_u32(event.clk, "keccak clk"));
         cols.state_addr
             .populate(blu, event.state_addr, u64::from(STATE_NUM_BYTES));
+        cols.code_range
+            .populate(event.state_addr, u64::from(STATE_NUM_BYTES), code, blu);
         for i in 0..STATE_NUM_WORDS {
             cols.state_addrs[i].populate(blu, event.state_addr, 8 * i as u64);
             cols.state_read[i].populate(event.state_read_records[i], blu);
@@ -299,6 +330,15 @@ where
             builder,
             STATE_NUM_BYTES,
             local.state_addr,
+            local.is_real.into(),
+        );
+        // The state is written back, so it may not lie on the program's code. The third
+        // limb is zero at any address the finalize check admits.
+        CodeRangeCols::<CB::F>::eval(
+            builder,
+            &local.code_range,
+            [state_addr[0].into(), state_addr[1].into()],
+            CB::Expr::from_u32(STATE_NUM_BYTES),
             local.is_real.into(),
         );
 

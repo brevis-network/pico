@@ -1,7 +1,6 @@
-use super::AotEmulatorCore;
+use super::{types::is_present, AotEmulatorCore};
 use hashbrown::HashMap;
 use pico_vm::{
-    compiler::addr::fits_pc,
     emulator::{
         opts::EmulatorOpts,
         riscv::{
@@ -10,7 +9,7 @@ use pico_vm::{
                 Memory, RecvTimeoutError, GLOBAL_MEMORY_POOL, GLOBAL_MEMORY_RECYCLER, POOL_WAIT,
             },
             riscv_emulator::EmulationError,
-            state::{RiscvEmulationState, RuntimeRegisterRecord},
+            state::RiscvEmulationState,
         },
     },
     machine::report::EmulationReport,
@@ -43,23 +42,19 @@ impl AotEmulatorCore {
         snapshot.public_values_stream = self.public_values_stream.clone();
     }
 
+    /// Only `HALT` sets the pc to 0: a jump there, or anywhere outside the program, fails where
+    /// it is taken (`check_jump_target`), and a fall-through past the last instruction fails at
+    /// the fetch, as in the interpreter.
     #[inline(always)]
     pub fn is_program_done(&self) -> bool {
         self.pc == 0
-            || self.pc.wrapping_sub(self.program_pc_base()).wrapping_div(4)
-                >= self.program_len() as u64
     }
 
     /// The interpreter's error for a run that ends here, where it raises it: inside an
-    /// unconstrained block, or at a pc the CPU trace cannot hold.
+    /// unconstrained block.
     pub(crate) fn run_end_error(&self) -> Option<EmulationError> {
-        if self.is_unconstrained_mode() {
-            Some(EmulationError::UnconstrainedEnd)
-        } else if !fits_pc(self.pc) {
-            Some(EmulationError::EndPcBeyondProofAddress(self.pc))
-        } else {
-            None
-        }
+        self.is_unconstrained_mode()
+            .then_some(EmulationError::UnconstrainedEnd)
     }
 
     pub(crate) fn next_state_batch(
@@ -160,6 +155,7 @@ impl AotEmulatorCore {
                 done,
                 cycle_tracker: None,
                 host_cycle_estimator: None,
+                misaligned_accesses: self.misaligned_accesses,
             },
         ))
     }
@@ -186,29 +182,21 @@ impl AotEmulatorCore {
     /// registers touched during the batch. AOT must mirror that contract; untouched live registers
     /// remain in the snapshot, while touched ones are restored to batch-start state.
     fn restore_touched_snapshot_registers(&self, snapshot: &mut RiscvEmulationState) {
-        let regs = &self.batch_start_registers;
-        let reg_present = &self.batch_start_reg_present;
-        let reg_records = &self.batch_start_register_records;
-
-        for i in 0..32 {
-            if self.accessed_regs[i] && reg_present[i] {
-                let old_rec = reg_records[i];
-                snapshot.registers[i] = RuntimeRegisterRecord {
-                    chunk: old_rec.chunk,
-                    timestamp: old_rec.timestamp,
-                    value: regs[i],
-                };
-            }
+        for i in self.restored_registers() {
+            snapshot.registers[i] = self.batch_start_registers[i];
         }
     }
 
     /// The registers [`Self::restore_touched_snapshot_registers`] just restored: the register half of
     /// the segment's prestate.
     fn count_touched_registers(&mut self) {
-        let restored = (0..32)
-            .filter(|&i| self.accessed_regs[i] && self.batch_start_reg_present[i])
-            .count();
+        let restored = self.restored_registers().count();
         self.snapshot_counts.first_touch_registers += restored as u64;
+    }
+
+    /// The registers the batch touched that were present when it began.
+    fn restored_registers(&self) -> impl Iterator<Item = usize> + '_ {
+        (0..32).filter(|&i| self.touched_registers[i] && is_present(&self.batch_start_registers[i]))
     }
 
     /// Build snapshot state header.
@@ -253,7 +241,7 @@ impl AotEmulatorCore {
             current_chunk: self.current_chunk,
             clk: self.clk as u64,
             pc: self.pc,
-            registers: self.runtime_registers(),
+            registers: self.registers.0,
             uninitialized_memory: Memory::default(),
             // Stream fields are filled by `snapshot_stream_state` below; cloning them here
             // is redundant (the clones would be immediately overwritten). Start empty to
@@ -263,26 +251,10 @@ impl AotEmulatorCore {
             public_values_stream: Vec::new(),
             memory,
             syscall_counts: HashMap::default(),
+            misaligned_accesses: self.misaligned_accesses,
         };
         self.snapshot_stream_state(&mut snapshot);
         snapshot
-    }
-
-    /// The register file as the interpreter keeps it: a register never accessed is the zero
-    /// record.
-    pub(crate) fn runtime_registers(&self) -> [RuntimeRegisterRecord; 32] {
-        let mut registers = [RuntimeRegisterRecord::default(); 32];
-        for (idx, present) in self.reg_present.iter().copied().enumerate() {
-            if present {
-                let record = self.register_records[idx];
-                registers[idx] = RuntimeRegisterRecord {
-                    chunk: record.chunk,
-                    timestamp: record.timestamp,
-                    value: self.registers[idx],
-                };
-            }
-        }
-        registers
     }
 
     /// Fill snapshot with memory delta (old values of accessed locations).
@@ -381,7 +353,7 @@ mod tests {
             riscv::{
                 memory::{memory_pool_size, GLOBAL_MEMORY_RECYCLER},
                 record_slots::hold_records_unbounded,
-                riscv_emulator::EmulationError,
+                riscv_emulator::{EmulationError, TerminationReason},
                 state::RiscvEmulationState,
             },
         },
@@ -395,7 +367,7 @@ mod tests {
             vec![
                 Instruction::new(Opcode::ADD, 1, 0, 0, false, false),
                 Instruction::new(Opcode::ADD, 2, 0, 0, false, false),
-                Instruction::new(Opcode::JALR, 0, 0, 0, false, true),
+                Instruction::new(Opcode::ECALL, 5, 10, 11, false, false),
             ],
             0x1000,
             0x1000,
@@ -503,31 +475,26 @@ mod tests {
         })
     }
 
-    /// A jump to a pc the CPU trace cannot hold, crossing a chunk boundary as it ends the batch,
-    /// ends the run there, as the interpreter's error: no record is cut for an end no proof can
-    /// state.
+    /// A jump out of the program, as it crosses a chunk boundary, ends the run abnormally there,
+    /// as in the interpreter: no record is cut for it. The addresses are those the CPU trace
+    /// cannot hold (`1 << 32`, `1 << 48`) and the last one it can (`(1 << 32) - 4`); none is
+    /// an instruction, so all three fail the same way.
     #[test]
-    fn a_run_ending_beyond_the_proof_address_range_is_the_interpreters_error() {
+    fn a_jump_out_of_the_program_ends_the_run_abnormally() {
         hold_records_unbounded();
-        for shift in [32, 48] {
-            for ended in run_ending_at(shift, 0) {
-                assert!(
-                    matches!(
-                        ended,
-                        Err(EmulationError::EndPcBeyondProofAddress(pc)) if pc == 1 << shift
-                    ),
+        for (shift, offset) in [(32, 0), (48, 0), (32, -4)] {
+            let target = (1u64 << shift).wrapping_add(offset as u64);
+            for ended in run_ending_at(shift, offset) {
+                assert_eq!(
+                    ended
+                        .as_ref()
+                        .err()
+                        .and_then(EmulationError::abnormal_termination)
+                        .map(|t| t.reason),
+                    Some(TerminationReason::OutsideProgram { pc: target }),
                     "{ended:?}"
                 );
             }
-        }
-    }
-
-    /// The last pc the CPU trace can hold ends a run as the interpreter's does.
-    #[test]
-    fn a_run_ending_at_the_last_proof_pc_is_no_error() {
-        hold_records_unbounded();
-        for ended in run_ending_at(32, -4) {
-            assert!(ended.is_ok(), "{ended:?}");
         }
     }
 

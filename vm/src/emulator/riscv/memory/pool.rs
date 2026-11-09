@@ -64,6 +64,19 @@ pub fn memory_pool_capacity() -> usize {
 /// under back-pressure never reaches it.
 pub const POOL_WAIT: Duration = Duration::from_secs(600);
 
+static MEMORIES_MADE: AtomicUsize = AtomicUsize::new(0);
+
+/// Memories the pool has made since the process started, replacements included. A reset keeps a
+/// memory's pages, so the pool costs the memories alive, at most this, not [`memory_pool_size`].
+pub fn memories_made() -> usize {
+    MEMORIES_MADE.load(Ordering::Relaxed)
+}
+
+fn make_memory() -> ContiguousRiscvMemory {
+    MEMORIES_MADE.fetch_add(1, Ordering::Relaxed);
+    ContiguousRiscvMemory::new()
+}
+
 pub static GLOBAL_MEMORY_POOL: Lazy<(
     Sender<ContiguousRiscvMemory>,
     Receiver<ContiguousRiscvMemory>,
@@ -80,7 +93,7 @@ pub static GLOBAL_MEMORY_POOL: Lazy<(
     let low_water = memory_pool_low_water();
 
     for _ in 0..eager {
-        let _ = tx.send(ContiguousRiscvMemory::new());
+        let _ = tx.send(make_memory());
     }
 
     if pool_size > eager {
@@ -94,7 +107,7 @@ pub static GLOBAL_MEMORY_POOL: Lazy<(
                         std::thread::sleep(std::time::Duration::from_millis(1));
                         continue;
                     }
-                    if tx_bg.send(ContiguousRiscvMemory::new()).is_err() {
+                    if tx_bg.send(make_memory()).is_err() {
                         break;
                     }
                     created += 1;

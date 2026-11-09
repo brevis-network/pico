@@ -1,5 +1,7 @@
 use super::columns::{Uint256MulCols, NUM_UINT256_MUL_COLS};
 #[cfg(feature = "cuda")]
+use crate::chips::gadgets::code_range::{fill_on_device, NUM_CODE_RANGE_COLS};
+#[cfg(feature = "cuda")]
 use crate::mle::spans::device;
 use crate::{
     chips::{
@@ -73,6 +75,8 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
             })
             .collect();
 
+        let code = input.program.code();
+
         // Generate the trace rows & corresponding records for each event.
         let mut rows = events
             .iter()
@@ -135,6 +139,8 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                 // Populate pointer gadgets.
                 cols.x_ptr
                     .populate(&mut new_byte_lookup_events, event.x_ptr, 32);
+                cols.code_range
+                    .populate(event.x_ptr, 32, &code, &mut new_byte_lookup_events);
                 cols.y_ptr
                     .populate(&mut new_byte_lookup_events, event.y_ptr, 64);
 
@@ -317,6 +323,21 @@ impl<F: PrimeField32> GpuChipBehavior<F> for Uint256MulChip<F> {
                 stream.into(),
             );
         }
+
+        // The code range, the last columns of the chip's row, which the kernel leaves zero.
+        // The result goes to `x`.
+        let writes: Vec<u64> = events.iter().map(|event| event.x_ptr).collect();
+        fill_on_device(
+            &mut d_trace,
+            num_cols_per_row,
+            num_cols_per_row - NUM_CODE_RANGE_COLS,
+            &writes,
+            32,
+            &input.program.code(),
+            d_byte_trace,
+            mem_pool,
+            stream,
+        );
 
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;

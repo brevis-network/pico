@@ -6,11 +6,9 @@
 //! then writes `PASS` or `FAIL` to the public values and halts, with exit code 0 after `PASS` and 1
 //! after `FAIL`. So a run that commits `PASS` is a test that passed.
 //!
-//! * The 64 tests of the I and M suites must execute, and prove to the riscv phase, which verifies
-//!   the proof, committing `PASS` both times.
-//! * The 8 of the Misalign suite are known failures until Pico supports misaligned loads and
-//!   stores, and each must still fail. The first one that passes fails this module
-//!   instead, so that the suite moves into `MUST_PASS` and all 72 are required from then on.
+//! Every one of the 72 must execute, and prove to the riscv phase, which verifies the proof,
+//! committing `PASS` both times. A Misalign test must also make misaligned loads or stores, which
+//! the `MemoryUnaligned` chip proves, and its proof must report as many as its execution counted.
 
 use std::{
     fs,
@@ -35,10 +33,10 @@ const ARCHIVE: &str = concat!(
 const ARCHIVE_SHA256: &str = "abf1aae4f2fa9cac8c68ffbdb2f26a420991291af8c81f1220c574b2ade862bd";
 
 /// The suites every test of which must pass, and how many tests each holds.
-pub(super) const MUST_PASS: [(&str, usize); 2] = [("I", 51), ("M", 13)];
+pub(super) const MUST_PASS: [(&str, usize); 3] = [("I", 51), ("M", 13), (MISALIGN, 8)];
 
-/// Known failures until Pico supports misaligned loads and stores.
-pub(super) const KNOWN_FAILURES: (&str, usize) = ("Misalign", 8);
+/// The suite whose tests make misaligned loads and stores (Zicclsm).
+const MISALIGN: &str = "Misalign";
 
 /// What a test writes to the public values when every result matched the reference model's.
 const PASS: &[u8] = b"PASS";
@@ -127,20 +125,20 @@ pub(super) fn suite(name: &str) -> Vec<(String, PathBuf)> {
 /// A test that disappears, or one that is added, is a reviewed change rather than a quiet one.
 #[test]
 fn each_suite_holds_its_tests() {
-    for (name, count) in MUST_PASS.into_iter().chain([KNOWN_FAILURES]) {
+    for (name, count) in MUST_PASS {
         assert_eq!(suite(name).len(), count, "elfs/{name} in the archive");
     }
 }
 
-/// All 64 tests run, and every failure is reported, not only the first.
+/// All 72 tests run, and every failure is reported, not only the first.
 #[test]
-fn the_i_and_m_tests_execute_prove_and_verify() {
+fn every_test_executes_proves_and_verifies() {
     let mut failed = Vec::new();
     let mut ran = 0;
     for (name, _) in MUST_PASS {
         for (test, path) in suite(name) {
             let started = Instant::now();
-            let outcome = run(&fs::read(&path).expect("read the ELF"));
+            let outcome = run(&fs::read(&path).expect("read the ELF"), name == MISALIGN);
             let seconds = started.elapsed().as_secs_f64();
             match outcome {
                 Ok(()) => eprintln!("{test}: ok ({seconds:.1} s)"),
@@ -152,7 +150,7 @@ fn the_i_and_m_tests_execute_prove_and_verify() {
             ran += 1;
         }
     }
-    assert_eq!(ran, 64, "the I and M suites hold 64 tests");
+    assert_eq!(ran, 72, "the suites hold 72 tests");
     assert!(
         failed.is_empty(),
         "{} of {ran} ACT4 tests failed:\n{}",
@@ -161,36 +159,10 @@ fn the_i_and_m_tests_execute_prove_and_verify() {
     );
 }
 
-/// Each Misalign test still fails. One that passes fails this test: move the suite into
-/// `MUST_PASS`, so that from then on it has to keep passing.
-#[test]
-fn the_misalign_tests_are_still_known_failures() {
-    let (name, _) = KNOWN_FAILURES;
-    let mut passing = Vec::new();
-    for (test, path) in suite(name) {
-        let started = Instant::now();
-        let outcome = execute(&fs::read(&path).expect("read the ELF"));
-        let seconds = started.elapsed().as_secs_f64();
-        match outcome {
-            Err(why) => eprintln!("{test}: known failure ({seconds:.1} s): {why}"),
-            Ok(()) => {
-                let why = format!("it passes now; move {name} into MUST_PASS");
-                eprintln!("{test}: FAILED ({seconds:.1} s): {why}");
-                passing.push(test);
-            }
-        }
-    }
-    assert!(
-        passing.is_empty(),
-        "{} {name} test(s) pass now ({}): move the suite into MUST_PASS, so that they have to keep \
-         passing",
-        passing.len(),
-        passing.join(", ")
-    );
-}
-
-/// Execute, then prove to the riscv phase and verify. Both must commit `PASS`.
-fn run(elf: &[u8]) -> Result<(), String> {
+/// Execute, then prove to the riscv phase and verify. Both must commit `PASS`. A test of the
+/// Misalign suite (`misaligned`) must make misaligned accesses, and its proof must report as many
+/// as its execution counted.
+fn run(elf: &[u8], misaligned: bool) -> Result<(), String> {
     let mut prover = Prover::builder(elf)
         .log_stacked_height(SMALL_LOG_STACKED_HEIGHT)
         .build()
@@ -199,18 +171,20 @@ fn run(elf: &[u8]) -> Result<(), String> {
         .execute_chunked(Stdin::new())
         .map_err(|e| format!("execute: {e}"))?;
     committed_pass("execute", &execution.committed_bytes)?;
+    if misaligned && execution.misaligned_accesses == 0 {
+        return Err("execute counted no misaligned access".to_string());
+    }
     let proof = prover
         .prove_to(Stdin::new(), Phase::Riscv)
         .map_err(|e| format!("prove: {e}"))?;
-    committed_pass("the proof", proof.committed().as_bytes())
-}
-
-/// Execute only, without a prover's keys.
-fn execute(elf: &[u8]) -> Result<(), String> {
-    let execution = Prover::builder(elf)
-        .execute_chunked(Stdin::new())
-        .map_err(|e| format!("execute: {e}"))?;
-    committed_pass("execute", &execution.committed_bytes)
+    committed_pass("the proof", proof.committed().as_bytes())?;
+    match proof.misaligned_accesses() {
+        Some(count) if count == execution.misaligned_accesses => Ok(()),
+        count => Err(format!(
+            "the proof reports {count:?} misaligned accesses, execute counted {}",
+            execution.misaligned_accesses
+        )),
+    }
 }
 
 /// `Ok` when the bytes `what` committed are `PASS`.

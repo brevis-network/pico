@@ -98,7 +98,7 @@ cudart = { git = "https://github.com/brevis-network/era-cuda.git", rev = "4277a3
 cudart-sys = { git = "https://github.com/brevis-network/era-cuda.git", rev = "4277a3558fce68b5ae48bc80055046bb1d0d6ed4" }
 # To build against a local pico-gpu checkout, override this with a `[patch]` outside this file,
 # e.g. `--config 'patch."https://github.com/brevis-network/pico-gpu.git".pico-gpu.path="<checkout>/rust"'`.
-pico-gpu = { git = "https://github.com/brevis-network/pico-gpu.git", rev = "0a8155ca577fee32b2b33d1a837a8774c1488668" }
+pico-gpu = { git = "https://github.com/brevis-network/pico-gpu.git", rev = "edd0ceb85f55c18b2aa9cb3864a94c99dd2ca3c5" }
 
 # misc
 amcl = { package = "snowbridge-amcl", version = "1.0.2", default-features = false, features = ["bls381"] }

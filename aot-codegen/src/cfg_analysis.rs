@@ -6,7 +6,7 @@
 
 use crate::{
     constants,
-    types::{sign_extend_imm32_to_u64, Opcode, ProgramInfo},
+    types::{Opcode, ProgramInfo},
 };
 use std::collections::HashMap;
 
@@ -102,7 +102,7 @@ impl CfgAnalysis {
                     Opcode::JAL => {
                         has_terminator[block_idx] = true;
                         let (_, imm) = inst.j_type();
-                        let target = last_inst_pc.wrapping_add(sign_extend_imm32_to_u64(imm));
+                        let target = last_inst_pc.wrapping_add(imm);
                         if let Some(&target_idx) = pc_to_idx.get(&target) {
                             let weight =
                                 Self::edge_weight(EdgeType::JalTarget, last_inst_pc, target);
@@ -117,7 +117,7 @@ impl CfgAnalysis {
                     | Opcode::BGEU => {
                         has_terminator[block_idx] = true;
                         let (_, _, imm) = inst.b_type();
-                        let target = last_inst_pc.wrapping_add(sign_extend_imm32_to_u64(imm));
+                        let target = last_inst_pc.wrapping_add(imm);
                         let fallthrough = last_inst_pc.wrapping_add(4);
 
                         // Branch target

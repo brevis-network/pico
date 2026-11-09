@@ -57,6 +57,9 @@ pub const MLE_RISCV_MAIN_LOG_HEIGHTS: &[(&str, usize)] = &[
     // so this sits at the stacked cap beside Cpu rather than a notch under it. reth reaches
     // 2^23 in 2 of the 658 chunks of the 13-block reth corpus.
     ("MemoryReadWrite", 23),
+    // One row per misaligned load or store. The chunk split caps a CPU chunk at this many,
+    // so every ladder row carries the same height and a chunk never leaves its row for them.
+    ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
     ("SyscallRiscv", 22),
     ("Ecall", 22),
     // Global carries every chunk kind and is the tallest chip in all three families;
@@ -109,6 +112,12 @@ pub const MLE_RISCV_MAIN_LOG_HEIGHTS: &[(&str, usize)] = &[
     ("EdDecompress", 12),
 ];
 
+/// The `MemoryUnaligned` height in every core shape, the catch-all included: the chunk split closes
+/// a CPU chunk once it holds this many misaligned loads and stores
+/// (`ChunkSplitConfig::misaligned_threshold`). 2^10 rows of its 87 columns cost about 0.02 ms a
+/// chunk, and add 28 x 2^10 to a row's TI.
+pub const MLE_MEMORY_UNALIGNED_LOG_HEIGHT: usize = 10;
+
 /// The floor every present air pads to: `2^l_skip` rows, the smallest the MLE prover packs.
 pub const MLE_MIN_LOG_HEIGHT: usize = 4;
 
@@ -159,6 +168,7 @@ pub const MLE_CORE_CANONICAL_PRESENCE: &[&str] = &[
     "Subw",
     "MemoryLocal",
     "MemoryReadWrite",
+    "MemoryUnaligned",
     "SyscallRiscv",
     "Ecall",
     "Global",
@@ -198,14 +208,23 @@ pub fn bucket_log_height(chip_name: &str, is_cpu_chunk: bool) -> usize {
 /// (a class is the componentwise maximum of its members) and three envelope rows (a coarse 3-class
 /// clustering of the same chunks, with headroom on the cheap chips). Subw, Addw and DivRem sit at
 /// 2^10 or more in every row: a recent block can carry 2^7 Subw rows in one chunk where the corpus
-/// has none. The previous ladder's three envelope rows are kept, so this one holds every chunk
-/// that one held (the last of them was raised for a G1MSM chunk of block 26180455).
+/// has none. Of the previous ladder's six envelope rows three are kept, and each of the other three
+/// lies under a new envelope row, so this ladder holds every chunk that one held (its last row was
+/// raised for a G1MSM chunk of block 26180455).
+///
+/// Refitted for the code-range check, which adds three interactions to every MemoryReadWrite row
+/// and one to every Program row. Under those counts six rows of the previous fit crossed TI = 2^28,
+/// and 43% of the fit set's CPU chunks would have proved at GKR size m = 29 (12% before the
+/// check); on this ladder 25% do, where 23% cross the line on their natural heights alone (4%
+/// before it). The natural heights are the previous fit's, probed again with the check in place:
+/// no chunk moved.
 ///
 /// The clustering minimizes the GPU price of a chunk on its row, from a one-card regression over
-/// 254 CPU chunks in natural and whitelist mode: 0.273 ms per million cells and 0.182 ms per
-/// million GKR leaves (2^m, m the bit length of TI, so a row past TI = 2^28 pays ~49 ms more). On
-/// the 26 held-out blocks a CPU chunk costs +2.8% over its natural heights (the previous ladder:
-/// +8.0%); on 18 more recent blocks the fit never saw, +4.5% (+8.2%).
+/// 254 CPU chunks in natural and whitelist mode (a KoalaBear⁴ calibration): 0.273 ms per million
+/// cells and 0.182 ms per million GKR leaves (2^m, m the bit length of TI, so a row past TI = 2^28
+/// pays ~49 ms more), with the interaction counts and widths of a real keygen. On the 26 held-out
+/// blocks a CPU chunk costs +3.0% over its natural heights (the previous ladder, under the same
+/// counts: +4.9%); on 18 more recent blocks the fit never saw, +4.1% (+7.4%).
 ///
 /// A chunk takes the FIRST entry that dominates it componentwise, and the rows sit
 /// cheapest-first by that price, so the first dominating row is the cheapest one; the catch-all
@@ -223,11 +242,12 @@ pub fn bucket_log_height(chip_name: &str, is_cpu_chunk: bool) -> usize {
 /// classes, so a chunk a class holds can still take an envelope row that is cheaper and also
 /// holds it.
 pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
-    // row 0: 35 fit-set chunks; 187 ms; TI 0.24 x 2^29
+    // row 0: 32 fit-set chunks; 188 ms; TI 0.25 x 2^29
     &[
         ("Cpu", 22),
         ("MemoryReadWrite", 21),
-        ("Add", 21),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 20),
         ("Sub", 16),
         ("LessThan", 19),
         ("Bitwise", 19),
@@ -245,10 +265,11 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 1: 79 fit-set chunks; 275 ms; TI 0.38 x 2^29
+    // row 1: 79 fit-set chunks; 277 ms; TI 0.39 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 20),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 17),
         ("LessThan", 20),
@@ -267,10 +288,34 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 2: 335 fit-set chunks; 300 ms; TI 0.43 x 2^29
+    // row 2: 17 fit-set chunks; 290 ms; TI 0.46 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 21),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
+        ("Sub", 19),
+        ("LessThan", 21),
+        ("Bitwise", 20),
+        ("ShiftLeft", 19),
+        ("ShiftRight", 19),
+        ("Mul", 19),
+        ("Addw", 14),
+        ("Subw", 10),
+        ("DivRem", 10),
+        ("SyscallRiscv", 5),
+        ("Ecall", 5),
+        ("MemoryLocal", 11),
+        ("Global", 14),
+        ("RiscvKoalaBearPoseidon2", 12),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 3: 336 fit-set chunks; 310 ms; TI 0.45 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 17),
         ("LessThan", 21),
@@ -289,10 +334,11 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 3: 443 fit-set chunks; 313 ms; TI 0.45 x 2^29
+    // row 4: 442 fit-set chunks; 323 ms; TI 0.48 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 18),
         ("LessThan", 21),
@@ -311,32 +357,11 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 4: 142 fit-set chunks; 316 ms; TI 0.45 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("Add", 21),
-        ("Sub", 17),
-        ("LessThan", 21),
-        ("Bitwise", 20),
-        ("ShiftLeft", 20),
-        ("ShiftRight", 18),
-        ("Mul", 17),
-        ("Addw", 14),
-        ("Subw", 10),
-        ("DivRem", 13),
-        ("SyscallRiscv", 14),
-        ("Ecall", 14),
-        ("MemoryLocal", 16),
-        ("Global", 18),
-        ("RiscvKoalaBearPoseidon2", 16),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 5: 91 fit-set chunks; 324 ms; TI 0.42 x 2^29
+    // row 5: 94 fit-set chunks; 330 ms; TI 0.43 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 21),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 17),
         ("LessThan", 20),
@@ -355,54 +380,11 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 6: 117 fit-set chunks; 325 ms; TI 0.44 x 2^29
+    // row 6: 163 fit-set chunks; 331 ms; TI 0.49 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("Add", 21),
-        ("Sub", 17),
-        ("LessThan", 21),
-        ("Bitwise", 20),
-        ("ShiftLeft", 19),
-        ("ShiftRight", 18),
-        ("Mul", 17),
-        ("Addw", 15),
-        ("Subw", 10),
-        ("DivRem", 11),
-        ("SyscallRiscv", 15),
-        ("Ecall", 15),
-        ("MemoryLocal", 16),
-        ("Global", 19),
-        ("RiscvKoalaBearPoseidon2", 17),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 7: 151 fit-set chunks; 334 ms; TI 0.43 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 21),
-        ("Add", 22),
-        ("Sub", 19),
-        ("LessThan", 21),
-        ("Bitwise", 20),
-        ("ShiftLeft", 19),
-        ("ShiftRight", 18),
-        ("Mul", 14),
-        ("Addw", 16),
-        ("Subw", 10),
-        ("DivRem", 10),
-        ("SyscallRiscv", 14),
-        ("Ecall", 14),
-        ("MemoryLocal", 17),
-        ("Global", 20),
-        ("RiscvKoalaBearPoseidon2", 18),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 8: 165 fit-set chunks; 340 ms; TI 0.48 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 18),
         ("LessThan", 21),
@@ -410,93 +392,97 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("ShiftLeft", 20),
         ("ShiftRight", 19),
         ("Mul", 18),
-        ("Addw", 16),
+        ("Addw", 14),
         ("Subw", 10),
-        ("DivRem", 14),
-        ("SyscallRiscv", 16),
-        ("Ecall", 16),
-        ("MemoryLocal", 17),
-        ("Global", 19),
-        ("RiscvKoalaBearPoseidon2", 17),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 9: 27 fit-set chunks; 343 ms; TI 0.50 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("Add", 22),
-        ("Sub", 19),
-        ("LessThan", 21),
-        ("Bitwise", 20),
-        ("ShiftLeft", 19),
-        ("ShiftRight", 19),
-        ("Mul", 19),
-        ("Addw", 15),
-        ("Subw", 10),
-        ("DivRem", 10),
-        ("SyscallRiscv", 15),
-        ("Ecall", 15),
+        ("DivRem", 13),
+        ("SyscallRiscv", 14),
+        ("Ecall", 14),
         ("MemoryLocal", 16),
-        ("Global", 19),
-        ("RiscvKoalaBearPoseidon2", 17),
+        ("Global", 18),
+        ("RiscvKoalaBearPoseidon2", 16),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 10: 155 fit-set chunks; 357 ms; TI 0.47 x 2^29
+    // row 7: 44 fit-set chunks; 340 ms; TI 0.50 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 17),
         ("LessThan", 20),
         ("Bitwise", 20),
-        ("ShiftLeft", 19),
+        ("ShiftLeft", 20),
         ("ShiftRight", 19),
-        ("Mul", 17),
-        ("Addw", 16),
+        ("Mul", 18),
+        ("Addw", 15),
         ("Subw", 10),
-        ("DivRem", 11),
-        ("SyscallRiscv", 17),
-        ("Ecall", 17),
-        ("MemoryLocal", 18),
-        ("Global", 20),
-        ("RiscvKoalaBearPoseidon2", 18),
+        ("DivRem", 12),
+        ("SyscallRiscv", 15),
+        ("Ecall", 15),
+        ("MemoryLocal", 17),
+        ("Global", 19),
+        ("RiscvKoalaBearPoseidon2", 17),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 11: 218 fit-set chunks; 366 ms; TI 0.48 x 2^29
+    // row 8: 193 fit-set chunks; 345 ms; TI 0.50 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 18),
+        ("LessThan", 21),
+        ("Bitwise", 20),
+        ("ShiftLeft", 19),
+        ("ShiftRight", 19),
+        ("Mul", 18),
+        ("Addw", 16),
+        ("Subw", 10),
+        ("DivRem", 14),
+        ("SyscallRiscv", 17),
+        ("Ecall", 17),
+        ("MemoryLocal", 17),
+        ("Global", 19),
+        ("RiscvKoalaBearPoseidon2", 17),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 9: 35 fit-set chunks; 345 ms; TI 0.49 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 17),
+        ("LessThan", 21),
+        ("Bitwise", 20),
+        ("ShiftLeft", 20),
+        ("ShiftRight", 19),
+        ("Mul", 17),
+        ("Addw", 15),
+        ("Subw", 10),
+        ("DivRem", 12),
+        ("SyscallRiscv", 15),
+        ("Ecall", 15),
+        ("MemoryLocal", 17),
+        ("Global", 19),
+        ("RiscvKoalaBearPoseidon2", 17),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 10: 181 fit-set chunks; 353 ms; TI 0.48 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 21),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 19),
         ("LessThan", 21),
         ("Bitwise", 20),
-        ("ShiftLeft", 19),
-        ("ShiftRight", 18),
-        ("Mul", 17),
-        ("Addw", 16),
-        ("Subw", 10),
-        ("DivRem", 11),
-        ("SyscallRiscv", 17),
-        ("Ecall", 17),
-        ("MemoryLocal", 17),
-        ("Global", 20),
-        ("RiscvKoalaBearPoseidon2", 18),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 12: 108 fit-set chunks; 369 ms; TI 0.49 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 21),
-        ("Add", 22),
-        ("Sub", 19),
-        ("LessThan", 22),
-        ("Bitwise", 20),
         ("ShiftLeft", 20),
-        ("ShiftRight", 20),
+        ("ShiftRight", 19),
         ("Mul", 15),
         ("Addw", 16),
         ("Subw", 10),
@@ -509,42 +495,67 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 13: 153 fit-set chunks; 370 ms; TI 0.49 x 2^29
+    // row 11: 75 fit-set chunks; 365 ms; TI 0.50 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("Add", 22),
-        ("Sub", 19),
-        ("LessThan", 21),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 17),
+        ("LessThan", 20),
         ("Bitwise", 20),
         ("ShiftLeft", 19),
         ("ShiftRight", 19),
-        ("Mul", 16),
-        ("Addw", 16),
+        ("Mul", 17),
+        ("Addw", 15),
         ("Subw", 10),
         ("DivRem", 10),
-        ("SyscallRiscv", 14),
-        ("Ecall", 14),
+        ("SyscallRiscv", 15),
+        ("Ecall", 15),
         ("MemoryLocal", 18),
         ("Global", 20),
         ("RiscvKoalaBearPoseidon2", 18),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 14: 18 fit-set chunks; 372 ms; TI 0.50 x 2^29
+    // row 12: 78 fit-set chunks; 368 ms; TI 0.49 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 21),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
+        ("Sub", 18),
+        ("LessThan", 22),
+        ("Bitwise", 20),
+        ("ShiftLeft", 20),
+        ("ShiftRight", 20),
+        ("Mul", 13),
+        ("Addw", 15),
+        ("Subw", 10),
+        ("DivRem", 10),
+        ("SyscallRiscv", 13),
+        ("Ecall", 13),
+        ("MemoryLocal", 17),
+        ("Global", 20),
+        ("RiscvKoalaBearPoseidon2", 18),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 13: 131 fit-set chunks; 371 ms; TI 0.50 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 18),
         ("LessThan", 21),
-        ("Bitwise", 21),
+        ("Bitwise", 20),
         ("ShiftLeft", 19),
         ("ShiftRight", 19),
-        ("Mul", 18),
-        ("Addw", 17),
+        ("Mul", 17),
+        ("Addw", 16),
         ("Subw", 10),
-        ("DivRem", 14),
+        ("DivRem", 12),
         ("SyscallRiscv", 17),
         ("Ecall", 17),
         ("MemoryLocal", 17),
@@ -553,32 +564,80 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 15: 50 fit-set chunks; 375 ms; TI 0.50 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("Add", 21),
-        ("Sub", 18),
-        ("LessThan", 21),
-        ("Bitwise", 20),
-        ("ShiftLeft", 20),
-        ("ShiftRight", 20),
-        ("Mul", 17),
-        ("Addw", 15),
-        ("Subw", 10),
-        ("DivRem", 12),
-        ("SyscallRiscv", 14),
-        ("Ecall", 14),
-        ("MemoryLocal", 18),
-        ("Global", 20),
-        ("RiscvKoalaBearPoseidon2", 18),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 16: 84 fit-set chunks; 375 ms; TI 0.49 x 2^29
+    // row 14: 129 fit-set chunks; 388 ms; TI 0.46 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 21),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 18),
+        ("LessThan", 20),
+        ("Bitwise", 20),
+        ("ShiftLeft", 18),
+        ("ShiftRight", 18),
+        ("Mul", 16),
+        ("Addw", 16),
+        ("Subw", 10),
+        ("DivRem", 10),
+        ("SyscallRiscv", 18),
+        ("Ecall", 18),
+        ("MemoryLocal", 18),
+        ("Global", 21),
+        ("RiscvKoalaBearPoseidon2", 19),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 15: 46 fit-set chunks; 412 ms; TI 0.49 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 15),
+        ("LessThan", 20),
+        ("Bitwise", 19),
+        ("ShiftLeft", 17),
+        ("ShiftRight", 16),
+        ("Mul", 15),
+        ("Addw", 14),
+        ("Subw", 10),
+        ("DivRem", 10),
+        ("SyscallRiscv", 18),
+        ("Ecall", 18),
+        ("MemoryLocal", 18),
+        ("Global", 21),
+        ("RiscvKoalaBearPoseidon2", 19),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 16: 78 fit-set chunks; 414 ms; TI 0.50 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 17),
+        ("LessThan", 20),
+        ("Bitwise", 19),
+        ("ShiftLeft", 18),
+        ("ShiftRight", 17),
+        ("Mul", 17),
+        ("Addw", 16),
+        ("Subw", 10),
+        ("DivRem", 10),
+        ("SyscallRiscv", 17),
+        ("Ecall", 17),
+        ("MemoryLocal", 18),
+        ("Global", 21),
+        ("RiscvKoalaBearPoseidon2", 19),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 17: 84 fit-set chunks; 430 ms; TI 0.51 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 21),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 17),
         ("LessThan", 22),
@@ -597,100 +656,13 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 17: 129 fit-set chunks; 382 ms; TI 0.44 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 21),
-        ("Add", 21),
-        ("Sub", 18),
-        ("LessThan", 20),
-        ("Bitwise", 20),
-        ("ShiftLeft", 18),
-        ("ShiftRight", 18),
-        ("Mul", 16),
-        ("Addw", 16),
-        ("Subw", 10),
-        ("DivRem", 10),
-        ("SyscallRiscv", 18),
-        ("Ecall", 18),
-        ("MemoryLocal", 18),
-        ("Global", 21),
-        ("RiscvKoalaBearPoseidon2", 19),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 18: 111 fit-set chunks; 404 ms; TI 0.46 x 2^29
+    // row 18: 303 fit-set chunks; 431 ms; TI 0.53 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("Add", 21),
-        ("Sub", 16),
-        ("LessThan", 20),
-        ("Bitwise", 19),
-        ("ShiftLeft", 18),
-        ("ShiftRight", 17),
-        ("Mul", 16),
-        ("Addw", 16),
-        ("Subw", 10),
-        ("DivRem", 10),
-        ("SyscallRiscv", 18),
-        ("Ecall", 18),
-        ("MemoryLocal", 18),
-        ("Global", 21),
-        ("RiscvKoalaBearPoseidon2", 19),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 19: envelope row; 411 ms; TI 0.56 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("Add", 21),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
         ("Sub", 19),
-        ("LessThan", 21),
-        ("Bitwise", 20),
-        ("ShiftLeft", 20),
-        ("ShiftRight", 19),
-        ("Mul", 19),
-        ("Addw", 17),
-        ("Subw", 10),
-        ("DivRem", 18),
-        ("SyscallRiscv", 18),
-        ("Ecall", 17),
-        ("MemoryLocal", 17),
-        ("Global", 19),
-        ("RiscvKoalaBearPoseidon2", 17),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 20: 88 fit-set chunks; 417 ms; TI 0.50 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("Add", 21),
-        ("Sub", 17),
-        ("LessThan", 20),
-        ("Bitwise", 20),
-        ("ShiftLeft", 19),
-        ("ShiftRight", 19),
-        ("Mul", 18),
-        ("Addw", 16),
-        ("Subw", 10),
-        ("DivRem", 11),
-        ("SyscallRiscv", 17),
-        ("Ecall", 17),
-        ("MemoryLocal", 18),
-        ("Global", 21),
-        ("RiscvKoalaBearPoseidon2", 19),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 21: 75 fit-set chunks; 422 ms; TI 0.50 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("Add", 21),
-        ("Sub", 18),
         ("LessThan", 21),
         ("Bitwise", 20),
         ("ShiftLeft", 19),
@@ -698,19 +670,20 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Mul", 17),
         ("Addw", 16),
         ("Subw", 10),
-        ("DivRem", 10),
-        ("SyscallRiscv", 17),
-        ("Ecall", 17),
+        ("DivRem", 11),
+        ("SyscallRiscv", 16),
+        ("Ecall", 16),
         ("MemoryLocal", 18),
-        ("Global", 21),
-        ("RiscvKoalaBearPoseidon2", 19),
+        ("Global", 20),
+        ("RiscvKoalaBearPoseidon2", 18),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 22: envelope row 14 of the previous ladder, kept; 423 ms; TI 0.59 x 2^29
+    // row 19: an envelope row kept from the previous ladder (row 14 of the one before); 433 ms; TI 0.62 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 20),
         ("LessThan", 21),
@@ -729,10 +702,103 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 23: 36 fit-set chunks; 516 ms; TI 0.56 x 2^29
+    // row 20: envelope row; 466 ms; TI 0.64 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
+        ("Sub", 20),
+        ("LessThan", 21),
+        ("Bitwise", 20),
+        ("ShiftLeft", 20),
+        ("ShiftRight", 19),
+        ("Mul", 19),
+        ("Addw", 18),
+        ("Subw", 10),
+        ("DivRem", 18),
+        ("SyscallRiscv", 19),
+        ("Ecall", 18),
+        ("MemoryLocal", 18),
+        ("Global", 20),
+        ("RiscvKoalaBearPoseidon2", 18),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 21: 101 fit-set chunks; 477 ms; TI 0.63 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
+        ("Sub", 19),
+        ("LessThan", 22),
+        ("Bitwise", 21),
+        ("ShiftLeft", 20),
+        ("ShiftRight", 20),
+        ("Mul", 19),
+        ("Addw", 17),
+        ("Subw", 10),
+        ("DivRem", 16),
+        ("SyscallRiscv", 17),
+        ("Ecall", 17),
+        ("MemoryLocal", 18),
+        ("Global", 20),
+        ("RiscvKoalaBearPoseidon2", 18),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 22: 146 fit-set chunks; 482 ms; TI 0.53 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 18),
+        ("LessThan", 21),
+        ("Bitwise", 20),
+        ("ShiftLeft", 19),
+        ("ShiftRight", 19),
+        ("Mul", 17),
+        ("Addw", 16),
+        ("Subw", 10),
+        ("DivRem", 11),
+        ("SyscallRiscv", 17),
+        ("Ecall", 17),
+        ("MemoryLocal", 18),
+        ("Global", 21),
+        ("RiscvKoalaBearPoseidon2", 19),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 23: 39 fit-set chunks; 517 ms; TI 0.62 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
+        ("Sub", 19),
+        ("LessThan", 21),
+        ("Bitwise", 21),
+        ("ShiftLeft", 20),
+        ("ShiftRight", 20),
+        ("Mul", 19),
+        ("Addw", 16),
+        ("Subw", 10),
+        ("DivRem", 10),
+        ("SyscallRiscv", 17),
+        ("Ecall", 17),
+        ("MemoryLocal", 18),
+        ("Global", 21),
+        ("RiscvKoalaBearPoseidon2", 19),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 24: 36 fit-set chunks; 536 ms; TI 0.62 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 23),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 17),
         ("LessThan", 20),
@@ -751,32 +817,11 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 24: 52 fit-set chunks; 525 ms; TI 0.62 x 2^29
+    // row 25: an envelope row kept from the previous ladder (row 24 of the one before); 572 ms; TI 0.74 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("Add", 22),
-        ("Sub", 19),
-        ("LessThan", 22),
-        ("Bitwise", 21),
-        ("ShiftLeft", 20),
-        ("ShiftRight", 20),
-        ("Mul", 19),
-        ("Addw", 16),
-        ("Subw", 10),
-        ("DivRem", 16),
-        ("SyscallRiscv", 17),
-        ("Ecall", 17),
-        ("MemoryLocal", 18),
-        ("Global", 21),
-        ("RiscvKoalaBearPoseidon2", 19),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 25: envelope row 24 of the previous ladder, kept; 561 ms; TI 0.71 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 20),
         ("LessThan", 22),
@@ -795,10 +840,11 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 26: 14 fit-set chunks; 569 ms; TI 0.51 x 2^29
+    // row 26: 14 fit-set chunks; 581 ms; TI 0.55 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 20),
         ("Sub", 16),
         ("LessThan", 19),
@@ -817,10 +863,11 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 27: envelope row; 631 ms; TI 0.94 x 2^29
+    // row 27: envelope row; 641 ms; TI 0.98 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 20),
         ("LessThan", 22),
@@ -839,17 +886,18 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 28: envelope row; 646 ms; TI 0.64 x 2^29
+    // row 28: envelope row; 722 ms; TI 0.84 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 23),
-        ("Add", 21),
-        ("Sub", 18),
-        ("LessThan", 20),
-        ("Bitwise", 20),
-        ("ShiftLeft", 19),
-        ("ShiftRight", 18),
-        ("Mul", 18),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
+        ("Sub", 20),
+        ("LessThan", 21),
+        ("Bitwise", 21),
+        ("ShiftLeft", 20),
+        ("ShiftRight", 20),
+        ("Mul", 20),
         ("Addw", 17),
         ("Subw", 10),
         ("DivRem", 14),
@@ -861,12 +909,13 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 29: envelope row 26 of the previous ladder, kept; 710 ms; TI 0.76 x 2^29. Ecall is at
+    // row 29: an envelope row kept from the previous ladder (row 26 of the one before); 731 ms; TI 0.83 x 2^29. Ecall is at
     // 2^18 because a G1MSM chunk (block 26180455, 139,646 ecalls) fits no other row and was past
     // 2^17 here.
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 23),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 20),
         ("LessThan", 22),
@@ -888,9 +937,9 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
 ];
 
 /// The rows of [`MLE_CORE_LADDER`] that are envelope rows (the coarse 3-class clustering with
-/// headroom, and the previous ladder's three) rather than fitted classes; the run log names them so
+/// headroom, and the three kept from the previous ladder) rather than fitted classes; the run log names them so
 /// a run's cost can be attributed to them.
-pub const MLE_CORE_ENVELOPE_ROWS: &[usize] = &[19, 22, 25, 27, 28, 29];
+pub const MLE_CORE_ENVELOPE_ROWS: &[usize] = &[19, 20, 25, 27, 28, 29];
 
 /// One precompile-family shape: the compute kind at a log height, its control sibling if it has
 /// one, and the companions the kind's event count drives. Byte and Program are pinned
@@ -1409,6 +1458,7 @@ pub fn mle_natural_heights_from_counter(
             "MemoryReadWrite",
             counter.num_memory_read_writes.div_ceil(MEMORY_RW_DATAPAR),
         ),
+        ("MemoryUnaligned", counter.num_memory_unaligned),
         // `+ 1`: the Global trace always ends with one padding row.
         ("Global", counter.num_global_lookup_events + 1),
         (
@@ -1469,8 +1519,8 @@ pub fn select_core_rung(
 }
 
 /// Whether a core shape is the catch-all row: every air at its `MLE_RISCV_MAIN_LOG_HEIGHTS`
-/// height. The catch-all is a CPU-only shape (its GKR leaf buffer is 64 GiB), so a GPU prover
-/// asks this before it commits to a chunk.
+/// height. Its GKR leaf buffer is 64 GiB, so the provers refuse a chunk that selects it (see
+/// `riscv::CatchAllShape`).
 pub fn is_core_catch_all(shape: &[(String, usize)]) -> bool {
     shape
         .iter()
@@ -1718,21 +1768,24 @@ pub enum RecursionTier {
 /// actually produces need W = 15..42. With rows, each child pads to the nearest row above it
 /// and the combine machine learns one child layout per row (`preregister_standard_shapes`).
 ///
-/// Row 0 (W 19) holds 13,997 of the 15,646 whitelist shapes: core classes 0 and 1, 7,469 of
+/// Row 0 (W 19) holds 14,085 of the 15,646 whitelist shapes: core classes 0 to 3, 7,539 of
 /// the 7,980 memory shapes and the small shapes of every precompile kind but keccak (all 284
-/// shapes of the two Ed25519 precompiles among them); row 1 (W 42) 1,579: core classes 2 to 28,
+/// shapes of the two Ed25519 precompiles among them); row 1 (W 42) 1,482: core classes 4 to 27,
 /// where the corpus's core chunks sit on KoalaBear⁵ (Poseidon2Packed at 2^18), the keccak
-/// children and the large precompile children; row 2 (W 74) the catch-all, core class 29 and
-/// 68 precompile shapes, all but one of which (a Bls381Fp2Mul shape) no corpus block uses. Of
-/// the corpus's 5,183 chunks 859 take row 0, 4,290 row 1 and 34 row 2; the padding costs 6.5%
-/// over the natural heights (3.6% on KoalaBear⁴). Fitted over the 80-block p99 corpus (natural
+/// children and the large precompile children; row 2 (W 74) the catch-all, core classes 28 and
+/// 29 and 76 precompile shapes, 67 of them keccak's (with the code-range check). Under
+/// the 27-row core ladder, of the corpus's 5,183 chunks 859 took row 0, 4,290 row 1 and 34 row 2,
+/// and the padding cost 6.5% over the natural heights (3.6% on KoalaBear⁴). Fitted over the 80-block p99 corpus (natural
 /// riscv heights of 2026-09-23) with the KoalaBear⁵ chip widths and the convert heights
 /// `examples/mle_tier_probe.rs` measured over the whole enumeration (2026-10-27) under the 27-row
 /// core ladder; re-measured over the 15,646 shapes of the 30-row core ladder (2026-10-28), where
 /// the refit reproduced the same three rows and the combine and compress rows below (the embed row
-/// was re-measured later, over the compress proof). The fitting tools and the runs' records are not
-/// part of this repository (`docs/tier-tables.md`). The probe walks every whitelist shape and
-/// reports which row it takes and the slack it leaves.
+/// was re-measured later, over the compress proof); and over the 15,646 shapes of the circuit with
+/// misaligned-access and code-store checks and its refitted core ladder (2026-11-05), all of which
+/// these rows still hold, where the p99 corpus's CPU chunks take row 0 more often (597 of 3,382,
+/// against 111 under the previous core ladder) and row 2 never. The fitting tools and the runs'
+/// records are not part of this repository (`docs/tier-tables.md`). The probe walks every
+/// whitelist shape and reports which row it takes and the slack it leaves.
 ///
 /// Converts have no fixpoint concern: their children are RISC-V proofs, not recursion proofs.
 pub const MLE_RECURSION_CONVERT_LADDER: &[&[(&str, usize)]] = &[
@@ -1974,7 +2027,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(seen, 50, "the machine's air list changed size");
+        assert_eq!(seen, 51, "the machine's air list changed size");
     }
 
     /// The three kinds the split sizes by the hardware-tier threshold rather than by cells: their
@@ -2358,7 +2411,7 @@ mod tests {
     /// chips must stay under 2^29, where the GKR size m goes from 29 to 30 and the leaf buffer
     /// outgrows the card. The interaction counts come off a real keygen, so a chip that gains an
     /// interaction moves the rows here rather than at proving time. The heaviest row, row
-    /// 27, is at 0.944 x 2^29.
+    /// 27, is at 0.977 x 2^29.
     #[test]
     fn core_ladder_rows_stay_under_the_gpu_line() {
         use crate::mle::machine::riscv::{

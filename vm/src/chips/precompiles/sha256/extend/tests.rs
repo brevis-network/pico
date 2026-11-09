@@ -519,9 +519,20 @@ fn bench_sha_extend_control_cpu_vs_gpu() {
         stream.synchronize().unwrap();
 
         let num_real_rows = num_events;
+        // The kernel's own columns: the code range is filled after it.
+        use crate::chips::gadgets::code_range::{kernel_columns, NUM_CODE_RANGE_COLS};
+        let offset = num_cols - NUM_CODE_RANGE_COLS;
         assert_eq!(
-            cpu_trace.values[..num_real_rows * num_cols],
-            gpu_trace.values[..num_real_rows * num_cols],
+            kernel_columns(
+                &cpu_trace.values[..num_real_rows * num_cols],
+                num_cols,
+                offset
+            ),
+            kernel_columns(
+                &gpu_trace.values[..num_real_rows * num_cols],
+                num_cols,
+                offset
+            ),
             "Main trace mismatch at bench size {}",
             num_events
         );

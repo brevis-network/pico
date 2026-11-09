@@ -61,6 +61,19 @@
 # the guest memory mmap-backed (mmap-memory); under -L too. Each arm's line says bigint=, alloc= and
 # mem= as the binary was built, not as this script asked.
 #
+# The snapshot thread runs the generated ordinary blocks; the AOT replay workers (the *-aot-workers
+# arms, replay-chunk's aot engine) run the recording bodies generated beside them.
+#
+# replay-chunk replays each chunk with the engines REPLAY_CHUNK_ENGINES lists, comma-separated, from
+# interp, interp-null and aot, at least one an interpreter; unset, all three. An arm's -e prefix
+# overrides this script's environment. aot-bench validates the list; this script reads it only to
+# refuse aot-recorder before the build.
+#
+# -C builds aot-bench with recorder-check: each step whose rows a recording block writes directly is
+# also closed by the shared writer's generic code, and a layout mismatch, or an instruction constant
+# that is not the program's at its pc, panics. It checks layout, not values. For correctness, never
+# timing; the run line says recorder_check=on.
+#
 # history-census writes its capacity table to PICO_BENCH_CENSUS_OUT and folds in the one
 # PICO_BENCH_CENSUS_FOLD names, both set in its -e prefix, so a second block's run folds in the
 # first's:
@@ -80,7 +93,7 @@ set -euo pipefail
 ARMS_ALL="emulate-opts pipeline-interp pipeline-aot pipeline-aot-workers execute-default execute-aot execute-serial prove-default prove-aot prove-serial prove-aot-workers tracegen-aot replay-chunk retained-rows history-census history-arena"
 
 usage() {
-  echo "usage: perf/aot/aot_bench.sh -g ELF -i INPUT [-i INPUT]... -w WORKERS -a ARM[@LABEL][,ARM[@LABEL]]... [-e LABEL=PREFIX]... [-p PHASE] [-r REPEATS] [-W] [-L] [-T] [-o DIR]" >&2
+  echo "usage: perf/aot/aot_bench.sh -g ELF -i INPUT [-i INPUT]... -w WORKERS -a ARM[@LABEL][,ARM[@LABEL]]... [-e LABEL=PREFIX]... [-p PHASE] [-r REPEATS] [-W] [-L] [-T] [-C] [-o DIR]" >&2
   echo "  ELF      a path, or a name under perf/bench_data/rv64/ without its -elf suffix" >&2
   echo "  INPUT    a file (passed raw, as cargo pico's file:<path>), or u32:<n>, u64:<n>, file:<path>" >&2
   echo "  WORKERS  interpreter workers for every arm that has them, or default: the core count for the" >&2
@@ -99,6 +112,7 @@ usage() {
   echo "           shipped build, and the run line says stage_ledger=off" >&2
   echo "  -T       build aot-bench with rug, tcmalloc and mmap-backed guest memory, as the production" >&2
   echo "           scripts do" >&2
+  echo "  -C       the checking build, every direct row checked as it is written; no timing" >&2
   echo "  DIR      where results.txt and each run's log go; default perf/aot/target/aot-bench/<guest>-<time>" >&2
   exit 2
 }
@@ -107,9 +121,10 @@ ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 AOT_DIR="$ROOT/perf/aot"
 
 guest_arg="" workers="" arms="" phase="" repeats=1 out="" warmup=0 stage_ledger=on memory=jemalloc
+recorder_check=off
 inputs=()
 prefixes=()
-while getopts "g:i:w:a:e:p:r:o:WLTh" opt; do
+while getopts "g:i:w:a:e:p:r:o:WLTRCIh" opt; do
   case "$opt" in
     g) guest_arg="$OPTARG" ;;
     i)
@@ -126,6 +141,15 @@ while getopts "g:i:w:a:e:p:r:o:WLTh" opt; do
     W) warmup=1 ;;
     L) stage_ledger=off ;;
     T) memory="bigint-rug tcmalloc mmap-memory" ;;
+    R)
+      echo "-R is refused: the recording bodies are always generated; leave it out" >&2
+      exit 2
+      ;;
+    C) recorder_check=on ;;
+    I)
+      echo "-I is refused: the recording blocks call their direct entries; the inlined form was slower and is gone" >&2
+      exit 2
+      ;;
     e)
       case "$OPTARG" in
         *=*) prefixes+=("$OPTARG") ;;
@@ -151,12 +175,49 @@ else
 fi
 guest=$(basename "$elf")
 
+# LABEL's prefix as given to -e, empty when there is none.
+prefix_of() {
+  local entry
+  for entry in ${prefixes[@]+"${prefixes[@]}"}; do
+    if [ "${entry%%=*}" = "$1" ]; then
+      echo "${entry#*=}"
+      return 0
+    fi
+  done
+  return 0
+}
+
+# ARM's engines: REPLAY_CHUNK_ENGINES from its -e prefix, else this environment's, else all three.
+replay_engines_of() {
+  local engines="${REPLAY_CHUNK_ENGINES-interp,interp-null,aot}" words=() word
+  case "$1" in *@*) read -r -a words <<<"$(prefix_of "${1#*@}")" ;; esac
+  for word in ${words[@]+"${words[@]}"}; do
+    case "$word" in REPLAY_CHUNK_ENGINES=*) engines=${word#REPLAY_CHUNK_ENGINES=} ;; esac
+  done
+  echo "$engines"
+}
+
 arm_list=$(echo "$arms" | tr ',' ' ')
 for arm in $arm_list; do
+  if [ "${arm%@*}" = pipeline-aot-recorder ]; then
+    echo "arm 'pipeline-aot-recorder' is refused: use pipeline-aot-workers, which runs the replay" \
+      "workers on the recording bodies" >&2
+    exit 2
+  fi
   case " $ARMS_ALL " in
     *" ${arm%@*} "*) ;;
     *) echo "unknown arm '$arm'" >&2; usage ;;
   esac
+  if [ "${arm%@*}" = replay-chunk ]; then
+    engines=$(replay_engines_of "$arm")
+    case ",$engines," in
+      *,aot-recorder,*)
+        echo "arm '$arm' replays with $engines: aot-recorder is refused; name aot, which replays" \
+          "on the recording bodies" >&2
+        exit 2
+        ;;
+    esac
+  fi
   case "$arm" in
     *@*)
       found=0
@@ -231,7 +292,13 @@ now() { perl -MTime::HiRes=time -e 'printf "%.2f", time'; }
 since() { perl -e 'printf "%.1f", $ARGV[1] - $ARGV[0]' "$1" "$(now)"; }
 
 # Anything but the tracked stub (the bootstrap script's sentinel aside) is someone's generated code.
-leftovers=$(git -C "$ROOT" status --porcelain --ignored -- aot-generated \
+# Checked apart from the filter: a failed git status prints nothing, which would pass for the stub
+# and let the exit trap delete whatever aot-generated/ holds.
+if ! generated=$(git -C "$ROOT" status --porcelain --ignored -- aot-generated); then
+  echo "git status failed on aot-generated/, so the run cannot tell it is the committed stub" >&2
+  exit 2
+fi
+leftovers=$(printf '%s\n' "$generated" \
   | grep -v '^!! aot-generated/\.aot-bootstrap-stub$' || true)
 if [ -n "$leftovers" ]; then
   echo "aot-generated/ is not the committed stub, and this run would overwrite it:" >&2
@@ -285,20 +352,22 @@ for input in ${inputs[@]+"${inputs[@]}"}; do
   esac
 done
 export RUST_LOG="${RUST_LOG:-info}"
-# What the prover and the pipeline read from the environment, beyond what the line already names.
+# What the prover, the pipeline and aot-bench read from the environment, beyond what the line
+# already names.
 env_values=""
 for name in MLE_SPLIT_REPLAY MLE_SPLIT_CHUNKS MLE_SPLIT_FROM_CHUNK PROVER_COUNT NUM_THREADS \
   MEMORY_POOL_SIZE CHUNK_SIZE PROVE_CONCURRENCY RUST_LOG RAYON_NUM_THREADS CHUNK_BATCH_SIZE \
   MLE_LOG_STACKED_HEIGHT MLE_LEDGER MLE_SPANS MLE_EVENT_POOL_SIZE MLE_PREWARM \
   MLE_HEAP_PREWARM_GB TCMALLOC_RELEASE_RATE PICO_BENCH_CENSUS_OUT PICO_BENCH_CENSUS_FOLD \
-  PICO_BENCH_CENSUS_REPLACE MLE_HISTORY_SLOTS MLE_REPLAY_WORKERS; do
+  PICO_BENCH_CENSUS_REPLACE MLE_HISTORY_SLOTS MLE_REPLAY_WORKERS REPLAY_CHUNK_ENGINES; do
   value=$(printenv "$name" | tr -s ' \t' '_' || true)
   env_values="$env_values $name=${value:--}"
 done
 record "AOT_BENCH_RUN guest=$guest elf_sha256=$(sha256 "$elf") \
 inputs=$(IFS=,; echo "${inputs[*]+${inputs[*]}}" | sed 's|file:[^,]*/|file:|g') \
 input_sha256=${input_sha256#,} workers=$workers arms=$arms repeats=$repeats phase=${phase:--} \
-stage_ledger=$stage_ledger memory_features=${memory// /+}\
+stage_ledger=$stage_ledger memory_features=${memory// /+} \
+recorder_check=$recorder_check\
 $env_values host=$(hostname -s) commit=$(git -C "$ROOT" rev-parse --short HEAD)$dirty"
 
 echo "==> building generate_crates"
@@ -326,6 +395,7 @@ if [ "$PICO_BACKEND" = cuda ]; then
     bench_features[2]="${bench_features[2]} cuda"
   fi
 fi
+[ "$recorder_check" = off ] || bench_features+=(--features recorder-check)
 
 # Against the stub first, so the build time below is the generated crates' alone.
 echo "==> building aot-bench's dependencies against the stub"
@@ -357,18 +427,6 @@ if [ "$arm_count" -ge 2 ] && [ $((repeats % 2)) -eq 1 ]; then
   record "AOT_BENCH_WARN repeats=$repeats is odd: the last repeat runs without its reverse, so its \
 back-to-back pairs run once more in one order than in the other"
 fi
-# LABEL's prefix as given to -e, empty when there is none.
-prefix_of() {
-  local entry
-  for entry in ${prefixes[@]+"${prefixes[@]}"}; do
-    if [ "${entry%%=*}" = "$1" ]; then
-      echo "${entry#*=}"
-      return 0
-    fi
-  done
-  return 0
-}
-
 # One arm, once: REP names the run's files, KIND is the line's record type.
 run_arm() {
   local rep=$1 pos=$2 arm=$3 kind=$4

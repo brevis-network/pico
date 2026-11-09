@@ -1,10 +1,14 @@
 use super::ShaCompressControlChip;
 #[cfg(feature = "cuda")]
+use crate::chips::gadgets::code_range::{fill_on_device, NUM_CODE_RANGE_COLS};
+#[cfg(feature = "cuda")]
 use crate::mle::spans::device;
 use crate::{
     chips::{
         chips::byte::event::ByteRecordBehavior,
-        gadgets::{addr_add::AddrAddGadget, syscall_addr::SyscallAddrGadget},
+        gadgets::{
+            addr_add::AddrAddGadget, code_range::CodeRangeCols, syscall_addr::SyscallAddrGadget,
+        },
         utils::pad_rows_fixed,
     },
     compiler::{riscv::program::Program, word::Word},
@@ -35,7 +39,7 @@ use crate::{
     instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::chip::GpuChipBehavior,
 };
-use core::borrow::Borrow;
+use core::{borrow::Borrow, ops::Range};
 #[cfg(feature = "cuda")]
 use cudart::{
     memory_pools::DevicePoolAllocation,
@@ -78,6 +82,9 @@ pub struct ShaCompressControlCols<T> {
     pub is_real: T,
     pub initial_state: [[T; 2]; 8],
     pub final_state: [[T; 2]; 8],
+
+    /// The new hash state is written to `h`, which may not lie on the program's code.
+    pub code_range: CodeRangeCols<T>,
 }
 
 impl<F: PrimeField32> BaseAir<F> for ShaCompressControlChip<F> {
@@ -97,6 +104,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaCompressControlChip<F> {
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
         let rows = vec![];
 
+        let code = input.program.code();
         let mut wrapped_rows = Some(rows);
         for (_, event) in input.get_precompile_events(SyscallCode::SHA_COMPRESS) {
             let event = if let PrecompileEvent::ShaCompress(event) = event {
@@ -104,7 +112,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaCompressControlChip<F> {
             } else {
                 unreachable!()
             };
-            self.event_to_row(event, &mut wrapped_rows, &mut vec![]);
+            self.event_to_row(event, &code, &mut wrapped_rows, &mut vec![]);
         }
 
         let mut rows = wrapped_rows.unwrap();
@@ -136,13 +144,14 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaCompressControlChip<F> {
             })
             .collect();
 
+        let code = input.program.code();
         let chunk_size = std::cmp::max(compress_events.len() / num_cpus::get(), 1);
         let blu_batches = compress_events
             .par_chunks(chunk_size)
             .flat_map(|events| {
                 let mut blu = vec![];
                 events.iter().for_each(|event| {
-                    self.event_to_row(event, &mut None, &mut blu);
+                    self.event_to_row(event, &code, &mut None, &mut blu);
                 });
                 blu
             })
@@ -233,6 +242,21 @@ impl<F: PrimeField32> GpuChipBehavior<F> for ShaCompressControlChip<F> {
             );
         }
 
+        // The code range, the last columns of the chip's row, which the kernel leaves zero.
+        // The state goes to `h`.
+        let writes: Vec<u64> = events.iter().map(|event| event.h_ptr).collect();
+        fill_on_device(
+            &mut d_trace,
+            num_cols_per_row,
+            num_cols_per_row - NUM_CODE_RANGE_COLS,
+            &writes,
+            64,
+            &input.program.code(),
+            d_byte_trace,
+            mem_pool,
+            stream,
+        );
+
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
         device::launched(kernels, stream);
@@ -249,6 +273,7 @@ impl<F: PrimeField32> ShaCompressControlChip<F> {
     fn event_to_row(
         &self,
         event: &ShaCompressEvent,
+        code: &Range<u64>,
         rows: &mut Option<Vec<[F; NUM_SHA_COMPRESS_CONTROL_COLS]>>,
         blu: &mut impl ByteRecordBehavior,
     ) {
@@ -261,6 +286,8 @@ impl<F: PrimeField32> ShaCompressControlChip<F> {
         cols.w_ptr.populate(blu, event.w_ptr, 512);
         // `h_ptr` has 8 words, so 64 bytes - but only 32 bytes are actually used.
         cols.h_ptr.populate(blu, event.h_ptr, 64);
+        // Each of the 8 state words is written as a whole dword.
+        cols.code_range.populate(event.h_ptr, 64, code, blu);
         cols.w_slice_end
             .populate(blu, event.w_ptr, OFFSET_LAST_ELEM_W * 8);
         cols.h_slice_end
@@ -301,6 +328,15 @@ where
             SyscallAddrGadget::<CB::F>::eval(builder, 512, local.w_ptr, local.is_real.into());
         let h_ptr =
             SyscallAddrGadget::<CB::F>::eval(builder, 64, local.h_ptr, local.is_real.into());
+        // The new state goes to `h`, eight whole dwords, which may not lie on the program's code.
+        // The third limb is zero at any address the finalize check admits.
+        CodeRangeCols::<CB::F>::eval(
+            builder,
+            &local.code_range,
+            [h_ptr[0].into(), h_ptr[1].into()],
+            CB::Expr::from_u32(64),
+            local.is_real.into(),
+        );
 
         AddrAddGadget::<CB::F>::eval(
             builder,

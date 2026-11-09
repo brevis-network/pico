@@ -67,15 +67,20 @@ export CHUNK_BATCH_SIZE="${CHUNK_BATCH_SIZE:-1}"
 # Records held at once: a chunk's record holds a slot from its first step until a worker proves it
 # and drops it, and emulation waits for a slot when every one is held. Streaming only needs
 # >= in-flight chunks (backpressure), so a modest bound keeps the held histories small. Each slot
-# is the chunk's history in pinned memory, about 0.7 GB, pinned at startup: 64 pin about 45 GB.
+# is the chunk's history in pinned memory, about 0.7 GB, pinned at startup: 16 pin about 11 GB.
+# 16 is below what a reth block holds at its peak on ethproofs_single_node_mle.sh's 4-card service,
+# so emulation waits for proving sooner, but no block ends measurably later and peak host memory is
+# far lower.
 # MLE_EVENT_POOL_SIZE, the variable's former name, still sets the count; the default here must not
 # shadow it, as the two set to different counts refuse to start.
-export MLE_HISTORY_SLOTS="${MLE_HISTORY_SLOTS:-${MLE_EVENT_POOL_SIZE:-64}}"
+export MLE_HISTORY_SLOTS="${MLE_HISTORY_SLOTS:-${MLE_EVENT_POOL_SIZE:-16}}"
 
 # Snapshot-pipeline memory pool: a CAP, not a count. The
 # pool seeds MEMORY_POOL_EAGER entries and tops up in the background while below
 # MEMORY_POOL_LOW_WATER, so this number alone no longer keeps the blocking recv from starving.
-export MEMORY_POOL_SIZE="${MEMORY_POOL_SIZE:-140}"
+# A reset keeps a memory's pages, so the memories alive, not this cap, are what the pool costs. 16
+# is what an unset MEMORY_POOL_SIZE gets at this shape; no block ends measurably later at it.
+export MEMORY_POOL_SIZE="${MEMORY_POOL_SIZE:-16}"
 export MEMORY_RECYCLER_THREADS="${MEMORY_RECYCLER_THREADS:-4}"
 
 # First-iteration warmup. Without these, the FIRST `e2e=` of a fresh process is 419±52 ms slower
@@ -98,10 +103,10 @@ export TCMALLOC_RELEASE_RATE="${TCMALLOC_RELEASE_RATE:-0}"
 # verified through combine, with e2e flat across them, since emulate runs behind prove.
 export NUM_THREADS="${NUM_THREADS:-8}"
 
-# The replay workers' engine: MLE_REPLAY_WORKERS=aot | interpreter. Unset, the workers replay on the
-# interpreter; `aot` puts them on the AOT-compiled guest the binary registered, and refuses to start
-# where it registered none. `MLE replay workers: <engine>` in the log says which ran. Not defaulted
-# here, so the prover's own default is the one in force.
+# The replay workers' engine: MLE_REPLAY_WORKERS=aot | interpreter. Unset, the workers replay on
+# the interpreter; `aot` puts them on the recording bodies of the AOT-compiled guest the binary
+# registered, and refuses to start where it registered none. `MLE replay workers: <engine>` in the
+# log says which ran. Not defaulted here, so the prover's own default is the one in force.
 
 # Global rayon pool; rayon otherwise sizes it from num_cpus (124 on the box measured here).
 # 32 is worth -3.3% e2e, and it lands in the riscv and convert phases -- combine goes +4.0% the

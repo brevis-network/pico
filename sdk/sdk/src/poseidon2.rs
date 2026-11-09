@@ -28,10 +28,10 @@ pub const DIGEST_SIZE: usize = 8;
 /// Elements absorbed per permutation.
 pub const RATE: usize = 8;
 
-// Checked against `pico-vm` on the host, since a guest does not compile it. DIGEST_SIZE is the width
-// of pico-vm's `hash_deferred_proof` output. Nothing in pico-vm reads PERMUTATION_RATE: the rate the
-// machine hashes at is pinned by `tests::the_deferred_proof_digest_is_the_machines` instead.
-#[cfg(not(target_os = "zkvm"))]
+// Checked against `pico-vm` in the host tests, since a guest does not compile it. DIGEST_SIZE is the
+// width of pico-vm's `hash_deferred_proof` output. Nothing in pico-vm reads PERMUTATION_RATE: the
+// rate the machine hashes at is pinned by `tests::the_deferred_proof_digest_is_the_machines` instead.
+#[cfg(all(test, not(target_os = "zkvm")))]
 const _: () = assert!(
     DIGEST_SIZE == pico_vm::primitives::consts::DIGEST_SIZE
         && RATE == pico_vm::primitives::consts::PERMUTATION_RATE
@@ -65,11 +65,23 @@ pub fn hash<I: IntoIterator<Item = ZkField>>(inputs: I) -> [ZkField; DIGEST_SIZE
         core::array::from_fn(|i| state[i])
     }
 
+    // The machine's sponge (`pico_vm::primitives::poseidon2_kb_hasher`), built here so a host
+    // build needs no `pico-vm`; `tests::the_digest_is_the_machines` holds the two together.
     #[cfg(not(target_os = "zkvm"))]
     {
-        <ZkField as pico_vm::primitives::Poseidon2HashField>::poseidon2_hash_iter(
-            inputs.into_iter().collect(),
-        )
+        use p3_koala_bear::{default_koalabear_poseidon2_16, Poseidon2KoalaBear};
+        use p3_symmetric::{CryptographicHasher, PaddingFreeSponge};
+
+        type Sponge = PaddingFreeSponge<
+            Poseidon2KoalaBear<POSEIDON2_WIDTH>,
+            POSEIDON2_WIDTH,
+            RATE,
+            DIGEST_SIZE,
+        >;
+        lazy_static::lazy_static! {
+            static ref HOST_HASHER: Sponge = Sponge::new(default_koalabear_poseidon2_16());
+        }
+        HOST_HASHER.hash_iter(inputs)
     }
 }
 
@@ -121,6 +133,21 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
 
     use super::*;
+
+    /// The host sponge is the machine's, at every length a block boundary can fall on.
+    #[test]
+    fn the_digest_is_the_machines() {
+        for len in 0..=3 * RATE + 1 {
+            let inputs: Vec<ZkField> = (0..len as u32)
+                .map(|i| ZkField::from_u32(i.wrapping_mul(2_654_435_761) >> 1))
+                .collect();
+            assert_eq!(
+                hash(inputs.clone()),
+                <ZkField as pico_vm::primitives::Poseidon2HashField>::poseidon2_hash_iter(inputs),
+                "{len} elements"
+            );
+        }
+    }
 
     #[test]
     fn the_deferred_proof_digest_is_the_machines() {

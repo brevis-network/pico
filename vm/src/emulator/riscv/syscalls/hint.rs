@@ -69,6 +69,11 @@ impl Syscall for HintReadSyscall {
             )));
             return None;
         }
+        // The dwords the hint lands in are written like a store's, and an empty one writes
+        // nothing, so its pointer may dangle, as an empty Rust vector's does.
+        if supplied > 0 && !ctx.allowed(ptr, 8 * supplied.div_ceil(8) as u64, true) {
+            return None;
+        }
 
         // The dispatcher ends the emulation on the first recorded failure, so a dword already
         // written when a later one fails is never read back.
@@ -195,16 +200,19 @@ mod tests {
         let mut emulator = test_emulator(vec![vec![1, 2, 3, 4, 5, 6, 7, 8]]);
         let mut ctx = SyscallContext::new(&mut emulator);
 
-        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x100, 8);
+        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x1_0100, 8);
 
         assert_eq!(
-            ctx.rt.state.uninitialized_memory.get(0x100).copied(),
+            ctx.rt.state.uninitialized_memory.get(0x1_0100).copied(),
             Some(0x0807_0605_0403_0201)
         );
-        assert_eq!(ctx.rt.state.memory.peek_dword(0x100), 0x0807_0605_0403_0201);
+        assert_eq!(
+            ctx.rt.state.memory.peek_dword(0x1_0100),
+            0x0807_0605_0403_0201
+        );
         assert_eq!(ctx.rt.state.input_stream_ptr, 1);
         let accessed: Vec<_> = ctx.rt.state.memory.accessed_keys().collect();
-        assert_eq!(accessed, vec![0x100]);
+        assert_eq!(accessed, vec![0x1_0100]);
     }
 
     #[test]
@@ -213,13 +221,16 @@ mod tests {
         let mut emulator = test_emulator(vec![vec![1, 2, 3]]);
         let mut ctx = SyscallContext::new(&mut emulator);
 
-        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x100, 3);
+        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x1_0100, 3);
 
         assert_eq!(
-            ctx.rt.state.uninitialized_memory.get(0x100).copied(),
+            ctx.rt.state.uninitialized_memory.get(0x1_0100).copied(),
             Some(0x0000_0000_0003_0201)
         );
-        assert_eq!(ctx.rt.state.memory.peek_dword(0x100), 0x0000_0000_0003_0201);
+        assert_eq!(
+            ctx.rt.state.memory.peek_dword(0x1_0100),
+            0x0000_0000_0003_0201
+        );
     }
 
     #[test]
@@ -228,20 +239,26 @@ mod tests {
         let mut emulator = test_emulator(vec![vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
         let mut ctx = SyscallContext::new(&mut emulator);
 
-        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x100, 10);
+        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x1_0100, 10);
 
         assert_eq!(
-            ctx.rt.state.uninitialized_memory.get(0x100).copied(),
+            ctx.rt.state.uninitialized_memory.get(0x1_0100).copied(),
             Some(0x0807_0605_0403_0201)
         );
         assert_eq!(
-            ctx.rt.state.uninitialized_memory.get(0x108).copied(),
+            ctx.rt.state.uninitialized_memory.get(0x1_0108).copied(),
             Some(0x0000_0000_0000_0A09)
         );
-        assert_eq!(ctx.rt.state.memory.peek_dword(0x100), 0x0807_0605_0403_0201);
-        assert_eq!(ctx.rt.state.memory.peek_dword(0x108), 0x0000_0000_0000_0A09);
+        assert_eq!(
+            ctx.rt.state.memory.peek_dword(0x1_0100),
+            0x0807_0605_0403_0201
+        );
+        assert_eq!(
+            ctx.rt.state.memory.peek_dword(0x1_0108),
+            0x0000_0000_0000_0A09
+        );
         let accessed: Vec<_> = ctx.rt.state.memory.accessed_keys().collect();
-        assert_eq!(accessed, vec![0x100, 0x108]);
+        assert_eq!(accessed, vec![0x1_0100, 0x1_0108]);
     }
 
     /// Every rejection below is guest-controlled, so each one has to reach the dispatcher as a
@@ -266,7 +283,7 @@ mod tests {
         let mut emulator = test_emulator(vec![vec![1, 2, 3, 4]]);
         let mut ctx = SyscallContext::new(&mut emulator);
 
-        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x104, 4);
+        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x1_0104, 4);
 
         assert_failed(&mut ctx, "is not aligned to 8 bytes");
     }
@@ -277,7 +294,7 @@ mod tests {
         let mut emulator = test_emulator(vec![vec![1, 2, 3, 4]]);
         let mut ctx = SyscallContext::new(&mut emulator);
 
-        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x100, 8);
+        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x1_0100, 8);
 
         assert_failed(&mut ctx, "length mismatch");
     }
@@ -289,12 +306,12 @@ mod tests {
 
         {
             let mut ctx = SyscallContext::new(&mut emulator);
-            HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x100, 4);
+            HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x1_0100, 4);
             assert!(ctx.take_error().is_none(), "the first read is well formed");
         }
 
         let mut ctx = SyscallContext::new(&mut emulator);
-        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x100, 4);
+        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x1_0100, 4);
 
         assert_failed(&mut ctx, "initialized already (uninitialized_memory)");
     }

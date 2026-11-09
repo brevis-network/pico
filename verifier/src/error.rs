@@ -19,6 +19,10 @@ pub enum VerifyError {
     /// The supplied vk's body does not hash to the pre_hash it carries.
     #[error("supplied vk body does not hash to its self-reported pre_hash")]
     VkBodyMismatch,
+    /// The supplied vk was made for another preset than the proof kind asks for: a root key in place
+    /// of the compress key, or the other way round.
+    #[error("supplied vk is not a {what} key: it was made for another preset")]
+    WrongPreset { what: String },
     /// The supplied vk's identity is not a whitelist member.
     #[error("supplied vk is not in the whitelist")]
     NotWhitelisted,

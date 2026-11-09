@@ -11,6 +11,7 @@ use std::{
     alloc::{alloc_zeroed, dealloc, Layout},
     ffi::c_void,
     fmt,
+    ops::Range,
     panic::{catch_unwind, AssertUnwindSafe},
     ptr::NonNull,
     sync::Arc,
@@ -21,22 +22,21 @@ use pico_aot_pure::{
     sext32, Fault, PureProgram, PureState, ABI_VERSION, ACCESS_LB, ACCESS_LBU, ACCESS_LD,
     ACCESS_LH, ACCESS_LHU, ACCESS_LW, ACCESS_LWU, ACCESS_SB, ACCESS_SD, ACCESS_SH, ACCESS_SW,
     EXIT_CYCLE_LIMIT, EXIT_FAULT, EXIT_HALT, EXIT_HOST_ERROR, FAULT_BREAKPOINT, FAULT_ILLEGAL,
-    FAULT_MISALIGNED, FAULT_OUT_OF_RANGE, NEXT_HALT, NEXT_HOST_ERROR, SOURCE_FINGERPRINT,
+    FAULT_MISALIGNED_JUMP, FAULT_NULL_ACCESS, FAULT_OUTSIDE_PROGRAM, FAULT_OUT_OF_RANGE,
+    FAULT_STACK_OVERFLOW, FAULT_STORE_TO_CODE, NEXT_HALT, NEXT_HOST_ERROR, SOURCE_FINGERPRINT,
 };
 use pico_vm::{
-    compiler::{
-        addr::fits_pc,
-        riscv::{opcode::Opcode, program::Program, register::Register},
-    },
+    compiler::riscv::{opcode::Opcode, program::Program, register::Register},
     emulator::riscv::{
         riscv_emulator::{
+            guard::{access_fault, access_width},
             AbnormalTermination, EmulationError, TerminationReason, MIN_MAIN_MEMORY_ADDR,
         },
         syscalls::SyscallCode,
     },
     primitives::{
         consts::{DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
-        layout::MEMORY_SIZE,
+        layout::{HEAP_END, MEMORY_SIZE, MIN_SEGMENT_ADDR, STACK_BOTTOM},
     },
 };
 
@@ -85,7 +85,7 @@ impl From<String> for PureFailure {
 
 impl From<Fault> for PureFailure {
     /// The failure a fault in generated code stands for, as the interpreter reports the same
-    /// fault: a misaligned access ends the guest, one outside memory aborts the emulator.
+    /// fault.
     fn from(fault: Fault) -> Self {
         let Fault::Guest {
             kind,
@@ -95,26 +95,38 @@ impl From<Fault> for PureFailure {
         else {
             return "pure host failed".to_string().into();
         };
-        match kind {
-            FAULT_BREAKPOINT => {
-                EmulationError::from(AbnormalTermination::fault(TerminationReason::Breakpoint {
-                    pc: value,
-                }))
-                .into()
-            }
-            FAULT_ILLEGAL => EmulationError::illegal_instruction(value).into(),
-            FAULT_MISALIGNED => match access_opcode(detail) {
-                Some(opcode) => EmulationError::invalid_memory_access(opcode, value).into(),
-                None => format!("misaligned access at {value:#x}").into(),
+        let reason = match kind {
+            FAULT_BREAKPOINT => TerminationReason::Breakpoint { pc: value },
+            FAULT_ILLEGAL => TerminationReason::IllegalInstruction { pc: value },
+            FAULT_MISALIGNED_JUMP => TerminationReason::MisalignedJumpTarget {
+                pc: detail,
+                target: value,
             },
-            FAULT_OUT_OF_RANGE => format!("guest memory access out of range: {value:#x}").into(),
-            other => format!("unknown pure fault {other} ({value:#x})").into(),
-        }
+            FAULT_OUTSIDE_PROGRAM => TerminationReason::OutsideProgram { pc: value },
+            FAULT_OUT_OF_RANGE | FAULT_NULL_ACCESS | FAULT_STACK_OVERFLOW | FAULT_STORE_TO_CODE => {
+                let Some(opcode) = access_opcode(detail) else {
+                    return format!("pure memory fault {kind} at {value:#x}, access {detail}")
+                        .into();
+                };
+                let addr = value;
+                match kind {
+                    FAULT_OUT_OF_RANGE => TerminationReason::InvalidMemoryAccess { opcode, addr },
+                    FAULT_NULL_ACCESS => TerminationReason::NullAccess { opcode, addr },
+                    FAULT_STACK_OVERFLOW => TerminationReason::StackOverflow { opcode, addr },
+                    _ => TerminationReason::StoreToCode { opcode, addr },
+                }
+            }
+            other => return format!("unknown pure fault {other} ({value:#x})").into(),
+        };
+        EmulationError::from(AbnormalTermination::fault(reason)).into()
     }
 }
 
 /// The load or store an `ACCESS_*` names.
-fn access_opcode(access: u32) -> Option<Opcode> {
+fn access_opcode(access: u64) -> Option<Opcode> {
+    let Ok(access) = u32::try_from(access) else {
+        return None;
+    };
     Some(match access {
         ACCESS_LB => Opcode::LB,
         ACCESS_LH => Opcode::LH,
@@ -148,6 +160,11 @@ const MEM_BYTES: usize = MEMORY_SIZE as usize;
 /// clearing them.
 struct FlatMemory {
     ptr: *mut u8,
+    /// The program's code, which a syscall may read but not write.
+    code: Range<u64>,
+    /// The first access a syscall made where no guest access may, which did not happen; the run
+    /// ends when the syscall returns, as in the interpreter.
+    fault: Option<TerminationReason>,
 }
 
 impl FlatMemory {
@@ -155,14 +172,45 @@ impl FlatMemory {
         Layout::from_size_align(MEM_BYTES, 8).expect("guest memory layout")
     }
 
-    fn new() -> Self {
+    fn new(code: Range<u64>) -> Self {
         // SAFETY: the layout's size is non-zero.
         let ptr = unsafe { alloc_zeroed(Self::layout()) };
         assert!(
             !ptr.is_null(),
             "cannot allocate {MEM_BYTES} bytes of guest memory"
         );
-        Self { ptr }
+        Self {
+            ptr,
+            code,
+            fault: None,
+        }
+    }
+
+    /// Whether a syscall's `width`-byte access at `addr` may happen, as the AOT core's syscall
+    /// accessors ask it; one that may not is kept as the run's fault, the first one only.
+    fn allowed(&mut self, addr: u64, width: u64, store: bool) -> bool {
+        match access_fault(Opcode::ECALL, addr, width, store, &self.code) {
+            None => true,
+            Some(reason) => {
+                self.fault.get_or_insert(reason);
+                false
+            }
+        }
+    }
+
+    /// The dword a syscall reads at `addr`, zero for one it may not read.
+    fn syscall_dword(&mut self, addr: u64) -> u64 {
+        if self.allowed(addr, 8, false) {
+            self.dword(addr)
+        } else {
+            0
+        }
+    }
+
+    fn syscall_set_dword(&mut self, addr: u64, value: u64) {
+        if self.allowed(addr, 8, true) {
+            self.set_dword(addr, value);
+        }
     }
 
     /// The dword at `addr`.
@@ -201,38 +249,49 @@ impl Drop for FlatMemory {
     }
 }
 
-/// Precompiles run on plain memory: no clock, metadata or chunk accounting.
+/// Precompiles run on plain memory: no clock, metadata or chunk accounting. Each access is checked
+/// as the AOT core's syscall accessors check it: a span read as one access at its start, every
+/// other dword on its own.
 impl PrecompileMemory for FlatMemory {
     fn clk(&self) -> u32 {
         0
     }
     fn read_mem_dword_span_at_clk(&mut self, addr: u64, out: &mut [u64], _clk: u32) {
-        self.read_mem_dword_span_snapshot(addr, out);
+        for (i, slot) in out.iter_mut().enumerate() {
+            *slot = self.syscall_dword(addr + (i as u64) * 8);
+        }
     }
     fn write_mem_dword_span_at_clk(&mut self, addr: u64, values: &[u64], _clk: u32) {
         for (i, &value) in values.iter().enumerate() {
-            self.set_dword(addr + (i as u64) * 8, value);
+            self.syscall_set_dword(addr + (i as u64) * 8, value);
         }
     }
-    fn read_mem_dword_span_snapshot(&mut self, addr: u64, out: &mut [u64]) {
-        for (i, slot) in out.iter_mut().enumerate() {
-            *slot = self.dword(addr + (i as u64) * 8);
+    fn read_mem_dword_span_snapshot_syscall(&mut self, addr: u64, out: &mut [u64]) {
+        if self.load_span_allowed(addr, out.len()) {
+            for (i, slot) in out.iter_mut().enumerate() {
+                *slot = self.dword(addr + (i as u64) * 8);
+            }
+        } else {
+            out.fill(0);
         }
+    }
+    fn load_span_allowed(&mut self, addr: u64, dwords: usize) -> bool {
+        dwords == 0 || self.allowed(addr, 8 * dwords as u64, false)
     }
     fn read_mem_low32_slot_at_clk(&mut self, addr: u64, _clk: u32) -> u32 {
-        self.dword(addr) as u32
+        self.syscall_dword(addr) as u32
     }
     fn write_mem_low32_slot_at_clk(&mut self, addr: u64, value: u32, _clk: u32) {
-        self.set_dword(addr, u64::from(value));
+        self.syscall_set_dword(addr, u64::from(value));
     }
     fn read_mem_low32_slot_span_at_clk(&mut self, addr: u64, out: &mut [u32], _clk: u32) {
         for (i, slot) in out.iter_mut().enumerate() {
-            *slot = self.dword(addr + (i as u64) * 8) as u32;
+            *slot = self.syscall_dword(addr + (i as u64) * 8) as u32;
         }
     }
     fn write_mem_low32_slot_span_at_clk(&mut self, addr: u64, values: &[u32], _clk: u32) {
         for (i, &value) in values.iter().enumerate() {
-            self.set_dword(addr + (i as u64) * 8, u64::from(value));
+            self.syscall_set_dword(addr + (i as u64) * 8, u64::from(value));
         }
     }
     fn read_mem_dword_unsafe(&self, addr: u64) -> u64 {
@@ -247,6 +306,8 @@ struct Unconstrained {
     pc: u64,
     insn_count: u64,
     regs: [u64; 32],
+    /// The misaligned-access count, which the region's accesses do not add to.
+    misaligned: u64,
     committed_value_digest: [u32; PV_DIGEST_NUM_WORDS],
     deferred_proofs_digest: [u32; DIGEST_SIZE],
     /// Each dword the region wrote, as it was before.
@@ -288,7 +349,8 @@ impl PureRun {
     /// A run of `program` from its entry point, with `input_stream` as its input elements, that
     /// stops with [`EmulationError::ExceededCycleLimit`] past `max_cycles` instructions.
     pub fn new(program: Arc<Program>, input_stream: Vec<Vec<u8>>, max_cycles: u64) -> Self {
-        let mut mem = FlatMemory::new();
+        let code = program.code();
+        let mut mem = FlatMemory::new(code.clone());
         for (&addr, &value) in program.memory_image.iter() {
             mem.set_dword(addr, value);
         }
@@ -313,7 +375,12 @@ impl PureRun {
             max_insns: max_cycles,
             mem: mem_ptr,
             mem_len: MEM_BYTES as u64,
-            mem_floor: MIN_MAIN_MEMORY_ADDR,
+            mem_floor: MIN_SEGMENT_ADDR,
+            guard_start: HEAP_END,
+            guard_end: STACK_BOTTOM,
+            code_start: code.start,
+            code_end: code.end,
+            misaligned: 0,
             host: host.as_ptr() as *mut c_void,
             ecall: host_ecall,
             step: host_step,
@@ -389,6 +456,12 @@ impl PureRun {
         self.state.insn_count
     }
 
+    /// Loads and stores whose address is not a multiple of their width, outside unconstrained
+    /// regions, as the interpreter counts them.
+    pub fn misaligned_accesses(&self) -> u64 {
+        self.state.misaligned
+    }
+
     /// The registers as the run left them.
     pub fn registers(&self) -> [u64; 32] {
         self.state.regs
@@ -437,21 +510,12 @@ fn host_call(
 
 impl PureHost {
     /// Runs the one instruction at `pc` with the generated code's semantics. Returns the next pc,
-    /// or [`NEXT_HALT`] at pc 0 or outside the program, where the interpreter ends a run.
+    /// or [`NEXT_HALT`] after `HALT`.
     fn step(&mut self, state: &mut PureState, pc: u64) -> Result<u64, PureFailure> {
-        // As the interpreter: pc 0 or a pc outside the program ends the run, and a pc inside it
-        // fetches the instruction its offset rounds down to.
-        let offset = pc.wrapping_sub(self.program.pc_base);
-        if pc == 0 || offset >= (self.program.instructions.len() * 4) as u64 {
-            if self.unconstrained.is_some() {
-                return Err(EmulationError::UnconstrainedEnd.into());
-            }
-            if !fits_pc(pc) {
-                return Err(EmulationError::EndPcBeyondProofAddress(pc).into());
-            }
-            return Ok(NEXT_HALT);
-        }
-        let inst = self.program.instructions[(offset / 4) as usize];
+        // As the interpreter: only `HALT` ends a run, and a pc outside the program is refused.
+        let Some(inst) = self.program.try_fetch(pc) else {
+            return Err(EmulationError::outside_program(pc).into());
+        };
         state.insn_count += 1;
         let (a, b_raw, c_raw) = (usize::from(inst.op_a), inst.op_b, inst.op_c);
         let next = pc.wrapping_add(4);
@@ -540,7 +604,8 @@ impl PureHost {
             Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SD => {
                 // S-type: op_a is the value register, op_b the base, op_c the offset.
                 let (rs2, rs1) = (a, b_raw as usize);
-                self.journal_store(state.regs[rs1].wrapping_add(sext32(c_raw)));
+                let addr = state.regs[rs1].wrapping_add(sext32(c_raw));
+                self.journal_store(addr, access_width(inst.opcode));
                 let stored = match inst.opcode {
                     Opcode::SB => state.sb(rs2, rs1, c_raw),
                     Opcode::SH => state.sh(rs2, rs1, c_raw),
@@ -559,17 +624,20 @@ impl PureHost {
                     Opcode::BLTU => x < y,
                     _ => x >= y,
                 };
-                return Ok(if taken {
-                    pc.wrapping_add(sext32(c_raw))
-                } else {
-                    next
-                });
+                if !taken {
+                    return Ok(next);
+                }
+                let target = pc.wrapping_add(sext32(c_raw));
+                state.check_jump(pc, target)?;
+                return Ok(target);
             }
             Opcode::JAL => {
+                let target = pc.wrapping_add(sext32(b_raw));
+                state.check_jump(pc, target)?;
                 state.link(a, pc);
-                return Ok(pc.wrapping_add(sext32(b_raw)));
+                return Ok(target);
             }
-            Opcode::JALR => return Ok(state.jalr(a, b_raw as usize, pc, c_raw)),
+            Opcode::JALR => return Ok(state.jalr(a, b_raw as usize, pc, c_raw)?),
             Opcode::ECALL => return self.ecall(state, pc),
             Opcode::EBREAK => {
                 return Err(Fault::Guest {
@@ -592,19 +660,23 @@ impl PureHost {
         Ok(next)
     }
 
-    /// In an unconstrained region, keeps the dword a store to `addr` changes, the first time. A
-    /// store outside memory faults instead, so it keeps nothing.
-    fn journal_store(&mut self, addr: u64) {
+    /// In an unconstrained region, keeps the dwords a `width`-byte store to `addr` changes, the
+    /// first time; a misaligned one can change two. A store outside memory faults instead, so it
+    /// keeps nothing.
+    fn journal_store(&mut self, addr: u64, width: u64) {
         let Some(region) = self.unconstrained.as_mut() else {
             return;
         };
-        let dword = addr & !7;
-        if (MIN_MAIN_MEMORY_ADDR..=(MEM_BYTES - 8) as u64).contains(&dword) {
-            let mem = &self.mem;
-            region
-                .journal
-                .entry(dword)
-                .or_insert_with(|| mem.dword(dword));
+        let first = addr & !7;
+        let last = addr.wrapping_add(width - 1) & !7;
+        for dword in [first, last] {
+            if (MIN_MAIN_MEMORY_ADDR..=(MEM_BYTES - 8) as u64).contains(&dword) {
+                let mem = &self.mem;
+                region
+                    .journal
+                    .entry(dword)
+                    .or_insert_with(|| mem.dword(dword));
+            }
         }
     }
 
@@ -650,6 +722,7 @@ impl PureHost {
                 Some(region) => {
                     state.regs = region.regs;
                     state.insn_count = region.insn_count;
+                    state.misaligned = region.misaligned;
                     self.committed_value_digest = region.committed_value_digest;
                     self.deferred_proofs_digest = region.deferred_proofs_digest;
                     for (addr, value) in region.journal {
@@ -705,6 +778,9 @@ impl PureHost {
                 if !dispatch_precompile(&mut self.mem, id, arg1, arg2)? {
                     return Err(EmulationError::UnsupportedSyscall(id).into());
                 }
+                if let Some(reason) = self.mem.fault.take() {
+                    return Err(EmulationError::from(AbnormalTermination::fault(reason)).into());
+                }
                 (ret, next)
             }
         };
@@ -720,6 +796,7 @@ impl PureHost {
             pc,
             insn_count: state.insn_count,
             regs: state.regs,
+            misaligned: state.misaligned,
             committed_value_digest: self.committed_value_digest,
             deferred_proofs_digest: self.deferred_proofs_digest,
             journal: HashMap::new(),
@@ -742,7 +819,10 @@ impl PureHost {
     fn write(&mut self, state: &PureState, fd: u64, buf: u64) -> Result<(), PureFailure> {
         let fd = syscall_leaf_u32(fd, "write fd")?;
         let nbytes = state.regs[Register::X12 as usize] as usize;
-        // Byte by byte, as the AOT core reads it: an empty write reads nothing, wherever it points.
+        // An empty write reads nothing, so its pointer may dangle, as an empty Rust slice's does.
+        if nbytes > 0 && !self.mem.allowed(buf, nbytes as u64, false) {
+            return Err(self.syscall_fault());
+        }
         let bytes = match nbytes {
             0 => Vec::new(),
             // SAFETY: `at` checked the span against memory.
@@ -755,7 +835,8 @@ impl PureHost {
                 self.output(fd, &text);
             }
             3 => self.public_values_stream.extend_from_slice(&bytes),
-            4 => self.input_stream.push(bytes),
+            // Read next, ahead of input the guest has not read yet, as in the interpreter.
+            4 => self.input_stream.insert(self.input_stream_ptr, bytes),
             fd => match self.hooks.get(&fd).copied() {
                 Some(hook) => {
                     let answer = hook(&bytes);
@@ -767,6 +848,14 @@ impl PureHost {
             },
         }
         Ok(())
+    }
+
+    /// The fault [`FlatMemory::allowed`] just kept, as the run's failure.
+    fn syscall_fault(&mut self) -> PureFailure {
+        match self.mem.fault.take() {
+            Some(reason) => EmulationError::from(AbnormalTermination::fault(reason)).into(),
+            None => "syscall access refused without a fault".to_string().into(),
+        }
     }
 
     /// Logs the guest's stdout or stderr a line at a time, as the AOT core does.
@@ -816,6 +905,10 @@ impl PureHost {
             ))
             .into());
         }
+        // The dwords the hint lands in are written like a store's; an empty hint writes nothing.
+        if supplied > 0 && !self.mem.allowed(ptr, 8 * supplied.div_ceil(8) as u64, true) {
+            return Err(self.syscall_fault());
+        }
         // Whole dwords, the last zero-padded, as the AOT core writes them. It also refuses a
         // dword something already wrote; plain memory can only tell one that holds a value.
         let element = std::mem::take(&mut self.input_stream[stream_ptr]);
@@ -848,7 +941,7 @@ mod tests {
         emulator::riscv::syscalls::SyscallCode,
     };
 
-    use pico_vm::emulator::riscv::riscv_emulator::EmulationError;
+    use pico_vm::emulator::riscv::riscv_emulator::{EmulationError, TerminationReason};
 
     use super::PureRun;
     use crate::{AotEmulatorCore, AotProgram};
@@ -861,21 +954,21 @@ mod tests {
         Instruction::new(Opcode::ECALL, 5, 10, 11, false, false)
     }
 
-    /// An unconstrained region that sets `x6` and stores it at 0x2000, then a load of 0x2000 into
-    /// `x8` after the region, and a halt.
+    /// An unconstrained region that sets `x6` and stores it at 0x2_0000, then a load of 0x2_0000
+    /// into `x8` after the region, and a halt.
     fn unconstrained_program() -> Arc<Program> {
         Arc::new(Program::new(
             vec![
                 addi(5, SyscallCode::ENTER_UNCONSTRAINED as u64), // 0x1000
                 ecall(),                                          // 0x1004
                 Instruction::new(Opcode::BEQ, 5, 0, 0x1c, false, true), // 0x1008: to 0x1024
-                addi(7, 0x2000),                                  // 0x100c
+                addi(7, 0x2_0000),                                // 0x100c
                 addi(6, 0x55),                                    // 0x1010
                 Instruction::new(Opcode::SD, 6, 7, 0, false, true), // 0x1014
                 addi(5, SyscallCode::EXIT_UNCONSTRAINED as u64),  // 0x1018
                 ecall(),                                          // 0x101c
                 Instruction::new(Opcode::UNIMP, 0, 0, 0, true, true), // 0x1020
-                addi(7, 0x2000),                                  // 0x1024
+                addi(7, 0x2_0000),                                // 0x1024
                 Instruction::new(Opcode::LD, 8, 7, 0, false, true), // 0x1028
                 addi(5, SyscallCode::HALT as u64),                // 0x102c
                 addi(10, 0),                                      // 0x1030
@@ -896,7 +989,8 @@ mod tests {
         let mut run = PureRun::new(unconstrained_program(), Vec::new(), u64::MAX);
         run.run_interpreted().expect("pure execution runs it");
 
-        assert_eq!(run.registers(), core.registers, "the registers differ");
+        let core_registers: [u64; 32] = std::array::from_fn(|i| core.registers[i].value);
+        assert_eq!(run.registers(), core_registers, "the registers differ");
         assert_eq!(
             run.cycles(),
             core.insn_count,
@@ -945,16 +1039,152 @@ mod tests {
         });
     }
 
+    /// The termination reason of a run that ends abnormally.
+    fn reason(result: Result<(), super::PureFailure>) -> TerminationReason {
+        let failure = result.expect_err("the run fails");
+        match failure.error {
+            Some(EmulationError::AbnormalTermination(t)) => t.reason,
+            _ => panic!("not an abnormal termination: {failure}"),
+        }
+    }
+
     #[test]
-    fn a_run_ending_past_32_bits_is_refused() {
+    fn a_jump_outside_the_program_is_refused() {
         // x1 = 1 << 32, then JALR to it.
         let program = vec![
             addi(1, 1),
             Instruction::new(Opcode::SLL, 1, 1, 32, false, true),
             Instruction::new(Opcode::JALR, 0, 1, 0, false, true),
         ];
-        failure_is(run(program, u64::MAX), |e| {
-            matches!(e, EmulationError::EndPcBeyondProofAddress(_))
-        });
+        assert_eq!(
+            reason(run(program, u64::MAX)),
+            TerminationReason::OutsideProgram { pc: 1 << 32 }
+        );
+    }
+
+    #[test]
+    fn a_misaligned_jump_is_refused_before_the_link() {
+        // JAL x1, +2 at 0x1000.
+        let program = vec![Instruction::new(Opcode::JAL, 1, 2, 0, true, true)];
+        assert_eq!(
+            reason(run(program, u64::MAX)),
+            TerminationReason::MisalignedJumpTarget {
+                pc: 0x1000,
+                target: 0x1002
+            }
+        );
+    }
+
+    #[test]
+    fn running_off_the_end_is_refused() {
+        assert_eq!(
+            reason(run(vec![addi(1, 1)], u64::MAX)),
+            TerminationReason::OutsideProgram { pc: 0x1004 }
+        );
+    }
+
+    /// A hint written to fd 4 is read before the input the guest has not read yet.
+    #[test]
+    fn a_hint_is_read_ahead_of_unread_input() {
+        // WRITE fd 4, 3 bytes at 0x2_0000; then HINT_LEN into x5 and halt.
+        let program = Arc::new(Program::new(
+            vec![
+                addi(5, SyscallCode::WRITE as u64),
+                addi(10, 4),
+                addi(11, 0x2_0000),
+                addi(12, 3),
+                ecall(),
+                addi(5, SyscallCode::HINT_LEN as u64),
+                ecall(),
+                addi(6, 0),
+                Instruction::new(Opcode::ADD, 6, 5, 0, false, true),
+                addi(5, SyscallCode::HALT as u64),
+                addi(10, 0),
+                ecall(),
+            ],
+            0x1000,
+            0x1000,
+        ));
+        let mut run = PureRun::new(program, vec![vec![0; 7]], u64::MAX);
+        run.run_interpreted().expect("pure execution runs it");
+        assert_eq!(
+            run.registers()[6],
+            3,
+            "HINT_LEN saw the hint, not the input"
+        );
+    }
+
+    #[test]
+    fn accesses_follow_the_memory_guard() {
+        use pico_vm::primitives::layout::{HEAP_END, MEMORY_SIZE};
+        let load = |addr: u64| {
+            run(
+                vec![
+                    addi(1, addr),
+                    Instruction::new(Opcode::LD, 2, 1, 0, false, true),
+                ],
+                u64::MAX,
+            )
+        };
+        let ld = Opcode::LD;
+        assert_eq!(
+            reason(load(0x100)),
+            TerminationReason::NullAccess {
+                opcode: ld,
+                addr: 0x100
+            }
+        );
+        assert_eq!(
+            reason(load(HEAP_END - 4)),
+            TerminationReason::StackOverflow {
+                opcode: ld,
+                addr: HEAP_END - 4
+            }
+        );
+        assert_eq!(
+            reason(load(MEMORY_SIZE - 4)),
+            TerminationReason::InvalidMemoryAccess {
+                opcode: ld,
+                addr: MEMORY_SIZE - 4
+            }
+        );
+        // SW into its own code, which lies above the null region here.
+        let program = Arc::new(Program::new(
+            vec![
+                addi(1, 0x2_0000),
+                Instruction::new(Opcode::SW, 0, 1, 0, false, true),
+            ],
+            0x2_0000,
+            0x2_0000,
+        ));
+        assert_eq!(
+            reason(PureRun::new(program, Vec::new(), u64::MAX).run_interpreted()),
+            TerminationReason::StoreToCode {
+                opcode: Opcode::SW,
+                addr: 0x2_0000
+            }
+        );
+    }
+
+    #[test]
+    fn misaligned_accesses_run_and_are_counted() {
+        // A misaligned SD across two dwords and an LD of it back, then halt.
+        let program = Arc::new(Program::new(
+            vec![
+                addi(1, 0x2_0003),
+                addi(2, 0x1122_3344_5566_7788),
+                Instruction::new(Opcode::SD, 2, 1, 0, false, true),
+                Instruction::new(Opcode::LD, 3, 1, 0, false, true),
+                addi(5, SyscallCode::HALT as u64),
+                addi(10, 0),
+                ecall(),
+            ],
+            0x1000,
+            0x1000,
+        ));
+        let mut run = PureRun::new(program, Vec::new(), u64::MAX);
+        run.run_interpreted().expect("pure execution runs it");
+        assert_eq!(run.registers()[3], 0x1122_3344_5566_7788);
+        assert_eq!(run.misaligned_accesses(), 2);
     }
 }

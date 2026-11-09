@@ -146,11 +146,13 @@ fn reth_stdin(dir: &str, block: &str) -> Stdin {
 
 /// `mle_vk_root.txt` in the artifact's directory: the name the tree ships it under.
 fn root_file_beside(out: &str) -> String {
+    file_beside(out, "mle_vk_root.txt")
+}
+
+fn file_beside(out: &str, name: &str) -> String {
     match Path::new(out).parent() {
-        Some(dir) if !dir.as_os_str().is_empty() => {
-            dir.join("mle_vk_root.txt").to_string_lossy().into_owned()
-        }
-        _ => "mle_vk_root.txt".to_string(),
+        Some(dir) if !dir.as_os_str().is_empty() => dir.join(name).to_string_lossy().into_owned(),
+        _ => name.to_string(),
     }
 }
 
@@ -455,6 +457,14 @@ fn main() {
     let root_out = env("MLE_VK_MAP_ROOT_OUT", &root_file_beside(&out));
     write_root_file(&root_out, &out, &artifact, leaves, &riscv_vk);
     info!("root file written: `{root_out}`");
+    // The compress key verifiers hold: a compress envelope carries none.
+    let compress_vk_out = file_beside(&root_out, "mle_compress_vk.bin");
+    fs::write(
+        &compress_vk_out,
+        bincode::serialize(&compress_vk).expect("compress vk encode"),
+    )
+    .unwrap_or_else(|e| panic!("cannot write `{compress_vk_out}`: {e}"));
+    info!("compress vk written: `{compress_vk_out}`");
 
     // The artifact is on disk by now. What follows only checks it, so a failure here (an input
     // that will not run, a chunk whose shape is not a member, a real VK missing) is reported

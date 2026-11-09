@@ -31,7 +31,7 @@ use crate::{
         riscv_global::GlobalChip,
         riscv_memory::{
             initialize_finalize::MemoryInitializeFinalizeChip, local::MemoryLocalChip,
-            read_write::MemoryReadWriteChip,
+            read_write::MemoryReadWriteChip, unaligned::MemoryUnalignedChip,
         },
         riscv_poseidon2::Poseidon2ChipP3,
         riscv_program::ProgramChip,
@@ -84,6 +84,7 @@ no_pvs!(
     GlobalChip<F>,
     MemoryLocalChip<F>,
     MemoryReadWriteChip<F>,
+    MemoryUnalignedChip<F>,
     SyscallChip<F>,
     ByteChip<F>,
     ProgramChip<F>,

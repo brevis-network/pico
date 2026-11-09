@@ -50,7 +50,7 @@ use bls12_381::{G1Affine as Bls12381G1Affine, G1Projective as Bls12381G1Projecti
 fn read_packed_words_snapshot(core: &mut impl PrecompileMemory, ptr: u64, out: &mut [u32]) {
     let mut dwords = [0u64; 16];
     let num_dwords = out.len() / 2;
-    core.read_mem_dword_span_snapshot(ptr, &mut dwords[..num_dwords]);
+    core.read_mem_dword_span_snapshot_syscall(ptr, &mut dwords[..num_dwords]);
     unpack_packed_dwords_into_words(&dwords[..num_dwords], out);
 }
 

@@ -254,10 +254,10 @@ where
     }
 }
 
-/// A replay worker running the AOT-compiled guest: [`MetaEmulator::recover_riscv`] and
-/// [`MetaEmulator::try_next_record_batch`] with the AOT core in the interpreter's place. Its
-/// records take the interpreter worker's road, through the same deferral and callback, so nothing
-/// downstream learns which engine replayed them.
+/// A replay worker running the AOT-compiled guest's recording blocks:
+/// [`MetaEmulator::recover_riscv`] and [`MetaEmulator::try_next_record_batch`] with the AOT core in
+/// the interpreter's place. Its records take the interpreter worker's road, through the same
+/// deferral and callback, so nothing downstream learns which engine replayed them.
 #[cfg(feature = "aot-emulator")]
 pub struct AotReplayMetaEmulator<SC, C>
 where
@@ -281,7 +281,8 @@ where
     ///
     /// # Panics
     ///
-    /// If no AOT replay factory is registered.
+    /// If no AOT replay factory is registered, which only a program with a recording entry point
+    /// installs.
     pub fn recover_riscv(
         witness: &ProvingWitness<SC, C, Vec<u8>>,
         state: RiscvEmulationState,
@@ -296,7 +297,7 @@ where
             .clone();
         let emulator =
             create_aot_replay_emulator(program.clone(), state, target_clk, final_segment)
-                .expect("AOT replay factory not registered");
+                .expect("no AOT program with a recording entry point is registered");
         Self {
             emulator,
             program,
@@ -355,6 +356,21 @@ where
     /// Instructions the fallback interpreter ran, over every replay this worker ran.
     pub fn fallback_insns(&self) -> u64 {
         self.emulator.fallback_insns()
+    }
+
+    /// See [`AotReplayEmulator::recorder_body_dispatches`].
+    pub fn recorder_body_dispatches(&self) -> u64 {
+        self.emulator.recorder_body_dispatches()
+    }
+
+    /// See [`AotReplayEmulator::recorder_body_insns`].
+    pub fn recorder_body_insns(&self) -> u64 {
+        self.emulator.recorder_body_insns()
+    }
+
+    /// See [`AotReplayEmulator::recorder_direct_insns`].
+    pub fn recorder_direct_insns(&self) -> u64 {
+        self.emulator.recorder_direct_insns()
     }
 }
 

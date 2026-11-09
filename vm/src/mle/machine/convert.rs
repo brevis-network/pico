@@ -617,6 +617,8 @@ struct GpuPkEntry {
     device_pk: GpuPk,
     /// LRU tick of the last use (larger = more recent).
     last_used: u64,
+    /// The [`super::PK_CACHE_RUN`] that added it.
+    run: u64,
 }
 
 /// Microsecond partition of one keygen-cache miss. Collected in one place rather than threaded out
@@ -713,6 +715,18 @@ pub struct GpuConvertMachine {
 
 #[cfg(feature = "cuda")]
 impl GpuConvertMachine {
+    /// Drops the device keys this cache added during `run` (a [`super::PK_CACHE_RUN`]); returns how
+    /// many.
+    pub fn drop_keys_added_in(&self, run: u64) -> usize {
+        let mut guard = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let before = guard.0.len();
+        guard.0.retain(|e| e.run != run);
+        before - guard.0.len()
+    }
+
     /// Light constructor: no proofs, no upfront keygen. Call [`Self::pre_keygen_warmup`] once
     /// from a quiescent thread before the proving pipeline spins up (JIT warmup — see there).
     pub fn new(
@@ -762,7 +776,10 @@ impl GpuConvertMachine {
     /// so this is the card's LRU residency — read by the VRAM census, which needs to say whether a
     /// resting-live climb is the cache filling up (bounded, ends at the cap) or something else.
     pub fn cache_len(&self) -> (usize, usize) {
-        let guard = self.cache.lock().expect("convert pk cache mutex poisoned");
+        let guard = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         (guard.0.len(), self.cache_cap)
     }
 
@@ -1135,7 +1152,10 @@ impl GpuConvertMachine {
         GpuPk,
     ) {
         {
-            let mut guard = self.cache.lock().unwrap();
+            let mut guard = self
+                .cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let (entries, tick) = &mut *guard;
             *tick += 1;
             let now = *tick;
@@ -1164,7 +1184,12 @@ impl GpuConvertMachine {
         timing.program_hit = !built_here;
         timing.layout_clone_us = layout_clone_us;
 
-        let mut guard = self.cache.lock().unwrap();
+        // A keygen that panicked under this lock (a card out of memory) left the entries as they
+        // were: they change only once a keygen succeeds.
+        let mut guard = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (entries, tick) = &mut *guard;
         *tick += 1;
         let now = *tick;
@@ -1180,6 +1205,7 @@ impl GpuConvertMachine {
 
         let (vk, pk) = {
             use crate::mle::machine::recursion::gpu;
+            crate::mle::inject::at(crate::mle::inject::Stage::Keygen);
             let t_keygen_call = std::time::Instant::now();
             let (vk, device_pk) = gpu::keygen_recursion_gpu(
                 &self.engine,
@@ -1245,6 +1271,7 @@ impl GpuConvertMachine {
             vk: vk.clone(),
             device_pk: pk.clone(),
             last_used: now,
+            run: super::PK_CACHE_RUN.load(std::sync::atomic::Ordering::Relaxed),
         };
         entries.push(entry);
         (program, vk, pk)

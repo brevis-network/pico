@@ -1,6 +1,8 @@
 use std::sync::OnceLock;
 
-use crate::{AotEmulatorCore, BlockFn, NextStep};
+use crate::{
+    emulator::RecordingRun, AotEmulatorCore, BlockFn, NextStep, RecordBlockFn, RecordStep,
+};
 
 static LOOKUP_BLOCK_FN: OnceLock<fn(u64) -> Option<BlockFn>> = OnceLock::new();
 
@@ -56,7 +58,61 @@ impl AotEmulatorCore {
         Ok(())
     }
 
-    /// How many times [`Self::run_blocks`] has entered a compiled block.
+    /// [`Self::run_blocks`] over recording blocks, with the core's sink lent to them for the whole
+    /// run ([`crate::Recorder`]) and returned however the run ends. The fallback interpreter writes
+    /// through the core's sink and stops at an ordinary block, whose pc is looked up again here, so
+    /// no ordinary block runs while the sink is lent.
+    ///
+    /// # Panics
+    ///
+    /// On a core that is not a replay worker ([`Self::recover`]): the direct writes feed no
+    /// chunk-split estimate, which only a replay worker's disabled split can do without.
+    #[inline(always)]
+    pub fn run_record_blocks(
+        &mut self,
+        lookup: impl Fn(u64) -> Option<RecordBlockFn>,
+    ) -> Result<(), String> {
+        assert!(
+            self.is_replay_worker(),
+            "recording blocks run only on a replay worker, whose chunk split is off"
+        );
+        let mut run = RecordingRun::new(self);
+        let RecordingRun { core, recorder } = &mut run;
+        let mut next = if core.pc == 0 {
+            RecordStep::Halt
+        } else if let Some(func) = lookup(core.pc) {
+            RecordStep::Direct(func)
+        } else {
+            RecordStep::Dynamic(core.pc)
+        };
+
+        loop {
+            if core.should_yield() {
+                break;
+            }
+            match next {
+                RecordStep::Direct(func) => {
+                    core.compiled_block_dispatches += 1;
+                    next = func(core, recorder)?;
+                }
+                RecordStep::Dynamic(pc) => {
+                    core.pc = pc;
+                    if pc == 0 {
+                        next = RecordStep::Halt;
+                    } else if let Some(func) = lookup(pc) {
+                        next = RecordStep::Direct(func);
+                    } else {
+                        next = core.with_sink_on_core(recorder, Self::interpret_from_current_pc)?;
+                    }
+                }
+                RecordStep::Halt => break,
+            }
+        }
+        Ok(())
+    }
+
+    /// How many times [`Self::run_blocks`] or [`Self::run_record_blocks`] has entered a compiled
+    /// block.
     pub fn compiled_block_dispatches(&self) -> u64 {
         self.compiled_block_dispatches
     }
@@ -70,13 +126,13 @@ mod tests {
 
     use crate::{AotEmulatorCore, AotProgram, BlockFn, NextStep};
 
-    /// Two `ADD`s, then a `JALR` to pc 0, which halts.
+    /// Two `ADD`s, then `HALT` (an `ECALL` with `t0 = 0`).
     fn program() -> Arc<Program> {
         Arc::new(Program::new(
             vec![
                 Instruction::new(Opcode::ADD, 1, 0, 0, false, false),
                 Instruction::new(Opcode::ADD, 2, 0, 0, false, false),
-                Instruction::new(Opcode::JALR, 0, 0, 0, false, true),
+                Instruction::new(Opcode::ECALL, 5, 10, 11, false, false),
             ],
             0x1000,
             0x1000,
@@ -103,5 +159,13 @@ mod tests {
         assert_eq!(stub.pc, 0, "the guest ran to its halt");
         assert_eq!(stub.insn_count, 3, "every instruction was interpreted");
         assert_eq!(stub.compiled_block_dispatches(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "recording blocks run only on a replay worker")]
+    fn a_recording_run_refuses_a_core_that_is_not_a_replay_worker() {
+        let mut emu = AotEmulatorCore::new(program(), Vec::new());
+        emu.emit_records();
+        let _ = emu.run_record_blocks(|_| None);
     }
 }

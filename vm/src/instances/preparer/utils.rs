@@ -1,3 +1,5 @@
+//! Test-only checks of the global and Poseidon2 events a kernel wrote against the record's.
+
 use crate::{
     chips::chips::{riscv_global::event::GlobalInteractionEvent, riscv_poseidon2::Poseidon2Event},
     emulator::riscv::record::EmulationRecord,

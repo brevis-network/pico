@@ -13,8 +13,8 @@ pub const NUM_PROGRAM_PREPROCESSED_COLS: usize = size_of::<ProgramPreprocessedCo
 // Pinned on both sides. The CUDA kernel reinterpret_casts a host-allocated row straight onto
 // `ProgramPreprocessedColsU64` using a width handed over from here, so drift on either side
 // writes past or short of the row with no diagnostic. Pc(2) + InstructionCols(9) +
-// OpcodeSelectorCols(13) + pc_carry(1) = 25.
-const _: () = assert!(NUM_PROGRAM_PREPROCESSED_COLS == 25);
+// OpcodeSelectorCols(13) + pc_carry(1) + code_start(2) + code_end(2) = 29.
+const _: () = assert!(NUM_PROGRAM_PREPROCESSED_COLS == 29);
 
 /// The number of columns for the program multiplicities.
 pub const NUM_PROGRAM_MULT_COLS: usize = size_of::<ProgramMultiplicityCols<u8>>();
@@ -33,6 +33,11 @@ pub struct ProgramPreprocessedCols<T> {
     /// a range check (`riscv_cpu/register/constraints.rs`). A table pc is 4-aligned, so the
     /// predicate is `pc[0] == 0xFFFC`.
     pub pc_carry: T,
+    /// The program's code, `[pc_base, pc_base + 4 * instructions)`, each end as two u16 limbs, the
+    /// same on every row. A store row, and a precompile's row for what it writes, looks it up and
+    /// proves it misses it.
+    pub code_start: [T; 2],
+    pub code_end: [T; 2],
 }
 
 /// The column layout for the chip.
@@ -40,4 +45,8 @@ pub struct ProgramPreprocessedCols<T> {
 #[repr(C)]
 pub struct ProgramMultiplicityCols<T> {
     pub multiplicity: T,
+    /// How many writing rows look the code's range up on this row: stores and precompile events
+    /// (`code_range::code_range_lookups`). Every row holds the same range, and trace generation
+    /// puts the record's whole count on row 0.
+    pub code_range_multiplicity: T,
 }

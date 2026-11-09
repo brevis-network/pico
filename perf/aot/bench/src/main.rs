@@ -5,8 +5,9 @@
 //! - `pipeline-interp`: `emulate_with_pipeline` with the interpreter on the snapshot thread.
 //! - `pipeline-aot`: the same with the generated code on the snapshot thread, so the two pipeline
 //!   arms differ in that alone: the same options and the same `--workers`.
-//! - `pipeline-aot-workers`: `pipeline-aot` with the replay workers running the generated code too
-//!   (`replay_workers = Aot`), so it and `pipeline-aot` differ in the workers' engine alone.
+//! - `pipeline-aot-workers`: `pipeline-aot` with the replay workers running the generated code's
+//!   recording bodies too (`replay_workers = Aot`), so it and `pipeline-aot` differ in the workers'
+//!   engine alone.
 //! - `execute-default`, `execute-aot`, `execute-serial`: `Prover::execute`, the emulation
 //!   `prove_to` runs, from the builders the three prove arms use.
 //! - `prove-default`: `Prover::prove_to` from a builder without `aot`, with
@@ -16,8 +17,8 @@
 //!   default and AOT prover arms differ in that alone.
 //! - `prove-serial`: the same with `serial_emulation` in place of a worker count, which emulates
 //!   through `emulate_with_opts`; `--workers` does not reach it.
-//! - `prove-aot-workers`: `prove-aot` with `aot_workers`, the replay workers on the generated code
-//!   too, so it and `prove-aot` differ in the workers' engine alone.
+//! - `prove-aot-workers`: `prove-aot` with `aot_workers`, the replay workers on the generated
+//!   recording bodies too, so it and `prove-aot` differ in the workers' engine alone.
 //! - `tracegen-aot`: `pipeline-aot`'s emulation, then the riscv phase's host trace generation over
 //!   its records and nothing after it: the augment, shape and per-chip `generate_main` stages
 //!   `prove-aot --phase riscv` writes to the stage ledger, in the same prove slots and at the same
@@ -62,17 +63,29 @@
 //!   blocked_takes= acquisitions= returns=`. A run with an upload that is not `equal` writes all of
 //!   that, then exits 1.
 //! - `replay-chunk`: the AOT snapshot thread over the input, one snapshot per chunk, and each
-//!   chunk's snapshot replayed three times, one engine at a time: by the interpreter's worker
-//!   (`interp`), by it again (`interp-null`, the arm that shows what two runs of one engine
-//!   differ by), and by the AOT core's replay worker (`aot`), in an order rotated chunk by chunk.
-//!   Each replay recovers a fresh worker so every engine pays the same recovery, unlike the
-//!   pipeline's in-place reuse, and defers into a pool of its own. One line per chunk and engine,
-//!   in the order they ran: `REPLAY_CHUNK chunk= engine= replay_us= recover_us= cycles= dispatches=
-//!   fallback_insns= digest_equal=`. `replay_us` brackets the replay alone, its deferral and its
-//!   records' hand-off included; `recover_us` is the worker's recovery, beside it; `dispatches`
-//!   and `fallback_insns` are the AOT core's, 0 for the interpreters; `digest_equal` compares the
-//!   chunk's record and what it deferred, field by field, with the first interpreter's of the
-//!   chunk. Each chunk's memories go back to the pool before the next snapshot is taken.
+//!   chunk's snapshot replayed once by each engine `REPLAY_CHUNK_ENGINES` lists, comma-separated,
+//!   one at a time: the interpreter's worker (`interp`), it again (`interp-null`, which shows what
+//!   two runs of one engine differ by), and the AOT core's replay worker on the recording bodies
+//!   (`aot`); unset, all three in that order. The list names no engine twice and needs an
+//!   interpreter, whose replay is the digest every engine's is compared with. The order rotates
+//!   chunk by chunk. Each replay recovers a fresh worker so every engine pays the same recovery,
+//!   unlike the pipeline's in-place reuse, and defers into a pool of its own. One line per chunk
+//!   and engine, in the order they ran: `REPLAY_CHUNK chunk= engine= replay_us= recover_us=
+//!   cycles= dispatches= fallback_insns= recorder_dispatches= recorder_insns=
+//!   recorder_direct_insns= digest_equal= replay_minflt= replay_majflt= recover_minflt=`.
+//!   `replay_us` brackets the replay alone, its deferral and its records' hand-off included;
+//!   `recover_us` is the worker's recovery, beside it; `dispatches` and `fallback_insns` are the
+//!   AOT core's, 0 for the interpreters; `recorder_dispatches` and `recorder_insns` count the
+//!   recording blocks that ran and their instructions, and `recorder_direct_insns` those whose
+//!   rows the blocks wrote directly (the rest went through the helpers' recording code), all three
+//!   `-` but for `aot`, whose `recorder_insns` and `fallback_insns` must sum to `cycles`;
+//!   `digest_equal` compares the chunk's record and what it deferred, field by field, with the
+//!   first interpreter's; `replay_minflt` and `replay_majflt` are this thread's page faults over
+//!   the replay, and `recover_minflt` its minor faults over the recovery, from
+//!   `getrusage(RUSAGE_THREAD)` just outside each timer, `-` off Linux. The memories the engines
+//!   give back are reset on this thread and returned to the pool after the chunk's last engine, so
+//!   no reset runs beside a timer; the run fails if the pool's free count moves while the engines
+//!   run, as it does when `MEMORY_POOL_EAGER` is below `MEMORY_POOL_SIZE`.
 //!
 //! The emulation arms run under the options `pico-prover` builds for itself. The prover arms take
 //! `CHUNK_SIZE`, `PROVE_CONCURRENCY`, `VK_VERIFICATION`, `MLE_VK_MAP` and `MLE_VK_ROOT` onto the
@@ -95,8 +108,8 @@
 //!   generation of every record it emitted, and the drop of the records. `prove_to`'s emulation
 //!   also runs the chip-support check, the digest backfill and the precompile count, none of which
 //!   this arm does, and it generates no keys.
-//! - `replay_chunks:snapshot+copy+3x(recover+replay+digest)`: the whole `replay-chunk` loop, whose
-//!   per-chunk timings are its `REPLAY_CHUNK` lines.
+//! - `replay_chunks:snapshot+copy+<n>x(recover+replay+digest+reset)`: the whole `replay-chunk`
+//!   loop over its `<n>` engines, whose per-chunk timings are its `REPLAY_CHUNK` lines.
 //! - `retained_rows:write`: not one call but the sum of `retained-rows`' per-chunk writes, the
 //!   emulation that staged them outside it.
 //! - `emulate_with_pipeline_streaming:emulate+census`: the emulation, each chunk's census taken
@@ -113,16 +126,21 @@
 //! default` is the core count for the pipeline arms and the builder's default, the core count up to
 //! 16, for the prover arms), `chunk_size`, `timed`, `wall_s`, `cycles`, `chunks`, `records` (for a
 //! prove arm, the RISC-V chunk proofs, one per record), `committed_sha256`, `aot_elf_sha256`,
-//! `aot_dispatches` (compiled blocks the snapshot thread entered; for `replay-chunk`, the AOT
-//! replays), `aot_worker_dispatches` (compiled blocks the AOT replay workers entered, the
-//! `*-aot-workers` arms only), `trace_source` and `branch_compares` (`history` and `indices` for
-//! `tracegen-aot`), `phase`, `mode` (`dev` or `whitelist`), `verified`, `distinct_shapes`
-//! (`Proof::distinct_shapes`), `traced_chunks` (CPU chunks that reached trace generation,
-//! `tracegen-aot` only), `ledger` (the `MLE_LEDGER` file the run's stage ledger went to), `alloc`
-//! (the global allocator this binary was built with, `tcmalloc`, `jemalloc` or `system`), `mem`
-//! (the guest memory backing it was built with, `mmap` or `heap`), `bigint` (the curve
-//! precompiles' big-integer backend, `rug` or `default`), `realloc`, `minor_faults`,
-//! `major_faults`, and `retained` and `retained_rows_us` (`retained-rows` only).
+//! `aot_dispatches` (compiled blocks the snapshot thread entered; for `replay-chunk`, the `aot`
+//! replays', or the snapshot thread's when `aot` is not among its engines), `aot_worker_dispatches`
+//! (compiled blocks the AOT replay workers entered, the `*-aot-workers` arms only),
+//! `aot_recorder_dispatches`, `aot_recorder_insns` and `aot_recorder_direct_insns` (the recording
+//! blocks that ran, their instructions, and those whose rows the blocks wrote directly: the
+//! workers' in the `*-aot-workers` arms, the `aot` replays' in `replay-chunk`), `trace_source` and
+//! `branch_compares` (`history` and `indices` for `tracegen-aot`), `phase`, `mode` (`dev` or
+//! `whitelist`), `verified`, `distinct_shapes` (`Proof::distinct_shapes`), `traced_chunks` (CPU
+//! chunks that reached trace generation, `tracegen-aot` only), `replay_engines` (the engines
+//! `replay-chunk` ran, comma-separated, in its first chunk's order), `ledger` (the `MLE_LEDGER`
+//! file the run's stage ledger went to), `alloc` (the global allocator this binary was built
+//! with, `tcmalloc`, `jemalloc` or `system`), `mem` (the guest memory backing it was built with,
+//! `mmap` or `heap`), `bigint` (the curve precompiles' big-integer backend, `rug` or `default`),
+//! `realloc`, `minor_faults`, `major_faults`, and `retained` and `retained_rows_us`
+//! (`retained-rows` only).
 //!
 //! `realloc` is, for an emulation arm, the reallocations each table of the execution history made
 //! over every record of the run, `<table>:<count>` for its sixteen vectors. A history table the
@@ -137,8 +155,9 @@
 //! `PICO_BENCH_CENSUS_REPLACE`, and every arm refuses the removed `PICO_BENCH_REPLAY_SINK`,
 //! `PICO_BENCH_TRACE_SOURCE` and `MLE_RECORD_STREAMS`.
 //!
-//! `tracegen-aot` reads CPU chunks from their execution histories. Whitelist mode is refused;
-//! trace generation runs in dev mode.
+//! `tracegen-aot` reads CPU chunks from their execution histories. In whitelist mode each record
+//! takes the shape a whitelist prove gives it, chosen from its active chips and natural heights (a
+//! CPU chunk's read off its history); in dev mode it traces at its natural heights.
 //!
 //! With `MLE_LEDGER` or `MLE_SPANS` set, the arm's name, `--label`, `--rep` and `--warmup`, the ELF
 //! and the inputs with their digests are handed to the ledger before the timed call, and its span
@@ -150,8 +169,10 @@
 //! chunk reached no trace generation, a `replay-chunk` run with a chunk whose digests differ and a
 //! `history-census` run with an unattributed access, and 3 when an AOT arm entered no compiled
 //! block, on its snapshot thread or, in an `*-aot-workers` arm, in its replay workers: it measured
-//! the interpreter under an AOT label. An AOT arm whose program is the bootstrap stub, or was
-//! generated from another ELF, is an error before anything runs.
+//! the interpreter under an AOT label; 3 also when the recording bodies ran no instruction of an
+//! `*-aot-workers` run, or when a `replay-chunk` chunk's `aot` replay ran other than its cycles
+//! between its recording bodies and its fallback. An AOT arm whose program is the bootstrap stub,
+//! or was generated from another ELF, is an error before anything runs.
 
 mod census;
 
@@ -221,7 +242,7 @@ use pico_vm::{
         },
     },
     primitives::consts::MAX_LOG_NUMBER_OF_CHUNKS,
-    proverchain::riscv::{max_pipeline_workers, RiscvChips},
+    proverchain::riscv::{init_memory_pool_for, max_pipeline_workers, RiscvChips},
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -285,7 +306,14 @@ impl Arm {
     }
 
     fn aot_workers(self) -> bool {
-        matches!(self, Self::PipelineAotWorkers | Self::ProveAotWorkers)
+        self.replay_workers() != ReplayWorkers::Interpreter
+    }
+
+    fn replay_workers(self) -> ReplayWorkers {
+        match self {
+            Self::PipelineAotWorkers | Self::ProveAotWorkers => ReplayWorkers::Aot,
+            _ => ReplayWorkers::Interpreter,
+        }
     }
 
     fn pipelined(self) -> bool {
@@ -299,6 +327,20 @@ impl Arm {
         matches!(self, Self::ExecuteSerial | Self::ProveSerial)
     }
 
+    /// Whether the arm runs through `pico-prover` (`through_prover`).
+    fn through_prover(self) -> bool {
+        matches!(
+            self,
+            Self::ExecuteDefault
+                | Self::ExecuteAot
+                | Self::ExecuteSerial
+                | Self::ProveDefault
+                | Self::ProveAot
+                | Self::ProveSerial
+                | Self::ProveAotWorkers
+        )
+    }
+
     fn proves(self) -> bool {
         matches!(
             self,
@@ -307,9 +349,22 @@ impl Arm {
     }
 }
 
+/// `pipeline-aot-recorder` is refused rather than read as `pipeline-aot-workers`, so a launcher
+/// still naming it finds out.
+fn parse_arm(s: &str) -> Result<Arm, String> {
+    if s == "pipeline-aot-recorder" {
+        return Err(
+            "pipeline-aot-recorder is refused: use pipeline-aot-workers, which runs the replay \
+             workers on the recording bodies"
+                .into(),
+        );
+    }
+    Arm::from_str(s, false)
+}
+
 #[derive(Parser)]
 struct Args {
-    #[clap(long, value_enum)]
+    #[clap(long, value_parser = parse_arm)]
     arm: Arm,
 
     #[clap(long)]
@@ -483,13 +538,6 @@ fn check_removed_knobs(is_set: impl Fn(&str) -> bool) -> Result<(), String> {
     Ok(())
 }
 
-fn check_tracegen_mode(bucket: bool) -> Result<(), String> {
-    if bucket {
-        return Err("tracing from the execution history requires dev mode".into());
-    }
-    Ok(())
-}
-
 /// `pico-prover`'s emulator options, every field stated so no environment variable decides one.
 fn opts(chunk_size: u32) -> EmulatorOpts {
     EmulatorOpts {
@@ -575,24 +623,61 @@ static DISPATCHES: AtomicU64 = AtomicU64::new(0);
 /// Compiled blocks the AOT replay workers have entered, over every replay.
 static WORKER_DISPATCHES: AtomicU64 = AtomicU64::new(0);
 
-/// The generated program, registered in its place: the same digest, stamp and code, reporting
-/// after every batch how many compiled blocks the run has entered.
-static COUNTED: AotProgram = AotProgram::stamped(
-    pico_aot_dispatch::AOT.elf_sha256(),
-    pico_aot_dispatch::AOT.codegen_stamp(),
-    run_counted,
-);
+/// Recording blocks the AOT replay workers ran, and the instructions they ran, over every replay.
+static RECORDER_DISPATCHES: AtomicU64 = AtomicU64::new(0);
+static RECORDER_INSNS: AtomicU64 = AtomicU64::new(0);
+/// Of `RECORDER_INSNS`, those whose rows the recording blocks wrote directly.
+static RECORDER_DIRECT_INSNS: AtomicU64 = AtomicU64::new(0);
 
-/// A replay core writes records and the snapshot thread's core does not, so the sink tells the two
-/// apart.
-fn run_counted(emu: &mut AotEmulatorCore) -> Result<(), String> {
-    let before = emu.compiled_block_dispatches();
-    let result = pico_aot_dispatch::AOT.run(emu);
-    if emu.is_emitting() {
-        WORKER_DISPATCHES.fetch_add(emu.compiled_block_dispatches() - before, Ordering::Relaxed);
-    } else {
-        DISPATCHES.store(emu.compiled_block_dispatches(), Ordering::Relaxed);
+/// The generated program, registered in its place: the same digest, stamp and code, reporting
+/// after every batch how many compiled blocks the run has entered; its recording entry point, if
+/// it has one, reports what the recording bodies ran.
+static COUNTED: AotProgram = {
+    let counted = AotProgram::stamped(
+        pico_aot_dispatch::AOT.elf_sha256(),
+        pico_aot_dispatch::AOT.codegen_stamp(),
+        run_counted,
+    );
+    match pico_aot_dispatch::AOT.record_entry() {
+        Some(_) => counted.with_recorder(run_counted_record),
+        None => counted,
     }
+};
+
+/// The snapshot thread's entry point. A replay core that reached it would have its blocks counted
+/// as the snapshot thread's, so it is refused.
+fn run_counted(emu: &mut AotEmulatorCore) -> Result<(), String> {
+    if emu.is_emitting() {
+        return Err(
+            "the generated program's ordinary entry point ran on a core that writes records: only \
+             the snapshot thread runs it, and the replay workers run the recording entry point"
+                .into(),
+        );
+    }
+    let result = pico_aot_dispatch::AOT.run(emu);
+    DISPATCHES.store(emu.compiled_block_dispatches(), Ordering::Relaxed);
+    result
+}
+
+/// Only a replay core runs the recording entry point.
+fn run_counted_record(emu: &mut AotEmulatorCore) -> Result<(), String> {
+    let record = pico_aot_dispatch::AOT
+        .record_entry()
+        .expect("COUNTED has a recording entry point only when the program does");
+    let before = (
+        emu.compiled_block_dispatches(),
+        emu.recorder_body_dispatches(),
+        emu.recorder_body_insns(),
+        emu.recorder_direct_insns(),
+    );
+    let result = record(emu);
+    WORKER_DISPATCHES.fetch_add(
+        emu.compiled_block_dispatches() - before.0,
+        Ordering::Relaxed,
+    );
+    RECORDER_DISPATCHES.fetch_add(emu.recorder_body_dispatches() - before.1, Ordering::Relaxed);
+    RECORDER_INSNS.fetch_add(emu.recorder_body_insns() - before.2, Ordering::Relaxed);
+    RECORDER_DIRECT_INSNS.fetch_add(emu.recorder_direct_insns() - before.3, Ordering::Relaxed);
     result
 }
 
@@ -626,7 +711,7 @@ fn register(elf: &[u8], path: &Path) -> Result<(), String> {
 struct Measured {
     workers: Option<NonZeroUsize>,
     chunk_size: u32,
-    timed: &'static str,
+    timed: String,
     wall: Duration,
     cycles: Option<u64>,
     chunks: Option<u32>,
@@ -647,6 +732,13 @@ struct Measured {
     faults: Option<Faults>,
     /// `retained-rows`' row counts, in [`RetainedChunk::counts`] order.
     retained: Option<[usize; 5]>,
+    /// Recording blocks run, their instructions and those written directly, counted by the arm
+    /// itself; `None` takes the replay workers' counters.
+    recorder: Option<(u64, u64, u64)>,
+    /// Chunks whose `aot` replay's recorded and fallback instructions do not sum to its cycles.
+    uncovered_chunks: usize,
+    /// The engines `replay-chunk` ran, in its first chunk's order.
+    replay_engines: Option<String>,
 }
 
 fn dash<T: Display>(value: Option<T>) -> String {
@@ -677,7 +769,8 @@ const BIGINT: &str = if cfg!(feature = "bigint-rug") {
     "default"
 };
 
-#[derive(Clone, Copy)]
+/// Minor and major page faults: the process's ([`Self::now`]) or one thread's ([`thread_faults`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Faults {
     minor: u64,
     major: u64,
@@ -703,6 +796,12 @@ impl Faults {
             minor: self.minor - before.minor,
             major: self.major - before.major,
         }
+    }
+
+    /// [`Self::since`] for two readings either of which may be missing.
+    fn between(before: Option<Self>, after: Option<Self>) -> Option<Self> {
+        let (before, after) = before.zip(after)?;
+        Some(after.since(before))
     }
 }
 
@@ -809,14 +908,9 @@ fn emulate(args: &Args, elf: &[u8]) -> Result<Measured, String> {
     } else {
         SnapshotMainMode::Interpreter
     };
-    let replay_workers = if args.arm.aot_workers() {
-        ReplayWorkers::Aot
-    } else {
-        ReplayWorkers::Interpreter
-    };
     let opts = opts(chunk_size)
         .with_snapshot_main(snapshot_main)
-        .with_replay_workers(replay_workers);
+        .with_replay_workers(args.arm.replay_workers());
     let timed = match workers {
         None => "emulate_with_opts",
         Some(_) => "emulate_with_pipeline",
@@ -840,7 +934,7 @@ fn emulate(args: &Args, elf: &[u8]) -> Result<Measured, String> {
     Ok(Measured {
         workers,
         chunk_size,
-        timed,
+        timed: timed.into(),
         wall,
         cycles: Some(output.cycles),
         chunks: Some(output.chunks),
@@ -856,6 +950,9 @@ fn emulate(args: &Args, elf: &[u8]) -> Result<Measured, String> {
         realloc: Some(census.line()),
         faults,
         retained: None,
+        recorder: None,
+        uncovered_chunks: 0,
+        replay_engines: None,
     })
 }
 
@@ -870,6 +967,24 @@ fn pipeline_workers(args: &Args) -> Result<NonZeroUsize, String> {
         Workers::Count(n) => n,
         Workers::Default => NonZeroUsize::new(max_pipeline_workers()).unwrap_or(NonZeroUsize::MIN),
     })
+}
+
+/// The workers and snapshot thread of the pipeline run an arm makes itself, which size the memory
+/// pool. `None` for an arm that makes none, and for one that goes through the prover, whose build
+/// sizes the pool.
+fn own_pipeline_run(args: &Args) -> Option<(NonZeroUsize, SnapshotMainMode)> {
+    let snapshot_main = match args.arm {
+        Arm::PipelineInterp => SnapshotMainMode::Interpreter,
+        Arm::PipelineAot
+        | Arm::PipelineAotWorkers
+        | Arm::TracegenAot
+        | Arm::RetainedRows
+        | Arm::HistoryCensus
+        | Arm::HistoryArena => SnapshotMainMode::Aot,
+        _ => return None,
+    };
+    // Without workers the arm refuses to run, and says so itself.
+    Some((pipeline_workers(args).ok()?, snapshot_main))
 }
 
 /// `tracegen-aot`: `pipeline-aot`'s emulation, then every record's trace generation, with the
@@ -891,7 +1006,6 @@ fn tracegen(args: &Args, elf: &[u8]) -> Result<Measured, String> {
     // no whitelist is loaded.
     let concurrency = env_concurrency()?;
     let bucket = builder(elf, env_chunk_size, concurrency)?.whitelist_mode();
-    check_tracegen_mode(bucket)?;
     let chips = RiscvChipType::<Kb>::all_chips();
 
     let start = Instant::now();
@@ -913,7 +1027,7 @@ fn tracegen(args: &Args, elf: &[u8]) -> Result<Measured, String> {
     Ok(Measured {
         workers: Some(workers),
         chunk_size,
-        timed: "trace_records:emulate+augment+shape+tracegen+drop-records",
+        timed: "trace_records:emulate+augment+shape+tracegen+drop-records".into(),
         wall,
         cycles: Some(output.cycles),
         chunks: Some(output.chunks),
@@ -929,6 +1043,9 @@ fn tracegen(args: &Args, elf: &[u8]) -> Result<Measured, String> {
         realloc: None,
         faults: None,
         retained: None,
+        recorder: None,
+        uncovered_chunks: 0,
+        replay_engines: None,
     })
 }
 
@@ -961,6 +1078,8 @@ fn through_prover(args: &Args, elf: &[u8]) -> Result<Measured, String> {
         "dev"
     };
     let mut prover = builder.build().map_err(|e| e.to_string())?;
+    // Outside the timer, and after the build, whose check sizes it.
+    init_memory_pool();
     // The emulation arms resolve the chunk size themselves; a prover arm that chunks differently
     // would not be measuring the same run.
     let chunk_size = env_chunk_size.unwrap_or_else(default_chunk_size);
@@ -975,7 +1094,7 @@ fn through_prover(args: &Args, elf: &[u8]) -> Result<Measured, String> {
     let mut measured = Measured {
         workers: prover.emulation_workers(),
         chunk_size,
-        timed: "",
+        timed: String::new(),
         wall: Duration::ZERO,
         cycles: None,
         chunks: None,
@@ -991,13 +1110,16 @@ fn through_prover(args: &Args, elf: &[u8]) -> Result<Measured, String> {
         realloc: None,
         faults: None,
         retained: None,
+        recorder: None,
+        uncovered_chunks: 0,
+        replay_engines: None,
     };
     let Some(phase) = phase else {
         let start = Instant::now();
         let execution = prover.execute_chunked(stdin);
         measured.wall = start.elapsed();
         let execution = execution.map_err(|e| format!("{}: {e}", args.arm.name()))?;
-        measured.timed = "execute:emulate+drop-records";
+        measured.timed = "execute:emulate+drop-records".into();
         measured.cycles = Some(execution.cycles);
         measured.chunks = Some(execution.chunks);
         measured.committed = Some(execution.committed_bytes);
@@ -1011,7 +1133,8 @@ fn through_prover(args: &Args, elf: &[u8]) -> Result<Measured, String> {
         "prove_to:emulate+prove+verify+drop-records"
     } else {
         "prove_to:emulate+prove+verify+recursion-keygen+drop-records"
-    };
+    }
+    .into();
     match proof {
         Ok(proof) => {
             measured.records = proof.chunk_count();
@@ -1033,11 +1156,13 @@ fn through_prover(args: &Args, elf: &[u8]) -> Result<Measured, String> {
 
 type Witness = ProvingWitness<KoalaBearPoseidon2, RiscvChips<KoalaBearPoseidon2>, Vec<u8>>;
 
-/// The engines `replay-chunk` replays a chunk with, in its first chunk's order.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// The engines `replay-chunk` can replay a chunk with, in its first chunk's order when
+/// `REPLAY_CHUNK_ENGINES` is unset.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Engine {
     Interp,
     InterpNull,
+    /// The AOT core's replay worker, on the recording bodies.
     Aot,
 }
 
@@ -1051,6 +1176,120 @@ impl Engine {
             Self::Aot => "aot",
         }
     }
+
+    fn interprets(self) -> bool {
+        matches!(self, Self::Interp | Self::InterpNull)
+    }
+}
+
+const REPLAY_CHUNK_ENGINES: &str = "REPLAY_CHUNK_ENGINES";
+
+fn engine_names(engines: &[Engine]) -> String {
+    engines
+        .iter()
+        .map(|engine| engine.name())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Strict, as the other variables are read: a value that is not Unicode is an error, not unset.
+fn env_engines() -> Result<Option<String>, String> {
+    match std::env::var(REPLAY_CHUNK_ENGINES) {
+        Ok(raw) => Ok(Some(raw)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(e) => Err(format!("{REPLAY_CHUNK_ENGINES}: {e}")),
+    }
+}
+
+/// `REPLAY_CHUNK_ENGINES`'s engines, every engine when it is unset. A repeated engine would print
+/// two lines one reader cannot tell apart, and without an interpreter no replay is the reference.
+fn select_engines(raw: Option<&str>) -> Result<Vec<Engine>, String> {
+    let Some(raw) = raw else {
+        return Ok(Engine::ALL.to_vec());
+    };
+    let mut engines = Vec::new();
+    for name in raw.split(',') {
+        // Refused, not read as `aot`, so a launcher still naming it finds out.
+        if name == "aot-recorder" {
+            return Err(format!(
+                "{REPLAY_CHUNK_ENGINES}={raw}: aot-recorder is refused; name aot, which replays \
+                 on the recording bodies"
+            ));
+        }
+        let engine = Engine::ALL
+            .into_iter()
+            .find(|engine| engine.name() == name)
+            .ok_or_else(|| {
+                format!(
+                    "{REPLAY_CHUNK_ENGINES}={raw}: `{name}` is not an engine; name them separated \
+                     by commas, from {}",
+                    engine_names(&Engine::ALL)
+                )
+            })?;
+        if engines.contains(&engine) {
+            return Err(format!("{REPLAY_CHUNK_ENGINES}={raw}: names {name} twice"));
+        }
+        engines.push(engine);
+    }
+    if !engines.iter().any(|engine| engine.interprets()) {
+        return Err(format!(
+            "{REPLAY_CHUNK_ENGINES}={raw}: names no interpreter (interp or interp-null), and an \
+             interpreter's replay is the digest every engine's is compared with"
+        ));
+    }
+    Ok(engines)
+}
+
+/// Refuses `aot` when the registered program has no recording entry point for it to run, rather
+/// than replay with something else under its name.
+fn check_aot_engine(raw: Option<&str>, engines: &[Engine], recording: bool) -> Result<(), String> {
+    if recording || !engines.contains(&Engine::Aot) {
+        return Ok(());
+    }
+    let regenerate = "regenerate aot-generated/ from the guest's ELF (perf/aot/aot_bench.sh does)";
+    Err(match raw {
+        None => format!(
+            "replay-chunk runs every engine while {REPLAY_CHUNK_ENGINES} is unset, and its aot \
+             engine runs the recording bodies, which the registered program lacks: {regenerate}, \
+             or set {REPLAY_CHUNK_ENGINES}={}",
+            engine_names(&[Engine::Interp, Engine::InterpNull])
+        ),
+        Some(raw) => format!(
+            "{REPLAY_CHUNK_ENGINES}={raw} names aot, which runs the recording bodies, and the \
+             registered program has none: {regenerate}, or leave aot out"
+        ),
+    })
+}
+
+/// The order `chunk`'s engines run in: the list, rotated one place further each chunk.
+fn chunk_order(engines: &[Engine], chunk: usize) -> impl Iterator<Item = Engine> + '_ {
+    (0..engines.len()).map(move |slot| engines[(chunk + slot) % engines.len()])
+}
+
+/// The calling thread's page faults so far. Per thread, so a fault the pool's or the recycler's
+/// threads take beside a replay is not counted as the replay's.
+#[cfg(target_os = "linux")]
+fn thread_faults() -> Result<Option<Faults>, String> {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+    // SAFETY: `usage` is valid for a write of one `rusage`.
+    if unsafe { libc::getrusage(libc::RUSAGE_THREAD, usage.as_mut_ptr()) } != 0 {
+        return Err(format!(
+            "getrusage(RUSAGE_THREAD): {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    // SAFETY: `getrusage` returned 0, so it wrote the whole struct.
+    let usage = unsafe { usage.assume_init() };
+    Ok(Some(Faults {
+        minor: usage.ru_minflt as u64,
+        major: usage.ru_majflt as u64,
+    }))
+}
+
+/// No per-thread count off Linux: macOS's `getrusage` has no `RUSAGE_THREAD`.
+#[cfg(not(target_os = "linux"))]
+fn thread_faults() -> Result<Option<Faults>, String> {
+    Ok(None)
 }
 
 /// One engine's replay of one chunk.
@@ -1058,8 +1297,12 @@ struct ChunkReplay {
     engine: Engine,
     recover: Duration,
     replay: Duration,
+    recover_faults: Option<Faults>,
+    replay_faults: Option<Faults>,
     dispatches: u64,
     fallback_insns: u64,
+    /// Recording blocks run, their instructions and those written directly; `aot` only.
+    recorder: Option<(u64, u64, u64)>,
     /// The chunk's record and what its replay deferred, as they are compared.
     digests: Vec<FieldDigest>,
 }
@@ -1095,12 +1338,46 @@ fn copy_state(state: &RiscvEmulationState) -> RiscvEmulationState {
         public_values_stream: state.public_values_stream.clone(),
         memory,
         syscall_counts: state.syscall_counts.clone(),
+        misaligned_accesses: state.misaligned_accesses,
     }
 }
 
-/// Back to the pool, as the pipeline's workers give a snapshot's memory back.
+thread_local! {
+    /// The memories the chunk's engines have given back, held until every engine has run.
+    static RELEASED: std::cell::RefCell<Vec<ContiguousRiscvMemory>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Held for [`settle_released`]: the recycler's threads would reset it while the next engine's
+/// timer runs.
 fn release(memory: ContiguousRiscvMemory) {
-    let _ = GLOBAL_MEMORY_RECYCLER.send((memory, true));
+    RELEASED.with_borrow_mut(|released| released.push(memory));
+}
+
+/// The chunk's memories back to the pool, each reset on this thread, once every engine has run.
+fn settle_released() {
+    for mut memory in RELEASED.take() {
+        memory.reset();
+        GLOBAL_MEMORY_POOL
+            .0
+            .send(memory)
+            .expect("the memory pool is open");
+    }
+}
+
+/// That the pool still holds the `free` memories it held as the chunk's engines began, none
+/// waiting for a reset: nothing was returned or made beside an engine's timer.
+fn check_pool_settled(free: usize) -> Result<(), String> {
+    let (now, queued) = (GLOBAL_MEMORY_POOL.1.len(), GLOBAL_MEMORY_RECYCLER.len());
+    if now == free && queued == 0 {
+        return Ok(());
+    }
+    Err(format!(
+        "replay-chunk: the memory pool went from {free} to {now} free memories, {queued} waiting \
+         to be reset, while the chunk's engines ran, so a timer ran beside a reset or a new \
+         memory; set MEMORY_POOL_EAGER to MEMORY_POOL_SIZE so the pool makes its memories before \
+         the run"
+    ))
 }
 
 /// A fresh worker per replay makes every engine pay the same recovery, unlike the pipeline's
@@ -1115,29 +1392,43 @@ fn replay_chunk(
     let deferred: SharedDeferredState =
         EmulationDeferredState::shared(program, Arc::new(RecordFinalPvsState::default()));
     let mut records = Vec::new();
-    let (recover, replay, replayed, dispatches, fallback_insns) = if engine == Engine::Aot {
+    // Before the recovery, between it and the replay, and after the replay: outside both timers.
+    let mut faults = [None; 3];
+    let (recover, replay, replayed, dispatches, fallback_insns, recorder) = if !engine.interprets()
+    {
+        faults[0] = thread_faults()?;
         let start = Instant::now();
         let mut worker =
             AotReplayMetaEmulator::recover_riscv(witness, state, deferred.clone(), target, true);
         let recover = start.elapsed();
+        faults[1] = thread_faults()?;
         let start = Instant::now();
         let replayed = worker.try_next_record_batch(&mut |record| records.push(record));
         let replay = start.elapsed();
+        faults[2] = thread_faults()?;
         let counts = (worker.compiled_block_dispatches(), worker.fallback_insns());
+        let recorder = Some((
+            worker.recorder_body_dispatches(),
+            worker.recorder_body_insns(),
+            worker.recorder_direct_insns(),
+        ));
         release(worker.into_memory());
-        (recover, replay, replayed, counts.0, counts.1)
+        (recover, replay, replayed, counts.0, counts.1, recorder)
     } else {
+        faults[0] = thread_faults()?;
         let start = Instant::now();
         let mut worker =
             MetaEmulator::recover_riscv(witness, state, deferred.clone(), target, true);
         let recover = start.elapsed();
+        faults[1] = thread_faults()?;
         let start = Instant::now();
         let replayed = worker.try_next_record_batch(&mut |record| records.push(record));
         let replay = start.elapsed();
+        faults[2] = thread_faults()?;
         if let Some(emulator) = worker.emulator.take() {
             release(emulator.state.memory);
         }
-        (recover, replay, replayed, 0, 0)
+        (recover, replay, replayed, 0, 0, None)
     };
     replayed.map_err(|e| format!("replay-chunk: the {} replay: {e}", engine.name()))?;
     // All of the pool, so what the replay deferred is compared with its record.
@@ -1151,19 +1442,25 @@ fn replay_chunk(
         engine,
         recover,
         replay,
+        recover_faults: Faults::between(faults[0], faults[1]),
+        replay_faults: Faults::between(faults[1], faults[2]),
         dispatches,
         fallback_insns,
+        recorder,
         digests,
     })
 }
 
-/// `replay-chunk`: each chunk's snapshot from the AOT snapshot thread, replayed by every engine.
+/// `replay-chunk`: each chunk's snapshot from the AOT snapshot thread, replayed by every engine
+/// `REPLAY_CHUNK_ENGINES` names.
 fn replay_chunks(args: &Args, elf: &[u8]) -> Result<Measured, String> {
     if args.phase.is_some() {
         return Err("--phase applies to the prove arms only".into());
     }
+    let raw_engines = env_engines()?;
+    let engines = select_engines(raw_engines.as_deref())?;
     let pool_size = memory_pool_size();
-    let needed = Engine::ALL.len();
+    let needed = engines.len();
     if pool_size < needed {
         return Err(format!(
             "replay-chunk: MEMORY_POOL_SIZE={pool_size} is too small; need at least {needed} \
@@ -1175,6 +1472,11 @@ fn replay_chunks(args: &Args, elf: &[u8]) -> Result<Measured, String> {
         .compile();
     let chunk_size = env_chunk_size()?.unwrap_or_else(default_chunk_size);
     register(elf, &args.elf)?;
+    check_aot_engine(
+        raw_engines.as_deref(),
+        &engines,
+        pico_aot_dispatch::AOT.record_entry().is_some(),
+    )?;
     let opts = opts(chunk_size).with_snapshot_main(SnapshotMainMode::Aot);
     let stdin = emulator_stdin(&args.input);
     let inputs = stdin.inputs.to_vec();
@@ -1189,28 +1491,32 @@ fn replay_chunks(args: &Args, elf: &[u8]) -> Result<Measured, String> {
 
     let start = Instant::now();
     let (mut chunks, mut dispatches, mut unequal_chunks) = (0u32, 0u64, 0usize);
+    let (mut recorder_dispatches, mut recorder_insns, mut recorder_direct) = (0u64, 0u64, 0u64);
+    let mut uncovered = Vec::new();
     loop {
         let (state, batch) = snapshots
             .next_state_batch()
             .map_err(|e| format!("replay-chunk: the snapshot thread: {e}"))?;
         let target = batch.current_cycle;
         let chunk_cycles = target - state.global_clk;
-        // Two copies, and the original for whichever engine runs last.
-        let mut states = [
-            Some(copy_state(&state)),
-            Some(copy_state(&state)),
-            Some(state),
-        ];
-        let mut replays = Vec::with_capacity(Engine::ALL.len());
-        for (slot, state) in states.iter_mut().enumerate() {
-            let engine = Engine::ALL[(chunks as usize + slot) % Engine::ALL.len()];
-            let state = state.take().expect("one state per engine");
+        // A copy for each engine but one, and the original for whichever runs last.
+        let copies = (1..engines.len())
+            .map(|_| copy_state(&state))
+            .collect::<Vec<_>>();
+        let mut states = copies.into_iter().chain([state]);
+        let mut replays = Vec::with_capacity(engines.len());
+        let free = GLOBAL_MEMORY_POOL.1.len();
+        for engine in chunk_order(&engines, chunks as usize) {
+            let state = states.next().expect("one state per engine");
+            check_pool_settled(free)?;
             replays.push(replay_chunk(engine, &witness, state, target)?);
         }
+        check_pool_settled(free)?;
+        settle_released();
         let reference = &replays
             .iter()
-            .find(|replay| replay.engine != Engine::Aot)
-            .expect("two interpreters replay every chunk")
+            .find(|replay| replay.engine.interprets())
+            .expect("an interpreter replays every chunk")
             .digests;
         let mut all_equal = true;
         for replay in &replays {
@@ -1218,15 +1524,31 @@ fn replay_chunks(args: &Args, elf: &[u8]) -> Result<Measured, String> {
             all_equal &= digest_equal;
             println!(
                 "REPLAY_CHUNK chunk={} engine={} replay_us={} recover_us={} cycles={chunk_cycles} \
-                 dispatches={} fallback_insns={} digest_equal={digest_equal}",
+                 dispatches={} fallback_insns={} recorder_dispatches={} recorder_insns={} \
+                 recorder_direct_insns={} digest_equal={digest_equal} replay_minflt={} \
+                 replay_majflt={} recover_minflt={}",
                 batch.start_chunk,
                 replay.engine.name(),
                 replay.replay.as_micros(),
                 replay.recover.as_micros(),
                 replay.dispatches,
                 replay.fallback_insns,
+                dash(replay.recorder.map(|(dispatches, ..)| dispatches)),
+                dash(replay.recorder.map(|(_, insns, _)| insns)),
+                dash(replay.recorder.map(|(.., direct)| direct)),
+                dash(replay.replay_faults.map(|faults| faults.minor)),
+                dash(replay.replay_faults.map(|faults| faults.major)),
+                dash(replay.recover_faults.map(|faults| faults.minor)),
             );
             dispatches += replay.dispatches;
+            if let Some((bodies, insns, direct)) = replay.recorder {
+                recorder_dispatches += bodies;
+                recorder_insns += insns;
+                recorder_direct += direct;
+                if insns + replay.fallback_insns != chunk_cycles {
+                    uncovered.push(batch.start_chunk);
+                }
+            }
         }
         unequal_chunks += usize::from(!all_equal);
         chunks += 1;
@@ -1236,10 +1558,19 @@ fn replay_chunks(args: &Args, elf: &[u8]) -> Result<Measured, String> {
     }
     let wall = start.elapsed();
 
+    if !uncovered.is_empty() {
+        eprintln!(
+            "error: the aot replay of chunk(s) {uncovered:?} ran other than its cycles between \
+             its recording bodies and its fallback, so something else replayed them"
+        );
+    }
     Ok(Measured {
         workers: None,
         chunk_size,
-        timed: "replay_chunks:snapshot+copy+3x(recover+replay+digest)",
+        timed: format!(
+            "replay_chunks:snapshot+copy+{}x(recover+replay+digest+reset)",
+            engines.len()
+        ),
         wall,
         cycles: Some(snapshots.cycles()),
         chunks: Some(chunks),
@@ -1250,11 +1581,19 @@ fn replay_chunks(args: &Args, elf: &[u8]) -> Result<Measured, String> {
         verified: None,
         distinct_shapes: None,
         traced_chunks: None,
-        dispatches: Some(dispatches),
+        // Without `aot`, the snapshot thread's count is the evidence that compiled code ran.
+        dispatches: engines.contains(&Engine::Aot).then_some(dispatches),
         unequal_chunks,
         realloc: None,
         faults: None,
         retained: None,
+        recorder: engines.contains(&Engine::Aot).then_some((
+            recorder_dispatches,
+            recorder_insns,
+            recorder_direct,
+        )),
+        uncovered_chunks: uncovered.len(),
+        replay_engines: Some(engine_names(&engines)),
     })
 }
 
@@ -1508,7 +1847,7 @@ fn retained_rows(args: &Args, elf: &[u8]) -> Result<Measured, String> {
     Ok(Measured {
         workers: Some(workers),
         chunk_size,
-        timed: "retained_rows:write",
+        timed: "retained_rows:write".into(),
         wall,
         cycles: Some(output.cycles),
         chunks: Some(output.chunks),
@@ -1524,6 +1863,9 @@ fn retained_rows(args: &Args, elf: &[u8]) -> Result<Measured, String> {
         realloc: None,
         faults: None,
         retained: Some(retained),
+        recorder: None,
+        uncovered_chunks: 0,
+        replay_engines: None,
     })
 }
 
@@ -1708,7 +2050,7 @@ fn history_census(args: &Args, elf: &[u8], files: CensusFiles) -> Result<Measure
     Ok(Measured {
         workers: Some(workers),
         chunk_size,
-        timed: "emulate_with_pipeline_streaming:emulate+census",
+        timed: "emulate_with_pipeline_streaming:emulate+census".into(),
         wall,
         cycles: Some(output.cycles),
         chunks: Some(output.chunks),
@@ -1724,6 +2066,9 @@ fn history_census(args: &Args, elf: &[u8], files: CensusFiles) -> Result<Measure
         realloc: None,
         faults: None,
         retained: None,
+        recorder: None,
+        uncovered_chunks: 0,
+        replay_engines: None,
     })
 }
 
@@ -1846,7 +2191,7 @@ fn history_arena(args: &Args, elf: &[u8]) -> Result<Measured, String> {
     Ok(Measured {
         workers: Some(workers),
         chunk_size,
-        timed: "emulate_with_pipeline_streaming:emulate+arena-fill+upload+read-back",
+        timed: "emulate_with_pipeline_streaming:emulate+arena-fill+upload+read-back".into(),
         wall,
         cycles: Some(output.cycles),
         chunks: Some(output.chunks),
@@ -1862,6 +2207,9 @@ fn history_arena(args: &Args, elf: &[u8]) -> Result<Measured, String> {
         realloc: None,
         faults: None,
         retained: None,
+        recorder: None,
+        uncovered_chunks: 0,
+        replay_engines: None,
     })
 }
 
@@ -1879,8 +2227,14 @@ fn run(args: Args) -> Result<ExitCode, String> {
     let census_files = env_census_files(args.arm)?;
     let traces = args.arm == Arm::TracegenAot;
     // Built on first use otherwise, which only the arms that run the snapshot pipeline make: its
-    // memories and threads would land inside their timer and no other arm's.
-    init_memory_pool();
+    // memories and threads would land inside their timer and no other arm's. The pool keeps the size
+    // it is built at, so a pipeline arm's is the size its run's check gives it, and the prover arms
+    // build theirs once the prover's build has sized it.
+    match own_pipeline_run(&args) {
+        Some((workers, snapshot_main)) => init_memory_pool_for(workers, snapshot_main),
+        None if !args.arm.through_prover() => init_memory_pool(),
+        None => {}
+    }
     if ledger::enabled() || std::env::var_os("MLE_SPANS").is_some() {
         ledger::set_driver(ledger::Driver {
             arm: Some(args.arm.name().to_string()),
@@ -1938,6 +2292,15 @@ fn run(args: Args) -> Result<ExitCode, String> {
         .arm
         .aot_workers()
         .then(|| WORKER_DISPATCHES.load(Ordering::Relaxed));
+    let recorder = measured.recorder.or_else(|| {
+        args.arm.aot_workers().then(|| {
+            (
+                RECORDER_DISPATCHES.load(Ordering::Relaxed),
+                RECORDER_INSNS.load(Ordering::Relaxed),
+                RECORDER_DIRECT_INSNS.load(Ordering::Relaxed),
+            )
+        })
+    });
     let input = if args.input.is_empty() {
         "-".to_string()
     } else {
@@ -1953,10 +2316,11 @@ fn run(args: Args) -> Result<ExitCode, String> {
     println!(
         "AOT_BENCH arm={} guest={guest} input={input} workers={} chunk_size={} timed={} \
          wall_s={:.6} cycles={} chunks={} records={} committed_sha256={} aot_elf_sha256={} \
-         aot_dispatches={} aot_worker_dispatches={} trace_source={} \
+         aot_dispatches={} aot_worker_dispatches={} aot_recorder_dispatches={} \
+         aot_recorder_insns={} aot_recorder_direct_insns={} trace_source={} \
          branch_compares={} phase={} mode={} verified={} distinct_shapes={} traced_chunks={} \
-         ledger={} alloc={ALLOC} mem={MEM} bigint={BIGINT} realloc={} minor_faults={} \
-         major_faults={} retained={} retained_rows_us={}",
+         replay_engines={} ledger={} alloc={ALLOC} mem={MEM} bigint={BIGINT} realloc={} \
+         minor_faults={} major_faults={} retained={} retained_rows_us={}",
         args.arm.name(),
         dash(measured.workers),
         measured.chunk_size,
@@ -1969,6 +2333,9 @@ fn run(args: Args) -> Result<ExitCode, String> {
         dash(aot.then(|| hex(&pico_aot_dispatch::AOT.elf_sha256()))),
         dash(aot.then_some(dispatches)),
         dash(worker_dispatches),
+        dash(recorder.map(|(dispatches, ..)| dispatches)),
+        dash(recorder.map(|(_, insns, _)| insns)),
+        dash(recorder.map(|(.., direct)| direct)),
         dash(traces.then_some("history")),
         dash(traces.then_some("indices")),
         dash(measured.phase),
@@ -1976,6 +2343,7 @@ fn run(args: Args) -> Result<ExitCode, String> {
         dash(measured.verified),
         dash(measured.distinct_shapes),
         dash(measured.traced_chunks),
+        dash(measured.replay_engines),
         dash(ledger_path),
         dash(measured.realloc.as_deref()),
         dash(measured.faults.map(|faults| faults.minor)),
@@ -2019,6 +2387,16 @@ fn run(args: Args) -> Result<ExitCode, String> {
         );
         return Ok(ExitCode::from(3));
     }
+    if recorder.is_some_and(|(_, insns, _)| insns == 0) {
+        eprintln!(
+            "error: the recording bodies ran no instruction, so this run measured the fallback \
+             under the recorder's name"
+        );
+        return Ok(ExitCode::from(3));
+    }
+    if measured.uncovered_chunks > 0 {
+        return Ok(ExitCode::from(3));
+    }
     Ok(ExitCode::SUCCESS)
 }
 
@@ -2045,12 +2423,6 @@ mod tests {
             assert!(error.contains(removed));
             assert!(error.contains("was removed"));
         }
-    }
-
-    #[test]
-    fn tracegen_requires_dev_mode() {
-        assert!(check_tracegen_mode(true).is_err());
-        assert!(check_tracegen_mode(false).is_ok());
     }
 
     /// `n` pushes into an empty vector: its capacity, and how many of them moved its rows.
@@ -2293,5 +2665,141 @@ mod tests {
         let mut history = ecall_history();
         history.syscalls[0].clk = 8;
         assert!(RetainedChunk::stage(&history).is_err());
+    }
+
+    #[test]
+    fn replay_chunk_runs_every_engine_while_the_list_is_unset() {
+        assert_eq!(select_engines(None).unwrap(), Engine::ALL);
+        assert_eq!(engine_names(&Engine::ALL), "interp,interp-null,aot");
+    }
+
+    #[test]
+    fn a_list_keeps_its_order() {
+        assert_eq!(
+            select_engines(Some("aot,interp-null,interp")).unwrap(),
+            [Engine::Aot, Engine::InterpNull, Engine::Interp]
+        );
+        assert_eq!(select_engines(Some("interp")).unwrap(), [Engine::Interp]);
+    }
+
+    #[test]
+    fn a_list_without_an_interpreter_is_refused() {
+        let error = select_engines(Some("aot")).unwrap_err();
+        assert!(error.contains("names no interpreter"), "{error}");
+    }
+
+    #[test]
+    fn unknown_empty_and_repeated_engines_are_refused() {
+        for raw in ["", "interp,", "interp,,aot", "interp, aot", "interp,jit"] {
+            let error = select_engines(Some(raw)).unwrap_err();
+            assert!(error.contains("is not an engine"), "{raw:?}: {error}");
+        }
+        let error = select_engines(Some("interp,aot,interp")).unwrap_err();
+        assert!(error.contains("names interp twice"), "{error}");
+    }
+
+    #[test]
+    fn aot_recorder_is_refused_for_aot() {
+        for raw in [
+            "aot-recorder",
+            "interp,aot-recorder",
+            "aot-recorder,interp,aot",
+        ] {
+            let error = select_engines(Some(raw)).unwrap_err();
+            assert!(
+                error.contains("aot-recorder is refused") && error.contains("name aot"),
+                "{raw}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_aot_engine_needs_the_recording_bodies() {
+        let interpreters = [Engine::Interp, Engine::InterpNull];
+        assert!(check_aot_engine(Some("interp,interp-null"), &interpreters, false).is_ok());
+        assert!(check_aot_engine(None, &Engine::ALL, true).is_ok());
+
+        let unset = check_aot_engine(None, &Engine::ALL, false).unwrap_err();
+        assert!(unset.contains("is unset"), "{unset}");
+        assert!(
+            unset.contains("REPLAY_CHUNK_ENGINES=interp,interp-null"),
+            "{unset}"
+        );
+        let listed = [Engine::Interp, Engine::Aot];
+        let named = check_aot_engine(Some("interp,aot"), &listed, false).unwrap_err();
+        assert!(named.contains("names aot"), "{named}");
+        assert!(named.contains("aot_bench.sh"), "{named}");
+    }
+
+    #[test]
+    fn the_recorder_arm_is_refused_for_the_workers_arm() {
+        let Err(error) = parse_arm("pipeline-aot-recorder") else {
+            panic!("pipeline-aot-recorder parsed as an arm");
+        };
+        assert!(error.contains("pipeline-aot-workers"), "{error}");
+        for arm in Arm::value_variants() {
+            assert!(parse_arm(arm.name()).is_ok_and(|parsed| parsed == *arm));
+        }
+    }
+
+    #[test]
+    fn each_chunk_runs_exactly_the_selected_engines_rotated() {
+        use Engine::{Aot, Interp, InterpNull};
+        let engines = select_engines(Some("interp,interp-null,aot")).unwrap();
+        let orders = (0..4)
+            .map(|chunk| chunk_order(&engines, chunk).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            orders,
+            [
+                vec![Interp, InterpNull, Aot],
+                vec![InterpNull, Aot, Interp],
+                vec![Aot, Interp, InterpNull],
+                vec![Interp, InterpNull, Aot],
+            ]
+        );
+        // Unset: every engine, rotated the same way.
+        for chunk in 0..8 {
+            let expected = (0..Engine::ALL.len())
+                .map(|slot| Engine::ALL[(chunk + slot) % Engine::ALL.len()])
+                .collect::<Vec<_>>();
+            assert_eq!(
+                chunk_order(&Engine::ALL, chunk).collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn page_faults_are_read_on_linux_alone() {
+        let faults = thread_faults().unwrap();
+        assert_eq!(faults.is_some(), cfg!(target_os = "linux"));
+        assert_eq!(Faults::between(None, faults), None);
+    }
+
+    /// Pages this thread touches first are its own minor faults.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn touching_fresh_pages_counts_minor_faults() {
+        const LEN: usize = 16 << 20;
+        let before = thread_faults().unwrap();
+        // SAFETY: an anonymous private mapping, written within its length and unmapped once.
+        unsafe {
+            let map = libc::mmap(
+                std::ptr::null_mut(),
+                LEN,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            );
+            assert_ne!(map, libc::MAP_FAILED);
+            for offset in (0..LEN).step_by(4096) {
+                map.cast::<u8>().add(offset).write_volatile(1);
+            }
+            assert_eq!(libc::munmap(map, LEN), 0);
+        }
+        let faults = Faults::between(before, thread_faults().unwrap()).unwrap();
+        assert!(faults.minor > 0, "{faults:?}");
     }
 }

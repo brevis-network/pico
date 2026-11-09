@@ -5,7 +5,8 @@ use crate::{
     chips::{
         chips::riscv_memory::read_write::columns::MemoryCols,
         gadgets::{
-            addr_add::AddrAddGadget, field_range_check::word_range::FieldWordRangeChecker,
+            addr_add::AddrAddGadget, code_range::CodeRangeCols,
+            field_range_check::word_range::FieldWordRangeChecker,
             poseidon2::constraints::eval_poseidon2, syscall_addr::SyscallAddrGadget,
         },
     },
@@ -68,6 +69,15 @@ where
             builder,
             STATE_NUM_BYTES,
             local.output_memory_ptr,
+            is_real.into(),
+        );
+        // The output buffer is written, so it may not lie on the program's code. The third
+        // limb is zero at any address the finalize check admits.
+        CodeRangeCols::<CB::F>::eval(
+            builder,
+            &local.code_range,
+            [output_ptr[0].into(), output_ptr[1].into()],
+            CB::Expr::from_u32(STATE_NUM_BYTES),
             is_real.into(),
         );
 

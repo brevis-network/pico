@@ -1,4 +1,6 @@
 #[cfg(feature = "cuda")]
+use crate::chips::gadgets::code_range::{fill_on_device, NUM_CODE_RANGE_COLS};
+#[cfg(feature = "cuda")]
 use crate::mle::spans::device;
 use crate::{
     chips::{
@@ -8,6 +10,7 @@ use crate::{
         },
         gadgets::{
             addr_add::AddrAddGadget,
+            code_range::CodeRangeCols,
             curves::{AffinePoint, CurveType, EllipticCurve},
             field::{
                 field_lt::FieldLtCols,
@@ -123,6 +126,9 @@ pub struct WeierstrassAddAssignCols<T, P: FieldParameters + NumWords> {
     pub(crate) slope_times_p_x_minus_x: FieldOpCols<T, P>,
     pub x3_range: FieldLtCols<T, P>,
     pub y3_range: FieldLtCols<T, P>,
+
+    /// The result is written back over `p`, which may not lie on the program's code.
+    pub code_range: CodeRangeCols<T>,
 }
 
 #[derive(Default)]
@@ -259,6 +265,7 @@ impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssign
 
         debug!("weierstrass add precompile events: {:?}", events.len());
 
+        let code = input.program.code();
         let mut rows = Vec::new();
 
         let mut new_byte_lookup_events = Vec::new();
@@ -290,6 +297,8 @@ impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssign
             let len = <E::BaseField as NumLimbs>::Limbs::USIZE as u64 * 2;
             cols.p_ptr
                 .populate(&mut new_byte_lookup_events, event.p_ptr, len);
+            cols.code_range
+                .populate(event.p_ptr, len, &code, &mut new_byte_lookup_events);
             cols.q_ptr
                 .populate(&mut new_byte_lookup_events, event.q_ptr, len);
 
@@ -540,6 +549,21 @@ impl<F: PrimeField32, E: EllipticCurve> GpuChipBehavior<F> for WeierstrassAddAss
         }
 
         // 6. Switch to main stream and return result
+        // The code range, the last columns of the chip's row, which the kernel leaves zero.
+        // The result is written back over `p`.
+        let writes: Vec<u64> = events.iter().map(|event| u64::from(event.p_ptr)).collect();
+        fill_on_device(
+            &mut d_trace,
+            num_cols,
+            num_cols - NUM_CODE_RANGE_COLS,
+            &writes,
+            <E::BaseField as NumLimbs>::Limbs::USIZE as u64 * 2,
+            &input.program.code(),
+            d_byte_trace,
+            mem_pool,
+            stream,
+        );
+
         let sync_stream = get_global_stream_pool(device_id);
         let main_stream = &sync_stream.0;
         device::launched(kernels, stream);
@@ -735,6 +759,15 @@ where
             builder,
             <E::BaseField as NumLimbs>::Limbs::USIZE as u32 * 2,
             local.p_ptr,
+            local.is_real.into(),
+        );
+        // The result is written back over `p`, which may not lie on the program's code.
+        // The third limb is zero at any address the finalize check admits.
+        CodeRangeCols::<CB::F>::eval(
+            builder,
+            &local.code_range,
+            [p_ptr[0].into(), p_ptr[1].into()],
+            CB::Expr::from_u32(<E::BaseField as NumLimbs>::Limbs::USIZE as u32 * 2),
             local.is_real.into(),
         );
         let q_ptr = SyscallAddrGadget::<CB::F>::eval(

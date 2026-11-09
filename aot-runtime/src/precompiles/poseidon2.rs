@@ -53,8 +53,11 @@ fn write_word_span_via_dwords_at_clk(
 ) {
     let (start, start_word_index, num_dwords) = covered_dword_range(addr, values.len());
     let mut dwords = [0u64; (PERMUTATION_WIDTH / 2) + 1];
-    for (i, slot) in dwords[..num_dwords].iter_mut().enumerate() {
-        *slot = core.read_mem_dword_unsafe(start + (i as u64) * 8);
+    // The interpreter reads the output's dwords as one load before writing them.
+    if core.load_span_allowed(start, num_dwords) {
+        for (i, slot) in dwords[..num_dwords].iter_mut().enumerate() {
+            *slot = core.read_mem_dword_unsafe(start + (i as u64) * 8);
+        }
     }
 
     for (i, &value) in values.iter().enumerate() {

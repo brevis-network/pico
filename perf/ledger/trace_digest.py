@@ -23,7 +23,9 @@ and its `events_added` differs by design.
 every CPU chunk's `prove.augment.clone` line: `streams` requires `trace_source` "streams"; `history`
 requires "history", every producer stream empty and `history_bytes` above zero, so a run that read
 the streams under the history's name fails. `any` (the default) checks neither, for a ledger written
-before those facts existed.
+before those facts existed. A record that carries no history has a null `trace_source`, so a CPU
+chunk without one fails `history`; deferred records, which carry none, are not checked. `streams`
+reads a ledger written before the streams were removed, when a record could be traced from either.
 
 `--reference-sink` and `--candidate-sink` say what each run's replay workers wrote, read off the
 envelope and every `worker.replay` line: `legacy`, `dual` or `history` requires the envelope's

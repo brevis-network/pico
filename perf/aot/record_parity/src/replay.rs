@@ -9,6 +9,12 @@
 //! across the run while worker identity and replay coverage are checked per chunk. Chunks are
 //! numbered as the ledger numbers them, from zero, where [`crate::emitting`]'s lines count from one.
 //!
+//! An AOT worker runs only recording blocks, so its recording bodies' instructions
+//! (`recorder_insns`) and its fallback's must sum to the chunk's cycles; a dispatch count cannot
+//! show that, as it also counts a block that fell back. The checking build checks only the rows
+//! written directly (`recorder_direct_insns`), so a checking run must show some: a short chunk may
+//! have none, but a run with none checked nothing.
+//!
 //! The ledger's sink is chosen once per process, from `MLE_LEDGER` as the process's first pipeline
 //! run opens its window, so [`Ledger::start`] sets it before any run and every run of the process
 //! writes to it. [`Ledger::arm`] notes the bytes one arm's run appended, which is all the audit
@@ -24,6 +30,9 @@ use std::{
 };
 
 use serde_json::Value;
+
+/// The `worker_kind` the ledger writes for an AOT replay worker.
+const AOT_KIND: &str = "aot";
 
 /// Which code the AOT workers run, and so what each of their chunks has to show.
 #[derive(Clone, Copy)]
@@ -44,6 +53,8 @@ struct Replayed {
     cycles: u64,
     dispatches: Option<u64>,
     fallback_insns: Option<u64>,
+    recorder_insns: Option<u64>,
+    recorder_direct_insns: Option<u64>,
 }
 
 /// The `worker.replay` lines of `text`, a ledger's lines or a slice of them.
@@ -71,6 +82,8 @@ fn replays(text: &str) -> Result<Vec<Replayed>, String> {
                 .ok_or_else(|| format!("ledger line {at}: a worker.replay line with no cycles"))?,
             dispatches: facts["dispatches"].as_u64(),
             fallback_insns: facts["fallback_insns"].as_u64(),
+            recorder_insns: facts["recorder_insns"].as_u64(),
+            recorder_direct_insns: facts["recorder_direct_insns"].as_u64(),
         });
     }
     Ok(rows)
@@ -81,6 +94,8 @@ struct Chunk {
     cycles: u64,
     dispatches: Option<u64>,
     fallback_insns: Option<u64>,
+    recorder_insns: Option<u64>,
+    recorder_direct_insns: Option<u64>,
     kinds: BTreeSet<String>,
 }
 
@@ -91,6 +106,8 @@ fn chunks(rows: &[Replayed]) -> BTreeMap<u64, Chunk> {
             cycles: 0,
             dispatches: Some(0),
             fallback_insns: Some(0),
+            recorder_insns: Some(0),
+            recorder_direct_insns: Some(0),
             kinds: BTreeSet::new(),
         });
         chunk.cycles += row.cycles;
@@ -99,6 +116,14 @@ fn chunks(rows: &[Replayed]) -> BTreeMap<u64, Chunk> {
         chunk.fallback_insns = chunk
             .fallback_insns
             .zip(row.fallback_insns)
+            .map(|(a, b)| a + b);
+        chunk.recorder_insns = chunk
+            .recorder_insns
+            .zip(row.recorder_insns)
+            .map(|(a, b)| a + b);
+        chunk.recorder_direct_insns = chunk
+            .recorder_direct_insns
+            .zip(row.recorder_direct_insns)
             .map(|(a, b)| a + b);
         chunk
             .kinds
@@ -113,9 +138,11 @@ fn only(kind: &str, kinds: &BTreeSet<String>) -> bool {
 
 /// Adds to `problems` what the two arms' workers show, prints what ran each chunk of the
 /// candidate, and returns a suffix for the run's line. The reference's workers are interpreters;
-/// the candidate's are the AOT core.
+/// the candidate's are the AOT core on the recording blocks, `checked` when those are the checking
+/// build's.
 fn audit_arms(
     expect: Expect,
+    checked: bool,
     reference: &[Replayed],
     candidate: &[Replayed],
     totals: [(u32, u64); 2],
@@ -175,6 +202,8 @@ fn audit_arms(
     let mut total_dispatches = 0;
     let mut interpreted = 0;
     let mut compiled_insns = 0;
+    let mut recorder_insns = 0;
+    let mut direct_insns = 0;
     for (chunk, work) in &candidate {
         if let Some(theirs) = reference.get(chunk) {
             if theirs.cycles != work.cycles {
@@ -184,10 +213,10 @@ fn audit_arms(
                 ));
             }
         }
-        if !only("aot", &work.kinds) {
+        if !only(AOT_KIND, &work.kinds) {
             problems.push(format!(
-                "chunk {chunk}: the workers report {:?}, not \"aot\", so the AOT engine was not \
-                 the one that replayed it",
+                "chunk {chunk}: the workers report {:?}, not {AOT_KIND:?}, so the AOT engine was \
+                 not the one that replayed it",
                 work.kinds
             ));
         }
@@ -217,6 +246,43 @@ fn audit_arms(
         }
         interpreted += fallback;
         compiled_insns += work.cycles - fallback;
+        match work.recorder_insns {
+            None => problems.push(format!(
+                "chunk {chunk}: the AOT workers report no recorder-body count"
+            )),
+            Some(recorded) => {
+                let share = 100.0 * recorded as f64 / work.cycles.max(1) as f64;
+                let direct = work.recorder_direct_insns.map_or(String::new(), |direct| {
+                    format!(", {direct} writing their rows directly")
+                });
+                println!(
+                    "    worker chunk {chunk}: {recorded} instruction(s) in recording bodies \
+                     ({share:.1} %){direct}"
+                );
+                recorder_insns += recorded;
+                if recorded + fallback != work.cycles {
+                    problems.push(format!(
+                        "chunk {chunk}: {recorded} instruction(s) in recording bodies and \
+                         {fallback} in the fallback, of {} cycle(s): something else ran the rest",
+                        work.cycles
+                    ));
+                }
+                if matches!(expect, Expect::AllFallback) && recorded != 0 {
+                    problems.push(format!(
+                        "chunk {chunk}: {recorded} instruction(s) in recording bodies, where the \
+                         stub's code has none"
+                    ));
+                }
+            }
+        }
+        if checked {
+            match work.recorder_direct_insns {
+                None => problems.push(format!(
+                    "chunk {chunk}: the checking build's workers report no direct-row count"
+                )),
+                Some(direct) => direct_insns += direct,
+            }
+        }
         match expect {
             Expect::AllFallback if dispatches != 0 || fallback != work.cycles => {
                 problems.push(format!(
@@ -236,9 +302,24 @@ fn audit_arms(
     if matches!(expect, Expect::Compiled) && !candidate.is_empty() && compiled_insns == 0 {
         problems.push("compiled code ran no instruction of the run".to_string());
     }
+    if matches!(expect, Expect::Compiled) && !candidate.is_empty() && recorder_insns == 0 {
+        problems.push("no recording body ran an instruction of the run".to_string());
+    }
+    if checked && matches!(expect, Expect::Compiled) && !candidate.is_empty() && direct_insns == 0 {
+        problems.push(
+            "no recording block wrote a row directly in the run, so the checking build checked \
+             none"
+                .to_string(),
+        );
+    }
+    let checked = if checked {
+        format!(", {direct_insns} of them writing their rows directly, each checked")
+    } else {
+        String::new()
+    };
     format!(
-        "; {} chunk(s) replayed by AOT workers, {interpreted} instruction(s) interpreted by their \
-         fallback",
+        "; {} chunk(s) replayed by {AOT_KIND} workers, {interpreted} instruction(s) interpreted by \
+         their fallback, {recorder_insns} in recording bodies{checked}",
         candidate.len()
     )
 }
@@ -305,10 +386,13 @@ impl Ledger {
 
     /// Adds to `problems` what the last two arms run, the interpreter's workers and then the AOT
     /// workers, show of their workers, and returns a suffix for the run's line.
-    /// `totals` holds each arm's emitted chunk count and cycles, in that same order.
+    /// `checked` says the recording blocks are the checking build's
+    /// (`pico_aot_runtime::RECORDER_CHECK`). `totals` holds each arm's emitted chunk count and
+    /// cycles, in that same order.
     pub fn audit(
         &self,
         expect: Expect,
+        checked: bool,
         totals: [(u32, u64); 2],
         problems: &mut Vec<String>,
     ) -> String {
@@ -319,7 +403,7 @@ impl Ledger {
         };
         match (self.rows(reference), self.rows(candidate)) {
             (Ok(reference), Ok(candidate)) => {
-                audit_arms(expect, &reference, &candidate, totals, problems)
+                audit_arms(expect, checked, &reference, &candidate, totals, problems)
             }
             (reference, candidate) => {
                 problems.extend([reference.err(), candidate.err()].into_iter().flatten());
@@ -358,26 +442,49 @@ mod tests {
             cycles,
             dispatches: None,
             fallback_insns: None,
+            recorder_insns: None,
+            recorder_direct_insns: None,
         }
     }
 
+    /// An AOT worker's chunk: every instruction the fallback did not run, in recording bodies, half
+    /// of them writing their rows directly.
     fn aot(chunk: u64, cycles: u64, dispatches: u64, fallback_insns: u64) -> Replayed {
+        let recorded = cycles.saturating_sub(fallback_insns);
         Replayed {
             chunk,
             kind: Some("aot".to_string()),
             cycles,
             dispatches: Some(dispatches),
             fallback_insns: Some(fallback_insns),
+            recorder_insns: Some(recorded),
+            recorder_direct_insns: Some(recorded / 2),
         }
     }
 
     fn audited(expect: Expect, reference: &[Replayed], candidate: &[Replayed]) -> Vec<String> {
+        audited_built(expect, false, reference, candidate)
+    }
+
+    fn audited_built(
+        expect: Expect,
+        checked: bool,
+        reference: &[Replayed],
+        candidate: &[Replayed],
+    ) -> Vec<String> {
         let mut problems = Vec::new();
         let totals = (
             chunks(reference).len() as u32,
             reference.iter().map(|r| r.cycles).sum(),
         );
-        audit_arms(expect, reference, candidate, [totals; 2], &mut problems);
+        audit_arms(
+            expect,
+            checked,
+            reference,
+            candidate,
+            [totals; 2],
+            &mut problems,
+        );
         problems
     }
 
@@ -396,7 +503,8 @@ mod tests {
                 1,
                 None,
                 json!({"cycles": 512, "worker_kind": "aot", "dispatches": 40,
-                       "fallback_insns": 7}),
+                       "fallback_insns": 7, "recorder_insns": 505,
+                       "recorder_direct_insns": 252}),
             ),
             json!({"v": 2, "run": "7f1c", "chunk": 2, "stage": "worker.replay",
                    "skipped": true})
@@ -413,6 +521,118 @@ mod tests {
         assert_eq!(
             replays(&text).unwrap(),
             vec![aot(1, 512, 40, 7), interpreter(2, 90)]
+        );
+    }
+
+    #[test]
+    fn an_aot_workers_chunks_are_its_recording_bodies_and_its_fallback() {
+        let candidate = [aot(0, 512, 30, 4), aot(1, 512, 31, 0), aot(2, 90, 3, 12)];
+        assert_eq!(
+            audited(Expect::Compiled, &three_chunks(), &candidate),
+            Vec::<String>::new()
+        );
+
+        let mut short = aot(1, 512, 31, 0);
+        short.recorder_insns = Some(500);
+        let mut silent = aot(2, 90, 3, 12);
+        silent.recorder_insns = None;
+        let problems = audited(
+            Expect::Compiled,
+            &three_chunks(),
+            &[aot(0, 512, 30, 4), short, silent],
+        );
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(problems[0].starts_with("chunk 1:") && problems[0].contains("something else"));
+        assert!(problems[1].starts_with("chunk 2:") && problems[1].contains("no recorder-body"));
+
+        let renamed = candidate.map(|chunk| Replayed {
+            kind: Some("aot-recorder".to_string()),
+            ..chunk
+        });
+        let problems = audited(Expect::Compiled, &three_chunks(), &renamed);
+        assert_eq!(
+            problems
+                .iter()
+                .filter(|problem| problem.contains("not \"aot\""))
+                .count(),
+            3,
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn the_aot_workers_have_to_run_their_recording_bodies_on_generated_code_only() {
+        let stub = [aot(0, 512, 0, 512), aot(1, 512, 0, 512), aot(2, 90, 0, 90)];
+        assert_eq!(
+            audited(Expect::AllFallback, &three_chunks(), &stub),
+            Vec::<String>::new()
+        );
+        let problems = audited(
+            Expect::Compiled,
+            &three_chunks(),
+            &[aot(0, 512, 1, 512), aot(1, 512, 1, 512), aot(2, 90, 1, 90)],
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p == "no recording body ran an instruction of the run"),
+            "{problems:?}"
+        );
+        let mut recorded = aot(1, 512, 0, 500);
+        recorded.dispatches = Some(0);
+        let problems = audited(
+            Expect::AllFallback,
+            &three_chunks(),
+            &[aot(0, 512, 0, 512), recorded, aot(2, 90, 0, 90)],
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("where the stub's code has none")),
+            "{problems:?}"
+        );
+    }
+
+    /// One chunk with direct rows is enough: a short chunk may have none.
+    #[test]
+    fn the_checking_build_has_to_see_direct_rows_somewhere_in_the_run() {
+        let undirected = |chunk, cycles, dispatches, fallback_insns| Replayed {
+            recorder_direct_insns: Some(0),
+            ..aot(chunk, cycles, dispatches, fallback_insns)
+        };
+        let none_direct = [
+            undirected(0, 512, 30, 4),
+            undirected(1, 512, 31, 0),
+            undirected(2, 90, 3, 12),
+        ];
+        let checked = |candidate: &[Replayed]| {
+            audited_built(Expect::Compiled, true, &three_chunks(), candidate)
+        };
+        assert_eq!(
+            audited(Expect::Compiled, &three_chunks(), &none_direct),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            checked(&none_direct),
+            ["no recording block wrote a row directly in the run, so the checking build checked \
+              none"
+                .to_string()]
+        );
+
+        let one_direct = [
+            undirected(0, 512, 30, 4),
+            aot(1, 512, 31, 0),
+            undirected(2, 90, 3, 12),
+        ];
+        assert_eq!(checked(&one_direct), Vec::<String>::new());
+
+        let mut silent = aot(1, 512, 31, 0);
+        silent.recorder_direct_insns = None;
+        let problems = checked(&[aot(0, 512, 30, 4), silent, aot(2, 90, 3, 12)]);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problems[0].starts_with("chunk 1:") && problems[0].contains("no direct-row count"),
+            "{problems:?}"
         );
     }
 
@@ -461,7 +681,10 @@ mod tests {
         let problems = audited(Expect::Compiled, &three_chunks(), &candidate);
         assert_eq!(
             problems,
-            ["compiled code ran no instruction of the run".to_string()]
+            [
+                "compiled code ran no instruction of the run".to_string(),
+                "no recording body ran an instruction of the run".to_string()
+            ]
         );
     }
 
@@ -537,6 +760,7 @@ mod tests {
         let mut problems = Vec::new();
         audit_arms(
             Expect::Compiled,
+            false,
             &reference,
             &candidate,
             [(3, 1114); 2],
@@ -585,8 +809,13 @@ mod tests {
         );
         let compiled = [aot(0, 512, 0, 512), aot(1, 512, 4, 500), aot(2, 90, 0, 90)];
         let problems = audited(Expect::AllFallback, &three_chunks(), &compiled);
-        assert_eq!(problems.len(), 1, "{problems:?}");
-        assert!(problems[0].starts_with("chunk 1:"), "{problems:?}");
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(
+            problems
+                .iter()
+                .all(|problem| problem.starts_with("chunk 1:")),
+            "{problems:?}"
+        );
         let entered = [aot(0, 512, 0, 512), aot(1, 512, 1, 512), aot(2, 90, 0, 90)];
         assert_eq!(
             audited(Expect::AllFallback, &three_chunks(), &entered).len(),
@@ -623,7 +852,8 @@ mod tests {
                 chunk,
                 None,
                 json!({"cycles": 512, "worker_kind": "aot", "dispatches": dispatches,
-                       "fallback_insns": 3}),
+                       "fallback_insns": 3, "recorder_insns": 509,
+                       "recorder_direct_insns": 200}),
             )
         };
         // An earlier run in the file, which the audit must not read.
@@ -631,14 +861,14 @@ mod tests {
         ledger.arm(|| append(&[interpreted(0), interpreted(1)]));
         ledger.arm(|| append(&[compiled(0, 9), compiled(1, 8)]));
         let mut problems = Vec::new();
-        ledger.audit(Expect::Compiled, [(2, 1024); 2], &mut problems);
+        ledger.audit(Expect::Compiled, false, [(2, 1024); 2], &mut problems);
         assert_eq!(problems, Vec::<String>::new());
 
         // The next pair writes nothing for its second arm.
         ledger.arm(|| append(&[interpreted(0)]));
         ledger.arm(|| ());
         let mut problems = Vec::new();
-        ledger.audit(Expect::Compiled, [(1, 512); 2], &mut problems);
+        ledger.audit(Expect::Compiled, false, [(1, 512); 2], &mut problems);
         assert!(
             problems[0].contains("wrote no worker.replay line"),
             "{problems:?}"

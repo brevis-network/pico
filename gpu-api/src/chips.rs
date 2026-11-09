@@ -650,6 +650,21 @@ unsafe extern "C" {
         stream: cudaStream_t,
     ) -> Error;
 
+    /// Row `i`'s code range, at column `offset` of `d_trace`, for the write of `width`
+    /// bytes from `d_writes[i]`, `i < rows`; the distance's range checks go to `d_byte_trace`.
+    pub fn cuda_code_range_fill(
+        d_trace: *mut c_void,
+        num_cols: usize,
+        offset: usize,
+        d_writes: *const c_void,
+        rows: usize,
+        width: u64,
+        code_start: u64,
+        code_end: u64,
+        d_byte_trace: *mut c_void,
+        stream: cudaStream_t,
+    ) -> Error;
+
     pub fn cuda_precompile_uint256_generate_extra_record_and_main(
         num_cols: usize,
         event_size: usize,

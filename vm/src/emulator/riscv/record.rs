@@ -253,9 +253,9 @@ const TAIL_GKR_FALLBACK_INTERACTIONS: u64 = 2048;
 ///     (riscv_global/constraints.rs:87). Six in the gadget, not eight: the `kind < 32`
 ///     LTU is gone (every sender passes a compile-time constant, so the multiset already pins
 ///     the receiver's column) and two U8 checks share one instance.
-///   - MemoryInit/Finalize 13/row: 10 × U16 (initialize_finalize/constraints.rs:43-45) +
-///     1 U8 pair (:55) + 1 looking Global (:70/:90) + 1 U16 inside LtWordU16Gadget
-///     (gadgets/lt_word_u16.rs:190).
+///   - MemoryInit/Finalize 14/row: 10 × U16 (initialize_finalize/constraints.rs:43-45) +
+///     1 U16 for the top of memory + 1 U8 pair + 1 looking Global + 1 U16 inside
+///     LtWordU16Gadget (gadgets/lt_word_u16.rs:190).
 ///   - MemoryLocal 44/row: 11 per event slot (local/constraints.rs, the per-entry loop: two
 ///     Global, two Memory-bus, the gated chunk-gap U16, the two limbs of the in-chunk clk-gap
 ///     check, two u8 pairs and two u16 limbs of the initial value) × LOCAL_MEMORY_DATAPAR(4)
@@ -265,13 +265,15 @@ const TAIL_GKR_FALLBACK_INTERACTIONS: u64 = 2048;
 ///   - Syscall 4/row: U8(syscall_id) + U16(arg1[0]) (syscall/constraints.rs:27,29) +
 ///     looked/looking syscall (:51/:85) + looking Global (:62/:96).
 ///   - Byte 10/row × 2^17 fixed rows (byte/constraints.rs:33-63, byte/traces.rs:29).
-///   - Program 1/row (riscv_program/constraints.rs:41) × pow2(instruction count) rows.
+///   - Program 2/row (riscv_program/constraints.rs): the instruction a Cpu row fetches, and the
+///     code's range a store row checks against, × pow2(instruction count) rows.
 const TAIL_GKR_GLOBAL_INTERACTIONS: u64 = 10;
-const TAIL_GKR_INIT_FIN_INTERACTIONS: u64 = 13;
+const TAIL_GKR_INIT_FIN_INTERACTIONS: u64 = 14;
 const TAIL_GKR_MEMORY_LOCAL_INTERACTIONS: u64 = 11 * LOCAL_MEMORY_DATAPAR as u64;
 const TAIL_GKR_POSEIDON2_INTERACTIONS: u64 = RISCV_POSEIDON2_DATAPAR as u64;
 const TAIL_GKR_SYSCALL_INTERACTIONS: u64 = 4;
 const TAIL_GKR_BYTE_LEAVES: u64 = 10 * (1 << 17);
+const TAIL_GKR_PROGRAM_INTERACTIONS: u64 = 2;
 
 /// Per-row interaction count of each tail precompile chip's AIR. Same key set as
 /// `tail_rows_and_width` — extend BOTH when admitting a new syscall to the tail tables.
@@ -289,11 +291,16 @@ const TAIL_GKR_BYTE_LEAVES: u64 = 10 * (1 << 17);
 /// AIR this entry is measured against** (the gadget range-checks its three address limbs).
 /// A gadget living in a sibling controller AIR does not count — see SHA_EXTEND/SHA_COMPRESS. Under-counting is what lets a
 /// tail record cross the leaf budget and double the logup-GKR device buffer.
+/// Every AIR that writes guest memory also carries `+ 3` for the code-range check of what it
+/// writes: one lookup of the code's range and two u16 checks of the distance. Under the
+/// same rule it is not counted where it lives in a controller.
 ///   - KECCAK_PERMUTE 280 = 277 + 3×1: SyscallAddr 1 + 25×AddrAdd 3 + 25×mem-access 4 +
 ///     looked_syscall 1 + 25×u16-range 4 (precompiles/keccak256/control.rs -- unlike the SHA
 ///     entries below, this one counts the sibling controller AIR, which is where the permute
 ///     chip's syscall and memory rows live);
 ///     mem-access = 2 Memory bus + 2 byte-bus u25 range (builder/riscv_memory.rs:46-235).
+///     The controller's code-range check (+3) is not in the 280: the estimate is pinned, and its
+///     margin over the two AIRs covers it (see the test).
 ///   - SHA_EXTEND 81 and SHA_COMPRESS 99 take **no** `+ 3n`: both chips keep their
 ///     `SyscallAddrGadget` in a separate controller AIR, which this table does not count.
 ///     SHA_EXTEND 81 = 3 + 5×AddrAdd 3 + 5×mem 4 + 6×rot/shift 4 + 4×xor 4 + add4 3
@@ -301,16 +308,16 @@ const TAIL_GKR_BYTE_LEAVES: u64 = 10 * (1 << 17);
 ///     be 61, which is what this entry held before that.
 ///     SHA_COMPRESS 99 = 3 + (mem 4 + 3×AddrAdd 3) + (6×rot 4 + 7×xor 4 + 5×and 4 +
 ///     add5 3 + 3×add 2) + add 2 (precompiles/sha256/compress/constraints.rs).
-///   - Weierstrass add 1127 = 1121 + 3×2 (secp256k1 = bn254: 32 limbs, 62 witness,
+///   - Weierstrass add 1130 = 1121 + 3×2 + 3 (secp256k1 = bn254: 32 limbs, 62 witness,
 ///     8 words/point, add = 22·WCP + 10·(L+W) + 5).
-///     **Double is 1223, not 1126 + 3×1** — its AIR gained far more than the address gadget in
+///     **Double is 1226, not 1126 + 3×1 + 3** — its AIR gained far more than the address gadget in
 ///     the upstream chip-completeness work, so the old closed form no longer predicts it.
 ///     Take the measured number; the test below is what pins it
 ///     (precompiles/weierstrass/weierstrass_{add,double}.rs).
-///   - Fp/Fp2, all 3×2 (bn254: L=32 W=62 WFE=4 WCP=8; bls381: L=48 W=94 WFE=6 WCP=12):
-///     fp = 22·WFE + (L+W) + 4 ⇒ 192 / 284; fp2 addsub = 22·WCP + 2·(L+W) + 5 ⇒ 375;
-///     fp2 mul = 22·WCP + 6·(L+W) + 5 ⇒ 751 / 1127 (precompiles/fptower/*.rs).
-///   - UINT256_MUL 237 = 231 + 3×2, 231 = 33·WFE + (L+W=95) + 4
+///   - Fp/Fp2, all 3×2 + 3 (bn254: L=32 W=62 WFE=4 WCP=8; bls381: L=48 W=94 WFE=6 WCP=12):
+///     fp = 22·WFE + (L+W) + 7 ⇒ 195 / 287; fp2 addsub = 22·WCP + 2·(L+W) + 8 ⇒ 378;
+///     fp2 mul = 22·WCP + 6·(L+W) + 8 ⇒ 754 / 1130 (precompiles/fptower/*.rs).
+///   - UINT256_MUL 240 = 231 + 3×2 + 3, 231 = 33·WFE + (L+W=95) + 4
 ///     (precompiles/uint256/constraints.rs).
 ///
 /// `interaction_counts_match_their_airs` below asserts all of this against real keygen —
@@ -320,14 +327,14 @@ fn tail_gkr_interactions(syscall_code: SyscallCode) -> Option<u64> {
         SyscallCode::KECCAK_PERMUTE => 280,
         SyscallCode::SHA_EXTEND => 81,
         SyscallCode::SHA_COMPRESS => 99,
-        SyscallCode::SECP256K1_ADD | SyscallCode::BN254_ADD => 1127,
-        SyscallCode::SECP256K1_DOUBLE | SyscallCode::BN254_DOUBLE => 1223,
-        SyscallCode::BN254_FP_ADD => 192,
-        SyscallCode::BN254_FP2_ADD => 375,
-        SyscallCode::BN254_FP2_MUL => 751,
-        SyscallCode::BLS12381_FP_ADD => 284,
-        SyscallCode::BLS12381_FP2_MUL => 1127,
-        SyscallCode::UINT256_MUL => 237,
+        SyscallCode::SECP256K1_ADD | SyscallCode::BN254_ADD => 1130,
+        SyscallCode::SECP256K1_DOUBLE | SyscallCode::BN254_DOUBLE => 1226,
+        SyscallCode::BN254_FP_ADD => 195,
+        SyscallCode::BN254_FP2_ADD => 378,
+        SyscallCode::BN254_FP2_MUL => 754,
+        SyscallCode::BLS12381_FP_ADD => 287,
+        SyscallCode::BLS12381_FP2_MUL => 1130,
+        SyscallCode::UINT256_MUL => 240,
         _ => return None,
     })
 }
@@ -357,7 +364,8 @@ struct TailGkrLeavesAccount {
 impl TailGkrLeavesAccount {
     fn new(program_instructions: u64) -> Self {
         Self {
-            base_leaves: TAIL_GKR_BYTE_LEAVES + Self::lift(program_instructions),
+            base_leaves: TAIL_GKR_BYTE_LEAVES
+                + TAIL_GKR_PROGRAM_INTERACTIONS * Self::lift(program_instructions),
             precompile_leaves: 0,
             local_mem_events: 0,
             precompile_events: 0,
@@ -1692,7 +1700,8 @@ mod tail_merge_constants {
         tail_gkr_interactions, tail_rows_and_width, TAIL_GKR_BYTE_LEAVES,
         TAIL_GKR_FALLBACK_INTERACTIONS, TAIL_GKR_GLOBAL_INTERACTIONS,
         TAIL_GKR_INIT_FIN_INTERACTIONS, TAIL_GKR_MEMORY_LOCAL_INTERACTIONS,
-        TAIL_GKR_POSEIDON2_INTERACTIONS, TAIL_GKR_SYSCALL_INTERACTIONS,
+        TAIL_GKR_POSEIDON2_INTERACTIONS, TAIL_GKR_PROGRAM_INTERACTIONS,
+        TAIL_GKR_SYSCALL_INTERACTIONS,
     };
     use crate::{
         compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program},
@@ -1807,9 +1816,9 @@ mod tail_merge_constants {
             "TAIL_GKR_BYTE_LEAVES is stale"
         );
         assert_eq!(
-            pk.per_air[air_id::PROGRAM].vk.num_interactions(),
-            1,
-            "Program is no longer 1 interaction/row, so `lift(program_instructions)` under-counts"
+            pk.per_air[air_id::PROGRAM].vk.num_interactions() as u64,
+            TAIL_GKR_PROGRAM_INTERACTIONS,
+            "TAIL_GKR_PROGRAM_INTERACTIONS is stale"
         );
 
         // Every entry of the per-precompile table, against its own AIR. Keep this list in step with

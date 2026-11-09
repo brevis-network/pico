@@ -86,7 +86,8 @@ impl AotEmulatorCore {
 
     /// Predict if a block can fit in current chunk without crossing a split boundary, and, in a
     /// replay, without running past the replay's target: `insn_count` bounds the instructions the
-    /// block runs, so one that fits ends at or before it.
+    /// block runs, so one that fits ends at or before it. `memory_insns`, the block's loads and
+    /// stores, bounds its misaligned accesses (`chunk_split::can_fit_block`).
     #[inline(always)]
     pub fn can_fit_block(
         &self,
@@ -94,6 +95,7 @@ impl AotEmulatorCore {
         mem_rw_exact: usize,
         non_register_global_lookup_base_max: usize,
         reg_write_mask: u32,
+        memory_insns: usize,
     ) -> bool {
         debug_assert_eq!(CLOCK_INCREMENT_PER_INSN, 4);
         self.insn_count + u64::from(insn_count) <= self.replay_target
@@ -103,6 +105,7 @@ impl AotEmulatorCore {
                 mem_rw_exact,
                 non_register_global_lookup_base_max,
                 reg_write_mask,
+                memory_insns,
                 &self.chunk_split_config,
             )
     }
@@ -144,6 +147,7 @@ mod tests {
             commit_tail_reserve: 0,
             commit_tail_overrun: 0,
             leaf_cap: 0,
+            misaligned_threshold: usize::MAX,
         };
         emu
     }
@@ -261,7 +265,7 @@ mod tests {
         let mut emu = test_emu();
         emu.clk = 252;
 
-        assert!(!emu.can_fit_block(2, 0, 0, 0));
+        assert!(!emu.can_fit_block(2, 0, 0, 0, 0));
     }
 
     #[test]
@@ -270,7 +274,7 @@ mod tests {
         emu.chunk_split_state.num_memory_read_write_events = 3;
         emu.chunk_split_state.num_global_lookup_base = 1;
 
-        assert!(!emu.can_fit_block(1, 2, 1, 0));
+        assert!(!emu.can_fit_block(1, 2, 1, 0, 0));
     }
 
     #[test]
@@ -279,7 +283,7 @@ mod tests {
         emu.chunk_split_state.num_memory_read_write_events = 3;
         emu.chunk_split_state.num_global_lookup_base = 1;
 
-        assert!(emu.can_fit_block(1, 1, 1, 0));
+        assert!(emu.can_fit_block(1, 1, 1, 0, 0));
     }
 
     #[test]
@@ -288,7 +292,7 @@ mod tests {
         emu.chunk_split_state.num_memory_read_write_events = 2;
         emu.chunk_split_state.num_global_lookup_base = 1;
 
-        assert!(!emu.can_fit_block(4, 3, 2, 0));
+        assert!(!emu.can_fit_block(4, 3, 2, 0, 0));
     }
 
     #[test]
@@ -298,7 +302,47 @@ mod tests {
         emu.chunk_split_state.track_address(1);
         emu.chunk_split_config.global_lookup_base_threshold = 1;
 
-        assert!(emu.can_fit_block(1, 1, 0, 1 << 1));
-        assert!(!emu.can_fit_block(1, 1, 0, 1 << 2));
+        assert!(emu.can_fit_block(1, 1, 0, 1 << 1, 0));
+        assert!(!emu.can_fit_block(1, 1, 0, 1 << 2, 0));
+    }
+
+    #[test]
+    fn chunk_boundary_fast_cuts_at_the_misaligned_cap() {
+        let mut emu = test_emu();
+        emu.chunk_split_config.misaligned_threshold = 3;
+        emu.clk = 128;
+        emu.chunk_split_state.num_misaligned = 2;
+        assert!(!emu.check_chunk_boundary_fast());
+
+        emu.chunk_split_state.num_misaligned = 3;
+        assert!(emu.check_chunk_boundary_fast());
+        assert_eq!(emu.current_chunk, 2);
+        assert_eq!(
+            emu.chunk_split_state.num_misaligned, 0,
+            "the cut starts a new count"
+        );
+    }
+
+    #[test]
+    fn can_fit_block_keeps_the_blocks_loads_and_stores_below_the_cap() {
+        let mut emu = test_emu();
+        emu.chunk_split_config.misaligned_threshold = 3;
+        emu.chunk_split_state.num_misaligned = 1;
+
+        assert!(emu.can_fit_block(1, 1, 1, 0, 1));
+        assert!(!emu.can_fit_block(2, 2, 2, 0, 2));
+    }
+
+    #[test]
+    fn a_misaligned_access_counts_toward_the_cap_outside_unconstrained_mode() {
+        let mut emu = test_emu();
+        emu.write_mem_dword(0x2_0000, 0x1122_3344_5566_7788);
+        emu.misaligned_load(Opcode::LW, 0x2_0002, 4).unwrap();
+        assert_eq!(emu.chunk_split_state.num_misaligned, 1);
+        assert_eq!(emu.misaligned_accesses, 1);
+
+        emu.enter_unconstrained_mode();
+        emu.misaligned_load(Opcode::LW, 0x2_0002, 4).unwrap();
+        assert_eq!(emu.chunk_split_state.num_misaligned, 1);
     }
 }

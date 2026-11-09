@@ -81,6 +81,8 @@ fn history(rows: u32) -> ExecutionHistory {
                 arg2: u64::from(i) + 9,
             })
             .collect(),
+        // On the heap whatever the slot: no region holds it.
+        unaligned: Rows::new(),
     }
 }
 
@@ -354,6 +356,19 @@ fn a_take_waits_for_a_held_slot() {
     assert_eq!((stats.acquisitions, stats.returns), (2, 2));
 }
 
+#[test]
+fn the_peak_restarts_from_the_slots_held_now() {
+    let arena = arena(SMALL, SpillPolicy::Spill);
+    let first = arena.take(1);
+    let second = arena.take(2);
+    drop(second);
+    assert_eq!(arena.take_max_in_use(), 2);
+    assert_eq!(arena.stats().max_in_use, 1, "one slot is still held");
+    drop(first);
+    assert_eq!(arena.take_max_in_use(), 1);
+    assert_eq!(arena.take_max_in_use(), 0);
+}
+
 /// The pipeline's stash at the arena: two free slots, and the two places after a late one asking
 /// first. Granted first come, first served, they would take both, and with their records held
 /// behind the late chunk it would wait for good; in turn, they wait for it, and the wait counts.
@@ -473,6 +488,42 @@ fn a_push_past_the_region_spills_and_a_pop_undoes_it() {
     assert!(!copy.is_resident() && !copy.is_spilled());
     drop(table);
     assert_eq!(region, [1, 2]);
+}
+
+/// Reserved past its room under a refusing policy, a region still refuses the row a push would.
+#[test]
+fn a_reservation_writes_no_row_and_leaves_a_region_in_place() {
+    let mut region = [0u32; 2];
+    // SAFETY: the region outlives the table and is written through it alone.
+    let mut table = unsafe {
+        Rows::resident(
+            Table::Memory,
+            NonNull::new(region.as_mut_ptr()).unwrap(),
+            2,
+            SpillPolicy::Refuse,
+            None,
+        )
+    };
+    table.push(7);
+    table.reserve(16);
+    assert!(table.is_resident());
+    assert_eq!(table.as_slice(), [7]);
+    assert_eq!(table.capacity(), 2);
+    table.push(8);
+    assert_eq!(
+        table.try_extend_from_slice(&[9]),
+        Err(TableFull {
+            table: Table::Memory,
+            capacity: 2,
+            needed: 3
+        })
+    );
+    drop(table);
+    assert_eq!(region, [7, 8]);
+
+    let mut heap = Rows::<u32>::new();
+    heap.reserve(16);
+    assert!(heap.is_empty() && heap.capacity() >= 16);
 }
 
 #[test]
