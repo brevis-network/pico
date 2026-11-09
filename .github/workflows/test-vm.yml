@@ -95,12 +95,6 @@ jobs:
           # The syscall map and the MLE air table each refuse nothing today; these pin both, so a
           # precompile losing support is a reviewed edit rather than a patch case turning red.
           cargo test --release -p pico-vm --test precompile_support
-      - name: Interpreter record pins
-        run: |
-          # The parity suites compare two emulators with each other; this is the only check on
-          # what the interpreter itself emits. A change to an event, a chunk cut or the deferred
-          # split moves a pinned digest, and a guest reaching a new syscall moves the coverage list.
-          cargo test --release -p pico-vm --test record_digest_golden
       - name: Execution sink pins
         run: |
           # The unconstrained rollback, the boundary a cut writes and the guards on swapping a
@@ -224,48 +218,23 @@ jobs:
         if: matrix.sink
         run: |
           cargo test --release -p pico-vm --test chunk_cut_parity
-      - name: Byte trace written by lookup against the row scan
-        run: |
-          # The byte chip's trace, written lookup by lookup, against the per-row scan it replaced.
-          # `PARITY_GUESTS` / `PARITY_SKIP_GUESTS` fail on an unknown guest or an empty selection.
-          PARITY_GUESTS="${ONLY// /,}" PARITY_SKIP_GUESTS="${SKIP// /,}" \
-            cargo test --release -p pico-vm --test byte_trace_scatter
-      - name: Execution history sinks on the serial and replay paths
-        run: |
-          # History output held to the program it ran, and replay workers against the interpreter.
-          # One exact test per guest; the count detects stale test names.
-          set -o pipefail
-          read -ra only <<<"$ONLY"
-          read -ra skip <<<"$SKIP"
-          args=(--exact)
-          for guest in "${only[@]}"; do args+=("${guest//-/_}"); done
-          for guest in "${skip[@]}"; do args+=(--skip "${guest//-/_}"); done
-          for suite in history_sink replay_sink_history; do
-            cargo test --release -p pico-vm --test "$suite" -- "${args[@]}" | tee "$suite.log"
-            if [ "${#only[@]}" -gt 0 ]; then
-              grep -qE "test result: ok\. ${#only[@]} passed" "$suite.log"
-            else
-              grep -qE "test result: ok\. [1-9][0-9]* passed" "$suite.log"
-            fi
-          done
       - name: Segmented replay preserves execution history and traces
         if: matrix.sink
         run: |
           set -o pipefail
           cargo test --release -p pico-vm --test history_fold | tee history-fold.log
           grep -qE 'test result: ok\. 7 passed' history-fold.log
-      - name: Per-chip traces against pinned digests
+      - name: Execution history, counting sink, header rows, byte trace, record and trace goldens
         if: matrix.sink
         run: |
-          set -o pipefail
-          cargo test --release -p pico-vm --test trace_digest_golden | tee trace-digest.log
-          grep -qE 'test result: ok\. 1 passed' trace-digest.log
-      - name: Counting sink against execution history
+          # One emulation of each guest feeds every check here, sha2's included: the syscall
+          # coverage and the counting sink's every-count check are decided over all guests at once.
+          # `test-utils` adds the counting sink; without it that check is skipped, not failed.
+          cargo test --release -p pico-vm --features test-utils --test serial_checks
+      - name: The chip-coverage guest and the history readers
         if: matrix.sink
         run: |
-          # The target needs `test-utils` (`required-features`), so a plain `cargo test` skips it.
-          # In one part only: it fails unless every count is taken on some guest, so it runs them all.
-          cargo test --release -p pico-vm --features test-utils --test counting_sink
+          cargo test --release -p pico-vm --features test-utils --test chip_coverage_guest --test history_readers
 
   compile-ffi:
     name: CPU · Compile, AOT and FFI
