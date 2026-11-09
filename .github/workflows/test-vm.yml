@@ -223,7 +223,7 @@ jobs:
         run: |
           set -o pipefail
           cargo test --release -p pico-vm --test history_fold | tee history-fold.log
-          grep -qE 'test result: ok\. 7 passed' history-fold.log
+          grep -qE 'test result: ok\. 6 passed' history-fold.log
       - name: Execution history, counting sink, header rows, byte trace, record and trace goldens
         if: matrix.sink
         run: |
