@@ -7,7 +7,7 @@ rebuilt in full. There is one procedure, no partial update. This page is that pr
 The procedure runs on the CPU build: keygen needs no GPU. One tree builds the CPU and the GPU
 prover over the same AIRs, shape tables, recursion compiler and params, so both keygen the same keys
 and ship the same artifact ("Verifying on a GPU host" below). Where this page says CI checks
-something, it is the jobs in `test-vm.yml` and `test-prover.yml`; the artifact unit test runs in
+something, it is a job of the repository's CI that needs no card; the artifact unit test runs in
 `CPU · VK whitelist and VM pins`.
 
 ## What ships
@@ -185,8 +185,8 @@ verified` and `standalone apex verify` with their check marks: the GPU riscv, co
 combine machines proved under the shipped root and the apex accepted it. To check the compress
 key as well (the whitelist's last leaf), add `MLE_STEP=compress` to the reth command; the log then
 also carries `standalone apex verify (compress)` with its check mark: the compress key is a
-whitelist member and the apex accepted the compress proof. CI runs the artifact unit test but no
-GPU proof.
+whitelist member and the apex accepted the compress proof. CI runs the artifact unit test, but no
+CI job proves under the whitelist on a GPU.
 
 ## When a proof fails under the whitelist
 

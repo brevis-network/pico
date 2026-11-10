@@ -139,12 +139,10 @@ does not verify.
 
 ## Gates
 
-CI runs three of these on the CPU prover: `test_mle_deferred` and `test_mle_e2e` in
-`CPU · MLE prove (fib)`, `test_carrier_tie` in `CPU · MLE carrier tie` (`test-vm.yml`); the others
-are run by hand. The deferred examples build with `--features cuda` too,
-which proves their riscv chunks on the GPU (the aggregator's then exercise the GPU Ecall tally),
-except `test_mle_deferred_split`, which builds its chunk contexts on the host and runs on the CPU
-build only.
+CI runs the three marked CI, on the CPU build; the others are run by hand. The deferred examples
+build with `--features cuda` too, which proves their riscv chunks on the GPU (the aggregator's then
+exercise the GPU Ecall tally), except `test_mle_deferred_split`, which builds its chunk contexts on
+the host and runs on the CPU build only.
 
 | | |
 |---|---|

@@ -45,7 +45,7 @@ use crate::{
         precompiles::{
             edwards::{EdAddAssignChip, EdDecompressChip},
             fptower::{fp::FpOpChip, fp2_addsub::Fp2AddSubChip, fp2_mul::Fp2MulChip},
-            keccak256::{KeccakControlChip, KeccakPermuteChip},
+            keccak256::{KeccakControlChip, KeccakSlicedChip, KeccakTables},
             sha256::{
                 compress::{ShaCompressChip, ShaCompressControlChip},
                 extend::{ShaExtendChip, ShaExtendControlChip},
@@ -65,9 +65,7 @@ use crate::{
         record::{AluStream, EmulationRecord},
         syscalls::precompiles::PrecompileLocalMemory,
     },
-    instances::compiler::shapes::riscv_shape::{
-        precompile_rows_per_event, precompile_syscall_code,
-    },
+    instances::compiler::shapes::riscv_shape::{precompile_kind_rows, precompile_syscall_code},
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
@@ -139,7 +137,7 @@ define_chip_type!(
         (Addw, AddwChip),
         (Subw, SubwChip),
         (Bitwise, BitwiseChip),
-        (KeecakP, KeccakPermuteChip),
+        (KeecakP, KeccakSlicedChip),
         (KeccakControl, KeccakControlChip),
         (FpBn254, FpOpBn254),
         (Fp2AddSubBn254, Fp2AddSubBn254),
@@ -154,6 +152,7 @@ define_chip_type!(
         (SyscallPrecompile, SyscallChip),
         (Global, GlobalChip),
         (Poseidon2, FieldSpecificPoseidon2Chip),
+        (KeccakTab, KeccakTables),
         (Byte, ByteChip)
     ]
 );
@@ -255,6 +254,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::Global(Default::default()),
             Self::Byte(Default::default()),
             Self::Poseidon2(Default::default()),
+            Self::KeccakTab(Default::default()),
         ]
     }
 
@@ -335,6 +335,9 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             // The misaligned loads and stores: host tracegen too, its rows few; appended
             // last for the same reason.
             Self::MemoryUnaligned(Default::default()),
+            // The sliced Keccak tables: a device kernel counts the record's permutations;
+            // no byte lookups. Appended last for the same reason.
+            Self::KeccakTab(Default::default()),
         ]
         .map(MetaChip::<F, RiscvChipType<F>>::new)
         .into()
@@ -488,7 +491,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             .filter(|events| !events.is_empty())
             .map(|events| {
                 (
-                    events.len() * precompile_rows_per_event(chip_name),
+                    precompile_kind_rows(chip_name, events.len()),
                     events.get_local_mem_events().into_iter().count(),
                     record.global_lookup_events.len(),
                 )
@@ -654,6 +657,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
         excluded_chip_names.insert(Self::ShaCompressControl(Default::default()).name());
         excluded_chip_names.insert(Self::ShaExtendControl(Default::default()).name());
         excluded_chip_names.insert(Self::KeccakControl(Default::default()).name());
+        excluded_chip_names.insert(Self::KeccakTab(Default::default()).name());
 
         all_chips
             .into_iter()

@@ -17,16 +17,12 @@ pico-aot-pure.workspace = true
 p3-koala-bear = { workspace = true }
 log = { workspace = true }
 tiny-keccak.workspace = true
-num-bigint.workspace = true
-num-traits.workspace = true
 p3-field.workspace = true
 p3-symmetric.workspace = true
 typenum.workspace = true
 hybrid-array.workspace = true
 num.workspace = true
-k256.workspace = true
 p256.workspace = true
-once_cell.workspace = true
 halo2curves.workspace = true
 bls12_381.workspace = true
 # AOT precompile backends.
@@ -34,14 +30,11 @@ ark-ff = "0.5"
 ark-secp256k1 = "0.5"
 ark-bn254 = "0.5"
 ark-bls12-381 = "0.5"
-bytemuck.workspace = true
-memmap2 = { version = "0.9", optional = true }
-libc = { version = "0.2", optional = true }
 
 
 [features]
 bigint-rug = ["pico-vm/bigint-rug"]
-mmap-memory = ["pico-vm/mmap-memory", "dep:memmap2", "dep:libc"]
+mmap-memory = ["pico-vm/mmap-memory"]
 # A checking build, for gates and never for timing: every step a recording block writes directly is
 # also closed by the shared writer's generic code, and the run panics where the two layouts differ
 # or an instruction constant is not the program's at its pc. Both see the same values, so a value

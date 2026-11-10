@@ -23,18 +23,13 @@ use std::collections::HashSet;
 /// - The instruction following a control flow instruction (fallthrough)
 pub struct BlockAnalyzer {
     leaders: HashSet<u64>,
-    leader_vec: Vec<u64>,
 }
 
 impl BlockAnalyzer {
     /// Creates a new block analyzer for the given program.
     pub fn new(program: &ProgramInfo) -> Self {
-        let leaders = Self::compute_leaders(program);
-        let mut leader_vec: Vec<u64> = leaders.iter().copied().collect();
-        leader_vec.sort_unstable();
         Self {
-            leaders,
-            leader_vec,
+            leaders: Self::compute_leaders(program),
         }
     }
 
@@ -83,15 +78,5 @@ impl BlockAnalyzer {
         }
 
         leaders
-    }
-
-    /// Returns an iterator over all block start addresses in program order.
-    pub fn block_starts(&self) -> Vec<u64> {
-        self.leader_vec.clone()
-    }
-
-    /// Checks if the given PC is a block leader.
-    pub fn is_leader(&self, pc: u64) -> bool {
-        self.leaders.contains(&pc)
     }
 }

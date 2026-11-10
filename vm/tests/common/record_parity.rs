@@ -5,17 +5,28 @@
 //! [`check_guest`] runs every run of a [`Guest`] down a reference arm and a candidate arm, prints
 //! every problem it finds, and then fails on any. A problem is a difference in the committed bytes,
 //! cycles, chunks or reports (in `start_chunk` order); in any record, in emission order, by kind,
-//! `chunk_index`, public value or `record_digest::field_digests` row; or in the final digests on
-//! the last record, which the SDK's `backfill_final_digests` reads. So is any reason the
-//! comparison would hold vacuously: no record compared, fewer chunks than the run is there to
-//! reach, a deferred block out before the last chunk where the run pins none or the reverse, or
-//! final digests that do not show what the guest commits and defers.
+//! `chunk_index`, public value or `record_digest::field_digests` row, the execution history's
+//! among them, or by a row one arm's record has and the other's lacks; or in the final digests on
+//! the last record, which the SDK's `backfill_final_digests` reads. So is a record of either arm
+//! that is not what an emitted record holds: an execution history on every CPU chunk and on no
+//! deferred record, and no augmentation row (`add_events`) yet. So is any reason the comparison
+//! would hold vacuously: no record compared, fewer chunks than the run is there to reach, a
+//! deferred block out before the last chunk where the run pins none or the reverse, final digests
+//! that do not show what the guest commits and defers, or, over all of a guest's runs, no step in
+//! any history or no run cut into more than one chunk.
 //!
 //! Each arm hands its records over one at a time, and each is reduced to those digests as it comes
 //! and dropped: a whole run of the sha2 or BLS12-381 field guest's records is gigabytes, more than
 //! a CI runner has.
+//!
+//! The other emulation suites under `vm/tests/` compile it by path too, for what they share: the
+//! guests and their runs ([`guest`]), the program, stdin and options builders, and the turn
+//! ([`one_at_a_time`]) a suite's tests take over what its process holds one of.
 
-use std::{num::NonZeroUsize, sync::Arc};
+use std::{
+    num::NonZeroUsize,
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
+};
 
 use pico_vm::{
     compiler::riscv::{
@@ -187,11 +198,24 @@ pub const GUESTS: [Guest; 12] = [
     },
 ];
 
+/// The guest called `name` in [`GUESTS`]. A name that is no guest panics, listing the names.
+pub fn guest(name: &str) -> &'static Guest {
+    GUESTS
+        .iter()
+        .find(|guest| guest.name == name)
+        .unwrap_or_else(|| {
+            panic!(
+                "no guest {name}, which is none of {:?}",
+                GUESTS.map(|guest| guest.name)
+            )
+        })
+}
+
 /// The guests a suite whose one test walks every guest runs: all of [`GUESTS`], narrowed to the
 /// comma-separated names `PARITY_GUESTS` lists and stripped of those `PARITY_SKIP_GUESTS` lists,
-/// either unset or empty meaning no narrowing. CI splits such a suite across jobs by guest. A name
-/// that is no guest panics, and so does a selection left empty: neither may pass as a run that
-/// compared nothing.
+/// either unset or empty meaning no narrowing. CI sets neither, so it runs every guest. A name that
+/// is no guest panics, and so does a selection left empty: neither may pass as a run that compared
+/// nothing.
 // The suites with a test per guest select by test name and never call it.
 #[allow(dead_code)]
 pub fn selected_guests() -> Vec<&'static Guest> {
@@ -333,8 +357,8 @@ pub fn program(elf: &[u8]) -> Arc<Program> {
         .compile()
 }
 
-pub fn stdin(elements: &[Vec<u8>]) -> EmulatorStdin<Program, Vec<u8>> {
-    let mut builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+pub fn stdin(elements: &[Vec<u8>]) -> EmulatorStdin {
+    let mut builder = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     for element in elements {
         builder.write_slice(element);
     }
@@ -361,6 +385,20 @@ pub fn opts(chunk_size: u32) -> EmulatorOpts {
 /// Several, so the workers can finish out of order: four, or the core count if lower.
 pub fn workers() -> NonZeroUsize {
     NonZeroUsize::new(max_pipeline_workers().min(4)).expect("at least one core")
+}
+
+/// What a suite's tests take turns on, one at a time: the snapshot pipeline's process-wide pool,
+/// from which every pipeline run takes its snapshot memory, or the one card the device suites run
+/// on. Each suite is its own test binary, so this orders that suite's tests alone.
+// The suites that run neither, and `perf/aot/record_parity`, never take it.
+#[allow(dead_code)]
+pub static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+/// A turn of [`ONE_AT_A_TIME`], held until it drops. A test that panicked holding it leaves it
+/// poisoned; that test has failed on its own, and the next takes its turn regardless.
+#[allow(dead_code)]
+pub fn one_at_a_time() -> MutexGuard<'static, ()> {
+    ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 pub fn fib_input(n: u32) -> Vec<Vec<u8>> {
@@ -453,13 +491,19 @@ fn public_value_fields(pv: &PublicValues<u32, u32>) -> Vec<(&'static str, String
 }
 
 /// What the comparison reads off a record: its kind, `chunk_index`, public values and the rows of
-/// `field_digests`.
+/// `field_digests`, and what each arm's record is checked for alone.
 struct RecordDigest {
     is_cpu_chunk: bool,
     ends_on_permute: bool,
     chunk_index: usize,
     public_values: PublicValues<u32, u32>,
+    /// A record carrying an execution history ends on its row: its steps and
+    /// `ExecutionHistory::digest`, which the two arms' records are compared by.
     rows: Vec<(&'static str, usize, u64)>,
+    /// The steps of the record's execution history; `None` if it carries none.
+    history_steps: Option<usize>,
+    /// The rows augmentation adds, already in the record: `add_events`.
+    add_rows: usize,
 }
 
 /// An [`EmulationOutput`] with each record reduced to its [`RecordDigest`].
@@ -479,6 +523,8 @@ impl RecordDigest {
             chunk_index: record.chunk_index(),
             public_values: record.public_values,
             rows: field_digests(record),
+            history_steps: record.history.as_ref().map(|history| history.steps.len()),
+            add_rows: record.add_events.len(),
         }
     }
 }
@@ -522,19 +568,54 @@ fn has_early_block(output: &OutputDigest) -> bool {
 
 /// Every field on which two records disagree, each with both values: all of them rather than
 /// `record_digest::first_difference`'s first, since nothing here says which arm built the rest
-/// from a wrong one.
-fn record_differences(reference: &RecordDigest, candidate: &RecordDigest) -> Vec<String> {
+/// from a wrong one. Rows are paired by field, so a row one record has and the other lacks (a
+/// history one arm dropped) is a difference of its own rather than the end of the comparison.
+fn record_differences(
+    arms: [&str; 2],
+    reference: &RecordDigest,
+    candidate: &RecordDigest,
+) -> Vec<String> {
+    let row = |record: &RecordDigest, field: &str| {
+        record
+            .rows
+            .iter()
+            .find(|(row_field, _, _)| *row_field == field)
+            .copied()
+    };
     let mut differences: Vec<String> = reference
         .rows
         .iter()
-        .zip(&candidate.rows)
-        .filter(|((field, len_r, hash_r), (_, len_c, hash_c))| {
-            is_compared(field) && (len_r != len_c || hash_r != hash_c)
-        })
-        .map(|((field, len_r, hash_r), (_, len_c, hash_c))| {
-            format!("{field}: len {len_r} vs {len_c}, digest {hash_r:#018x} vs {hash_c:#018x}")
+        .filter_map(|&(field, len_r, hash_r)| {
+            let (_, len_c, hash_c) = row(candidate, field)?;
+            (is_compared(field) && (len_r != len_c || hash_r != hash_c)).then(|| {
+                format!("{field}: len {len_r} vs {len_c}, digest {hash_r:#018x} vs {hash_c:#018x}")
+            })
         })
         .collect();
+    let lacking = [(reference, candidate), (candidate, reference)].map(|(record, other)| {
+        other
+            .rows
+            .iter()
+            .map(|(field, _, _)| *field)
+            .filter(|field| row(record, field).is_none())
+            .collect::<Vec<_>>()
+    });
+    if reference.rows.len() != candidate.rows.len()
+        || lacking.iter().any(|fields| !fields.is_empty())
+    {
+        let lacks: Vec<String> = arms
+            .iter()
+            .zip(&lacking)
+            .filter(|(_, fields)| !fields.is_empty())
+            .map(|(arm, fields)| format!("the {arm} arm's record has no {} row", fields.join(", ")))
+            .collect();
+        differences.push(format!(
+            "{} field_digests row(s) vs {}: {}",
+            reference.rows.len(),
+            candidate.rows.len(),
+            lacks.join("; ")
+        ));
+    }
     if reference.chunk_index != candidate.chunk_index {
         differences.push(format!(
             "chunk_index: {} vs {}",
@@ -558,9 +639,15 @@ fn record_differences(reference: &RecordDigest, candidate: &RecordDigest) -> Vec
     differences
 }
 
-/// Every difference between the two arms' outputs, the reference's value first, and every reason
-/// the comparison would hold vacuously that the outputs alone show.
-fn compare(guest: &Guest, reference: &OutputDigest, candidate: &OutputDigest) -> Vec<String> {
+/// Every difference between the two arms' outputs, the reference's value first, every record of
+/// either arm that is not what an emitted record holds, and every reason the comparison would hold
+/// vacuously that the outputs alone show. `arms` names the reference and the candidate.
+fn compare(
+    guest: &Guest,
+    arms: [&str; 2],
+    reference: &OutputDigest,
+    candidate: &OutputDigest,
+) -> Vec<String> {
     let mut problems = Vec::new();
     if reference.committed_bytes != candidate.committed_bytes {
         let at = reference
@@ -626,8 +713,31 @@ fn compare(guest: &Guest, reference: &OutputDigest, candidate: &OutputDigest) ->
         ));
     }
     for (i, (left, right)) in reference.records.iter().zip(&candidate.records).enumerate() {
-        for difference in record_differences(left, right) {
+        for difference in record_differences(arms, left, right) {
             problems.push(format!("record {i}: {difference}"));
+        }
+    }
+    // Each arm's own, over every record it emitted: two arms that both drop a history, or both
+    // augment early, agree on every row above.
+    for (arm, output) in arms.into_iter().zip([reference, candidate]) {
+        for (i, record) in output.records.iter().enumerate() {
+            if record.history_steps.is_some() != record.is_cpu_chunk {
+                problems.push(format!(
+                    "record {i}: the {arm} arm's {}",
+                    if record.is_cpu_chunk {
+                        "CPU chunk record lacks an execution history"
+                    } else {
+                        "deferred record carries an execution history"
+                    }
+                ));
+            }
+            if record.add_rows > 0 {
+                problems.push(format!(
+                    "record {i}: the {arm} arm's record holds {} augmentation row(s) \
+                     (add_events) before augmentation",
+                    record.add_rows
+                ));
+            }
         }
     }
 
@@ -676,17 +786,17 @@ pub struct Arm<'a> {
     #[allow(clippy::type_complexity)]
     pub emulate: &'a dyn Fn(
         Arc<Program>,
-        &EmulatorStdin<Program, Vec<u8>>,
+        &EmulatorStdin,
         EmulatorOpts,
         &mut (dyn FnMut(EmulationRecord) + Send),
     ) -> Result<EmulationOutput, EmulateError>,
 }
 
 /// Runs every run of `guest` down `[reference, candidate]`, prints one line per run and every
-/// problem found, and panics if there was any. A run's shape (its chunk count, and where its
-/// deferred blocks come out) is read off the reference; `workers` is only printed, each arm
-/// carrying its own. After both arms of a run, `audit` adds what their outputs cannot show to the
-/// run's problems and returns a suffix for the run's line.
+/// problem found, and panics if there was any. A run's shape (its chunk count, where its deferred
+/// blocks come out, and its history's steps) is read off the reference; `workers` is only printed,
+/// each arm carrying its own. After both arms of a run, `audit` adds what their outputs cannot show
+/// to the run's problems and returns a suffix for the run's line.
 pub fn check_guest(
     guest: &Guest,
     workers: NonZeroUsize,
@@ -695,6 +805,8 @@ pub fn check_guest(
 ) {
     let mut failures = Vec::new();
     let mut records_compared = 0;
+    let (mut history_steps, mut multi_chunk_runs) = (0, 0);
+    let names = arms.each_ref().map(|arm| arm.name);
     let runs = guest.runs();
     let run_count = runs.len();
     for run in runs {
@@ -724,7 +836,7 @@ pub fn check_guest(
 
         let compared = reference.records.len().min(candidate.records.len());
         records_compared += compared;
-        let mut problems = compare(guest, &reference, &candidate);
+        let mut problems = compare(guest, names, &reference, &candidate);
         if compared == 0 {
             problems.push("no record compared".to_string());
         }
@@ -753,6 +865,13 @@ pub fn check_guest(
                     .to_string(),
             );
         }
+        history_steps += reference
+            .records
+            .iter()
+            .filter_map(|r| r.history_steps)
+            .sum::<usize>();
+        let cpu_chunks = reference.records.iter().filter(|r| r.is_cpu_chunk).count();
+        multi_chunk_runs += usize::from(cpu_chunks > 1);
         let suffix = audit(&mut problems);
         println!(
             "[{label}] {compared} record(s) compared ({} vs {} emitted), {} chunk(s), {} \
@@ -767,12 +886,26 @@ pub fn check_guest(
             failures.push(format!("[{label}] {problem}"));
         }
     }
+    // The history comparison says nothing without a step, and nothing about a replay worker
+    // recovering a chunk from a snapshot taken mid-run without a run cut into more than one chunk.
+    let mut vacuous = Vec::new();
+    if history_steps == 0 {
+        vacuous.push("no step in any chunk's execution history");
+    }
+    if multi_chunk_runs == 0 {
+        vacuous.push("no run cut into more than one chunk");
+    }
+    for problem in vacuous {
+        println!("[{}] FAIL: {problem}", guest.name);
+        failures.push(format!("[{}] {problem}", guest.name));
+    }
     println!(
-        "[{}] {run_count} run(s), {records_compared} record(s) compared, {} problem(s)",
+        "[{}] {run_count} run(s), {records_compared} record(s) compared, {history_steps} history \
+         step(s), {} problem(s)",
         guest.name,
         failures.len()
     );
-    let [reference, candidate] = arms.map(|arm| arm.name);
+    let [reference, candidate] = names;
     assert!(
         failures.is_empty(),
         "the {candidate} arm and the {reference} arm disagree, or the comparison is vacuous; {} \

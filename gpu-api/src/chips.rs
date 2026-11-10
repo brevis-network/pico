@@ -8,8 +8,6 @@ pub mod history_bitwise_mul_shift;
 pub mod history_cpu_memory_lt;
 pub mod history_ecall_syscall;
 pub mod history_self_test;
-#[cfg(feature = "history-validate")]
-pub mod history_validate;
 pub mod step_events;
 
 unsafe extern "C" {
@@ -630,13 +628,15 @@ unsafe extern "C" {
         d_byte_trace: *mut c_void,
     ) -> Error;
 
-    pub fn cuda_precompile_keccak_generate_extra_record_and_main(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
+    /// The sliced Keccak AIR's main trace (`d_trace`, `height x 1953`) and/or its table AIR's four
+    /// multiplicity columns (`d_tables`, `2^20 x 4`, row-major); a null pointer skips a part.
+    /// `d_events` holds `event_size` `{ chunk: u32, clk: u32, state: [u64; 25] }`.
+    pub fn cuda_keccak_sliced_generate(
         d_events: *const c_void,
+        event_size: usize,
+        height: usize,
         d_trace: *mut c_void,
-        d_byte_trace: *mut c_void,
+        d_tables: *mut c_void,
         stream: cudaStream_t,
     ) -> Error;
 

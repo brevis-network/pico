@@ -103,7 +103,7 @@ fn halts(record: &EmulationRecord) -> bool {
 }
 
 fn emulate(program: &Arc<Program>, n: u32, chunk_size: u32) -> Vec<EmulationRecord> {
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     stdin.write(&n);
     // Sized for the largest chunk this run emulates (`emulate_cycles`), whichever comes first.
     let mut opts = emulate::opts_from_env_chunk_size(1 << 22);
@@ -128,7 +128,7 @@ fn run_is_whole(records: &[EmulationRecord]) -> bool {
 
 /// The run's instruction count, from one emulation in a single chunk.
 fn emulate_cycles(program: &Arc<Program>, n: u32) -> u64 {
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     stdin.write(&n);
     let mut opts = emulate::opts_from_env_chunk_size(1 << 22);
     opts.chunk_size = 1 << 22;

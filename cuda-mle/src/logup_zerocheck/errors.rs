@@ -64,6 +64,9 @@ pub enum InteractionGpuError {
     Copy(#[from] MemCopyError),
     #[error("interaction inputs do not match the expected layout")]
     Layout,
+    /// A segmented input's padding rows are not constant for these AIRs.
+    #[error("padding rows are not constant for {0:?}")]
+    SegPadding(Vec<String>),
 }
 
 #[derive(Debug, Error)]

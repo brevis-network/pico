@@ -62,6 +62,13 @@ pub enum LookupType {
     /// with tag 0 = input state and 1 = output state (one message of both would exceed the logUp
     /// message-length limit).
     KeccakPermute = 14,
+
+    /// Sliced Keccak chi row (`[key, out0..out4]`) against the chi table (`KeccakTables`).
+    KeccakChi = 15,
+
+    /// Sliced Keccak theta column parities (`[key, c0..c3]`) against the xor5 table
+    /// (`KeccakTables`).
+    KeccakXor5 = 16,
 }
 
 impl LookupType {
@@ -252,6 +259,8 @@ mod tests {
             (LookupType::ShaExtend, 12),
             (LookupType::Ecall, 13),
             (LookupType::KeccakPermute, 14),
+            (LookupType::KeccakChi, 15),
+            (LookupType::KeccakXor5, 16),
         ] {
             assert_eq!(kind as u16, value);
         }
@@ -284,6 +293,8 @@ mod tests {
             LookupType::ShaExtend,
             LookupType::Ecall,
             LookupType::KeccakPermute,
+            LookupType::KeccakChi,
+            LookupType::KeccakXor5,
         ];
         for kind in all {
             // Exhaustiveness guard: adding a variant breaks this `match` until it is listed above.
@@ -301,7 +312,9 @@ mod tests {
                 | LookupType::ShaCompress
                 | LookupType::ShaExtend
                 | LookupType::Ecall
-                | LookupType::KeccakPermute => {}
+                | LookupType::KeccakPermute
+                | LookupType::KeccakChi
+                | LookupType::KeccakXor5 => {}
             }
             assert!(
                 (kind as u32) < KIND_LIMIT,

@@ -230,12 +230,14 @@ fn the_stub_is_refused_and_installs_nothing() {
 
 /// Code generated against another runtime contract is refused, by a message naming both stamps, and
 /// the refusal installs nothing. A crate generated before the stamp existed builds its program with
-/// `AotProgram::new`, which carries none.
+/// `AotProgram::new`, which carries none. The likeliest stale crate carries the stamp just before
+/// this runtime's.
 #[test]
 fn code_generated_against_another_codegen_stamp_is_refused() {
     const EXPECTED: u32 = AotProgram::CODEGEN_STAMP;
     #[allow(deprecated)]
     static UNSTAMPED: AotProgram = AotProgram::new([5; 32], halt);
+    static PREVIOUS: AotProgram = AotProgram::stamped([5; 32], EXPECTED - 1, halt);
     static OTHER: AotProgram = AotProgram::stamped([5; 32], EXPECTED + 1, halt);
     static CURRENT: AotProgram = AotProgram::stamped([5; 32], EXPECTED, halt);
 
@@ -254,6 +256,22 @@ fn code_generated_against_another_codegen_stamp_is_refused() {
                 unstamped.to_string().contains("no codegen stamp")
                     && unstamped.to_string().contains(&format!("stamp {EXPECTED}")),
                 "{unstamped}"
+            );
+
+            let previous = register(&PREVIOUS).expect_err("the previous stamp is refused");
+            assert_eq!(
+                previous,
+                AotError::CodegenStamp {
+                    found: EXPECTED - 1,
+                    expected: EXPECTED
+                }
+            );
+            assert!(
+                previous
+                    .to_string()
+                    .contains(&format!("codegen stamp {}", EXPECTED - 1))
+                    && previous.to_string().contains("regenerate"),
+                "{previous}"
             );
 
             let other = register(&OTHER).expect_err("another stamp is refused");

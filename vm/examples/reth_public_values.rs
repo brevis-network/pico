@@ -306,9 +306,9 @@ fn fixtures(dir: &Path) -> Vec<(u64, PathBuf)> {
 }
 
 fn run_block(block: u64, program: &Arc<Program>, input: &[u8]) -> BlockReport {
-    let mut builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut builder = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     builder.write_slice(input);
-    let stdin = builder.finalize::<Program>();
+    let stdin = builder.finalize();
 
     let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
         program.clone(),

@@ -97,12 +97,11 @@ fn run(args: Args) -> Result<(), String> {
     };
     std::fs::create_dir_all(&args.out).map_err(|err| format!("{}: {err}", args.out.display()))?;
     let wanted: BTreeSet<u32> = args.chunks.into_iter().collect();
-    let witness =
-        ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<Kb>, Vec<u8>>::setup_for_mle_riscv(
-            record_parity::program(&elf),
-            stdin,
-            EmulatorOpts::bench_riscv_ops(),
-        );
+    let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<Kb>>::setup_for_mle_riscv(
+        record_parity::program(&elf),
+        stdin,
+        EmulatorOpts::bench_riscv_ops(),
+    );
     let workers = env_u32("NUM_THREADS")
         .and_then(|n| NonZeroUsize::new(n as usize))
         .unwrap_or(NonZeroUsize::MIN);

@@ -31,7 +31,9 @@
 //! Both sides read the record's history: the host through its accessors, the device through the
 //! fill uploaded from it. The device context is the caller's: a kernel is held to the host by
 //! building the context it takes part in and passing the airs it generates as `required`, which
-//! also fails a chunk that does not exercise them.
+//! also fails a chunk that does not exercise them. [`HostSide::check_with`] hands the caller each
+//! device trace as copied off the card, before any rule pairs a unit: a digest of the device's own
+//! output is taken from there.
 
 pub mod compare;
 
@@ -542,6 +544,18 @@ impl HostSide {
         device: &pico_mle_core::prover::ProvingContext<super::riscv::Pb>,
         required: &[usize],
     ) -> Result<ChunkVerdict, Vec<ChunkFailure>> {
+        self.check_with(device, required, |_, _| {})
+    }
+
+    /// [`Self::check`], handing `on_device_trace` every air of the device context by its id, the
+    /// cells the comparison then reads: the device's rows in the device's order, before the air's
+    /// policy pairs any unit, and whatever the verdict.
+    pub fn check_with(
+        &self,
+        device: &pico_mle_core::prover::ProvingContext<super::riscv::Pb>,
+        required: &[usize],
+        mut on_device_trace: impl FnMut(usize, Trace<'_>),
+    ) -> Result<ChunkVerdict, Vec<ChunkFailure>> {
         use cuda_mle::runtime::copy::MemCopyD2H;
         use pico_mle_core::poly::matrix::MatrixDimensions;
 
@@ -552,10 +566,6 @@ impl HostSide {
             }
         }
         for (air, device_air) in &device.per_trace {
-            let Some(policy) = air_policy(*air) else {
-                verdict.record(*air, Err(Divergence::NoPolicy));
-                continue;
-            };
             let (h, w) = (
                 device_air.common_main.height(),
                 device_air.common_main.width(),
@@ -577,6 +587,11 @@ impl HostSide {
             let device_trace = Trace {
                 cells: &cells,
                 width: w,
+            };
+            on_device_trace(*air, device_trace);
+            let Some(policy) = air_policy(*air) else {
+                verdict.record(*air, Err(Divergence::NoPolicy));
+                continue;
             };
             match self.traces.get(air) {
                 None => verdict.record_device_only(*air, check_device_only(&policy, device_trace)),
@@ -616,11 +631,24 @@ pub fn generate_and_check(
     chunk: &super::riscv::PreparedChunk,
     required: &[usize],
 ) -> Result<(ChunkVerdict, HistoryReads), Vec<ChunkFailure>> {
+    generate_and_check_with(host, orchestrator_chips, chunk, required, |_, _| {})
+}
+
+/// [`generate_and_check`], handing `on_device_trace` every air of the device context as
+/// [`HostSide::check_with`] does.
+#[cfg(feature = "cuda")]
+pub fn generate_and_check_with(
+    host: &HostSide,
+    orchestrator_chips: &Chips,
+    chunk: &super::riscv::PreparedChunk,
+    required: &[usize],
+    on_device_trace: impl FnMut(usize, Trace<'_>),
+) -> Result<(ChunkVerdict, HistoryReads), Vec<ChunkFailure>> {
     history_launch::record(true);
     let device = super::riscv::build_ctx_gpu(&chunk.record, &chunk.prepared, orchestrator_chips);
     let launched = history_launch::take();
     history_launch::record(false);
-    let verdict = host.check(&device, required)?;
+    let verdict = host.check_with(&device, required, on_device_trace)?;
     let readers = history_launches(&verdict, &chunk.record, &launched)?;
     Ok((verdict, readers))
 }
@@ -1071,10 +1099,7 @@ mod tests {
         use std::sync::Arc;
 
         use crate::{
-            compiler::riscv::{
-                compiler::{Compiler, SourceType},
-                program::Program,
-            },
+            compiler::riscv::compiler::{Compiler, SourceType},
             configs::stark_config::KoalaBearPoseidon2,
             emulator::{
                 opts::EmulatorOpts,
@@ -1102,7 +1127,7 @@ mod tests {
             ("chip-coverage", None, 1 << 22),
             ("chip-coverage", None, 64),
         ] {
-            let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+            let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
             if let Some(n) = input {
                 stdin.write(&n);
             }

@@ -8,14 +8,13 @@ use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(bound(serialize = "I: Serialize", deserialize = "I: Deserialize<'de>"))]
-pub struct EmulatorStdinBuilder<I, SC: StarkGenericConfig> {
-    pub buffer: Vec<I>,
+pub struct EmulatorStdinBuilder<SC: StarkGenericConfig> {
+    pub buffer: Vec<Vec<u8>>,
     #[serde(skip)]
     _config: PhantomData<SC>,
 }
 
-impl<I, SC: StarkGenericConfig> Default for EmulatorStdinBuilder<I, SC> {
+impl<SC: StarkGenericConfig> Default for EmulatorStdinBuilder<SC> {
     fn default() -> Self {
         Self {
             buffer: Vec::new(),
@@ -24,75 +23,21 @@ impl<I, SC: StarkGenericConfig> Default for EmulatorStdinBuilder<I, SC> {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
-pub struct EmulatorStdin<P, I> {
-    pub programs: Vec<Arc<P>>,
-    pub inputs: Arc<[I]>,
-    pub flag_empty: bool,
-    pub pointer: usize,
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct EmulatorStdin {
+    pub inputs: Arc<[Vec<u8>]>,
 }
 
-impl<P, I> Clone for EmulatorStdin<P, I>
-where
-    P: Clone,
-    I: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            programs: self.programs.clone(),
-            inputs: self.inputs.clone(),
-            flag_empty: self.flag_empty,
-            pointer: self.pointer,
-        }
-    }
-}
-
-#[allow(clippy::should_implement_trait)]
-impl<P, I> EmulatorStdin<P, I> {
-    // get both program and input for emulator
-    pub fn get_program_and_input(&self, index: usize) -> (&Arc<P>, &I, bool) {
-        let flag_last = index == self.inputs.len() - 1;
-
-        if index < self.programs.len() && index < self.inputs.len() {
-            (&self.programs[index], &self.inputs[index], flag_last)
-        } else {
-            panic!("EmulatorStdin: out of bounds");
-        }
-    }
-
-    // get input of the program for emulator
-    pub fn get_input(&self, index: usize) -> (&I, bool) {
-        let flag_last = index == self.inputs.len() - 1;
-        if index < self.inputs.len() {
-            (&self.inputs[index], flag_last)
-        } else {
-            panic!("EmulatorStdin: out of bounds");
-        }
-    }
-
-    pub fn new_builder<SC>() -> EmulatorStdinBuilder<I, SC>
+impl EmulatorStdin {
+    pub fn new_builder<SC>() -> EmulatorStdinBuilder<SC>
     where
-        I: Default,
         SC: StarkGenericConfig,
     {
-        EmulatorStdinBuilder::<I, SC>::default()
-    }
-
-    pub fn new_riscv(buf: &[I]) -> Self
-    where
-        I: Clone,
-    {
-        Self {
-            programs: Vec::new(),
-            inputs: Arc::from(buf),
-            flag_empty: false,
-            pointer: 0,
-        }
+        EmulatorStdinBuilder::<SC>::default()
     }
 }
 
-// for riscv machine stdin
-impl<SC: StarkGenericConfig> EmulatorStdinBuilder<Vec<u8>, SC> {
+impl<SC: StarkGenericConfig> EmulatorStdinBuilder<SC> {
     pub fn write<T: Serialize>(&mut self, data: &T) {
         let mut tmp = Vec::new();
         bincode::serialize_into(&mut tmp, data).expect("serialization failed");
@@ -103,12 +48,9 @@ impl<SC: StarkGenericConfig> EmulatorStdinBuilder<Vec<u8>, SC> {
         self.buffer.push(slice.to_vec());
     }
 
-    pub fn finalize<P>(self) -> EmulatorStdin<P, Vec<u8>> {
+    pub fn finalize(self) -> EmulatorStdin {
         EmulatorStdin {
-            programs: Vec::new(),
             inputs: self.buffer.into(),
-            flag_empty: false,
-            pointer: 0,
         }
     }
 }

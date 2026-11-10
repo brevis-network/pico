@@ -3902,18 +3902,11 @@ dependencies = [
  "ark-ff 0.5.0",
  "ark-secp256k1",
  "bls12_381 0.7.1",
- "bytemuck",
  "halo2curves",
  "hashbrown 0.14.5",
  "hybrid-array 0.2.3",
- "k256 0.13.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "libc",
  "log",
- "memmap2",
  "num",
- "num-bigint",
- "num-traits",
- "once_cell",
  "p256 0.13.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "p3-field",
  "p3-koala-bear",
@@ -3968,7 +3961,6 @@ dependencies = [
 [[package]]
 name = "pico-gpu"
 version = "0.1.11"
-source = "git+https://github.com/brevis-network/pico-gpu.git?rev=edd0ceb85f55c18b2aa9cb3864a94c99dd2ca3c5#edd0ceb85f55c18b2aa9cb3864a94c99dd2ca3c5"
 
 [[package]]
 name = "pico-gpu-api"
@@ -4184,7 +4176,6 @@ dependencies = [
  "libc",
  "log",
  "memmap2",
- "metrics",
  "num",
  "num-bigint",
  "num-traits",

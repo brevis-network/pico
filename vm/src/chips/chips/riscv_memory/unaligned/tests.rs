@@ -331,8 +331,9 @@ fn the_emulators_misaligned_accesses_satisfy_the_air() {
         pc_base: 0,
         memory_image: Arc::new(image),
         preprocessed_shape: None,
+        profiled_functions: Default::default(),
     };
-    let stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>().finalize();
+    let stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>().finalize();
     let opts = EmulatorOpts::default();
     let records = test_rv64_emulate_with_opts(Arc::new(program), stdin, opts);
 

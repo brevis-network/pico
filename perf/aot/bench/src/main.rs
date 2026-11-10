@@ -203,10 +203,7 @@ use pico_prover::{
 use pico_vm::instances::preparer::device_history::{plan::CPU_SLICE_STEPS, round_trip};
 use pico_vm::{
     chips::chips::riscv_memory::event::MemoryRecord,
-    compiler::riscv::{
-        compiler::{Compiler, SourceType},
-        program::Program,
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
         aot::{create_aot_emulator, split_chunks, split_from_chunk, split_segments},
@@ -469,8 +466,8 @@ fn parse_phase(s: &str) -> Result<Phase, String> {
 
 /// The elements as both stdin types hold them: an element is the bytes the guest reads, whichever
 /// way it was encoded.
-fn emulator_stdin(inputs: &[Input]) -> EmulatorStdin<Program, Vec<u8>> {
-    let mut builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+fn emulator_stdin(inputs: &[Input]) -> EmulatorStdin {
+    let mut builder = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     for input in inputs {
         builder.write_slice(&input.bytes);
     }
@@ -1154,7 +1151,7 @@ fn through_prover(args: &Args, elf: &[u8]) -> Result<Measured, String> {
     Ok(measured)
 }
 
-type Witness = ProvingWitness<KoalaBearPoseidon2, RiscvChips<KoalaBearPoseidon2>, Vec<u8>>;
+type Witness = ProvingWitness<KoalaBearPoseidon2, RiscvChips<KoalaBearPoseidon2>>;
 
 /// The engines `replay-chunk` can replay a chunk with, in its first chunk's order when
 /// `REPLAY_CHUNK_ENGINES` is unset.

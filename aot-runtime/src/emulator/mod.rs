@@ -10,7 +10,6 @@
 //! extension traits for execution (e.g. `run()` and `next_state_batch()`).
 
 mod chunk;
-mod clock;
 mod constants;
 mod instructions_base;
 mod instructions_no_count;

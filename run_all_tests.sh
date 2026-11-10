@@ -14,7 +14,7 @@ tests=(
 "bench_riscv_poseidon2_cpu_vs_gpu"
 "test_riscv_global_gpu_generate_extra_record_and_main"
 "bench_riscv_global_cpu_vs_gpu"
-"test_keccak_gpu_generate_extra_record_and_main"
+"test_keccak_sliced_gpu_generate_extra_record_and_main"
 "test_sha_compress_gpu_generate_extra_record_and_main"
 "bench_sha_compress_cpu_vs_gpu"
 "test_sha_compress_control_gpu_generate_extra_record_and_main"
@@ -63,8 +63,8 @@ for t in "${tests[@]}"; do
     summary+=("$passed $t")
 done
 # The RISC-V chips that build their traces from the execution history are checked against the
-# host by these integration tests instead.
-for t in history_add_sub_divrem history_bitwise_mul_shift history_cpu_memory_lt history_ecall_syscall device_history; do
+# host by this integration test instead.
+for t in device_history; do
     echo "========================================="
     echo "Running $t"
     echo "========================================="

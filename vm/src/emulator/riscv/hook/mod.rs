@@ -2,14 +2,17 @@ mod bls;
 mod ecrecover;
 pub mod ed_decompress;
 mod fp;
+#[cfg(test)]
+mod tests;
 
-use super::riscv_emulator::RiscvEmulator;
 use hashbrown::HashMap;
 
-pub type Hook = fn(&RiscvEmulator, &[u8]) -> Vec<Vec<u8>>;
+/// Answers a guest's write to a hook fd with the values it reads next. It sees only the request,
+/// so the interpreter and the AOT runtime serve the same functions and cannot answer differently.
+pub type Hook = fn(&[u8]) -> Vec<Vec<u8>>;
 
 const SECP256K1_ECRECOVER: u32 = 5;
-/// The file descriptor through which to access `hook_ed_decompress`.
+/// The file descriptor through which to access `ed_decompress`.
 pub const FD_EDDECOMPRESS: u32 = 8;
 
 /// The file descriptor through which to access `hook_fp_sqrt`.

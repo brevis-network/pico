@@ -7,10 +7,7 @@
 use aot::AotEmulatorCore;
 use aot_common::{compare_reports, compare_snapshots, recycle_snapshot_memory, AotRun};
 use pico_vm::{
-    compiler::riscv::{
-        compiler::{Compiler, SourceType},
-        program::Program,
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2 as RiscvKBSC,
     emulator::{
         opts::EmulatorOpts,
@@ -41,9 +38,9 @@ fn run_and_compare_chunks(
         .compile();
 
     // Set up baseline emulator directly.
-    let mut stdin_builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<RiscvKBSC>();
+    let mut stdin_builder = EmulatorStdin::new_builder::<RiscvKBSC>();
     stdin_builder.write(&INPUT_VALUE);
-    let stdin = stdin_builder.finalize::<Program>();
+    let stdin = stdin_builder.finalize();
 
     let mut baseline_emu = RiscvEmulator::new_single::<KoalaBear>(
         program.clone(),
@@ -53,9 +50,9 @@ fn run_and_compare_chunks(
     baseline_emu.write_stdin(&stdin);
 
     // Set up AOT emulator.
-    let mut stdin_builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<RiscvKBSC>();
+    let mut stdin_builder = EmulatorStdin::new_builder::<RiscvKBSC>();
     stdin_builder.write(&INPUT_VALUE);
-    let stdin = stdin_builder.finalize::<Program>();
+    let stdin = stdin_builder.finalize();
     let input_stream = stdin.inputs.to_vec();
 
     let mut aot_emu = AotEmulatorCore::new(program, input_stream);

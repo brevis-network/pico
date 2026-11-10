@@ -512,18 +512,6 @@ namespace pico_gpu {
 
   namespace keccak {
     PICO_FFI
-    RustError::by_value cuda_precompile_keccak_generate_extra_record_and_main(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const KeccakPermuteEvent* events,
-      field_t* trace,
-      field_t* byte_trace,
-      cudaStream_t stream)
-    {
-      return generate_extra_record_and_main(num_cols, event_size, trace_size, events, trace, byte_trace, stream);
-    } // cuda_precompile_keccak_generate_extra_record_and_main
-    PICO_FFI
     RustError::by_value cuda_precompile_keccak_control_generate_extra_record_and_main(
       const KeccakPermuteEvent* events,
       size_t events_len,

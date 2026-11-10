@@ -398,11 +398,11 @@ fn the_generated_code_is_the_committed_one() {
     const COMMITTED: [(&str, &str); 2] = [
         (
             "fib",
-            "f3e6c1991ef3ffd598ff04f200405b8ac96776fb8cecbeb5b1338b6d50895b6e",
+            "c405dc88f21108839a177ca31f7c5e2d262466c2425c45d6df5346c4c0fe5989",
         ),
         (
             "poseidon2",
-            "f63070794b4332ece1b2f0e16d79ce965a8dba57b15d9dab30355964084147d1",
+            "be04caac9fd96c43cc6733d0f4d63c4c961d4d988ccb7fecc253e0f2327d8db0",
         ),
     ];
     for (guest, committed) in COMMITTED {

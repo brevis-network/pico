@@ -59,6 +59,38 @@ impl GkrLens {
     }
 }
 
+/// Which rows of a trace the GKR input evaluation computes and where it writes them: rows
+/// `row0 .. row0 + n_eval`, row `row0 + i` of interaction `k` to output entry `k * out_stride + i`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GkrInputRows {
+    pub row0: u32,
+    pub n_eval: u32,
+    pub out_stride: u32,
+}
+
+impl GkrInputRows {
+    /// Every row, interaction-major: the dense layout.
+    pub fn all(height: u32) -> Self {
+        Self {
+            row0: 0,
+            n_eval: height,
+            out_stride: height,
+        }
+    }
+}
+
+/// A segmented GKR input's block tables as the kernels take them (gkr.cu `SegTab`): the real
+/// blocks in storage order and the real block of each storage granule. See
+/// `logup_zerocheck::seg_virtual`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SegTabFfi {
+    pub blk: *const crate::logup_zerocheck::seg_virtual::SegBlk,
+    pub cgran: *const u32,
+    pub g: u32,
+    pub log_len: u32,
+}
+
 pub trait FieldKernels: 'static + Copy + Send + Sync {
     /// If true, use the CPU path for the GKR fractional sumcheck instead of GPU.
     /// Default: false (use GPU). Override to true for fields where the GPU GKR
@@ -634,6 +666,119 @@ pub trait FieldKernels: 'static + Copy + Send + Sync {
         alpha: Self::ValExt,
     ) -> Result<(), CudaError>;
 
+    // ─── segmented GKR input (`logup_zerocheck::seg_virtual`) ────────────────────
+
+    /// Bit reversal, denominator shift and the first three tree layers of every real block.
+    unsafe fn gkr_seg_k3(
+        storage: *mut Frac<Self::ValExt>,
+        storage_len: usize,
+        tab: SegTabFfi,
+        alpha: Self::ValExt,
+    ) -> Result<(), CudaError>;
+
+    /// Every real block's tree from `level` to `level + 1`, or `level + 2` with `two`.
+    unsafe fn gkr_seg_build(
+        storage: *mut Frac<Self::ValExt>,
+        storage_len: usize,
+        tab: SegTabFfi,
+        level: u32,
+        two: bool,
+    ) -> Result<(), CudaError>;
+
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn gkr_seg_round_revert(
+        eq_xi: &SqrtEqLayersFor<Self::ValExt>,
+        storage: *mut Frac<Self::ValExt>,
+        storage_len: usize,
+        tab: SegTabFfi,
+        level: u32,
+        lambda: Self::ValExt,
+        out_device: &mut DeviceBuffer<Self::ValExt>,
+        tmp_block_sums: &mut DeviceBuffer<Self::ValExt>,
+    ) -> Result<(), CudaError>;
+
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn gkr_seg_round_fold(
+        eq_xi: &SqrtEqLayersFor<Self::ValExt>,
+        src: *const Frac<Self::ValExt>,
+        src_sh: u32,
+        dst: *mut Frac<Self::ValExt>,
+        dst_sh: u32,
+        storage_len: usize,
+        tab: SegTabFfi,
+        c_in: u32,
+        lambda: Self::ValExt,
+        r_prev: Self::ValExt,
+        out_device: &mut DeviceBuffer<Self::ValExt>,
+        tmp_block_sums: &mut DeviceBuffer<Self::ValExt>,
+    ) -> Result<(), CudaError>;
+
+    /// The windowed precompute's M matrix over a segmented vector (pad blocks left out).
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn gkr_seg_precompute_m_build(
+        src: *const Frac<Self::ValExt>,
+        src_sh: u32,
+        storage_len: usize,
+        tab: SegTabFfi,
+        c_src: u32,
+        wbits: u32,
+        fold_inline: bool,
+        lambda: Self::ValExt,
+        fold_r: Self::ValExt,
+        tail_eq_lo: *const Self::ValExt,
+        tail_eq_hi: *const Self::ValExt,
+        tail_lo_cap: usize,
+        tile_len: usize,
+        partials: *mut Self::ValExt,
+        partials_len: usize,
+        m_mat: *mut Self::ValExt,
+    ) -> Result<(), CudaError>;
+
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn gkr_seg_multifold(
+        src: *const Frac<Self::ValExt>,
+        src_sh: u32,
+        dst: *mut Frac<Self::ValExt>,
+        dst_sh: u32,
+        storage_len: usize,
+        tab: SegTabFfi,
+        c_src: u32,
+        wbits: u32,
+        win_eq: *const Self::ValExt,
+    ) -> Result<(), CudaError>;
+
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn gkr_seg_gather(
+        src: *const Frac<Self::ValExt>,
+        src_sh: u32,
+        tab: SegTabFfi,
+        leaf_gran: *const u32,
+        padtab: *const Frac<Self::ValExt>,
+        pad_level: u32,
+        c: u32,
+        dst: *mut Frac<Self::ValExt>,
+        n_log: u32,
+    ) -> Result<(), CudaError>;
+
+    unsafe fn gkr_seg_pad_table(
+        consts: *const Frac<Self::ValExt>,
+        n_consts: u32,
+        alpha: Self::ValExt,
+        padtab: *mut Frac<Self::ValExt>,
+    ) -> Result<(), CudaError>;
+
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn gkr_seg_pad_sum(
+        pads: *const crate::logup_zerocheck::seg_virtual::SegBlk,
+        n_pads: u32,
+        padtab: *const Frac<Self::ValExt>,
+        level: u32,
+        lambda: Self::ValExt,
+        xi_rev: *const Self::ValExt,
+        log_len: u32,
+        out: *mut Self::ValExt,
+    ) -> Result<(), CudaError>;
+
     // ─── logup / zerocheck eval kernels ───────────────────────────────────────
 
     #[allow(clippy::too_many_arguments)]
@@ -663,6 +808,7 @@ pub trait FieldKernels: 'static + Copy + Send + Sync {
         pair_idxs: &DeviceBuffer<u32>,
         height: u32,
         num_rows_per_tile: u32,
+        rows: GkrInputRows,
     ) -> Result<(), CudaError>;
 
     fn logup_r0_temp_sums_buffer_size(
@@ -1577,6 +1723,196 @@ mod kb_kernels {
                 alpha,
             )
         }
+
+        unsafe fn gkr_seg_k3(
+            storage: *mut Frac<EF>,
+            storage_len: usize,
+            tab: SegTabFfi,
+            alpha: EF,
+        ) -> Result<(), CudaError> {
+            use crate::cuda::logup_zerocheck_kb as k;
+            CudaError::from_result(k::_kb_gkr_seg_k3(storage, storage_len, tab, alpha))
+        }
+
+        unsafe fn gkr_seg_build(
+            storage: *mut Frac<EF>,
+            storage_len: usize,
+            tab: SegTabFfi,
+            level: u32,
+            two: bool,
+        ) -> Result<(), CudaError> {
+            use crate::cuda::logup_zerocheck_kb as k;
+            CudaError::from_result(k::_kb_gkr_seg_build(storage, storage_len, tab, level, two))
+        }
+
+        unsafe fn gkr_seg_round_revert(
+            eq_xi: &SqrtEqLayersFor<EF>,
+            storage: *mut Frac<EF>,
+            storage_len: usize,
+            tab: SegTabFfi,
+            level: u32,
+            lambda: EF,
+            out_device: &mut DeviceBuffer<EF>,
+            tmp_block_sums: &mut DeviceBuffer<EF>,
+        ) -> Result<(), CudaError> {
+            use crate::cuda::logup_zerocheck_kb as k;
+            let low_n = eq_xi.low_n();
+            let high_n = eq_xi.high_n();
+            CudaError::from_result(k::_kb_gkr_seg_round_revert(
+                eq_xi.low.get_ptr(low_n),
+                eq_xi.high.get_ptr(high_n),
+                storage,
+                storage_len,
+                tab,
+                level,
+                1 << low_n,
+                lambda,
+                out_device.as_mut_ptr(),
+                tmp_block_sums.as_mut_ptr(),
+            ))
+        }
+
+        unsafe fn gkr_seg_round_fold(
+            eq_xi: &SqrtEqLayersFor<EF>,
+            src: *const Frac<EF>,
+            src_sh: u32,
+            dst: *mut Frac<EF>,
+            dst_sh: u32,
+            storage_len: usize,
+            tab: SegTabFfi,
+            c_in: u32,
+            lambda: EF,
+            r_prev: EF,
+            out_device: &mut DeviceBuffer<EF>,
+            tmp_block_sums: &mut DeviceBuffer<EF>,
+        ) -> Result<(), CudaError> {
+            use crate::cuda::logup_zerocheck_kb as k;
+            let low_n = eq_xi.low_n();
+            let high_n = eq_xi.high_n();
+            CudaError::from_result(k::_kb_gkr_seg_round_fold(
+                eq_xi.low.get_ptr(low_n),
+                eq_xi.high.get_ptr(high_n),
+                src,
+                src_sh,
+                dst,
+                dst_sh,
+                storage_len,
+                tab,
+                c_in,
+                1 << low_n,
+                lambda,
+                r_prev,
+                out_device.as_mut_ptr(),
+                tmp_block_sums.as_mut_ptr(),
+            ))
+        }
+
+        unsafe fn gkr_seg_precompute_m_build(
+            src: *const Frac<EF>,
+            src_sh: u32,
+            storage_len: usize,
+            tab: SegTabFfi,
+            c_src: u32,
+            wbits: u32,
+            fold_inline: bool,
+            lambda: EF,
+            fold_r: EF,
+            tail_eq_lo: *const EF,
+            tail_eq_hi: *const EF,
+            tail_lo_cap: usize,
+            tile_len: usize,
+            partials: *mut EF,
+            partials_len: usize,
+            m_mat: *mut EF,
+        ) -> Result<(), CudaError> {
+            use crate::cuda::logup_zerocheck_kb as k;
+            CudaError::from_result(k::_kb_gkr_seg_precompute_m_build(
+                src,
+                src_sh,
+                storage_len,
+                tab,
+                c_src,
+                wbits,
+                fold_inline,
+                lambda,
+                fold_r,
+                tail_eq_lo,
+                tail_eq_hi,
+                tail_lo_cap,
+                tile_len,
+                partials,
+                partials_len,
+                m_mat,
+            ))
+        }
+
+        unsafe fn gkr_seg_multifold(
+            src: *const Frac<EF>,
+            src_sh: u32,
+            dst: *mut Frac<EF>,
+            dst_sh: u32,
+            storage_len: usize,
+            tab: SegTabFfi,
+            c_src: u32,
+            wbits: u32,
+            win_eq: *const EF,
+        ) -> Result<(), CudaError> {
+            use crate::cuda::logup_zerocheck_kb as k;
+            CudaError::from_result(k::_kb_gkr_seg_multifold(
+                src,
+                src_sh,
+                dst,
+                dst_sh,
+                storage_len,
+                tab,
+                c_src,
+                wbits,
+                win_eq,
+            ))
+        }
+
+        unsafe fn gkr_seg_gather(
+            src: *const Frac<EF>,
+            src_sh: u32,
+            tab: SegTabFfi,
+            leaf_gran: *const u32,
+            padtab: *const Frac<EF>,
+            pad_level: u32,
+            c: u32,
+            dst: *mut Frac<EF>,
+            n_log: u32,
+        ) -> Result<(), CudaError> {
+            use crate::cuda::logup_zerocheck_kb as k;
+            CudaError::from_result(k::_kb_gkr_seg_gather(
+                src, src_sh, tab, leaf_gran, padtab, pad_level, c, dst, n_log,
+            ))
+        }
+
+        unsafe fn gkr_seg_pad_table(
+            consts: *const Frac<EF>,
+            n_consts: u32,
+            alpha: EF,
+            padtab: *mut Frac<EF>,
+        ) -> Result<(), CudaError> {
+            use crate::cuda::logup_zerocheck_kb as k;
+            CudaError::from_result(k::_kb_gkr_seg_pad_table(consts, n_consts, alpha, padtab))
+        }
+
+        unsafe fn gkr_seg_pad_sum(
+            pads: *const crate::logup_zerocheck::seg_virtual::SegBlk,
+            n_pads: u32,
+            padtab: *const Frac<EF>,
+            level: u32,
+            lambda: EF,
+            xi_rev: *const EF,
+            log_len: u32,
+            out: *mut EF,
+        ) -> Result<(), CudaError> {
+            use crate::cuda::logup_zerocheck_kb as k;
+            CudaError::from_result(k::_kb_gkr_seg_pad_sum(
+                pads, n_pads, padtab, level, lambda, xi_rev, log_len, out,
+            ))
+        }
         // ── logup: missing methods ──────────────────────────────────────────────
         unsafe fn frac_vector_scalar_multiply_ext_fp(
             frac_vec: &mut DeviceBuffer<Frac<EF>>,
@@ -1770,6 +2106,7 @@ mod kb_kernels {
             pi: &DeviceBuffer<u32>,
             h: u32,
             nrpt: u32,
+            rows: GkrInputRows,
         ) -> Result<(), CudaError> {
             crate::cuda::logup_zerocheck_kb::logup_gkr_input_eval_kb(
                 is_g,
@@ -1784,6 +2121,7 @@ mod kb_kernels {
                 pi,
                 h,
                 nrpt,
+                rows,
             )
         }
         fn logup_r0_temp_sums_buffer_size(b: u32, s: u32, x: u32, c: u32, m: usize) -> usize {

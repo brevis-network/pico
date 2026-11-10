@@ -222,7 +222,10 @@ where
             .when(halt_cond.clone())
             .assert_word_eq(local.op_b_value, local.ecall.operand_to_check);
 
-        // TODO: check if operand is u32 for halt
+        // The exit code is `op_b_value` reduced into the field. The range check above holds the
+        // word below `p` on this row (`range_check_operand` covers HALT), so no operand `v >= p`
+        // -- `p` or `2p` reducing to 0, say -- can stand in for the exit code `v mod p`.
+        // `riscv_ecall/tests.rs` feeds such operands past the emulator and sees them rejected.
         builder.when(halt_cond).assert_eq(
             local.op_b_value.reduce::<CB>(),
             public_values.exit_code.clone(),
@@ -384,7 +387,7 @@ impl<F: PrimeField32> EcallChip<F> {
             .when(local.is_real * is_commit_deferred_proofs)
             .assert_eq(
                 expected_deferred_proofs_digest_element,
-                // TODO: check if operand is u32 for commit_deferred_proofs
+                // Canonical: `digest_word` is `operand_to_check`, range checked below `p`.
                 digest_word.reduce::<CB>(),
             );
     }

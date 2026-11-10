@@ -156,7 +156,7 @@ use crate::chips::{
     precompiles::{
         edwards::{EdAddAssignChip, EdDecompressChip},
         fptower::{fp::FpOpChip, fp2_addsub::Fp2AddSubChip, fp2_mul::Fp2MulChip},
-        keccak256::{KeccakControlChip, KeccakPermuteChip},
+        keccak256::KeccakControlChip,
         poseidon2::Poseidon2PermuteChip,
         sha256::{
             compress::{ShaCompressChip, ShaCompressControlChip},
@@ -172,7 +172,6 @@ use crate::chips::{
 };
 
 no_pvs_pf32!(
-    KeccakPermuteChip<F>,
     KeccakControlChip<F>,
     ShaExtendChip<F>,
     ShaExtendControlChip<F>,

@@ -46,45 +46,6 @@ pub struct CpuEvent {
     pub exit_code: u32,
 }
 
-/// Slimmed CpuEvent for GPU trace generation.
-///
-/// Excludes `memory`, `memory_record`, and `exit_code` which are not accessed
-/// by the riscv_cpu CUDA kernel, reducing per-event size by ~24%.
-#[derive(Debug, Copy, Clone, Default)]
-#[repr(C)]
-pub struct CpuEventSlim {
-    pub chunk: RvChunk,
-    pub clk: RvClk,
-    pub pc: RvAddr,
-    pub next_pc: RvAddr,
-    pub instruction: Instruction,
-    pub a: RvValue,
-    pub a_record: FfiOption<MemoryRecordEnum>,
-    pub b: RvValue,
-    pub b_record: FfiOption<MemoryRecordEnum>,
-    pub c: RvValue,
-    pub c_record: FfiOption<MemoryRecordEnum>,
-}
-
-impl From<&CpuEvent> for CpuEventSlim {
-    #[inline]
-    fn from(e: &CpuEvent) -> Self {
-        Self {
-            chunk: e.chunk,
-            clk: e.clk,
-            pc: e.pc,
-            next_pc: e.next_pc,
-            instruction: e.instruction,
-            a: e.a,
-            a_record: e.a_record,
-            b: e.b,
-            b_record: e.b_record,
-            c: e.c,
-            c_record: e.c_record,
-        }
-    }
-}
-
 impl CpuEvent {
     #[allow(clippy::too_many_arguments)]
     pub fn new(

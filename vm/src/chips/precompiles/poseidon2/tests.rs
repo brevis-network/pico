@@ -368,10 +368,10 @@ mod syscall_reachability_tests {
             pc_base: 0,
             memory_image: Arc::new(memory_image),
             preprocessed_shape: None,
+            profiled_functions: Default::default(),
         };
 
-        let stdin =
-            EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>().finalize();
+        let stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>().finalize();
         let records = test_rv64_emulate(Arc::new(program), stdin);
 
         let events: Vec<_> = records

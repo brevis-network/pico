@@ -26,7 +26,7 @@ pub use pico_vm::{
 pub use pico_aot_dispatch::AotEmulatorCore;
 
 #[cfg(feature = "aot")]
-pub use aot_common::{recycle_snapshot_memory, register_with_vm, AotRun};
+pub use aot_common::{recycle_snapshot_memory, AotRun};
 #[cfg(feature = "aot")]
 pub use pico_aot_dispatch::run_aot as run_aot_dispatch;
 
@@ -46,16 +46,16 @@ pub const ELF_PATH: &str = concat!(
 );
 
 pub type FibonacciWitness =
-    ProvingWitness<RiscvKBSC, RiscvChipType<<RiscvKBSC as StarkGenericConfig>::Val>, Vec<u8>>;
+    ProvingWitness<RiscvKBSC, RiscvChipType<<RiscvKBSC as StarkGenericConfig>::Val>>;
 
 pub fn load_elf_bytes() -> Vec<u8> {
     std::fs::read(ELF_PATH).expect("Failed to read ELF file")
 }
 
-pub fn build_stdin(n: u32) -> EmulatorStdin<Program, Vec<u8>> {
-    let mut stdin_builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<RiscvKBSC>();
+pub fn build_stdin(n: u32) -> EmulatorStdin {
+    let mut stdin_builder = EmulatorStdin::new_builder::<RiscvKBSC>();
     stdin_builder.write(&n);
-    stdin_builder.finalize::<Program>()
+    stdin_builder.finalize()
 }
 
 pub fn build_witness(elf_bytes: &[u8], opts: EmulatorOpts, n: u32) -> FibonacciWitness {
@@ -68,7 +68,6 @@ pub fn build_witness(elf_bytes: &[u8], opts: EmulatorOpts, n: u32) -> FibonacciW
         program: Some(program),
         vk_root: None,
         stdin: Some(stdin),
-        flag_empty_stdin: false,
         config: None,
         opts: Some(opts),
         records: vec![],

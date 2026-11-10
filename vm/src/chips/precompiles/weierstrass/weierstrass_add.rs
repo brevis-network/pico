@@ -569,7 +569,6 @@ impl<F: PrimeField32, E: EllipticCurve> GpuChipBehavior<F> for WeierstrassAddAss
         device::launched(kernels, stream);
         device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        device::wait(stream).unwrap();
         device::wait(main_stream).unwrap();
 
         info!(

@@ -17,10 +17,7 @@ use pico_mle_core::{
 use pico_vm::{
     compiler::{
         program::ProgramBehavior,
-        riscv::{
-            compiler::{Compiler, SourceType},
-            program::Program,
-        },
+        riscv::compiler::{Compiler, SourceType},
     },
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP, stdin::EmulatorStdin},
@@ -82,7 +79,7 @@ fn direct_chain(n: u32) -> Direct {
         .expect("parse the fib ELF")
         .compile();
 
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     stdin.write(&n);
     let stdin = stdin.finalize();
 

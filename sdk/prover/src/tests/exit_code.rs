@@ -64,7 +64,7 @@ fn a_proved_bundle_carrying_a_non_zero_exit_code_is_refused() {
     assert!(is_refused(&err), "verify_artifact: got {err}");
 
     let err = prover
-        .prove_records(&emulated.records, emulated.committed_bytes, Phase::Riscv)
+        .prove_records(emulated.records, emulated.committed_bytes, Phase::Riscv)
         .expect_err("nor may the prover return a proof of it");
     assert!(is_refused(&err), "prove_records: got {err}");
 }

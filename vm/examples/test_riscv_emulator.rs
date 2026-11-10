@@ -2,10 +2,7 @@ use itertools::enumerate;
 use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 use pico_vm::{
-    compiler::riscv::{
-        compiler::{Compiler, SourceType},
-        program::Program,
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
         opts::EmulatorOpts,
@@ -24,7 +21,7 @@ use tracing::{debug, info, trace};
 #[path = "common/parse_args.rs"]
 mod parse_args;
 
-fn run<F>(elf: &'static [u8], stdin: EmulatorStdin<Program, Vec<u8>>)
+fn run<F>(elf: &'static [u8], stdin: EmulatorStdin)
 where
     F: PrimeField32 + FieldSpecificPoseidon2Config,
 {

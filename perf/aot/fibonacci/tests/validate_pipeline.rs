@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 
-use aot::register_with_vm;
 use p3_koala_bear::KoalaBear;
 use pico_vm::{
     compiler::riscv::{
@@ -27,14 +26,13 @@ type Chips = RiscvChipType<KoalaBear>;
 
 fn make_witness(
     program: Arc<Program>,
-    stdin: EmulatorStdin<Program, Vec<u8>>,
+    stdin: EmulatorStdin,
     opts: EmulatorOpts,
-) -> ProvingWitness<RiscvKBSC, Chips, Vec<u8>> {
+) -> ProvingWitness<RiscvKBSC, Chips> {
     ProvingWitness {
         program: Some(program),
         vk_root: None,
         stdin: Some(stdin),
-        flag_empty_stdin: false,
         config: None,
         opts: Some(opts),
         records: vec![],
@@ -42,9 +40,9 @@ fn make_witness(
 }
 
 fn run_mode(program: Arc<Program>, opts: EmulatorOpts) -> (u64, Vec<u8>, Vec<EmulationReport>) {
-    let mut stdin_builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<RiscvKBSC>();
+    let mut stdin_builder = EmulatorStdin::new_builder::<RiscvKBSC>();
     stdin_builder.write(&INPUT_VALUE);
-    let stdin = stdin_builder.finalize::<Program>();
+    let stdin = stdin_builder.finalize();
 
     let witness = make_witness(program, stdin, opts);
 
@@ -71,7 +69,14 @@ fn snapshot_pipeline_interp_vs_aot_equivalent() {
         .expect("failed to parse RISC-V ELF")
         .compile();
 
-    register_with_vm();
+    // `register` refuses the committed bootstrap stub, which has no compiled code: with the stub in
+    // place the AOT side is the interpreted runtime, registered as such.
+    if pico_aot_dispatch::AOT.is_stub() {
+        pico_aot_runtime::register_interpreted()
+    } else {
+        aot::register_aot()
+    }
+    .expect("register the AOT runtime");
 
     let opts_interp = EmulatorOpts::test_opts().with_snapshot_main(SnapshotMainMode::Interpreter);
     let opts_aot = EmulatorOpts::test_opts().with_snapshot_main(SnapshotMainMode::Aot);

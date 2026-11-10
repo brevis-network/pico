@@ -137,7 +137,6 @@ impl<F: PrimeField32> GpuChipBehavior<F> for ByteChip<F> {
         let main_stream = &sync_stream.0;
         stream.synchronize().unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
         main_stream.synchronize().unwrap();
 
         info!("[byte-chip] generate_preprocessed on GPU");

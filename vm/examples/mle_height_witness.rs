@@ -135,12 +135,11 @@ fn run(
         ),
         _ => return Err("name a --guest, or an --elf and its --input".into()),
     };
-    let witness =
-        ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<Kb>, Vec<u8>>::setup_for_mle_riscv(
-            record_parity::program(&elf),
-            stdin,
-            EmulatorOpts::bench_riscv_ops(),
-        );
+    let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<Kb>>::setup_for_mle_riscv(
+        record_parity::program(&elf),
+        stdin,
+        EmulatorOpts::bench_riscv_ops(),
+    );
     let workers = env_u32("NUM_THREADS")
         .and_then(|n| NonZeroUsize::new(n as usize))
         .unwrap_or(NonZeroUsize::MIN);

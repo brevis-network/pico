@@ -403,7 +403,7 @@ mod tests {
     use ark_ff::PrimeField;
 
     #[test]
-    fn phase5_bn_fp_round_trip_uses_packed_dwords() {
+    fn a_bn254_field_element_round_trips_through_packed_dwords() {
         let value = Bn254Fq::from(0x1234_5678_u64) * Bn254Fq::from(0x0102_0304_u64);
         let words = fq_to_words_32(value);
         let dwords = pack_words_to_packed_dwords(&words);
@@ -413,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_bls_fp2_round_trip_uses_packed_dwords() {
+    fn a_bls12_381_fp2_element_round_trips_through_packed_dwords() {
         let value = Bls381Fq2::new(Bls381Fq::from(3_u64), Bls381Fq::from(9_u64));
         let c0 = fq_to_words_48(value.c0);
         let c1 = fq_to_words_48(value.c1);

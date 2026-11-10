@@ -42,12 +42,13 @@ pub struct EcallCols<T> {
     /// should be set to 1 and everything else set to 0.
     pub index_bitmap: [T; PV_DIGEST_NUM_WORDS],
 
-    // TODO: check if operand is u32 for halt and commit_deferred_proofs
-    /// Columns to range check the halt/commit_deferred_proofs operand.
+    /// Columns to prove the HALT / COMMIT_DEFERRED_PROOFS operand a canonical field element:
+    /// limbs 2 and 3 zero and the 32-bit value below `p`, so it is the one `u64` that reduces to
+    /// the public value it is bound to.
     pub operand_range_check_cols: FieldWordRangeChecker<T>,
 
-    // TODO: check if operand is u32 for halt and commit_deferred_proofs
-    /// The operand value to range check.
+    /// The operand checked by `operand_range_check_cols`: `op_b_value` (the exit code) on HALT
+    /// rows, the digest word on COMMIT_DEFERRED_PROOFS rows.
     pub operand_to_check: Word<T>,
 }
 

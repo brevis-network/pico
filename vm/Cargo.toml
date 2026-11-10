@@ -74,7 +74,6 @@ itertools.workspace = true
 k256.workspace = true
 lazy_static.workspace = true
 log.workspace = true
-metrics = { workspace = true, optional = true }
 num-bigint.workspace = true
 num-traits.workspace = true
 num.workspace = true
@@ -141,11 +140,8 @@ libc = { version = "0.2", optional = true }
 [features]
 default = ["rayon", "strict", "multi-field-transcript"]
 bigint-rug = ["rug"] # curves
-debug = []
-debug-lookups = []
 tcmalloc = ["dep:tcmalloc"]
 jemalloc = ["dep:tikv-jemallocator"]
-single-threaded = []
 rayon = ["dep:rayon", "dep:rayon-scan", "p3-maybe-rayon/parallel", "parallel"]
 strict = []
 aot-emulator = []
@@ -175,15 +171,9 @@ cuda = ["dep:cuda-mle", "dep:pico-gpu-api", "dep:cudart", "dep:cudart-sys"]
 # and the BN254 config they prove under), so it is on by default, and `test-utils` the Ecall
 # trace's `CVD_FORGE_K` forgery hook.
 parallel = ["pico-mle-core/parallel", "pico-mle-cpu/parallel", "pico-verifier/parallel"]
-metrics = ["dep:metrics", "pico-mle-core/metrics"]
 multi-field-transcript = ["pico-mle-core/multi-field-transcript"]
 soundness-bchks25-optimized = ["pico-mle-core/soundness-bchks25-optimized"]
 test-utils = ["pico-mle-core/test-utils"]
-
-# `Sink::Counting` exists only with the feature.
-[[test]]
-name = "counting_sink"
-required-features = ["test-utils"]
 
 # Examples that drive the outer (BN254) transcript/config only exist with the feature.
 [[example]]

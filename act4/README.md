@@ -51,9 +51,9 @@ mkdir -p /tmp/act4 && tar -xJf act4/act4-elfs-4.1.0-pico-rv64im-zicclsm.tar.xz -
 # /tmp/act4/elfs/I/I-add-00.elf, ...
 ```
 
-CI runs it on the CPU prover as `CPU · ACT4 RV64IM_Zicclsm (72 pass)` in
-`test-prover.yml`. On the GPU prover, run the same module with `--features cuda` on a machine with a
-card.
+CI runs it as `ACT4 RV64IM_Zicclsm (72 pass)`. By hand, `cargo test --release -p pico-prover --
+--test-threads=1 tests::act4::` proves it on the CPU, and the same module with `--features cuda` on
+a machine with a card proves it on the GPU.
 
 ## How they were built
 

@@ -23,7 +23,7 @@ use crate::{
             fptower::{
                 fp::num_fp_cols, fp2_addsub::num_fp2_addsub_cols, fp2_mul::num_fp2_mul_cols,
             },
-            keccak256::columns::NUM_KECCAK_MEM_COLS,
+            keccak256::sliced::SLOT_ROWS as KECCAK_SLOT_ROWS,
             sha256::{
                 compress::columns::NUM_SHA_COMPRESS_COLS, extend::columns::NUM_SHA_EXTEND_COLS,
             },
@@ -158,9 +158,21 @@ const TAIL_MERGE_MAX_WIDE_ROWS: usize = 1 << 17;
 /// (e.g. a column reduction) re-calibrate the tail thresholds automatically.
 /// Returns None for syscalls without an entry; callers fall back to the legacy
 /// event-count threshold, valued conservatively at one full block per threshold.
+/// Keccak's `(rows_per_event, width)` for the tail tables, pinned at the 24-row, 2537-column
+/// layout that preceded the sliced chip. The cells-derived threshold no longer applies to
+/// Keccak (its full block is set from the slot layout in `split`), so the figure only feeds the
+/// tail record's cost estimate; it stays where the tail budget was calibrated rather than moving
+/// every keccak tail record's packing with the layout change. Above the sliced chip's 13.5 rows
+/// x 1953 columns, so the estimate errs high.
+const KECCAK_TAIL_ROWS_AND_WIDTH: (u64, usize) = (24, 2537);
+
+/// Keccak permutations per full block: the 2^19-row block the tail budget was proven on, at two
+/// permutations per 27-row slot of the sliced chip.
+const KECCAK_PERMS_PER_BLOCK: usize = 2 * ((1 << 19) / KECCAK_SLOT_ROWS);
+
 pub(crate) fn tail_rows_and_width(syscall_code: SyscallCode) -> Option<(u64, u64)> {
     let (rows, width) = match syscall_code {
-        SyscallCode::KECCAK_PERMUTE => (24, NUM_KECCAK_MEM_COLS),
+        SyscallCode::KECCAK_PERMUTE => KECCAK_TAIL_ROWS_AND_WIDTH,
         SyscallCode::SHA_EXTEND => (48, NUM_SHA_EXTEND_COLS),
         SyscallCode::SHA_COMPRESS => (80, NUM_SHA_COMPRESS_COLS),
         SyscallCode::SECP256K1_ADD => (
@@ -899,13 +911,9 @@ impl EmulationRecord {
                     let cells_derived =
                         (TAIL_TARGET_CELLS / (rows_per_event * width).max(1)) as usize;
                     match syscall_code {
-                        // Clamp to the proven 2^19-row block: cells-derivation lands 8 rows
-                        // under the pow2 cliff today (21845×24 = 524,280), and any future
-                        // keccak column reduction would push it over — doubling the padded
-                        // block past the measured OOM anchor without tripping any cap.
-                        SyscallCode::KECCAK_PERMUTE => {
-                            cells_derived.min((1usize << 19) / rows_per_event as usize)
-                        }
+                        // The proven 2^19-row block: the sliced layout packs two permutations
+                        // per 27-row slot, so it holds 2 * floor(2^19 / 27) = 38836.
+                        SyscallCode::KECCAK_PERMUTE => KECCAK_PERMS_PER_BLOCK,
                         SyscallCode::SHA_EXTEND | SyscallCode::SHA_COMPRESS => legacy,
                         _ => cells_derived
                             .min(TAIL_MERGE_MAX_WIDE_ROWS / (rows_per_event as usize).max(1)),
@@ -1697,7 +1705,7 @@ mod tests {
 #[cfg(test)]
 mod tail_merge_constants {
     use super::{
-        tail_gkr_interactions, tail_rows_and_width, TAIL_GKR_BYTE_LEAVES,
+        tail_gkr_interactions, tail_rows_and_width, KECCAK_SLOT_ROWS, TAIL_GKR_BYTE_LEAVES,
         TAIL_GKR_FALLBACK_INTERACTIONS, TAIL_GKR_GLOBAL_INTERACTIONS,
         TAIL_GKR_INIT_FIN_INTERACTIONS, TAIL_GKR_MEMORY_LOCAL_INTERACTIONS,
         TAIL_GKR_POSEIDON2_INTERACTIONS, TAIL_GKR_PROGRAM_INTERACTIONS,
@@ -1907,14 +1915,15 @@ mod tail_merge_constants {
         );
         let (keccak_rows, _) = tail_rows_and_width(SyscallCode::KECCAK_PERMUTE)
             .expect("KECCAK_PERMUTE has no tail_rows_and_width entry");
-        let real =
-            measured("KeccakPermuteChip", None) * keccak_rows + measured("KeccakControlChip", None);
+        // The sliced chip proves two permutations per 27-row slot, 13.5 rows per event.
+        let real = measured("KeccakSlicedChip", None) * KECCAK_SLOT_ROWS as u64 / 2
+            + measured("KeccakControlChip", None);
         let estimated = estimate_per_row * keccak_rows;
         println!("MEASURED KECCAK_PERMUTE(+control) = {real} per event (estimate {estimated})");
         assert!(
             estimated >= real,
             "tail_gkr_interactions under-counts a keccak event: estimate {estimated}, \
-             KeccakPermuteChip + KeccakControlChip {real}"
+             KeccakSlicedChip + KeccakControlChip {real}"
         );
     }
 }

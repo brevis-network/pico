@@ -1,4 +1,3 @@
-use super::super::riscv_emulator::RiscvEmulator;
 use k256::{elliptic_curve::ff::PrimeField, FieldBytes, FieldElement, Scalar as K256Scalar};
 
 /// The non-quadratic residue for the curve for secp256k1.
@@ -8,7 +7,7 @@ const NQR: [u8; 32] = {
     nqr
 };
 
-pub fn ecrecover(_: &RiscvEmulator, buf: &[u8]) -> Vec<Vec<u8>> {
+pub fn ecrecover(buf: &[u8]) -> Vec<Vec<u8>> {
     // Early return if the buffer length is incorrect
     if buf.len() != 65 {
         return vec![vec![0]];

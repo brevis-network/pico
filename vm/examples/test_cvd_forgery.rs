@@ -262,7 +262,7 @@ fn main() {
     // recommends -- its forgery table needs a precompile workload).
     let elf = std::fs::read("./perf/bench_data/rv64/fib-elf")
         .expect("run from the repo root: ./perf/bench_data/rv64/fib-elf not found");
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     stdin.write(&n);
     let stdin = stdin.finalize();
 

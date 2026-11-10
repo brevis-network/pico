@@ -185,8 +185,31 @@ pub fn precompile_rows_per_event(chip_name: &str) -> usize {
     match chip_name {
         "ShaCompress" => 80,
         "ShaExtend" => 48,
-        "KeccakPermute" => 24,
+        // 13.5 rows per permutation in the sliced layout (27 per two); rounded up.
+        "KeccakPermute" => 14,
         _ => 1,
+    }
+}
+
+/// The rows a precompile kind's own trace takes for `n` events, as its generator lays them out.
+///
+/// `n * rows_per_event` for every kind but KeccakPermute, whose sliced layout pairs permutations
+/// into 27-row slots and pads to a power of two that avoids one wrap (`sliced_height`), so its
+/// count is already the padded height. The MLE shapes key on this, not on the rounded
+/// `precompile_rows_per_event`, so a whitelist shape is exactly what tracegen produces.
+pub fn precompile_kind_rows(chip_name: &str, n: usize) -> usize {
+    match chip_name {
+        "KeccakPermute" => crate::chips::precompiles::keccak256::sliced::sliced_height(n),
+        _ => n * precompile_rows_per_event(chip_name),
+    }
+}
+
+/// The fixed-height lookup tables a precompile kind's chunk carries beside it: the sliced
+/// Keccak's chi and xor5 tables, one 2^20-row AIR. Present exactly when the kind is.
+pub fn precompile_tables(chip_name: &str) -> &'static [(&'static str, usize)] {
+    match chip_name {
+        "KeccakPermute" => &[("KeccakTables", 20)],
+        _ => &[],
     }
 }
 

@@ -80,10 +80,7 @@ use pico_mle_core::{
     StarkEngine,
 };
 use pico_vm::{
-    compiler::riscv::{
-        compiler::{Compiler, SourceType},
-        program::Program,
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::kb_poseidon2::KoalaBearPoseidon2,
     emulator::{riscv::record::EmulationRecord, stdin::EmulatorStdin},
     instances::chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
@@ -118,7 +115,7 @@ use pico_vm::{
 };
 use tracing::info;
 
-type Stdin = EmulatorStdin<Program, Vec<u8>>;
+type Stdin = EmulatorStdin;
 type Shape = Vec<(String, usize)>;
 type Chips = [MetaChip<riscv::Kb, RiscvChipType<riscv::Kb>>];
 
@@ -132,14 +129,14 @@ fn read_file(dir: &str, name: &str) -> Vec<u8> {
 }
 
 fn fib_stdin(n: u32) -> Stdin {
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     stdin.write(&n);
     stdin.finalize()
 }
 
 fn reth_stdin(dir: &str, block: &str) -> Stdin {
     let input = read_file(dir, &format!("reth-{block}.bin"));
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     stdin.write_slice(&input);
     stdin.finalize()
 }

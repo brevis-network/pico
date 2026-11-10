@@ -30,7 +30,7 @@ use crate::{
     mle::{config::MleSingleNodeConfig, BlockJob},
 };
 use clap::Parser;
-use pico_vm::{compiler::riscv::program::Program, emulator::stdin::EmulatorStdin};
+use pico_vm::emulator::stdin::EmulatorStdin;
 use std::{net::SocketAddr, sync::Arc, time::Instant};
 use store::ProvingResultStore;
 use tracing::{info, warn};
@@ -70,7 +70,7 @@ pub struct BlockRequest {
     pub block: u64,
     /// When `RequestProver` was received -- the start of the reported `proving_duration`.
     pub received_at: Instant,
-    pub stdin: EmulatorStdin<Program, Vec<u8>>,
+    pub stdin: EmulatorStdin,
 }
 
 /// How many tokio workers the service gets.

@@ -36,8 +36,8 @@ const ED25519_ELF: &[u8] = include_bytes!(concat!(
 
 /// What `--elf ed25519 --n 10` writes in `vm/examples/common/parse_args.rs`: the basepoint, its
 /// negation, and two scalars.
-fn stdin() -> EmulatorStdin<Program, Vec<u8>> {
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+fn stdin() -> EmulatorStdin {
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     let mut basepoint = [0x66u8; 32];
     basepoint[0] = 0x58;
     stdin.write(&basepoint);

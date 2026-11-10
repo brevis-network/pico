@@ -8,7 +8,6 @@
 //!
 //! - **`AotEmulatorCore`**: The core emulator struct with all base functionality
 //! - **`NextStep`**: Control flow decision (Direct/Dynamic/Halt)
-//! - **`BlockClock`**: Batched clock updates for performance
 //!
 //! # Usage Pattern
 //!
@@ -18,7 +17,7 @@
 //! ```ignore
 //! // In your crate's emulator.rs
 //! use std::ops::{Deref, DerefMut};
-//! pub use pico_aot_runtime::{AotEmulatorCore, NextStep, BlockClock};
+//! pub use pico_aot_runtime::{AotEmulatorCore, NextStep};
 //!
 //! pub struct MyEmulator(pub AotEmulatorCore);
 //!
@@ -49,7 +48,6 @@
 
 mod dispatch;
 pub mod emulator;
-mod hook;
 pub mod interpreter;
 pub mod precompiles;
 mod program;
@@ -64,7 +62,7 @@ pub use dispatch::{lookup_block_fn, set_lookup_block_fn};
 pub use emulator::{AotEmulatorCore, Recorder};
 pub use program::{AotError, AotProgram};
 pub use snapshot_runtime::{register, register_interpreted};
-pub use types::{BlockClock, BlockFn, ClockUpdate, NextStep, RecordBlockFn, RecordStep};
+pub use types::{BlockFn, NextStep, RecordBlockFn, RecordStep};
 
 /// Whether the `recorder-check` feature is on, for a harness to report which build it ran.
 pub const RECORDER_CHECK: bool = cfg!(feature = "recorder-check");

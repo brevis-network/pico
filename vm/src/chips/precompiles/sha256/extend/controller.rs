@@ -255,7 +255,6 @@ impl<F: PrimeField32> GpuChipBehavior<F> for ShaExtendControlChip<F> {
         device::launched(kernels, stream);
         device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        device::wait(stream).unwrap();
         device::wait(main_stream).unwrap();
 
         TraceData::Gpu(num_cols_per_row, d_trace)

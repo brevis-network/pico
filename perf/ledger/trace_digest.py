@@ -26,6 +26,9 @@ the streams under the history's name fails. `any` (the default) checks neither, 
 before those facts existed. A record that carries no history has a null `trace_source`, so a CPU
 chunk without one fails `history`; deferred records, which carry none, are not checked. `streams`
 reads a ledger written before the streams were removed, when a record could be traced from either.
+The line is written only where a record is copied before its trace generation, as `tracegen-aot`
+copies each; the prover of a prove arm owns its records and traces them in place, writing none, so
+either check fails such a ledger on every CPU chunk.
 
 `--reference-sink` and `--candidate-sink` say what each run's replay workers wrote, read off the
 envelope and every `worker.replay` line: `legacy`, `dual` or `history` requires the envelope's

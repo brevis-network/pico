@@ -1,4 +1,3 @@
-use super::super::emulator::RiscvEmulator;
 use crate::chips::gadgets::{
     curves::weierstrass::bls381::Bls381BaseField, utils::field_params::FieldParameters,
 };
@@ -18,7 +17,7 @@ fn pad_to_be(val: &BigUint, len: usize) -> Vec<u8> {
     bytes
 }
 
-pub fn hook_bls12_381_sqrt(_: &RiscvEmulator, buf: &[u8]) -> Vec<Vec<u8>> {
+pub fn hook_bls12_381_sqrt(buf: &[u8]) -> Vec<Vec<u8>> {
     assert!(buf.len() == 48, "BLS12-381 sqrt input must be 48 bytes");
 
     let field_element = BigUint::from_bytes_be(buf);
@@ -45,7 +44,7 @@ pub fn hook_bls12_381_sqrt(_: &RiscvEmulator, buf: &[u8]) -> Vec<Vec<u8>> {
     vec![vec![1], pad_to_be(&sqrt, 48)]
 }
 
-pub fn hook_bls12_381_inverse(_: &RiscvEmulator, buf: &[u8]) -> Vec<Vec<u8>> {
+pub fn hook_bls12_381_inverse(buf: &[u8]) -> Vec<Vec<u8>> {
     assert!(buf.len() == 48, "BLS12-381 inverse input must be 48 bytes");
 
     let field_element = BigUint::from_bytes_be(buf);

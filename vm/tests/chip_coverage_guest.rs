@@ -3,16 +3,11 @@
 //! the golden height file pins its program, and a run of it reaches what the guest's header
 //! promises.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 use pico_vm::{
     compiler::riscv::opcode::Opcode,
-    emulator::riscv::{
-        emulator::RiscvEmulator,
-        public_values::RecordFinalPvsState,
-        record::{AluStream, EmulationRecord},
-        record_slots::hold_records_unbounded,
-    },
+    emulator::riscv::record::{AluStream, EmulationRecord},
     instances::chiptype::riscv_chiptype::RiscvChipType,
     mle::machine::{
         riscv::{augmented_record, Kb},
@@ -27,24 +22,20 @@ mod chip_coverage;
 #[allow(dead_code)]
 #[path = "common/record_parity.rs"]
 mod record_parity;
-use record_parity::{opts, program, stdin, WHOLE};
+// Only the run on an ELF and an input: this guest is none of the parity guests.
+#[allow(dead_code)]
+#[path = "common/trace_source.rs"]
+mod trace_source;
+use record_parity::{program, WHOLE};
+use trace_source::history_run;
 
+/// Every record a run of the guest emits in chunks of `chunk_size` cycles, held together.
 fn records(chunk_size: u32) -> Vec<EmulationRecord> {
-    let mut emulator = RiscvEmulator::new_single::<Kb>(
-        program(chip_coverage::elf()),
-        Arc::new(RecordFinalPvsState::default()),
-        opts(chunk_size),
-    );
-    emulator.write_stdin(&stdin(&[]));
     let mut records = Vec::new();
-    loop {
-        let report = emulator
-            .emulate_batch(&mut |record| records.push(record))
-            .expect("the chip-coverage guest emulates");
-        if report.done {
-            return records;
-        }
-    }
+    history_run(chip_coverage::elf(), &[], chunk_size, |record| {
+        records.push(record)
+    });
+    records
 }
 
 #[test]
@@ -80,7 +71,6 @@ fn the_golden_heights_pin_the_chip_coverage_guest() {
 /// extra-record pass adds the derived rows the device has to reproduce.
 #[test]
 fn the_chip_coverage_guest_reaches_every_chip_family() {
-    hold_records_unbounded();
     let chips = RiscvChipType::<Kb>::all_chips();
     let records = records(WHOLE);
     let mut heights = BTreeMap::<String, usize>::new();
@@ -160,7 +150,6 @@ fn the_chip_coverage_guest_reaches_every_chip_family() {
 /// The 256 back-to-back ECALLs hold a whole chunk at a size below that.
 #[test]
 fn a_chip_coverage_chunk_opens_and_closes_on_an_ecall() {
-    hold_records_unbounded();
     let records = records(64);
     let found = records.iter().filter(|r| r.is_cpu_chunk).any(|record| {
         let steps = record.cpu_steps();

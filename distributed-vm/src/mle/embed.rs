@@ -19,7 +19,7 @@ use pico_vm::{
 };
 
 #[cfg(feature = "cuda")]
-use pico_vm::{compiler::riscv::program::Program, emulator::stdin::EmulatorStdin};
+use pico_vm::emulator::stdin::EmulatorStdin;
 
 #[cfg(feature = "cuda")]
 use super::{config::Step, run_step, BlockJob, MleSingleNodeConfig, RootProofExport};
@@ -259,10 +259,7 @@ static POISONED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 /// The memory tier is latched as [`init_memory_tier`] does; a caller that emulates before its
 /// first call should run that first.
 #[cfg(feature = "cuda")]
-pub fn prove(
-    program: EmbeddedProgram,
-    stdin: EmulatorStdin<Program, Vec<u8>>,
-) -> Result<EmbeddedProof, EmbedError> {
+pub fn prove(program: EmbeddedProgram, stdin: EmulatorStdin) -> Result<EmbeddedProof, EmbedError> {
     static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     if POISONED.load(Ordering::Acquire) {

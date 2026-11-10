@@ -17,8 +17,9 @@ fn main() {
     }));
     // Register the AOT emulation factory when built with `aot-emulator` (no-op otherwise).
     distributed_vm::init_optional_aot();
-    // The replay workers' engine is resolved here, after the registration `MLE_REPLAY_WORKERS=aot`
-    // needs, so a value this process cannot honour refuses to start before any setup.
+    // The replay workers' engine is resolved here, after the registration the AOT default and
+    // `MLE_REPLAY_WORKERS=aot` need, so a value this process cannot honour refuses to start
+    // before any setup.
     mle::replay_workers();
     let cfg = MleSingleNodeConfig::parse();
 

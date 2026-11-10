@@ -76,7 +76,9 @@ pub const MLE_RISCV_MAIN_LOG_HEIGHTS: &[(&str, usize)] = &[
     ("MemoryInitialize", 22),
     ("MemoryFinalize", 22),
     // ── precompile family: max(full-block threshold, tail-merge cap) per kind ──
-    ("KeccakPermute", 20),
+    // The sliced layout: a full block is 2 * floor(2^19 / 27) = 38836 permutations in 2^19 rows
+    // (`EmulationRecord::split`), and a tail remainder is smaller.
+    ("KeccakPermute", 19),
     ("ShaExtend", 20),
     ("ShaCompress", 20),
     // Control siblings and the precompile syscall receiver follow
@@ -85,6 +87,9 @@ pub const MLE_RISCV_MAIN_LOG_HEIGHTS: &[(&str, usize)] = &[
     ("ShaExtendControl", 15),
     ("ShaCompressControl", 14),
     ("SyscallPrecompile", 17), // the 1-row/event kinds at 2^17 dominate here
+    // The sliced Keccak lookup tables, fixed at their full height in every Keccak chunk
+    // (`precompile_tables`).
+    ("KeccakTables", 20),
     // 1 row per event, capped by TAIL_MERGE_MAX_WIDE_ROWS = 2^17.
     ("Uint256MulMod", 17),
     ("Secp256k1AddAssign", 17),
@@ -1004,10 +1009,43 @@ fn memory_lookups_per_row(chip_name: &str) -> usize {
         .unwrap_or_else(|| panic!("no chip named `{chip_name}` in the RISC-V machine"))
 }
 
+/// The event counts whose kind trace pads to exactly `2^kind_log_height`: `(n_lo, n_hi)`, or
+/// `None` when no count does. The rows are `precompile_kind_rows`, which grows with `n`, so the
+/// counts form one interval, found by bisection over `[1, 2^kind_log_height]` (a trace holds at
+/// least a row per event).
+pub(crate) fn kind_event_window(kind: &str, kind_log_height: usize) -> Option<(usize, usize)> {
+    use crate::instances::compiler::shapes::riscv_shape::precompile_kind_rows;
+    let log = |n: usize| {
+        (precompile_kind_rows(kind, n)
+            .max(1)
+            .next_power_of_two()
+            .ilog2() as usize)
+            .max(MLE_MIN_LOG_HEIGHT)
+    };
+    // The first `n` in `[lo, hi]` where `pred` holds, `pred` false-then-true; `hi + 1` if none.
+    let first = |mut lo: usize, mut hi: usize, pred: &dyn Fn(usize) -> bool| {
+        hi += 1;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if pred(mid) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        lo
+    };
+    let max = 1usize << kind_log_height;
+    let n_hi = first(1, max, &|n| log(n) > kind_log_height) - 1;
+    let n_lo = first(1, max, &|n| log(n) >= kind_log_height);
+    (n_lo >= 1 && n_lo <= n_hi).then_some((n_lo, n_hi))
+}
+
 /// Every shape the precompile family admits.
 ///
 /// A precompile chunk has TWO free variables, not one. The event count `n` of the compute kind
-/// drives the kind's own height (`n * rows_per_event`) and, one row per event, its syscall and
+/// drives the kind's own height (`precompile_kind_rows`: `n * rows_per_event`, or the sliced Keccak's
+/// slot layout) and, one row per event, its syscall and
 /// control siblings. But MemoryLocal counts the DISTINCT ADDRESSES the chunk touches, which
 /// address locality decides, not `n`: the corpus pins no per-event constant that explains it,
 /// and for Uint256MulMod the bracket its rows imply is empty. So MemoryLocal is swept, bounded
@@ -1060,20 +1098,17 @@ pub fn mle_precompile_shapes() -> Vec<MlePrecompileShape> {
         let control_cap = control.map(|c| bucket_log_height(c, false));
 
         for kind_log_height in MLE_MIN_LOG_HEIGHT..=kind_cap {
-            // Event counts this kind height admits: the kind air pads `n * rows_per_event` up to
-            // `2^kind_log_height`, so `n` spans a factor of two (clipped at the floor).
-            let rows_hi = 1u128 << kind_log_height;
-            let rows_lo = if kind_log_height == MLE_MIN_LOG_HEIGHT {
-                1
-            } else {
-                (1u128 << (kind_log_height - 1)) + 1
-            };
-            let n_hi = rows_hi / rows_per_event;
-            let n_lo = rows_lo.div_ceil(rows_per_event).max(1);
-            if n_hi < n_lo {
+            // Event counts this kind height admits: the kind air pads its rows
+            // (`precompile_kind_rows`) up to `2^kind_log_height`, so `n` spans a factor of two
+            // (clipped at the floor). A height the layout never lands on (the sliced Keccak's
+            // 2^9) admits none.
+            let Some((n_lo, n_hi)) = kind_event_window(&kind, kind_log_height) else {
                 continue;
-            }
-            for syscall in [log2_ceil(n_lo), log2_ceil(n_hi)] {
+            };
+            let (n_lo, n_hi) = (n_lo as u128, n_hi as u128);
+            // Two values for a window of a factor of two; the sliced Keccak's 2^10 window, which
+            // takes the counts 2^9 would have held, spans a factor of four.
+            for syscall in log2_ceil(n_lo)..=log2_ceil(n_hi) {
                 if syscall > syscall_cap || control_cap.is_some_and(|c| syscall > c) {
                     continue;
                 }
@@ -1206,6 +1241,11 @@ pub fn mle_riscv_shapes() -> Vec<(String, Vec<(String, usize)>)> {
         if let Some((name, h)) = s.control.clone() {
             shape.push((name, h));
         }
+        shape.extend(
+            crate::instances::compiler::shapes::riscv_shape::precompile_tables(&s.kind)
+                .iter()
+                .map(|(name, h)| (name.to_string(), *h)),
+        );
         out.push((
             format!(
                 "precompile:{}:{}/{}/{}/{}",
@@ -1305,7 +1345,9 @@ pub fn mle_natural_heights(record: &EmulationRecord) -> BTreeMap<String, usize> 
         // A precompile chunk carries exactly one compute kind (`split` puts each kind in its own
         // record), its control sibling if it has one, and the shared companions.
         use crate::{
-            instances::compiler::shapes::riscv_shape::precompile_rows_per_event,
+            instances::compiler::shapes::riscv_shape::{
+                precompile_syscall_code, precompile_tables,
+            },
             primitives::consts::LOCAL_MEMORY_DATAPAR,
         };
         for kind in precompile_kinds() {
@@ -1314,9 +1356,15 @@ pub fn mle_natural_heights(record: &EmulationRecord) -> BTreeMap<String, usize> 
             else {
                 continue;
             };
-            let events = kind_rows / precompile_rows_per_event(kind);
+            let events = record
+                .precompile_events
+                .get_events(precompile_syscall_code(kind))
+                .map_or(0, |events| events.len());
             if let Some(control) = precompile_control_sibling(kind) {
                 out.insert(control.to_string(), events);
+            }
+            for (table, log) in precompile_tables(kind) {
+                out.insert(table.to_string(), 1 << log);
             }
             out.insert(kind.clone(), kind_rows);
             out.insert("SyscallPrecompile".to_string(), events);
@@ -1374,7 +1422,7 @@ pub fn mle_natural_heights_from_counter(
         // row for row; `MLE_SHAPE_CROSSCHECK=1` asserts it.
         use crate::{
             instances::compiler::shapes::riscv_shape::{
-                precompile_rows_per_event, precompile_syscall_code,
+                precompile_kind_rows, precompile_syscall_code, precompile_tables,
             },
             primitives::consts::LOCAL_MEMORY_DATAPAR,
         };
@@ -1408,7 +1456,10 @@ pub fn mle_natural_heights_from_counter(
                 if let Some(control) = precompile_control_sibling(kind) {
                     out.insert(control.to_string(), events);
                 }
-                out.insert(kind.clone(), events * precompile_rows_per_event(kind));
+                for (table, log) in precompile_tables(kind) {
+                    out.insert(table.to_string(), 1 << log);
+                }
+                out.insert(kind.clone(), precompile_kind_rows(kind, events));
                 out.insert("SyscallPrecompile".to_string(), events);
                 out.insert(
                     "MemoryLocal".to_string(),
@@ -1768,7 +1819,9 @@ pub enum RecursionTier {
 /// actually produces need W = 15..42. With rows, each child pads to the nearest row above it
 /// and the combine machine learns one child layout per row (`preregister_standard_shapes`).
 ///
-/// Row 0 (W 19) holds 14,085 of the 15,646 whitelist shapes: core classes 0 to 3, 7,539 of
+/// Of the 15,604 whitelist shapes since the sliced Keccak (with PackBlock one notch up in
+/// rows 1 and 2), row 0 holds 14,085, row 1 1,503 and row 2 16 (`mle_tier_probe`, 2026-11-07).
+/// Before it, row 0 (W 19) held 14,085 of the 15,646 whitelist shapes: core classes 0 to 3, 7,539 of
 /// the 7,980 memory shapes and the small shapes of every precompile kind but keccak (all 284
 /// shapes of the two Ed25519 precompiles among them); row 1 (W 42) 1,482: core classes 4 to 27,
 /// where the corpus's core chunks sit on KoalaBear⁵ (Poseidon2Packed at 2^18), the keccak
@@ -1828,7 +1881,9 @@ pub const MLE_RECURSION_CONVERT_LADDER: &[&[(&str, usize)]] = &[
         ("MleOpen", 12),
         ("DigestSelect", 15),
         ("BinaryFoldStep", 14),
-        ("PackBlock", 13),
+        // One notch over the fit for the sliced Keccak children, whose table AIR's own
+        // preprocessed commitment adds ~1k PackBlock rows the other children do not have.
+        ("PackBlock", 14),
         ("GkrSumcheckRound", 9),
         ("FracFold", 5),
         ("LagrangeEvalD2", 6),
@@ -1856,7 +1911,7 @@ pub const MLE_RECURSION_CONVERT_LADDER: &[&[(&str, usize)]] = &[
         ("MleOpen", 13),
         ("DigestSelect", 15),
         ("BinaryFoldStep", 14),
-        ("PackBlock", 13),
+        ("PackBlock", 14), // as in row 1 (sliced Keccak children)
         ("GkrSumcheckRound", 9),
         ("FracFold", 5),
         ("LagrangeEvalD2", 6),
@@ -2027,7 +2082,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(seen, 51, "the machine's air list changed size");
+        assert_eq!(seen, 52, "the machine's air list changed size");
     }
 
     /// The three kinds the split sizes by the hardware-tier threshold rather than by cells: their
@@ -2059,6 +2114,50 @@ mod tests {
                 bucket_log_height(kind, false)
             );
         }
+    }
+
+    /// The sliced Keccak: a full split block (`EmulationRecord::split`, 38836 permutations) fits its
+    /// catch-all, the 2^4 and 2^9 heights its layout skips admit no event count, every other height up to
+    /// the catch-all admits a window, and the table entries are the tables' real height.
+    #[test]
+    fn sliced_keccak_shapes_match_the_layout() {
+        use crate::{
+            chips::precompiles::keccak256::sliced::{sliced_height, TABLE_ROWS},
+            instances::compiler::shapes::riscv_shape::precompile_tables,
+        };
+        let cap = bucket_log_height("KeccakPermute", false);
+        assert_eq!(sliced_height(2 * ((1 << 19) / 27)), 1 << cap);
+        assert!(sliced_height(2 * ((1 << 19) / 27) + 1) > 1 << cap);
+        // 2^4 is under one 27-row slot; 2^9 would end on a clk-25 row and doubles.
+        assert_eq!(kind_event_window("KeccakPermute", 4), None);
+        assert_eq!(kind_event_window("KeccakPermute", 9), None);
+        for k in (MLE_MIN_LOG_HEIGHT..=cap).filter(|k| *k != 4 && *k != 9) {
+            let (lo, hi) = kind_event_window("KeccakPermute", k)
+                .unwrap_or_else(|| panic!("no event count lands on 2^{k}"));
+            for n in [lo, hi] {
+                assert_eq!(sliced_height(n), 1 << k, "n = {n} at 2^{k}");
+            }
+            assert!(lo == 1 || sliced_height(lo - 1) < 1 << k);
+            assert!(sliced_height(hi + 1) > 1 << k);
+        }
+        for (table, log) in precompile_tables("KeccakPermute") {
+            assert_eq!(1 << log, TABLE_ROWS, "{table}");
+            assert_eq!(bucket_log_height(table, false), *log, "{table}");
+        }
+        // The linear kinds keep the closed form the enumeration had before the window search.
+        for (kind, rpe, k) in [("ShaCompress", 80usize, 12usize), ("Uint256MulMod", 1, 4)] {
+            let lo = if k == MLE_MIN_LOG_HEIGHT {
+                1
+            } else {
+                ((1 << (k - 1)) + 1usize).div_ceil(rpe)
+            };
+            assert_eq!(
+                kind_event_window(kind, k),
+                Some((lo, (1 << k) / rpe)),
+                "{kind} 2^{k}"
+            );
+        }
+        assert_eq!(kind_event_window("ShaCompress", 6), None);
     }
 
     /// The program table's preprocessed height and its main multiplicity trace must agree.
@@ -2253,7 +2352,9 @@ mod tests {
         use crate::{
             instances::{
                 chiptype::riscv_chiptype::RiscvChipType,
-                compiler::shapes::riscv_shape::precompile_rows_per_event,
+                compiler::shapes::riscv_shape::{
+                    precompile_kind_rows, precompile_rows_per_event, precompile_tables,
+                },
             },
             primitives::consts::{LOCAL_MEMORY_DATAPAR, RISCV_POSEIDON2_DATAPAR},
         };
@@ -2269,7 +2370,7 @@ mod tests {
             let mem_per_event = rows_per_event * memory_lookups_per_row(&kind)
                 + control.map_or(0, memory_lookups_per_row);
             let n_max = [
-                (1usize << bucket_log_height(&kind, false)) / rows_per_event,
+                kind_event_window(&kind, bucket_log_height(&kind, false)).map_or(0, |(_, hi)| hi),
                 1 << bucket_log_height("SyscallPrecompile", false),
                 control.map_or(usize::MAX, |c| 1 << bucket_log_height(c, false)),
             ]
@@ -2279,9 +2380,9 @@ mod tests {
             // Where the syscall's height turns over, and where the kind's does.
             let mut ns = edges(n_max);
             ns.extend(
-                (0..usize::BITS)
-                    .map(|k| (1usize << k) / rows_per_event)
-                    .flat_map(|n| [n, n + 1])
+                (MLE_MIN_LOG_HEIGHT..=bucket_log_height(&kind, false))
+                    .filter_map(|k| kind_event_window(&kind, k))
+                    .flat_map(|(lo, hi)| [lo, hi, hi + 1])
                     .filter(|n| (1..=n_max).contains(n)),
             );
             for n in ns {
@@ -2307,7 +2408,7 @@ mod tests {
                 for local in locals.into_iter().filter(|l| (1..=local_max).contains(l)) {
                     let events = 2 * local + n;
                     let mut natural = vec![
-                        (kind.as_str(), n * rows_per_event),
+                        (kind.as_str(), precompile_kind_rows(&kind, n)),
                         ("SyscallPrecompile", n),
                         ("MemoryLocal", local.div_ceil(LOCAL_MEMORY_DATAPAR)),
                         ("Global", events + 1),
@@ -2317,6 +2418,7 @@ mod tests {
                         ),
                     ];
                     natural.extend(control.map(|c| (c, n)));
+                    natural.extend(precompile_tables(&kind).iter().map(|(t, h)| (*t, 1 << h)));
                     select_deferred(&natural);
                     power_of_two_counts += usize::from(events.is_power_of_two());
                 }
@@ -2382,7 +2484,7 @@ mod tests {
     /// shipped-artifact test derives the same count from the config and holds the artifact to it.
     #[test]
     fn the_whitelist_shape_count_is_pinned() {
-        assert_eq!(mle_riscv_shapes().len(), 15_646, "riscv whitelist shapes");
+        assert_eq!(mle_riscv_shapes().len(), 15_604, "riscv whitelist shapes");
     }
 
     /// The whitelist builder checkpoints keygens by shape CONTENT, so two admitted shapes must
@@ -2433,6 +2535,7 @@ mod tests {
             pc_base: 0,
             memory_image: Default::default(),
             preprocessed_shape: None,
+            profiled_functions: Default::default(),
         };
         let airs = mle_riscv_air_refs(Arc::new(program), true);
         let (_, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);

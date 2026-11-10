@@ -19,8 +19,10 @@ use tracing::instrument;
 
 use super::errors::InteractionGpuError;
 use crate::{
-    cuda::field_kernels::FieldKernels, data_transporter::transport_matrix_d2h_col_major,
-    gpu_backend::GenericGpuBackend, hash_scheme::GpuHashScheme,
+    cuda::field_kernels::{FieldKernels, GkrInputRows},
+    data_transporter::transport_matrix_d2h_col_major,
+    gpu_backend::GenericGpuBackend,
+    hash_scheme::GpuHashScheme,
 };
 
 const GKR_TASKS: u32 = 65536;
@@ -94,9 +96,22 @@ pub fn collect_trace_interactions<
         .collect()
 }
 
+/// The GKR input evaluation's output: the leaves (or a segmented input's storage) and, segmented,
+/// the padding leaves.
+pub struct GkrInputs<E> {
+    pub leaves: DeviceBuffer<Frac<E>>,
+    pub alpha: E,
+    pub consts: Option<DeviceBuffer<Frac<E>>>,
+}
+
 /// Evaluates the interactions over the trace evaluation matrices, producing the (p, q) leaves
 /// that feed the fractional sumcheck. The leaves come back without alpha; alpha is returned
 /// alongside so the first tree layer can add it.
+///
+/// With `seg`, the output is that segmented input (`seg_virtual`): each trace's stored rows go to
+/// its place in the storage buffer, and its padding leaves, taken from the first row not stored,
+/// to the constants table. The last row is evaluated too, and every trace's padding leaf must equal
+/// it: a cheap check of the `real_rows` hint the plan was built from.
 #[allow(clippy::too_many_arguments)]
 #[instrument(name = "prover.rap_constraints.logup_gkr.input_evals", skip_all)]
 pub fn log_gkr_input_evals<
@@ -116,9 +131,14 @@ pub fn log_gkr_input_evals<
     // Allocate only the `used_leaves` real leaves and leave the padding to the virtual GKR tree
     // (`fractional::use_virtual_padding`) instead of materialising `total_leaves`.
     virtual_padding: bool,
-) -> Result<(DeviceBuffer<Frac<FK::ValExt>>, FK::ValExt), InteractionGpuError> {
+    seg: Option<&super::seg_virtual::SegPlan>,
+) -> Result<GkrInputs<FK::ValExt>, InteractionGpuError> {
     if trace_interactions.iter().all(|meta| meta.is_none()) {
-        return Ok((DeviceBuffer::new(), alpha_logup));
+        return Ok(GkrInputs {
+            leaves: DeviceBuffer::new(),
+            alpha: alpha_logup,
+            consts: None,
+        });
     }
 
     let t_fz = std::time::Instant::now();
@@ -129,18 +149,39 @@ pub fn log_gkr_input_evals<
     // A virtual buffer is rounded up to a 1/64 of the logical length, so that the cached region,
     // which is reused only when its recorded length suffices, is not reallocated whenever the next
     // prove has a few more real leaves.
-    let alloc_len = if virtual_padding {
+    let alloc_len = if let Some(plan) = seg {
+        let granule = (total_leaves / 64).max(1);
+        plan.storage_len.next_multiple_of(granule).min(total_leaves)
+    } else if virtual_padding {
         let granule = (total_leaves / 64).max(1);
         used_leaves.next_multiple_of(granule).min(total_leaves)
     } else {
         total_leaves
     };
     let leaves = super::buf_cache_checkout::<Frac<FK::ValExt>>("gkr_leaves", alloc_len);
+    // Segmented: where each trace goes, and the padding rows evaluated per padding leaf: the
+    // first SEG_CHECK_WINDOW padding rows (the first is the leaf), a middle one and the last one.
+    let seg_writes: std::collections::HashMap<usize, super::seg_virtual::SlabWrite> = seg
+        .map(|plan| plan.writes.iter().map(|w| (w.trace_idx, *w)).collect())
+        .unwrap_or_default();
+    let pad_rows = match seg {
+        Some(plan) => {
+            let k = DeviceBuffer::<Frac<FK::ValExt>>::with_capacity(plan.n_consts * SEG_CHECK_LEN);
+            k.fill_zero()?;
+            if plan.zero_fill.1 > 0 {
+                leaves.fill_zero_suffix(plan.zero_fill.0)?;
+            }
+            Some(k)
+        }
+        None => None,
+    };
+    // (padding leaf, AIR, interaction, rows evaluated) of each checked padding leaf.
+    let mut konst_owner: Vec<(usize, String, usize, usize)> = Vec::new();
     // The interaction kernels fully write `[0, used_leaves)` (the stacked interaction slices are
     // contiguous from row 0; short traces are filled via vertical repeat) — only the pow2 padding
     // tail needs zeroing (8.6 GiB memset → ~1.5 GiB). A virtual buffer has no padding: the tree
     // never reads past `used_leaves`.
-    if !virtual_padding && used_leaves < alloc_len {
+    if seg.is_none() && !virtual_padding && used_leaves < alloc_len {
         leaves.fill_zero_suffix(used_leaves)?;
     }
     if std::env::var("STEP_PROF").is_ok() {
@@ -215,16 +256,34 @@ pub fn log_gkr_input_evals<
             crate::scratch::alloc::<FK::ValExt>(1)
         };
 
-        let num_rows_per_tile = height.div_ceil(GKR_TASKS as usize).max(1);
-
         let slice = meta.layout_slices.first().unwrap();
         if slice.col_idx != 0 {
             return Err(InteractionGpuError::Layout);
         }
-        let dst_offset = slice.row_idx;
         let lifted_height = max(height, 1 << l_skip);
         debug_assert_eq!(slice.len(l_skip), lifted_height);
-        // SAFETY: by definition of interactions stacked layout, `leaves` has enough capacity
+        // Dense: the slice's offset, every row. Segmented: the trace's storage base and stored rows
+        // (every row of a short trace).
+        let write = if seg.is_some() {
+            Some(
+                *seg_writes
+                    .get(&meta.trace_idx)
+                    .ok_or(InteractionGpuError::Layout)?,
+            )
+        } else {
+            None
+        };
+        let dst_offset = write.map_or(slice.row_idx, |w| w.base);
+        let main_rows = match write {
+            Some(w) if height == lifted_height => GkrInputRows {
+                row0: 0,
+                n_eval: w.rows as u32,
+                out_stride: w.rows as u32,
+            },
+            _ => GkrInputRows::all(height as u32),
+        };
+        // SAFETY: by definition of interactions stacked layout (or the segmented plan), `leaves`
+        // has enough capacity
         let leaves_ptr = unsafe { leaves.as_mut_ptr().add(dst_offset) };
 
         let trace_output = if height != lifted_height {
@@ -323,7 +382,10 @@ pub fn log_gkr_input_evals<
         };
 
         // Run the GPU input-eval kernel into `trace_output`.
-        let run_gpu = |trace_output: *mut Frac<FK::ValExt>| -> Result<(), InteractionGpuError> {
+        let run_gpu = |trace_output: *mut Frac<FK::ValExt>,
+                       rows: GkrInputRows|
+         -> Result<(), InteractionGpuError> {
+            let num_rows_per_tile = (rows.n_eval as usize).div_ceil(GKR_TASKS as usize).max(1);
             unsafe {
                 FK::logup_gkr_input_eval(
                     is_global,
@@ -338,13 +400,15 @@ pub fn log_gkr_input_evals<
                     &rules.d_pair_idxs,
                     height as u32,
                     num_rows_per_tile as u32,
+                    rows,
                 )?;
             }
             Ok(())
         };
 
         use crate::runtime::d_buffer::DeviceBuffer as DevBuf;
-        let verify_input_eval = crate::cuda::jit::env_flag("MLE_VERIFY_INPUT_EVAL", false);
+        let verify_input_eval =
+            seg.is_none() && crate::cuda::jit::env_flag("MLE_VERIFY_INPUT_EVAL", false);
 
         if FK::use_cpu_gkr_input_eval() {
             // CPU fallback path: compute on CPU and upload to trace_output.
@@ -366,7 +430,7 @@ pub fn log_gkr_input_evals<
             if verify_input_eval {
                 use crate::runtime::copy::MemCopyD2H;
                 let scratch = DevBuf::<Frac<FK::ValExt>>::with_capacity(height * num_interactions);
-                run_gpu(scratch.as_mut_ptr())?;
+                run_gpu(scratch.as_mut_ptr(), GkrInputRows::all(height as u32))?;
                 let gpu_fracs: Vec<Frac<FK::ValExt>> =
                     scratch.to_host().map_err(InteractionGpuError::Copy)?;
                 let mut mism = 0usize;
@@ -429,7 +493,8 @@ pub fn log_gkr_input_evals<
                     .copied()
             });
             let launch_jit = |out: *mut Frac<FK::ValExt>,
-                              kernel: crate::cuda::jit::JitKernel|
+                              kernel: crate::cuda::jit::JitKernel,
+                              rows: GkrInputRows|
              -> Result<(), String> {
                 use std::ffi::c_void;
                 let mut p_out = out as *mut c_void;
@@ -438,7 +503,9 @@ pub fn log_gkr_input_evals<
                 let mut p_pub = d_public_values.as_ptr() as *mut c_void;
                 let mut p_chal = d_challenges.as_ptr() as *mut c_void;
                 let mut v_h: u32 = height as u32;
-                let mut v_n: u32 = height as u32;
+                let mut v_n: u32 = rows.n_eval;
+                let mut v_r0: u32 = rows.row0;
+                let mut v_s: u32 = rows.out_stride;
                 let mut params = [
                     &mut p_out as *mut _ as *mut c_void,
                     &mut p_parts as *mut _ as *mut c_void,
@@ -447,8 +514,13 @@ pub fn log_gkr_input_evals<
                     &mut p_chal as *mut _ as *mut c_void,
                     &mut v_h as *mut u32 as *mut c_void,
                     &mut v_n as *mut u32 as *mut c_void,
+                    &mut v_r0 as *mut u32 as *mut c_void,
+                    &mut v_s as *mut u32 as *mut c_void,
                 ];
-                let grid = (height as u32).div_ceil(256);
+                if rows.n_eval == 0 {
+                    return Ok(());
+                }
+                let grid = rows.n_eval.div_ceil(256);
                 unsafe { kernel.launch(grid, 256, 0, &mut params) }
             };
             // The proof takes the interpreter's output under `G1_JIT_VERIFY` and after a failed
@@ -461,14 +533,16 @@ pub fn log_gkr_input_evals<
             match jit {
                 // Off unless explicitly on — it allocates a device-side reference buffer per
                 // launch; see the `Z1_JIT_VERIFY` note in `round0.rs`.
-                Some(kernel) if crate::cuda::jit::env_flag("G1_JIT_VERIFY", false) => {
+                Some(kernel)
+                    if seg.is_none() && crate::cuda::jit::env_flag("G1_JIT_VERIFY", false) =>
+                {
                     // Verify: JIT into scratch, interpreter into the real output, compare.
                     use crate::runtime::copy::MemCopyD2H;
                     let scratch =
                         DevBuf::<Frac<FK::ValExt>>::with_capacity(height * num_interactions);
-                    let jit_ok = launch_jit(scratch.as_mut_ptr(), kernel);
+                    let jit_ok = launch_jit(scratch.as_mut_ptr(), kernel, main_rows);
                     crate::air_times::note_path("interpreter");
-                    run_gpu(trace_output)?;
+                    run_gpu(trace_output, main_rows)?;
                     match jit_ok {
                         Ok(()) => {
                             let a: Vec<Frac<FK::ValExt>> =
@@ -508,7 +582,7 @@ pub fn log_gkr_input_evals<
                     }
                 }
                 Some(kernel) => {
-                    if let Err(e) = launch_jit(trace_output, kernel) {
+                    if let Err(e) = launch_jit(trace_output, kernel, main_rows) {
                         // The bound device is part of the diagnosis, not decoration: a handle
                         // loaded on another card fails here with `CUDA_ERROR_INVALID_HANDLE` (400),
                         // and without the device printed that is indistinguishable from an ordinary
@@ -520,12 +594,38 @@ pub fn log_gkr_input_evals<
                             crate::runtime::context::get_device()
                         );
                         crate::air_times::note_path("interpreter");
-                        run_gpu(trace_output)?;
+                        run_gpu(trace_output, main_rows)?;
                     }
                 }
                 None => {
                     // GPU interpreter path.
-                    run_gpu(trace_output)?;
+                    run_gpu(trace_output, main_rows)?;
+                }
+            }
+            // Segmented: the padding rows to check, the first of them the padding leaf.
+            if let (Some(w), Some(k)) = (write, pad_rows.as_ref()) {
+                if let Some(konst) = w.konst {
+                    let window = SEG_CHECK_WINDOW.min(height - w.rows);
+                    for i in 0..num_interactions {
+                        konst_owner.push((konst as usize + i, pk_air.air_name.clone(), i, window));
+                    }
+                    let base = unsafe { k.as_mut_ptr().add(konst as usize * SEG_CHECK_LEN) };
+                    for (at, row0, n_eval) in [
+                        (0, w.rows, window),
+                        (SEG_CHECK_WINDOW, w.rows + (height - w.rows) / 2, 1),
+                        (SEG_CHECK_WINDOW + 1, height - 1, 1),
+                    ] {
+                        let out = unsafe { base.add(at) };
+                        let rows = GkrInputRows {
+                            row0: row0 as u32,
+                            n_eval: n_eval as u32,
+                            out_stride: SEG_CHECK_LEN as u32,
+                        };
+                        match jit {
+                            Some(kernel) if launch_jit(out, kernel, rows).is_ok() => {}
+                            _ => run_gpu(out, rows)?,
+                        }
+                    }
                 }
             }
         }
@@ -551,7 +651,57 @@ pub fn log_gkr_input_evals<
         crate::air_times::stop(air_time, &pk_air.air_name, "gkr_input");
     }
 
+    let consts = match (seg, pad_rows) {
+        (Some(plan), Some(k)) => {
+            // Every padding row of a trace must evaluate to one leaf. A trace whose padding is not
+            // constant (a multi-row event layout, say) fails here, and the caller proves this input
+            // without segmenting and stops trusting that AIR's real_rows.
+            let checked: Vec<Frac<FK::ValExt>> = k.to_host()?;
+            let mut bad: Vec<String> = Vec::new();
+            for (konst, air, interaction, window) in &konst_owner {
+                let row = &checked[konst * SEG_CHECK_LEN..(konst + 1) * SEG_CHECK_LEN];
+                let first = row[0];
+                let mut others = row[1..*window]
+                    .iter()
+                    .chain(&row[SEG_CHECK_WINDOW..SEG_CHECK_LEN]);
+                if others.any(|x| x.p != first.p || x.q != first.q) {
+                    tracing::warn!(
+                        target: "bench",
+                        "[gkr-seg] {air} interaction {interaction}: padding rows are not constant"
+                    );
+                    if !bad.contains(air) {
+                        bad.push(air.clone());
+                    }
+                }
+            }
+            if !bad.is_empty() {
+                super::buf_cache_checkin("gkr_leaves", leaves);
+                return Err(InteractionGpuError::SegPadding(bad));
+            }
+            let mut host = vec![
+                Frac {
+                    p: FK::ValExt::ZERO,
+                    q: FK::ValExt::ZERO
+                };
+                plan.n_consts
+            ];
+            for (konst, ..) in &konst_owner {
+                host[*konst] = checked[konst * SEG_CHECK_LEN];
+            }
+            Some(host.to_device()?)
+        }
+        _ => None,
+    };
     // alpha is deliberately left out of the leaves: `fractional_sumcheck_gpu` adds it while
     // building the first tree layer, which saves a separate pass over memory.
-    Ok((leaves, alpha_logup))
+    Ok(GkrInputs {
+        leaves,
+        alpha: alpha_logup,
+        consts,
+    })
 }
+
+/// Padding rows checked per padding leaf of a segmented input: the first SEG_CHECK_WINDOW (any
+/// period up to it shows), then a middle and the last row.
+const SEG_CHECK_WINDOW: usize = 32;
+const SEG_CHECK_LEN: usize = SEG_CHECK_WINDOW + 2;

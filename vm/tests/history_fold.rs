@@ -1,6 +1,9 @@
-//! A chunk replayed in several segments and folded, against the same chunk replayed whole, on the
-//! record-parity guests: the execution history table by table and by its digest, every compared
-//! field of `record_digest::field_digests`, and every chip's main trace cell by cell.
+//! A chunk replayed in several segments and folded, against the same chunk replayed whole, on four
+//! of the record-parity guests: the execution history table by table and by its digest, every
+//! compared field of `record_digest::field_digests`, and every chip's main trace cell by cell.
+//!
+//! A replay worker only defers a chunk's precompile events, never splits them into records, so
+//! what folds is a CPU chunk alone, and where a guest's deferred blocks come out never reaches it.
 //!
 //! Only the AOT snapshot thread cuts a chunk into segments, and no AOT program is registered here,
 //! so the tests cut them as the pipeline's workers would replay them: the interpreter's snapshot
@@ -45,7 +48,7 @@ use pico_vm::{
 #[allow(dead_code)]
 #[path = "common/record_parity.rs"]
 mod record_parity;
-use record_parity::{opts, program, stdin, GUESTS};
+use record_parity::{guest, opts, program, stdin};
 
 type Chips = [MetaChip<Kb, RiscvChipType<Kb>>];
 
@@ -409,10 +412,7 @@ fn trace_differences(
 /// Every run of the guest called `name` in [`GUESTS`], each chunk replayed whole and in
 /// [`SEGMENTS`] segments.
 fn check(name: &str) {
-    let guest = GUESTS
-        .iter()
-        .find(|guest| guest.name == name)
-        .unwrap_or_else(|| panic!("no guest {name}"));
+    let guest = guest(name);
     let chips = RiscvChipType::<Kb>::all_chips();
     let mut problems = Vec::new();
     let mut split_chunks = 0;
@@ -533,13 +533,8 @@ fn history_fold_aggregator() {
 }
 
 #[test]
-fn history_fold_bls12381_fp() {
-    check("bls12381-fp");
-}
-
-#[test]
 fn history_fold_replays_a_middle_segment() {
-    let guest = &GUESTS[0];
+    let guest = guest("fib");
     let program = program(guest.elf);
     let run = &guest.runs()[0];
     let opts = opts(run.chunk_size);

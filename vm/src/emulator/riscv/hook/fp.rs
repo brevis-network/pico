@@ -1,4 +1,3 @@
-use super::super::emulator::RiscvEmulator;
 use num_bigint::BigUint;
 use num_traits::{One, Zero};
 
@@ -9,7 +8,7 @@ fn pad_to_be(val: &BigUint, len: usize) -> Vec<u8> {
     bytes
 }
 
-pub fn hook_fp_inverse(_: &RiscvEmulator, buf: &[u8]) -> Vec<Vec<u8>> {
+pub fn hook_fp_inverse(buf: &[u8]) -> Vec<Vec<u8>> {
     let len: usize = u32::from_be_bytes(buf[0..4].try_into().unwrap()) as usize;
 
     assert!(buf.len() == 4 + 2 * len, "FpOp Hook: Invalid buffer length");
@@ -25,7 +24,7 @@ pub fn hook_fp_inverse(_: &RiscvEmulator, buf: &[u8]) -> Vec<Vec<u8>> {
     vec![pad_to_be(&inverse, len)]
 }
 
-pub fn hook_fp_sqrt(_: &RiscvEmulator, buf: &[u8]) -> Vec<Vec<u8>> {
+pub fn hook_fp_sqrt(buf: &[u8]) -> Vec<Vec<u8>> {
     let len: usize = u32::from_be_bytes(buf[0..4].try_into().unwrap()) as usize;
 
     assert!(buf.len() == 4 + 3 * len, "FpOp Hook: Invalid buffer length");

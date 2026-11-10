@@ -1,5 +1,4 @@
 use anyhow::Error;
-use pico_vm::{configs::config::StarkGenericConfig, emulator::stdin::EmulatorStdin};
 use std::{env, fs};
 
 #[derive(Clone, Copy, Debug)]
@@ -118,20 +117,4 @@ pub fn load_input(input: &str) -> Result<Vec<u8>, Error> {
     } else {
         Ok(fs::read(input)?)
     }
-}
-
-#[allow(clippy::type_complexity)]
-pub fn load<P, SC: StarkGenericConfig>(
-    bench: &BenchProgram,
-) -> Result<(Vec<u8>, EmulatorStdin<P, Vec<u8>>), Error> {
-    let elf = fs::read(bench.elf)?;
-    let mut stdin_builder = EmulatorStdin::<P, Vec<u8>>::new_builder::<SC>();
-
-    if let Some(input) = bench.input {
-        let input_bytes = load_input(input)?;
-        stdin_builder.write_slice(&input_bytes);
-    }
-
-    let stdin = stdin_builder.finalize();
-    Ok((elf, stdin))
 }

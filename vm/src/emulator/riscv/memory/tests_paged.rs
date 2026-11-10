@@ -1,13 +1,4 @@
-use super::{Memory, Memory32, Memory64, PagedMemory64};
-
-#[test]
-fn memory32_parity_insert_get() {
-    let mut memory: Memory32<u32> = Memory::new_preallocated();
-    memory.insert(0, 11);
-    memory.insert(4, 22);
-    assert_eq!(memory.get(0), Some(&11));
-    assert_eq!(memory.get(4), Some(&22));
-}
+use super::{Memory, Memory64, PagedMemory};
 
 #[test]
 fn memory64_high_address_path() {
@@ -30,7 +21,7 @@ fn memory64_register_path_uses_low_addresses() {
 
 #[test]
 fn paged_memory_from_iter_round_trip() {
-    let paged: PagedMemory64<u32> = [(0x1000_u64, 7_u32), (0x2000_u64, 9_u32)]
+    let paged: PagedMemory<u64, u32> = [(0x1000_u64, 7_u32), (0x2000_u64, 9_u32)]
         .into_iter()
         .collect();
 

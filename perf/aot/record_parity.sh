@@ -40,15 +40,11 @@ usage() {
 workers=""
 engine=aot
 check=""
-while getopts "w:e:cih" opt; do
+while getopts "w:e:ch" opt; do
   case "$opt" in
     w) workers="$OPTARG" ;;
     e) engine="$OPTARG" ;;
     c) check=1 ;;
-    i)
-      echo "-i is refused: the recording blocks call their direct entries; the inlined form was slower and is gone" >&2
-      exit 2
-      ;;
     *) usage ;;
   esac
 done
@@ -207,8 +203,7 @@ done
 echo "$control_line"
 echo "$workers_control_line"
 printf '%s' "$summary"
-echo "OVERALL: $((total - failed))/$total guest(s) passed, replay workers on $engine${check:+, checking build}\
-${inline:+, direct entries inlined}, control \
-EXIT=$control, workers control EXIT=$workers_control, \
+echo "OVERALL: $((total - failed))/$total guest(s) passed, replay workers on $engine${check:+, checking build}, \
+control EXIT=$control, workers control EXIT=$workers_control, \
 EXIT=$((failed > 0 || control != 0 || workers_control != 0 ? 1 : 0))"
 [ "$failed" -eq 0 ] && [ "$control" -eq 0 ] && [ "$workers_control" -eq 0 ]

@@ -612,7 +612,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> GpuChipBehavior<
         device::launched(kernels, stream);
         device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        device::wait(stream).unwrap();
         device::wait(main_stream).unwrap();
 
         info!("[weierstrass-double-assign-chip] generate_main on GPU");

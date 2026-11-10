@@ -1371,10 +1371,12 @@ impl Prover {
             return self.prove_gpu(stdin, phase);
         }
 
-        let emulated = self.emulate(stdin)?;
+        let mut emulated = self.emulate(stdin)?;
         let committed = emulated.execution.committed_bytes;
         let misaligned = emulated.execution.misaligned_accesses;
-        let proved = self.prove_records(&emulated.records, committed, phase);
+        let proved = self.prove_records(std::mem::take(&mut emulated.records), committed, phase);
+        // Empty: the prove took the records and dropped each with its prove job. This ends the
+        // ledger run.
         pico_vm::mle::ledger::drop_records(emulated.records);
         proved.map(|proof| proof.counting(misaligned))
     }
@@ -1392,15 +1394,21 @@ impl Prover {
         let Some(vk_root) = self.vk_map.as_ref().map(|map| digest_words(&map.root())) else {
             return Err(ProveError::EvmRequiresWhitelist);
         };
-        let emulated = self.emulate(stdin)?;
+        let mut emulated = self.emulate(stdin)?;
         let misaligned = emulated.execution.misaligned_accesses;
         let proved = if binding::commits(&emulated.records) {
             let committed = emulated.execution.committed_bytes;
-            self.prove_records(&emulated.records, committed, Phase::Wrap)
-                .map(|proof| proof.counting(misaligned))
+            self.prove_records(
+                std::mem::take(&mut emulated.records),
+                committed,
+                Phase::Wrap,
+            )
+            .map(|proof| proof.counting(misaligned))
         } else {
             Err(ProveError::EvmNoCommittedDigest)
         };
+        // Empty when the prove took them; still full when there was no committed digest to prove.
+        // Either way this drops what is left and ends the ledger run.
         pico_vm::mle::ledger::drop_records(emulated.records);
         crate::EvmBundle::from_wrap_proof(proved?, vk_root)
     }
@@ -1446,17 +1454,19 @@ impl Prover {
         }
     }
 
+    /// Takes the records: the riscv prove uses each without a copy and drops it when that chunk's
+    /// prove job is done with it, so no record is held into the recursion phases.
     pub(crate) fn prove_records(
         &mut self,
-        records: &[EmulationRecord],
+        records: Vec<EmulationRecord>,
         committed: Vec<u8>,
         phase: Phase,
     ) -> Result<Proof, ProveError> {
-        check_chips_provable(records)?;
-        self.riscv.check_chunk_shapes(records)?;
+        check_chips_provable(&records)?;
+        self.riscv.check_chunk_shapes(&records)?;
         let bundle = self
             .riscv
-            .prove(records)
+            .prove_owned(records)
             .map_err(|e| ProveError::proving(Phase::Riscv, e.to_string()))?;
         self.riscv
             .verify(&bundle, self.initial_gcs)

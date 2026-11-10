@@ -41,10 +41,7 @@ pub struct Memory<A: Addr, V: Copy + Default> {
     pub page_table: PagedMemory<A, V>,
 }
 
-pub type Memory32<V> = Memory<u32, V>;
 pub type Memory64<V> = Memory<u64, V>;
-pub type PagedMemory32<V> = PagedMemory<u32, V>;
-pub type PagedMemory64<V> = PagedMemory<u64, V>;
 
 impl<A: Addr + 'static, V: Copy + Default + 'static> IntoIterator for Memory<A, V> {
     type Item = (A, V);
@@ -105,19 +102,6 @@ impl<A: Addr, V: Copy + Default> Memory<A, V> {
         }
     }
 
-    /// Get a mutable reference, creating the page if needed for page table addresses.
-    ///
-    /// When possible, prefer directly accessing the `page_table` or `registers` fields.
-    /// This method often incurs unnecessary branching.
-    #[inline]
-    pub fn get_mut_or_create(&mut self, addr: A) -> &mut V {
-        if addr.to_usize() < 32 {
-            self.registers.get_mut(addr)
-        } else {
-            self.page_table.get_mut_or_create(addr)
-        }
-    }
-
     /// Clear the memory.
     #[inline]
     pub fn clear(&mut self) {
@@ -159,14 +143,6 @@ impl<T: Copy + Default> Registers<T> {
     #[inline]
     pub fn get<A: Addr>(&self, addr: A) -> &T {
         &self.registers[addr.to_usize()]
-    }
-
-    /// Get a mutable reference to the value at the given address.
-    ///
-    /// Assumes addr < 32.
-    #[inline]
-    pub fn get_mut<A: Addr>(&mut self, addr: A) -> &mut T {
-        &mut self.registers[addr.to_usize()]
     }
 
     /// Insert a value into the registers.
@@ -260,28 +236,6 @@ impl<A: Addr, V: Copy + Default> PagedMemory<A, V> {
             .map(|index| &self.page_table[*index as usize].0[lower])
     }
 
-    /// Get a mutable reference to the memory value at the given address.
-    /// Returns None if the page doesn't exist.
-    pub fn get_mut(&mut self, addr: A) -> Option<&mut V> {
-        let (upper, lower) = Self::indices(addr);
-        self.index
-            .get(&upper)
-            .map(|index| &mut self.page_table[*index as usize].0[lower])
-    }
-
-    /// Get a mutable reference to the memory value at the given address,
-    /// creating the page if it doesn't exist.
-    pub fn get_mut_or_create(&mut self, addr: A) -> &mut V {
-        let (upper, lower) = Self::indices(addr);
-        let mut index = self.index.get(&upper).copied().unwrap_or(u16::MAX);
-        if index == u16::MAX {
-            index = self.page_table.len() as u16;
-            self.index.insert(upper, index);
-            self.page_table.push(NewPage::new());
-        }
-        &mut self.page_table[index as usize].0[lower]
-    }
-
     /// Insert a value at the given address. Returns the previous value.
     pub fn insert(&mut self, addr: A, value: V) -> V {
         let (upper, lower) = Self::indices(addr);
@@ -304,19 +258,6 @@ impl<A: Addr, V: Copy + Default> PagedMemory<A, V> {
                 .enumerate()
                 .map(move |(lower, _)| Self::decompress_addr(upper + lower))
         })
-    }
-
-    /// Get the number of slots in allocated pages.
-    pub fn exact_len(&self) -> usize {
-        self.index
-            .iter()
-            .map(|index| self.page_table[*index.1 as usize].0.len())
-            .sum()
-    }
-
-    /// Estimate the number of addresses in use.
-    pub fn estimate_len(&self) -> usize {
-        self.index.len() * PAGE_LEN
     }
 
     /// Clears the page table. Drops all `Page`s, but retains the memory used by the table itself.

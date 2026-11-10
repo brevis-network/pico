@@ -16,10 +16,9 @@
 //! An AOT arm that interprets every block passes every comparison, so a run also fails unless the
 //! AOT snapshot thread entered compiled blocks (`AotEmulatorCore::compiled_block_dispatches`).
 //!
-//! A second pass compares the AOT snapshot thread's own records, its sink on ([`emitting`]), and
-//! reads per chunk how much of it compiled code ran. [`check_at_scale`] runs that pass on any
-//! guest and input at a production chunk size (the `emitting_at_scale` binary), where the per-chunk
-//! bounds apply.
+//! A second pass, which [`check_generated_guest`] runs after the first, compares the AOT snapshot
+//! thread's own records, its sink on ([`emitting`]), and reads per chunk how much of it compiled
+//! code ran.
 //!
 //! [`check_stub_code`] is the positive control for the AOT core's own records ([`emitting`]): the
 //! bootstrap stub's code, registered under fib's digest, interprets every chunk, and its records
@@ -50,23 +49,17 @@ use std::{
 
 use pico_aot_runtime::{AotEmulatorCore, AotProgram};
 use pico_vm::{
-    emulator::{
-        opts::{ReplayWorkers, SnapshotMainMode},
-        riscv::record_digest::{field_digests, is_compared, FieldDigest},
-    },
-    mle::machine::riscv::{
-        emulate_with_pipeline, emulate_with_pipeline_streaming, EmulationOutput,
-    },
+    emulator::opts::{ReplayWorkers, SnapshotMainMode},
+    mle::machine::riscv::emulate_with_pipeline_streaming,
 };
 use sha2::{Digest, Sha256};
 
-mod chain_diff;
 pub mod emitting;
 pub mod replay;
 
 #[path = "../../../../vm/tests/common/record_parity.rs"]
 mod record_parity;
-use record_parity::{check_guest, Arm, Guest, GUESTS};
+use record_parity::{check_guest, guest, Arm, Guest, GUESTS};
 
 /// Refuses an `AOT_PARITY_REPLAY` other than `aot`.
 fn check_replay_engine() {
@@ -282,10 +275,7 @@ pub fn check_stub_code() {
     if let Err(err) = pico_aot_runtime::register(stub_code()) {
         panic!("register the stub's code under fib's digest: {err}");
     }
-    let fib = GUESTS
-        .iter()
-        .find(|guest| guest.name == "fib")
-        .expect("fib is a guest");
+    let fib = guest("fib");
     let workers = workers();
     check_guest(
         fib,
@@ -318,157 +308,7 @@ pub fn check_stub_replay() {
     if let Err(err) = pico_aot_runtime::register(stub_code()) {
         panic!("register the stub's code under fib's digest: {err}");
     }
-    let fib = GUESTS
-        .iter()
-        .find(|guest| guest.name == "fib")
-        .expect("fib is a guest");
+    let fib = guest("fib");
     check_replay_workers(fib, &ledger, replay::Expect::AllFallback);
     ledger.remove();
-}
-
-/// What [`check_at_scale`] compares of a run: each record's kind, chunk index, public values and
-/// `field_digests` rows, and the run's committed bytes, cycles and chunk count. Taken before the
-/// other arm runs: at production chunk size one arm's records alone are gigabytes.
-struct Reduced {
-    records: Vec<(bool, usize, String, Vec<FieldDigest>)>,
-    committed_bytes: Vec<u8>,
-    cycles: u64,
-    chunks: u32,
-}
-
-fn reduced(output: EmulationOutput) -> Reduced {
-    Reduced {
-        records: output
-            .records
-            .iter()
-            .map(|record| {
-                (
-                    record.is_cpu_chunk,
-                    pico_vm::emulator::record::RecordBehavior::chunk_index(record),
-                    format!("{:?}", record.public_values),
-                    field_digests(record),
-                )
-            })
-            .collect(),
-        committed_bytes: output.committed_bytes,
-        cycles: output.cycles,
-        chunks: output.chunks,
-    }
-}
-
-/// The emitting pass on the guest `aot-generated/` was generated from, `elf`, with `input` its one
-/// stdin element and `chunk_size` a production chunk size: records equal to the interpreter's on
-/// every chunk, and the per-chunk bounds of [`emitting::Expect::CompiledAtScale`]. Prints every
-/// difference, the per-chunk table and a verdict line, and returns the number of problems.
-///
-/// Not through `check_guest`, whose guests and runs are fixed: this one takes its guest and input
-/// from the caller, such as a reth block. `EMITTING_DIFF_DUMP` set prints why the first record
-/// whose local-memory chain differs differs (`chain_diff`).
-pub fn check_at_scale(elf: &[u8], input: Vec<u8>, chunk_size: u32) -> usize {
-    let generated = &pico_aot_dispatch::AOT;
-    assert!(
-        !generated.is_stub(),
-        "aot-generated/ holds the bootstrap stub; generate the guest's crates into it first"
-    );
-    let digest: [u8; 32] = Sha256::digest(elf).into();
-    assert_eq!(
-        generated.elf_sha256(),
-        digest,
-        "aot-generated/ was generated from ELF {}, not from the ELF given, {}",
-        hex(&generated.elf_sha256()),
-        hex(&digest)
-    );
-    if let Err(err) = pico_aot_runtime::register(&COUNTED) {
-        panic!("register the generated program: {err}");
-    }
-
-    let program = record_parity::program(elf);
-    let stdin = record_parity::stdin(&[input]);
-    let opts = record_parity::opts(chunk_size);
-    let workers = workers();
-    let dump = chain_diff::enabled();
-    let take = |output: EmulationOutput| {
-        let windows = dump.then(|| chain_diff::collect(&output));
-        (reduced(output), windows)
-    };
-    let (interpreter, interpreter_windows) =
-        emulate_with_pipeline(program.clone(), &stdin, opts, workers)
-            .map(take)
-            .unwrap_or_else(|err| panic!("the interpreter arm: {err}"));
-    let (aot, aot_windows) = emitting::emulate(program, &stdin, opts, workers)
-        .map(take)
-        .unwrap_or_else(|err| panic!("the AOT, emitting arm: {err}"));
-
-    let mut problems = Vec::new();
-    if interpreter.committed_bytes != aot.committed_bytes {
-        problems.push("committed bytes differ".to_string());
-    }
-    if (interpreter.cycles, interpreter.chunks) != (aot.cycles, aot.chunks) {
-        problems.push(format!(
-            "cycles and chunks: {} and {} vs {} and {}",
-            interpreter.cycles, interpreter.chunks, aot.cycles, aot.chunks
-        ));
-    }
-    if interpreter.chunks < 4 {
-        problems.push(format!(
-            "{} chunk(s) at chunk size {chunk_size}, short of the 4 the bounds are read over",
-            interpreter.chunks
-        ));
-    }
-    if interpreter.records.len() != aot.records.len() {
-        problems.push(format!(
-            "{} vs {} record(s)",
-            interpreter.records.len(),
-            aot.records.len()
-        ));
-    }
-    for (index, (left, right)) in interpreter.records.iter().zip(&aot.records).enumerate() {
-        if (left.0, left.1, &left.2) != (right.0, right.1, &right.2) {
-            problems.push(format!(
-                "record {index}: kind, chunk index or public values differ"
-            ));
-        }
-        for ((field, len_l, digest_l), (_, len_r, digest_r)) in left.3.iter().zip(&right.3) {
-            if is_compared(field) && (len_l, digest_l) != (len_r, digest_r) {
-                problems.push(format!(
-                    "record {index}: {field}: len {len_l} vs {len_r}, digest {digest_l:#018x} vs \
-                     {digest_r:#018x}"
-                ));
-            }
-        }
-    }
-    if let (Some(left), Some(right)) = (&interpreter_windows, &aot_windows) {
-        let chain_differs = |index: &usize| {
-            let row = |reduced: &Reduced| {
-                reduced.records[*index]
-                    .3
-                    .iter()
-                    .find(|row| row.0 == "cpu_local_memory_chain")
-                    .map(|row| (row.1, row.2))
-            };
-            row(&interpreter) != row(&aot)
-        };
-        let first = (0..interpreter.records.len().min(aot.records.len())).find(chain_differs);
-        if let Some(index) = first {
-            let cpu_index = interpreter.records[..index]
-                .iter()
-                .filter(|record| record.0)
-                .count();
-            chain_diff::report(left, right, cpu_index);
-        }
-    }
-    let suffix = emitting::audit(emitting::Expect::CompiledAtScale, &mut problems);
-    for problem in &problems {
-        println!("FAIL: {problem}");
-    }
-    println!(
-        "[{} @ chunk {chunk_size}] {} record(s), {} chunk(s), {} cycle(s), {workers} worker(s){suffix}; \
-         {} problem(s)",
-        hex(&digest),
-        aot.records.len(),
-        aot.chunks,
-        aot.cycles,
-        problems.len()
-    );
-    problems.len()
 }

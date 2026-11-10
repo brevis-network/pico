@@ -1,5 +1,7 @@
 //! The snapshot pipeline, with the interpreter on its snapshot thread (`emulate_with_pipeline`),
-//! against the one-interpreter path (`emulate_with_opts`), record by record.
+//! against the one-interpreter path (`emulate_with_opts`), record by record, each CPU chunk's
+//! execution history included: the pipeline's replay workers write it from a snapshot, and must
+//! write the interpreter's.
 //!
 //! Both paths cut chunks and split the deferred pool with the same code, after every chunk, so
 //! everything `common/record_parity.rs` compares must match.
@@ -30,20 +32,14 @@ use pico_vm::{
 #[path = "common/record_parity.rs"]
 mod record_parity;
 use record_parity::{
-    check_guest, fib_input, opts, program, stdin, workers, Arm, BLS12381_FP_ELF, FIB_ELF, GUESTS,
-    WHOLE,
+    check_guest, fib_input, guest, one_at_a_time, opts, program, stdin, workers, Arm,
+    BLS12381_FP_ELF, FIB_ELF, WHOLE,
 };
-
-/// The pipeline takes its snapshot memory from one process-wide pool, so runs go one at a time.
-static PIPELINE: Mutex<()> = Mutex::new(());
 
 /// Every run of the guest called `name` in [`GUESTS`], down both paths.
 fn check(name: &str) {
-    let guest = GUESTS
-        .iter()
-        .find(|guest| guest.name == name)
-        .unwrap_or_else(|| panic!("no guest {name}"));
-    let _one_at_a_time = PIPELINE.lock().unwrap_or_else(PoisonError::into_inner);
+    let guest = guest(name);
+    let _one_at_a_time = one_at_a_time();
     let workers = workers();
     check_guest(
         guest,
@@ -131,12 +127,11 @@ fn bn254_ws() {
 /// until the run ends.
 #[test]
 fn the_shared_pipeline_holds_the_deferred_pool_back_as_gpu_base_does() {
-    let _one_at_a_time = PIPELINE.lock().unwrap_or_else(PoisonError::into_inner);
-    let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<Kb>, Vec<u8>> {
+    let _one_at_a_time = one_at_a_time();
+    let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<Kb>> {
         program: Some(program(BLS12381_FP_ELF)),
         vk_root: None,
         stdin: Some(stdin(&[])),
-        flag_empty_stdin: false,
         config: None,
         opts: Some(opts(WHOLE)),
         records: Vec::new(),

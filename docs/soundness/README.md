@@ -158,7 +158,7 @@ cargo test -p pico-mle-core --test soundness -- --nocapture --test-threads=1
 A second test scores eight rows at a fixed shape, over the `KoalaBear^4` reference width and the
 100-bit LogUp derivation the values were produced with, against pinned reference values, so a change that
 moves the binding term shows up as a failing assertion rather than as a silently different verdict.
-CI's `CPU · Soundness` job runs both, with the crate's other tests, under the default degree bound
+CI's soundness job runs both, with the crate's other tests, under the default degree bound
 and again with `soundness-bchks25-optimized`, where the parity test is skipped:
 
 ```bash

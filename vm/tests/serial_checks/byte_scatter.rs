@@ -1,12 +1,10 @@
 //! The byte chip's trace, built by writing each lookup into its row, against the trace the
-//! per-row scan of every lookup builds: over every record of the record-parity guests, and over
-//! a hand-built lookup set that reaches every opcode, every `BitRange` width and the edges of the
-//! table.
+//! per-row scan of every lookup builds: over every record of the record-parity guests that carries
+//! a byte lookup, the way the prover reads it, after the chips' `extra_record` pass has raised the
+//! byte lookups; over a hand-built lookup set that reaches every opcode, every `BitRange` width and
+//! the edges of the table; and over no lookup at all.
 
-use std::{
-    borrow::{Borrow, BorrowMut},
-    sync::Arc,
-};
+use std::borrow::{Borrow, BorrowMut};
 
 use hashbrown::HashMap;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
@@ -22,20 +20,10 @@ use pico_vm::{
         ByteChip,
     },
     compiler::riscv::opcode::ByteOpcode,
-    emulator::riscv::{
-        emulator::RiscvEmulator, public_values::RecordFinalPvsState, record::EmulationRecord,
-        record_slots::hold_records_unbounded,
-    },
-    instances::chiptype::riscv_chiptype::RiscvChipType,
+    emulator::riscv::record::EmulationRecord,
     machine::chip::ChipBehavior,
-    mle::machine::riscv::{augmented_record, Kb},
+    mle::machine::riscv::Kb,
 };
-
-// Only the guests and their runs: the comparison in there is between two emulation arms.
-#[allow(dead_code)]
-#[path = "common/record_parity.rs"]
-mod record_parity;
-use record_parity::{opts, program, selected_guests, stdin};
 
 type Lookups = HashMap<ByteLookupEvent, usize>;
 
@@ -81,27 +69,36 @@ fn record_with_lookups(lookups: Lookups) -> EmulationRecord {
     }
 }
 
-/// A failure names the first differing cell rather than printing 1.4 million field elements.
-fn assert_same_trace(what: &str, scattered: &RowMajorMatrix<Kb>, scanned: &RowMajorMatrix<Kb>) {
-    assert_eq!(scattered.width, scanned.width, "{what}: width");
-    assert_eq!(
-        scattered.values.len(),
-        scanned.values.len(),
-        "{what}: height"
-    );
-    if let Some(at) = scattered
+/// The first differing cell, if any, rather than 1.4 million field elements.
+fn trace_difference(
+    what: &str,
+    scattered: &RowMajorMatrix<Kb>,
+    scanned: &RowMajorMatrix<Kb>,
+) -> Option<String> {
+    if (scattered.width, scattered.values.len()) != (scanned.width, scanned.values.len()) {
+        return Some(format!(
+            "{what}: width and cells {:?} scattered, {:?} scanned",
+            (scattered.width, scattered.values.len()),
+            (scanned.width, scanned.values.len())
+        ));
+    }
+    let at = scattered
         .values
         .iter()
         .zip(&scanned.values)
-        .position(|(got, want)| got != want)
-    {
-        panic!(
-            "{what}: row {} column {}: scattered {}, scanned {}",
-            at / NUM_BYTE_MULT_COLS,
-            at % NUM_BYTE_MULT_COLS,
-            scattered.values[at],
-            scanned.values[at]
-        );
+        .position(|(got, want)| got != want)?;
+    Some(format!(
+        "{what}: row {} column {}: scattered {}, scanned {}",
+        at / NUM_BYTE_MULT_COLS,
+        at % NUM_BYTE_MULT_COLS,
+        scattered.values[at],
+        scanned.values[at]
+    ))
+}
+
+fn assert_same_trace(what: &str, scattered: &RowMajorMatrix<Kb>, scanned: &RowMajorMatrix<Kb>) {
+    if let Some(difference) = trace_difference(what, scattered, scanned) {
+        panic!("{difference}");
     }
 }
 
@@ -113,59 +110,72 @@ fn cell_sum(trace: &RowMajorMatrix<Kb>) -> u64 {
         .sum()
 }
 
-/// Every record of every run of every guest `selected_guests` picks, the way the prover reads
-/// it: after the chips' `extra_record` pass has raised the byte lookups. Each record is dropped
-/// before the next is emulated: a large guest's whole run does not fit in memory beside a second
-/// copy of itself.
-#[test]
-fn scatter_matches_scan_on_every_parity_guest_record() {
-    hold_records_unbounded();
-    let chips = RiscvChipType::<Kb>::all_chips();
-    for guest in selected_guests() {
-        for (run_index, run) in guest.runs().into_iter().enumerate() {
-            let what = format!("{} run {run_index}", guest.name);
-            let mut emulator = RiscvEmulator::new_single::<Kb>(
-                program(guest.elf),
-                Arc::new(RecordFinalPvsState::default()),
-                opts(run.chunk_size),
-            );
-            emulator.write_stdin(&stdin(&run.stdin));
+/// One guest's byte traces, over every record of every run.
+#[derive(Default)]
+pub struct Check {
+    problems: Vec<String>,
+    /// The run in progress: records, those carrying a lookup, which are the ones compared, and
+    /// lookups.
+    records: usize,
+    with_lookups: usize,
+    lookups_seen: usize,
+}
 
-            let (mut records, mut with_lookups, mut lookups_seen) = (0usize, 0usize, 0usize);
-            loop {
-                let report = emulator
-                    .emulate_batch(&mut |raw| {
-                        // Only the lookups are compared, so the augmented record and the raw one
-                        // are both dropped before the 2^17-row traces are built.
-                        let byte_lookups =
-                            std::mem::take(&mut augmented_record(&chips, &raw).byte_lookups);
-                        drop(raw);
-                        let at = format!("{what} record {records}");
-                        let record = record_with_lookups(byte_lookups);
-                        let scattered = scattered_trace(&record);
-                        assert_same_trace(&at, &scattered, &scanned_trace(&record.byte_lookups));
-
-                        // Independent of the scan: no lookup falls off the table, so the trace
-                        // holds every multiplicity once.
-                        let total: usize = record.byte_lookups.values().sum();
-                        assert_eq!(cell_sum(&scattered), total as u64, "{at}: multiplicities");
-
-                        records += 1;
-                        with_lookups += usize::from(!record.byte_lookups.is_empty());
-                        lookups_seen += record.byte_lookups.len();
-                    })
-                    .expect("the guest emulates");
-                if report.done {
-                    break;
-                }
-            }
-            assert!(records > 0, "{what}: no record compared");
-            assert!(
-                with_lookups > 0,
-                "{what}: no record carried a byte lookup, so every trace compared was empty"
-            );
-            eprintln!("{what}: {records} records, {lookups_seen} lookups");
+impl Check {
+    /// The byte trace of a record the extra-record pass has augmented. Its lookups are taken out
+    /// for the comparison and put back. A record with none is counted and not traced: both of its
+    /// traces are the table's height of zeros, which `scatter_matches_scan_on_no_lookups` compares.
+    pub fn record(&mut self, run: &str, augmented: &mut EmulationRecord) {
+        let at = format!("{run} record {}", self.records);
+        self.records += 1;
+        if augmented.byte_lookups.is_empty() {
+            return;
         }
+        let record = record_with_lookups(std::mem::take(&mut augmented.byte_lookups));
+        let scattered = scattered_trace(&record);
+        self.problems.extend(trace_difference(
+            &at,
+            &scattered,
+            &scanned_trace(&record.byte_lookups),
+        ));
+
+        // Independent of the scan: no lookup falls off the table, so the trace holds every
+        // multiplicity once.
+        let total: usize = record.byte_lookups.values().sum();
+        let cells = cell_sum(&scattered);
+        if cells != total as u64 {
+            self.problems.push(format!(
+                "{at}: multiplicities: the trace's cells add to {cells}, the lookups' to {total}"
+            ));
+        }
+
+        self.with_lookups += 1;
+        self.lookups_seen += record.byte_lookups.len();
+        augmented.byte_lookups = record.byte_lookups;
+    }
+
+    pub fn end_run(&mut self, run: &str) {
+        let (records, with_lookups, lookups_seen) = (
+            std::mem::take(&mut self.records),
+            std::mem::take(&mut self.with_lookups),
+            std::mem::take(&mut self.lookups_seen),
+        );
+        if records == 0 {
+            self.problems.push(format!("{run}: no record"));
+        }
+        if with_lookups == 0 {
+            self.problems.push(format!(
+                "{run}: no record carried a byte lookup, so no trace was compared"
+            ));
+        }
+        eprintln!(
+            "{run}: {records} records, {with_lookups} with a byte lookup and compared, \
+             {lookups_seen} lookups"
+        );
+    }
+
+    pub fn finish(self) -> Vec<String> {
+        self.problems
     }
 }
 
@@ -220,6 +230,7 @@ fn hand_built_lookups() -> (Lookups, Vec<ByteLookupEvent>) {
 
 #[test]
 fn scatter_matches_scan_on_hand_built_lookups() {
+    crate::before_any_emulation();
     let (lookups, dropped) = hand_built_lookups();
     let record = record_with_lookups(lookups.clone());
     let scattered = scattered_trace(&record);
@@ -248,9 +259,19 @@ fn scatter_matches_scan_on_hand_built_lookups() {
     );
 }
 
+#[test]
+fn scatter_matches_scan_on_no_lookups() {
+    crate::before_any_emulation();
+    let none = Lookups::new();
+    let scattered = scattered_trace(&record_with_lookups(none.clone()));
+    assert_same_trace("no lookup", &scattered, &scanned_trace(&none));
+    assert_eq!(cell_sum(&scattered), 0);
+}
+
 /// The scattered row is the scan's row for every operand pair, at the widths that change the rule.
 #[test]
 fn the_row_rule_is_the_scans() {
+    crate::before_any_emulation();
     for opcode in ByteOpcode::all() {
         for a2 in [0u8, 1, 7, 8, 15, 16, 17, 255] {
             for b in 0..=u8::MAX {
@@ -267,6 +288,7 @@ fn the_row_rule_is_the_scans() {
 /// the table the byte bus is balanced against cannot drift apart.
 #[test]
 fn a_lookups_row_holds_its_operands_in_the_preprocessed_table() {
+    crate::before_any_emulation();
     let table = ByteChip::<Kb>::preprocess();
     let (lookups, dropped) = hand_built_lookups();
     let mut checked = 0;

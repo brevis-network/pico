@@ -278,7 +278,7 @@ fn main() {
     let mut failures = 0;
     for (label, words, cases) in guests {
         let program = Arc::new(guest(&words));
-        let stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+        let stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
         let chunk_size = riscv::chunk_size_from_env(LOG_STACKED_HEIGHT);
         let records = riscv::emulate(Arc::clone(&program), stdin.finalize(), Some(chunk_size));
         let honest = honest_digest(&words);

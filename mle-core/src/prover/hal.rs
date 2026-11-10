@@ -209,11 +209,12 @@ where
                     .iter()
                     .map(|cd| self.transport_committed_trace_data_to_device(cd))
                     .collect();
-                let device_ctx = AirProvingContext::new(
+                let mut device_ctx = AirProvingContext::new(
                     cached_mains,
                     common_main,
                     trace_ctx.public_values.clone(),
                 );
+                device_ctx.real_rows = trace_ctx.real_rows;
                 (*air_idx, device_ctx)
             })
             .collect();
@@ -267,11 +268,12 @@ where
                     .iter()
                     .map(|cd| self.transport_row_major_committed_trace_data_to_device(cd))
                     .collect();
-                let device_trace_ctx = AirProvingContext::new(
+                let mut device_trace_ctx = AirProvingContext::new(
                     cached_mains,
                     common_main,
                     trace_ctx.public_values.clone(),
                 );
+                device_trace_ctx.real_rows = trace_ctx.real_rows;
                 (*air_idx, device_trace_ctx)
             })
             .collect();

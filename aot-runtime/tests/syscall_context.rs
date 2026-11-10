@@ -46,7 +46,7 @@ struct Guest {
     defers: bool,
 }
 
-type StdinBuilder = pico_vm::emulator::stdin::EmulatorStdinBuilder<Vec<u8>, KoalaBearPoseidon2>;
+type StdinBuilder = pico_vm::emulator::stdin::EmulatorStdinBuilder<KoalaBearPoseidon2>;
 
 macro_rules! elf {
     ($file:literal) => {
@@ -157,8 +157,7 @@ fn aggregator_stdin(stdin: &mut StdinBuilder) {
     let outputs: Vec<Vec<u8>> = [10u32, 20]
         .iter()
         .map(|n| {
-            let mut builder =
-                EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+            let mut builder = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
             builder.write(n);
             emulate_with_opts(fib.clone(), &builder.finalize(), opts())
                 .expect("fib")
@@ -187,10 +186,7 @@ fn opts() -> EmulatorOpts {
 }
 
 /// The interpreter's record of the guest's one chunk, and every record it deferred, merged.
-fn interpreted(
-    program: Arc<Program>,
-    stdin: &EmulatorStdin<Program, Vec<u8>>,
-) -> (EmulationRecord, EmulationRecord) {
+fn interpreted(program: Arc<Program>, stdin: &EmulatorStdin) -> (EmulationRecord, EmulationRecord) {
     let records = emulate_with_opts(program.clone(), stdin, opts())
         .expect("the guest runs under the interpreter")
         .records;
@@ -214,7 +210,7 @@ fn split(mut deferred: EmulationRecord) -> EmulationRecord {
 }
 
 /// The AOT core's record of the guest's one chunk, written while the stub's code ran it.
-fn emitted(program: Arc<Program>, stdin: &EmulatorStdin<Program, Vec<u8>>) -> EmulationRecord {
+fn emitted(program: Arc<Program>, stdin: &EmulatorStdin) -> EmulationRecord {
     let mut emu = AotEmulatorCore::new(program, stdin.inputs.to_vec());
     emu.emit_records();
     AotProgram::STUB
@@ -240,7 +236,7 @@ fn a_precompile_on_the_aot_core_writes_the_interpreters_events() {
         let program = Compiler::new(SourceType::RISCV, guest.elf)
             .expect("the ELF parses")
             .compile();
-        let mut builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+        let mut builder = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
         (guest.stdin)(&mut builder);
         let stdin = builder.finalize();
 

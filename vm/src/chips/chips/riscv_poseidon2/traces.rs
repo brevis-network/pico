@@ -330,7 +330,6 @@ impl<
         let main_stream = &sync_stream.0;
         stream.synchronize().unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        stream.synchronize().unwrap();
         main_stream.synchronize().unwrap();
 
         info!("[riscv-poseidon2-chip] generate_main on GPU");
@@ -420,7 +419,6 @@ impl<
         device::stepped(steps, stream);
         device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        device::wait(stream).unwrap();
         device::wait(main_stream).unwrap();
 
         info!("[riscv-poseidon2-chip] generate_extra_record_and_main on GPU");

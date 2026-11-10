@@ -67,10 +67,7 @@ use std::{panic, sync::Arc};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use pico_mle_core::config::recursion_params_with_128_bits_security;
 use pico_vm::{
-    compiler::riscv::{
-        compiler::{Compiler, SourceType},
-        program::Program,
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP, stdin::EmulatorStdin},
     machine::logger::setup_logger,
@@ -114,7 +111,7 @@ fn main() {
             .expect("parse elf")
             .compile(),
     );
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     stdin.write(&10u32);
     let opts = emulate::opts_from_env_chunk_size(1 << 23);
     // A chunk wider than the stacked height proves the wrong shape, and both are env-settable.
@@ -195,7 +192,7 @@ fn main() {
         .expect("parse aggregator elf")
         .compile(),
     );
-    let mut agg_stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut agg_stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     agg_stdin.write(&vec![fib_identity; 2]);
     agg_stdin.write(&vec![emulated.committed_bytes.clone(); 2]);
     let agg_emulated = emulate::emulate_with_opts(
@@ -297,7 +294,7 @@ fn main() {
     // The control for `seam`: the aggregator claiming fib's root once, so one node is the whole
     // chain and the leaves start where it ends. With as many leaves as `seam`, the tree reduces
     // the same way, pairing the deferred node with the first convert leaf, and must prove.
-    let mut one_stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut one_stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     one_stdin.write(&vec![fib_identity; 1]);
     one_stdin.write(&vec![emulated.committed_bytes.clone(); 1]);
     let one_emulated = emulate::emulate_with_opts(

@@ -95,6 +95,13 @@ pub struct AirProvingContext<PB: ProverBackend> {
     pub common_main: PB::Matrix,
     /// Public values
     pub public_values: Vec<PB::Val>,
+    /// A prover-only hint, never committed or sent: rows `real_rows..height` of the trace are
+    /// padding rows that all evaluate every interaction to the same leaf, so a prover may store and
+    /// compute those leaves once instead of per row (the GKR input's per-segment virtual padding).
+    /// `None`, the default, claims nothing: every row is treated as real. A wrong value can only
+    /// make the proof fail to verify, never make a false statement verify.
+    #[new(default)]
+    pub real_rows: Option<usize>,
 }
 
 impl<PB: ProverBackend> CommittedTraceData<PB> {

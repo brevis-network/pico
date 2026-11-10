@@ -69,7 +69,7 @@ impl Syscall for WriteSyscall {
             let ptr = rt.state.input_stream_ptr;
             rt.state.input_stream.insert(ptr, slice.to_vec());
         } else if let Some(hook) = rt.hook_map.get(&fd) {
-            let result = hook(rt, slice);
+            let result = hook(slice);
             let ptr = rt.state.input_stream_ptr;
             rt.state.input_stream.splice(ptr..ptr, result);
         } else {

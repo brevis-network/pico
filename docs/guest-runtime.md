@@ -91,6 +91,15 @@ only gets a warning.
 destination alignment, lengths 0 to 40 and three longer ones, and `memmove` over overlapping
 ranges both ways; `sdk/prover/src/tests/memory_functions.rs` runs it.
 
+**Cycle counts.** With cycle tracking on (`EmulatorOpts::cycle_tracker`), the emulator counts the
+instructions run inside `memcpy`, `memset`, `memmove`, `memcmp`, `bcmp` and `strlen`, and reports
+them in `EmulationReport::cycle_tracker` under the function's name, beside the guest's own
+`cycle-tracker-start` / `-end` spans. The ranges come from the ELF's symbol table (profiling only:
+the program is the segments), so a stripped ELF reports none, and a function whose work is done by
+helpers with other names, such as `compiler_builtins`' `memmove` in a Rust guest, counts only its
+own instructions. The memory-function test guest runs 3.8 M cycles in each of `memcpy` and
+`memset` out of 39 M.
+
 ## Memory layout
 
 | address | region |
@@ -211,3 +220,23 @@ so whatever an older runtime left in `a1` reads as a plain `Exit`.
 
 `cargo pico execute` exits with status 1 when the guest fails and 2 when the run cannot be
 executed; `--exit-code-file <file>` writes the exit code in decimal (0 for a successful halt).
+
+### What a proof says about termination
+
+The circuit takes the exit code from `HALT`: the Ecall chip reduces the operand into the field
+and binds it to the public `exit_code`. It first proves the operand canonical: a 32-bit value
+below the KoalaBear modulus `p`. So an operand `v >= p` cannot pass for the exit code `v mod p`,
+and `p` cannot pass for 0.
+
+How much a verified proof says depends on what was verified:
+
+| proof | what it binds | exit code |
+|---|---|---|
+| a raw `verify_riscv` bundle | each chunk is valid, and the chunks' global cumulative sums cancel. Nothing ties them into one run that started at the entry point and ended at `HALT`. | not checked |
+| an SDK `Phase::Riscv` artifact | as the raw bundle | 0 in every chunk; anything else fails with `NonZeroExitCode`. |
+| an SDK proof from `Phase::Combine` on | one whole run: starts at chunk 1, ends with `next_pc == 0` (a `HALT`), memory closed | 0 in every chunk, asserted in the circuit |
+
+A caller that needs "this program ran to completion and succeeded" checks
+`binds_complete_execution()`, true from `Phase::Combine` on, rather than comparing the phase
+itself. A `Phase::Riscv` artifact and a raw bundle are chunk proofs, for pipelines that go on to
+recurse.

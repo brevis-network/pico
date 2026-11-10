@@ -204,7 +204,6 @@ impl<F: PrimeField32> GpuChipBehavior<F> for ShaExtendChip<F> {
         device::launched(kernels, stream);
         device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        device::wait(stream).unwrap();
         device::wait(main_stream).unwrap();
 
         info!("[precompile-sha256-extend-chip] generate_extra_record_and_main on GPU");

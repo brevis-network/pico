@@ -8,8 +8,10 @@ use bls12_381::{
 use pico_sdk::io::commit_bytes;
 
 pub fn main() {
+    // The prover's expected commits are computed for this count.
+    const ITERATIONS: usize = 16;
+
     // Add
-    const ITERATIONS: usize = 6000;
     use bls12_381::g1::G1Affine;
 
     let mut val_affine = G1Affine::generator();

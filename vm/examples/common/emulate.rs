@@ -23,7 +23,7 @@ pub fn opts_from_env_chunk_size(default_chunk_size: u32) -> EmulatorOpts {
 /// [`riscv::emulate_with_opts`], aborting on failure.
 pub fn emulate_with_opts(
     program: Arc<Program>,
-    stdin: &EmulatorStdin<Program, Vec<u8>>,
+    stdin: &EmulatorStdin,
     opts: EmulatorOpts,
 ) -> EmulationOutput {
     riscv::emulate_with_opts(program, stdin, opts).expect("emulation")

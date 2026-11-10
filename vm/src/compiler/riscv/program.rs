@@ -35,6 +35,23 @@ pub struct Program {
     pub memory_image: Arc<BTreeMap<u64, u64>>,
     /// The shape for the preprocessed tables.
     pub preprocessed_shape: Option<RiscvPadShape>,
+    /// The memory functions' address ranges, read from the ELF's symbol table for profiling only
+    /// (`MEMORY_FUNCTIONS`): with cycle tracking on, the emulator counts the instructions run in
+    /// each. Not part of the program's identity, and empty for a stripped ELF.
+    #[serde(skip)]
+    pub profiled_functions: Arc<[ProfiledFunction]>,
+}
+
+/// The memory functions whose cycles the emulator reports, by symbol name: the runtime's
+/// assembly (`memcpy`, `memset`, and in the static library `memmove`, `memcmp`, `bcmp`,
+/// `strlen`) or whatever definition the link kept.
+pub const MEMORY_FUNCTIONS: [&str; 6] = ["memcpy", "memset", "memmove", "memcmp", "bcmp", "strlen"];
+
+/// One profiled function: its name and its instructions' addresses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfiledFunction {
+    pub name: &'static str,
+    pub range: core::ops::Range<u64>,
 }
 
 impl Program {
@@ -47,6 +64,7 @@ impl Program {
             pc_base,
             memory_image: BTreeMap::new().into(),
             preprocessed_shape: None,
+            profiled_functions: Arc::new([]),
         }
     }
 
@@ -102,6 +120,7 @@ impl<F: PrimeField32> ProgramBehavior<F> for Program {
             pc_base: self.pc_base,
             memory_image: self.memory_image.clone(),
             preprocessed_shape: self.preprocessed_shape.clone(),
+            profiled_functions: self.profiled_functions.clone(),
         }
     }
 

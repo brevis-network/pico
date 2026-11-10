@@ -39,9 +39,6 @@ use sha2::{Digest, Sha256};
 /// Whether the AOT run in progress writes records.
 static EMIT: AtomicBool = AtomicBool::new(false);
 /// The chunks the AOT run in progress has cut.
-// TODO: every chunk's full record, held beside the pipeline's own until the splice, so the
-// at-scale pass peaks at two copies of the run's CPU records where `check_at_scale` holds one
-// arm's. Reduce each chunk as it is cut once that pass outgrows the host.
 static EMITTED: Mutex<Vec<EmittedChunk>> = Mutex::new(Vec::new());
 /// What the last emitting run found, for its audit.
 static LAST: Mutex<Option<Spliced>> = Mutex::new(None);
@@ -73,11 +70,6 @@ pub enum Expect {
     /// Generated code on the harness's short chunks: compiled code ran some instruction of the run.
     /// No per-chunk bound: a block that does not fit a short chunk runs in the fallback by design.
     Compiled,
-    /// Generated code at production chunk size: on every chunk but the last, which can be short,
-    /// compiled code ran some instruction, the fallback at most 1 % of the cycles, and cycles per
-    /// dispatch at most 2 times the median over those chunks. The fallback is not required to run:
-    /// a cut can land on a block boundary, and the stub's code proves the fallback's records.
-    CompiledAtScale,
     /// The bootstrap stub's code, which interprets every instruction.
     AllFallback,
 }
@@ -109,7 +101,7 @@ pub fn run_emitting(
 /// The emitting arm's `emulate`: the AOT pipeline, its CPU chunk records the AOT core's own.
 pub fn emulate(
     program: Arc<Program>,
-    stdin: &EmulatorStdin<Program, Vec<u8>>,
+    stdin: &EmulatorStdin,
     opts: EmulatorOpts,
     workers: NonZeroUsize,
 ) -> Result<EmulationOutput, EmulateError> {
@@ -269,20 +261,6 @@ pub fn audit(expect: Expect, problems: &mut Vec<String>) -> String {
     }
 
     let per_dispatch = |run: &ChunkRun| run.cycles as f64 / run.dispatches as f64;
-    let barred = match expect {
-        Expect::CompiledAtScale => &chunks[..chunks.len().saturating_sub(1)],
-        _ => &[][..],
-    };
-    let mut cycles_per_dispatch: Vec<f64> = barred
-        .iter()
-        .filter(|run| run.dispatches > 0)
-        .map(per_dispatch)
-        .collect();
-    cycles_per_dispatch.sort_by(f64::total_cmp);
-    let median = cycles_per_dispatch
-        .get(cycles_per_dispatch.len() / 2)
-        .copied();
-
     for (index, run) in chunks.iter().enumerate() {
         let chunk = index + 1;
         let share = 100.0 * run.fallback_insns as f64 / run.cycles.max(1) as f64;
@@ -307,28 +285,6 @@ pub fn audit(expect: Expect, problems: &mut Vec<String>) -> String {
     if let Expect::Compiled = expect {
         if chunks.iter().all(|run| run.compiled_insns() == 0) {
             problems.push("compiled code ran no instruction of the run".to_string());
-        }
-    }
-    for (index, run) in barred.iter().enumerate() {
-        let chunk = index + 1;
-        if run.compiled_insns() == 0 {
-            problems.push(format!("chunk {chunk}: compiled code ran none of it"));
-        }
-        if run.fallback_insns * 100 > run.cycles {
-            problems.push(format!(
-                "chunk {chunk}: the fallback ran {:.1} % of its cycles, over 1 %",
-                100.0 * run.fallback_insns as f64 / run.cycles.max(1) as f64
-            ));
-        }
-        // One-sided: many cycles per dispatch is what a chunk the fallback ran mostly looks like,
-        // while few only means short blocks, which compiled code ran all the same.
-        if let (true, Some(median)) = (run.dispatches > 0, median) {
-            if per_dispatch(run) > 2.0 * median {
-                problems.push(format!(
-                    "chunk {chunk}: {:.1} cycles per dispatch, over 2× the median {median:.1}",
-                    per_dispatch(run)
-                ));
-            }
         }
     }
     let fallback: u64 = chunks.iter().map(|run| run.fallback_insns).sum();

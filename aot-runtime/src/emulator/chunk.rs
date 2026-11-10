@@ -10,6 +10,13 @@ impl AotEmulatorCore {
     // Chunk & Batch Boundaries
     // ========================================================================
 
+    /// Update instruction count and clock. Called after each instruction.
+    #[inline(always)]
+    pub fn update_insn_clock(&mut self) {
+        self.insn_count += 1;
+        self.clk = self.clk.wrapping_add(CLOCK_INCREMENT_PER_INSN);
+    }
+
     /// Check if we've crossed a chunk boundary and should yield.
     ///
     /// Note: Chunk boundary checks are skipped during unconstrained mode to match

@@ -10,6 +10,7 @@
 #include "field/ff_config.hpp"
 #include "tracegen/common/prelude.cuh"
 #include "tracegen/riscv/history_cpu_memory_lt.cuh"
+#include "tracegen/riscv/history_spin.cuh"
 
 namespace pico_gpu {
   namespace cpu_memory_lt_history {

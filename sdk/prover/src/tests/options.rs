@@ -405,7 +405,7 @@ fn a_prover_failure_is_an_error() {
         .expect("prover for the second guest");
     let err = prover
         .prove_records(
-            &emulated.records,
+            emulated.records,
             emulated.committed_bytes,
             crate::Phase::Riscv,
         )
