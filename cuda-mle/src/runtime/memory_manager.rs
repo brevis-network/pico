@@ -87,6 +87,12 @@
 //! large cross-round buffers that would otherwise thrash this path are cached by their owners
 //! (see `logup_zerocheck`'s GKR-leaf and eq-buffer caches) rather than re-allocated per round.
 //!
+//! What a trim cannot fix is the pool's virtual address range. With CUDA's default `maxSize` a
+//! pool spans only about twice the card's memory, and once live blocks are scattered across it a
+//! large request finds no hole however much the driver has free: no trim or wait moves a live
+//! block. pico's pool is therefore created with a far larger `maxSize`
+//! (`pico_vm::cuda_adaptor::resource_pool::mem_pool`).
+//!
 //! ## Rejected alternatives
 //!
 //! - **Self-managed VPMM pool** (CUDA VMM `cuMemCreate`/`cuMemMap` paging; the prototype's

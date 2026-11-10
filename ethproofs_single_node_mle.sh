@@ -75,14 +75,27 @@ export MLE_COMBINE_OVERLAP_KEYGEN="${MLE_COMBINE_OVERLAP_KEYGEN:-1}"
 # ── Service settings ────────────────────────────────────────────────────────────────────────────
 export MLE_ELF="${MLE_ELF:-reth}"
 
-# ⚠️ DIFFERENCE 2: forced, not defaulted. `--step riscv` and `--step convert` produce no root, so a
-# prover started on either would answer every GetProveResult with "no proof" forever while looking
-# perfectly healthy. There is no legitimate ethproofs run below combine, so this is not a knob.
-if [ -n "${MLE_STEP:-}" ] && [ "$MLE_STEP" != "combine" ]; then
-    echo "MLE_STEP=$MLE_STEP: ethproofs needs a combine root; refusing to start" >&2
-    exit 1
-fi
-export MLE_STEP=combine
+# ⚠️ DIFFERENCE 2: combine (the default) or compress, nothing else. `--step riscv` and `--step
+# convert` produce no root, so a prover started on either would answer every GetProveResult with "no
+# proof" forever while looking perfectly healthy. There is no legitimate ethproofs run below combine.
+# `compress` re-proves the root at the compress preset and submits that proof instead (v4, about
+# 300 KB against the root's ~700 KB); it is exported in whitelist mode only, so it requires
+# VK_VERIFICATION=true, and without MLE_VERIFY the root's own host-side acceptance is skipped, the
+# compress proof being accepted in its place.
+export MLE_STEP="${MLE_STEP:-combine}"
+case "$MLE_STEP" in
+    combine) ;;
+    compress)
+        if [ "${VK_VERIFICATION:-}" != "true" ]; then
+            echo "MLE_STEP=compress needs VK_VERIFICATION=true: only a whitelist-mode compress proof can be submitted; refusing to start" >&2
+            exit 1
+        fi
+        ;;
+    *)
+        echo "MLE_STEP=$MLE_STEP: ethproofs needs a combine root or a compress proof; refusing to start" >&2
+        exit 1
+        ;;
+esac
 
 # Where RSP connects (its WITNESS_GETAWAY_ENDPOINT). 50051 matches the FRI ethproofs node, so RSP
 # needs no change to point at this one.

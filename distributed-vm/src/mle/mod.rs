@@ -157,6 +157,10 @@ pub struct BlockOutcome {
     /// compress proof (`--step compress` without `MLE_VERIFY`; see the export below), and on an MLE
     /// secondary (the root is proved and accepted on the primary by construction).
     pub root: Option<RootProofExport>,
+    /// `--step compress` in whitelist mode: the compress proof, once this process has accepted it
+    /// (the CPU compress machine and the standalone apex). The final proof, and much smaller than
+    /// the root, so the ethproofs entry submits it whenever it is present.
+    pub compress: Option<CompressProofExport>,
     /// The bytes the guest committed, from the emulation. Bound to a proof only by the root's
     /// `committed_value_digest`, which a verifier checks.
     pub committed: Vec<u8>,
@@ -207,6 +211,17 @@ pub struct RootProofExport {
     /// the apex accepts it only as a member of the pinned whitelist -- which is what lets the root
     /// be checked from artifacts alone, without the child layouts (and without trusting them).
     pub root_vk: Option<Vec<u8>>,
+}
+
+/// The compress proof, packaged so somebody else can verify it. Whitelist mode only: the proof
+/// verifies under the whitelist's one compress key, which `pico_verifier` ships
+/// (`shipped_compress_vk`), so no key travels with it -- the reason it is so much smaller than a
+/// root submission.
+pub struct CompressProofExport {
+    /// `mle-core`'s canonical versioned wire format.
+    pub proof: Vec<u8>,
+    /// `RiscvVmVk::digest()`, the exe identity the proof is pinned against.
+    pub riscv_vk_digest: String,
 }
 
 /// Whether the caller explicitly asked for MLE two-machine, which is what decides if the
@@ -4020,6 +4035,10 @@ fn run_pipeline(
     // acceptance. A root this process has not itself verified must never reach a submission.
     #[cfg_attr(not(feature = "cuda"), allow(unused_mut))]
     let mut root_export: Option<RootProofExport> = None;
+    // Likewise for the compress proof: filled only once the compress proof has passed host-side
+    // acceptance and the standalone apex.
+    #[cfg_attr(not(feature = "cuda"), allow(unused_mut))]
+    let mut compress_export: Option<CompressProofExport> = None;
 
     // Combine stage: the tree collapsed (that is what let the workers exit), so the root is in the
     // slot. Acceptance runs on the CPU `CombineMachine` — deliberately, so the four-step host-side
@@ -4266,6 +4285,24 @@ fn run_pipeline(
                 apex.verify_compress(&proved.proof)
                     .expect("standalone apex verify of the compress proof failed");
                 info!("standalone apex verify (compress) ✓");
+                // Exported only here: in whitelist mode, and once both acceptances above have
+                // passed. Without a whitelist nothing outside this process could verify it.
+                match pico_vm::mle::machine::recursion::proof_wire_bytes(&proved.proof.0) {
+                    Ok(bytes) => {
+                        compress_export = Some(CompressProofExport {
+                            proof: bytes,
+                            riscv_vk_digest: riscv_vm_vk
+                                .as_ref()
+                                .expect("compress implies convert, which builds the exe identity")
+                                .digest_hex(),
+                        });
+                    }
+                    // As for the root: a proof that verified must not take the process down
+                    // because its export failed; the caller sees `compress: None`.
+                    Err(e) => {
+                        tracing::warn!("MLE compress: wire encode failed, not exported: {e:?}")
+                    }
+                }
             }
             info!(
                 target: "bench",
@@ -4350,6 +4387,7 @@ fn run_pipeline(
         e2e_wall,
         root_accept,
         root: root_export,
+        compress: compress_export,
         committed,
         guest_failure: None,
         stage_failure: None,
