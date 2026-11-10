@@ -1,0 +1,254 @@
+# Triggers, permissions, concurrency and job naming are explained in lint.yml.
+on:
+  pull_request:
+    branches:
+      - main
+      - release/v*
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".gitignore"
+      - "Makefile"
+      - "tools/**"
+      - ".claude/**"
+      - ".agent/**"
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".gitignore"
+      - "Makefile"
+      - "tools/**"
+      - ".claude/**"
+      - ".agent/**"
+  workflow_dispatch:
+
+name: Test prover
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VK_VERIFICATION: false
+
+jobs:
+  # The host prover crate's tests prove the chain, so they run beside the VM lanes (test-vm.yml)
+  # rather than after them, split by module across three jobs so none outlasts the rest of CI.
+  prover:
+    name: CPU · Host prover (core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: Host prover crate
+        run: |
+          # The `chunks` tests prove across chunk boundaries at the chain's operating point and would
+          # keep this job running well past the wrap proof. A plain run includes them. `chain` runs
+          # in the `prover-chain` job, the precompile guests in `prover-precompiles`, the ACT4 tests
+          # in `act4`, and the wrap test in the `wrap` job.
+          # One test at a time: each proof already uses every core, and several peak at 6-8 GB, so
+          # side by side they can exceed the runner's memory. `free` records what it has.
+          nproc && free -g
+          cargo test --release -p pico-prover -- --test-threads=1 --skip tests::chunks:: \
+            --skip tests::chain:: --skip tests::precompiles:: --skip tests::act4:: \
+            --skip tests::evm::a_wrap_proof_gives_the_program_id_and_the_bundle_the_circuits_public_inputs
+      - name: The commit tail stays in one chunk
+        run: |
+          # The two `chunks` tests that only emulate: they guard the emulator's commit-tail hold.
+          cargo test --release -p pico-prover -- --exact \
+            tests::chunks::the_emulator_keeps_the_commit_in_one_chunk \
+            tests::chunks::a_commit_split_across_chunks_is_backfilled
+      - name: Host prover crate without its default features
+        run: |
+          # The build without `multi-field-transcript`: it must compile, and name the two outer
+          # phases as missing rather than lack them.
+          cargo test --release -p pico-prover --no-default-features -- \
+            tests::options::the_outer_phases_can_be_named_and_report_themselves_missing
+
+  prover-chain:
+    name: CPU · Host prover chain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: The facade against the direct chain
+        run: |
+          # `--test-threads=1`: the facade test alone peaks near 8 GB.
+          set -o pipefail
+          cargo test --release -p pico-prover -- --test-threads=1 tests::chain:: | tee chain-test.log
+          grep -qE "test result: ok\. [1-9][0-9]* passed" chain-test.log
+
+  prover-precompiles:
+    name: CPU · Host prover precompiles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: The precompile guests prove
+        run: |
+          # Their own process: the ed25519 guest's proof peaks near 10.5 GB alone and near 11.5 GB
+          # after the poseidon2 guest's, too close to the runner's memory to follow the rest of the
+          # crate's tests.
+          set -o pipefail
+          cargo test --release -p pico-prover -- --test-threads=1 tests::precompiles:: | tee precompiles-test.log
+          grep -qE "test result: ok\. [1-9][0-9]* passed" precompiles-test.log
+
+  # The RISC-V architectural tests (ACT4) of Pico's RV64IM_Zicclsm target, 72 in all (act4/README.md).
+  # Each checks its own results and commits `PASS` or `FAIL`. All 72 must execute, prove and
+  # verify, committing `PASS`, and the proof of each of the 8 Misalign tests must report the
+  # misaligned accesses its execution counted. Its own job: 72 keygens and proofs, beside the other
+  # proving lanes.
+  act4:
+    name: CPU · ACT4 RV64IM_Zicclsm (72 pass)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: Execute, prove and verify each test
+        run: |
+          # `--nocapture` prints a line per test with its time. The count: a renamed module would
+          # otherwise run nothing and pass.
+          set -o pipefail
+          cargo test --release -p pico-prover -- --test-threads=1 --nocapture tests::act4:: | tee act4-test.log
+          grep -q "test result: ok. 2 passed" act4-test.log
+
+  cli:
+    name: CPU · CLI prove and verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: cargo pico prove and execute
+        run: |
+          # Drives the binary, and verifies the proof file it writes in a process that proved nothing.
+          cargo test --release -p pico-cli
+
+  # The C guest example (examples/c-guest): a guest in C and C++ linked against only the static
+  # library and linker script that `cargo pico lib` writes, once with LLD and once with GNU ld,
+  # each run through every case and proved. The only job that installs the guest toolchain, which
+  # `cargo pico lib` builds the library with.
+  c-guest:
+    name: CPU · C guest, GNU ld and LLD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: clang and LLD
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld
+      - name: GNU ld for RISC-V
+        run: |
+          # Not Ubuntu's binutils-riscv64-unknown-elf: 2.38, on this runner's Ubuntu 22.04, rejects
+          # every object LLVM builds for RV64IM ("Invalid or unknown z ISA extension: 'zmmul'" in
+          # their .riscv.attributes). xPack's toolchain carries a current binutils; its checksum is
+          # the one the release publishes.
+          set -eux
+          v=15.2.0-1
+          f=xpack-riscv-none-elf-gcc-$v-linux-x64.tar.gz
+          curl -fsSL -o "$RUNNER_TEMP/$f" \
+            "https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v$v/$f"
+          echo "aaaa8060c914851a3e5ee1ba82cc3d6f80972f90638a05c6e823a37557a33758  $RUNNER_TEMP/$f" \
+            | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP"
+          echo "GNU_LD=$RUNNER_TEMP/xpack-riscv-none-elf-gcc-$v/bin/riscv-none-elf-ld" >> "$GITHUB_ENV"
+      - name: cargo pico, the guest toolchain and the library
+        run: |
+          set -eux
+          cargo build --release -p pico-cli
+          echo "$PWD/target/release" >> "$GITHUB_PATH"
+          ./target/release/cargo-pico pico install
+          # The library from this checkout, not from the release the CLI names.
+          PICO_SOURCE="$PWD" ./target/release/cargo-pico pico lib --output examples/c-guest/pico-zkvm
+      - name: Build with LLD and GNU ld
+        working-directory: examples/c-guest
+        run: ./build.sh pico-zkvm
+      - name: Run and prove each build
+        working-directory: examples/c-guest
+        run: |
+          ./check.sh guest-lld.elf
+          ./check.sh guest-gnu-ld.elf
+
+  # The wrap proof is the longest single proof here and nothing else waits on it, so it runs beside
+  # the VM lanes (test-vm.yml). The gnark step that reads its two artifacts moves with it, which is why no
+  # artifact has to cross a job boundary.
+  #
+  # It is the longest job in CI, so the next thing to look at to shorten it.
+  wrap:
+    name: EVM · Wrap proof and verifier circuit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - name: Wrap proof (fib), and the EVM bundle against the wrap circuit
+        env:
+          # The test writes the bundle's two files here for the gnark step below.
+          PICO_PROVER_WRAP_OUT: ${{ github.workspace }}/wrap-out
+        run: |
+          # `--exact` and the count: a renamed test would otherwise run nothing and pass.
+          set -o pipefail
+          cargo test --release -p pico-prover -- --exact \
+            tests::evm::a_wrap_proof_gives_the_program_id_and_the_bundle_the_circuits_public_inputs \
+            | tee wrap-test.log
+          grep -q "test result: ok. 1 passed" wrap-test.log
+      - name: Compile field ffi so
+        run: |
+          cargo build --release --package field-ffi
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: gnark/go.mod
+          cache-dependency-path: gnark/go.sum
+      - name: Groth16 verifier circuit solves the wrap proof
+        run: |
+          set -eux
+          # The test reads these two names out of its own directory.
+          cp wrap-out/wrap_constraints.json gnark/koalabear_verifier/constraints.json
+          cp wrap-out/wrap_groth16_witness.json gnark/koalabear_verifier/groth16_witness.json
+          (cd gnark && CGO_LDFLAGS="-L$GITHUB_WORKSPACE/target/release -Wl,-rpath,$GITHUB_WORKSPACE/target/release" \
+            go test -timeout 600s -run TestSolveVerifierCircuit ./koalabear_verifier/)
+      - name: Tampered wrap witnesses do not solve
+        run: |
+          set -eux -o pipefail
+          # One witness value changed per case, each of which must leave the circuit
+          # unsatisfiable, after the honest witness solves as the control. The test skips without
+          # the two files above, so the PASS line is what says it ran.
+          (cd gnark && CGO_LDFLAGS="-L$GITHUB_WORKSPACE/target/release -Wl,-rpath,$GITHUB_WORKSPACE/target/release" \
+            go test -timeout 1800s -v -run '^TestTamperedWitnessIsUnsatisfiable$' ./koalabear_verifier/) \
+            | tee tamper-test.log
+          grep -q -- "--- PASS: TestTamperedWitnessIsUnsatisfiable" tamper-test.log
+      - name: The wrap circuit fits the Groth16 domain
+        run: |
+          set -eux -o pipefail
+          # Compiles the circuit, which nothing above does, and needs at most 2^23 constraints.
+          # This is the dev-mode circuit CI proves to (7,233,341 constraints, 13.8% under); the
+          # whitelist-mode one a verifier is set up for (7,243,820, 13.6% under) is checked the
+          # same way on a machine that can prove it, before a setup.
+          (cd gnark && CGO_LDFLAGS="-L$GITHUB_WORKSPACE/target/release -Wl,-rpath,$GITHUB_WORKSPACE/target/release" \
+            go test -timeout 900s -v -run '^TestCircuitFitsGroth16Domain$' ./koalabear_verifier/) \
+            | tee fits-test.log
+          grep -q -- "--- PASS: TestCircuitFitsGroth16Domain" fits-test.log
+
+  # The verifier contracts, against the proofs committed in contracts/test/fixtures. Foundry only:
+  # nothing here proves.
+  contracts:
+    name: EVM · Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+      - name: forge fmt and test
+        working-directory: contracts
+        run: |
+          set -eux
+          forge fmt --check
+          forge test -vvv
