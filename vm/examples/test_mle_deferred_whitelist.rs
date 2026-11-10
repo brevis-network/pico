@@ -41,10 +41,7 @@ use pico_mle_core::{
     protocol::proof::Proof,
 };
 use pico_vm::{
-    compiler::riscv::{
-        compiler::{Compiler, SourceType},
-        program::Program,
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP, stdin::EmulatorStdin},
     machine::logger::setup_logger,
@@ -77,7 +74,7 @@ struct Guest {
     committed_bytes: Vec<u8>,
 }
 
-fn prove_guest(elf: &str, stdin: EmulatorStdin<Program, Vec<u8>>) -> Guest {
+fn prove_guest(elf: &str, stdin: EmulatorStdin) -> Guest {
     let program = Arc::new(
         Compiler::new(SourceType::RISCV, &std::fs::read(elf).expect("elf"))
             .expect("parse elf")
@@ -243,13 +240,13 @@ fn main() {
     #[cfg(feature = "cuda")]
     riscv::init_mle_gpu_pool(riscv::MLE_GPU_DEVICE);
 
-    let mut fib_stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut fib_stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     fib_stdin.write(&10u32);
     let fib = prove_guest(ELF, fib_stdin.finalize());
     // The aggregator is handed fib's exe identity and output, so its digest is a chain over
     // fib's root; the identity is fixed by the program, so it is known before fib is proved.
     let fib_identity: [u32; DIGEST_SIZE] = fib.vm_vk.digest().map(|l| l.as_canonical_u32());
-    let mut agg_stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut agg_stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     agg_stdin.write(&vec![fib_identity; 2]);
     agg_stdin.write(&vec![fib.committed_bytes.clone(); 2]);
     let agg = prove_guest(AGGREGATOR_ELF, agg_stdin.finalize());

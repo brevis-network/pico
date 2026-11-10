@@ -115,6 +115,9 @@ where
         // device table the same way, so it runs before the table is finalized too.
         const MEMORY_UNALIGNED_CHIP_INDEX: usize = 50;
 
+        // The sliced Keccak tables, appended last: a device kernel, no byte lookups.
+        const KECCAK_TABLES_CHIP_INDEX: usize = 51;
+
         let durations = DashMap::new();
         let mut chip_names_traces = Vec::new();
         let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
@@ -297,7 +300,9 @@ where
         // Host-tracegen precompile chips. Their byte-table update is a read-modify-write through
         // the host (`gpu_add_host_byte_lookups`), which is sound only because the chips run one
         // at a time and each one synchronizes its streams before returning -- keep it that way.
-        for chip_index in HOST_TRACEGEN_PRECOMPILE_INDICES.chain([MEMORY_UNALIGNED_CHIP_INDEX]) {
+        for chip_index in HOST_TRACEGEN_PRECOMPILE_INDICES
+            .chain([MEMORY_UNALIGNED_CHIP_INDEX, KECCAK_TABLES_CHIP_INDEX])
+        {
             run_chip(chip_index, &mut preallocated_gpu_memory);
             snap_after!(chip_index);
         }

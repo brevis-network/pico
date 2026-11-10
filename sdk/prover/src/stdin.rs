@@ -1,9 +1,6 @@
 //! Guest input. One host method per guest `io` read.
 
-use pico_vm::{
-    compiler::riscv::program::Program, configs::stark_config::KoalaBearPoseidon2,
-    emulator::stdin::EmulatorStdin,
-};
+use pico_vm::{configs::stark_config::KoalaBearPoseidon2, emulator::stdin::EmulatorStdin};
 use serde::Serialize;
 
 /// What the guest reads, in the order it reads it.
@@ -91,8 +88,8 @@ impl Stdin {
     /// Hand the elements to the emulator.
     ///
     /// `KoalaBearPoseidon2` is the builder's phantom type parameter, discarded by `finalize`.
-    pub(crate) fn into_emulator_stdin(self) -> EmulatorStdin<Program, Vec<u8>> {
-        let mut builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    pub(crate) fn into_emulator_stdin(self) -> EmulatorStdin {
+        let mut builder = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
         for element in self.elements {
             builder.write_slice(&element);
         }

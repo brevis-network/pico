@@ -405,7 +405,6 @@ impl<F: PrimeField32> GpuChipBehavior<F> for MemoryLocalChip<F> {
         let main_stream = &sync_stream.0;
         device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        device::wait(stream).unwrap();
         device::wait(main_stream).unwrap();
 
         info!("[memory-local-chip] generate_extra_record_and_main on GPU");

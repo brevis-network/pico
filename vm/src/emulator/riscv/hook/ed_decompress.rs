@@ -1,11 +1,8 @@
 use num::{BigUint, One};
 
-use crate::{
-    chips::gadgets::{
-        curves::edwards::ed25519::{ed25519_sqrt, Ed25519BaseField},
-        utils::field_params::FieldParameters,
-    },
-    emulator::riscv::riscv_emulator::RiscvEmulator,
+use crate::chips::gadgets::{
+    curves::edwards::ed25519::{ed25519_sqrt, Ed25519BaseField},
+    utils::field_params::FieldParameters,
 };
 
 /// A non-quadratic residue in the Ed25519 base field.
@@ -28,16 +25,7 @@ const NQR_CURVE_25519: u8 = 2;
 /// WARNING: this only hints. Every value it returns is constrained on the guest side; nothing
 /// here is trusted.
 #[must_use]
-pub fn ed_decompress(_: &RiscvEmulator, buf: &[u8]) -> Vec<Vec<u8>> {
-    hint_ed_decompress(buf)
-}
-
-/// The hint itself, without the emulator the hook signature carries. Split out so the protocol
-/// can be tested directly, and so the AOT runtime can answer with this function rather than a
-/// copy of it: the guest reads a different number of values depending on the answer, so the two
-/// emulators have to agree on every request.
-#[must_use]
-pub fn hint_ed_decompress(buf: &[u8]) -> Vec<Vec<u8>> {
+pub fn ed_decompress(buf: &[u8]) -> Vec<Vec<u8>> {
     assert_eq!(
         buf.len(),
         64,

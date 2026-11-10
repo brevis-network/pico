@@ -262,7 +262,6 @@ pub(crate) fn split_trace_from_history<'t, F: PrimeField32>(
     device::launched(kernels, stream);
     device::wait(stream).unwrap();
     let d_trace = d_trace.swap_stream(main_stream);
-    device::wait(stream).unwrap();
     device::wait(main_stream).unwrap();
 
     info!("[{chip}] generate_extra_record_and_main from the history on GPU");

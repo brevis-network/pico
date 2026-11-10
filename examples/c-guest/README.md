@@ -26,4 +26,4 @@ RV64IM, on the `zmmul` extension in its `.riscv.attributes`. CI uses xPack's `ri
 `abort`, the `assert` hook and `__cxa_atexit`, the static library provides
 (`docs/guest-runtime.md`).
 
-CI builds both, and runs `check.sh` on each (`CPU · C guest, GNU ld and LLD`, in `test-prover.yml`).
+CI builds both, and runs `check.sh` on each (`CPU · C guest, GNU ld and LLD`).

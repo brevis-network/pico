@@ -3,10 +3,7 @@
 //! Provides helpers for loading the reth ELF binary and block input data.
 
 use anyhow::{Context, Result};
-use pico_vm::{
-    compiler::riscv::program::Program, configs::config::StarkGenericConfig,
-    emulator::stdin::EmulatorStdin,
-};
+use pico_vm::{configs::config::StarkGenericConfig, emulator::stdin::EmulatorStdin};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -95,13 +92,10 @@ pub fn validate_block(block_number: u32) -> Result<()> {
     Ok(())
 }
 
-/// Creates an EmulatorStdin from input bytes, following the pattern from perf/src/common/bench_program.rs.
+/// Creates an EmulatorStdin from input bytes.
 /// This is the correct way to load reth block inputs (raw bytes, not serialized EmulatorStdinBuilder).
-#[allow(clippy::type_complexity)]
-pub fn create_stdin<SC: StarkGenericConfig>(
-    input_bytes: &[u8],
-) -> Result<EmulatorStdin<Program, Vec<u8>>> {
-    let mut stdin_builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<SC>();
+pub fn create_stdin<SC: StarkGenericConfig>(input_bytes: &[u8]) -> Result<EmulatorStdin> {
+    let mut stdin_builder = EmulatorStdin::new_builder::<SC>();
     stdin_builder.write_slice(input_bytes);
     let stdin = stdin_builder.finalize();
     Ok(stdin)

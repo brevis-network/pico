@@ -4,7 +4,6 @@ use crate::common::{
 };
 use anyhow::{Context, Error};
 use pico_vm::{
-    compiler::riscv::program::Program,
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{EmulatorStdin, EmulatorStdinBuilder},
 };
@@ -18,14 +17,13 @@ use std::{
 // Helper: load stdin_builder (by deserializing a builder)
 pub fn load_stdin_builder_from_file<P: AsRef<Path>>(
     path: P,
-) -> anyhow::Result<EmulatorStdinBuilder<Vec<u8>, KoalaBearPoseidon2>> {
+) -> anyhow::Result<EmulatorStdinBuilder<KoalaBearPoseidon2>> {
     let path_ref = path.as_ref();
     let f = BufReader::new(
         File::open(path_ref).with_context(|| format!("failed to open {}", path_ref.display()))?,
     );
-    let builder: EmulatorStdinBuilder<Vec<u8>, KoalaBearPoseidon2> =
+    let builder: EmulatorStdinBuilder<KoalaBearPoseidon2> =
         bincode::deserialize_from(f).context("failed to deserialize stdin_builder")?;
-    // let (stdin, _) = builder.finalize::<Program>();
     Ok(builder)
 }
 
@@ -51,15 +49,14 @@ pub fn subblock_builder_path(block: u64, gas_threshold: u64, idx: usize) -> Stri
     )
 }
 
-pub fn build_stdin(input: &ProgramInput) -> anyhow::Result<(u64, EmulatorStdin<Program, Vec<u8>>)> {
+pub fn build_stdin(input: &ProgramInput) -> anyhow::Result<(u64, EmulatorStdin)> {
     // we'll set this in the match
     let block: u64;
 
-    let stdin: EmulatorStdin<Program, Vec<u8>> = match input {
+    let stdin: EmulatorStdin = match input {
         ProgramInput::Simple { block: b, input } => {
             block = *b;
-            let mut builder =
-                EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+            let mut builder = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
             if let Some(bytes) = input {
                 builder.write_slice(bytes);
             }
@@ -68,8 +65,7 @@ pub fn build_stdin(input: &ProgramInput) -> anyhow::Result<(u64, EmulatorStdin<P
 
         ProgramInput::Common { task_id, inputs } => {
             block = *task_id;
-            let mut builder =
-                EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+            let mut builder = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
             for x in inputs {
                 let bytes = bincode::serialize(x).context("serialize Common.inputs")?;
                 builder.write_slice(&bytes);
@@ -112,7 +108,7 @@ pub fn build_stdin(input: &ProgramInput) -> anyhow::Result<(u64, EmulatorStdin<P
         } => {
             block = *b;
 
-            let mut stdin_builder: EmulatorStdinBuilder<Vec<u8>, KoalaBearPoseidon2> =
+            let mut stdin_builder: EmulatorStdinBuilder<KoalaBearPoseidon2> =
                 bincode::deserialize(builder_bytes)
                     .context("deserialize AggregatorRaw.builder_bytes")?;
             // TRICKY: replace vk digest in aggregator stdin builder
@@ -129,7 +125,7 @@ pub fn build_stdin(input: &ProgramInput) -> anyhow::Result<(u64, EmulatorStdin<P
             builder_bytes,
         } => {
             block = *b;
-            let stdin_builder: EmulatorStdinBuilder<Vec<u8>, KoalaBearPoseidon2> =
+            let stdin_builder: EmulatorStdinBuilder<KoalaBearPoseidon2> =
                 bincode::deserialize(builder_bytes)
                     .context("deserialize SubblockRaw.builder_bytes")?;
 

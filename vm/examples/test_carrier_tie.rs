@@ -34,10 +34,7 @@ use pico_mle_core::{
 use pico_vm::{
     compiler::{
         program::ProgramBehavior,
-        riscv::{
-            compiler::{Compiler, SourceType},
-            program::Program,
-        },
+        riscv::compiler::{Compiler, SourceType},
     },
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
@@ -119,7 +116,7 @@ fn main() {
 
     let elf = std::fs::read("./perf/bench_data/rv64/fib-elf")
         .expect("run from the repo root: ./perf/bench_data/rv64/fib-elf not found");
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     stdin.write(&10u32);
     let program = Compiler::new(SourceType::RISCV, &elf)
         .expect("failed to parse ELF")

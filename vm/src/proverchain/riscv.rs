@@ -342,7 +342,7 @@ where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>,
 {
-    Interpreter(Box<MetaEmulator<SC, C, Program, Vec<u8>, RiscvEmulator>>),
+    Interpreter(Box<MetaEmulator<SC, C, RiscvEmulator>>),
     #[cfg(feature = "aot-emulator")]
     Aot(AotReplayMetaEmulator<SC, C>),
 }
@@ -356,7 +356,7 @@ where
     /// A worker's first batch: an emulator of `engine`'s kind, recovered from `snapshot`.
     fn recover(
         engine: ReplayWorkers,
-        witness: &ProvingWitness<SC, C, Vec<u8>>,
+        witness: &ProvingWitness<SC, C>,
         snapshot: RiscvEmulationState,
         shared_ds: SharedDeferredState,
         target_clk: u64,
@@ -1028,7 +1028,7 @@ fn memory_pool_refusal(
 /// [`emulate_snapshot_pipeline_with`], with the worker count read from `NUM_THREADS` (unset or
 /// `0`: one) and the prover pipeline's deferred split.
 pub fn emulate_snapshot_pipeline<SC, C, F>(
-    witness: &ProvingWitness<SC, C, Vec<u8>>,
+    witness: &ProvingWitness<SC, C>,
     handle_record: F,
 ) -> Result<(Vec<EmulationReport>, u64, Vec<u8>), EmulationError>
 where
@@ -1064,7 +1064,7 @@ where
 ///
 /// If `witness.opts.chunk_batch_size` is not 1.
 pub fn emulate_snapshot_pipeline_with<SC, C, F>(
-    witness: &ProvingWitness<SC, C, Vec<u8>>,
+    witness: &ProvingWitness<SC, C>,
     workers: NonZeroUsize,
     deferred_split: DeferredSplit,
     handle_record: F,
@@ -1958,8 +1958,7 @@ mod tests {
     use std::time::Duration;
 
     /// fib(10) in five chunks of 2048, each its own batch.
-    fn fib_witness() -> ProvingWitness<KoalaBearPoseidon2, RiscvChips<KoalaBearPoseidon2>, Vec<u8>>
-    {
+    fn fib_witness() -> ProvingWitness<KoalaBearPoseidon2, RiscvChips<KoalaBearPoseidon2>> {
         let fib: &[u8] = include_bytes!("../compiler/test_elf/fib-elf");
         let program = crate::compiler::riscv::compiler::Compiler::new(
             crate::compiler::riscv::compiler::SourceType::RISCV,
@@ -1967,15 +1966,12 @@ mod tests {
         )
         .expect("parse fib")
         .compile();
-        let mut stdin = crate::emulator::stdin::EmulatorStdin::<Program, Vec<u8>>::new_builder::<
-            KoalaBearPoseidon2,
-        >();
+        let mut stdin = crate::emulator::stdin::EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
         stdin.write(&10u32);
         ProvingWitness {
             program: Some(program),
             vk_root: None,
             stdin: Some(stdin.finalize()),
-            flag_empty_stdin: false,
             config: None,
             opts: Some(crate::emulator::opts::EmulatorOpts {
                 chunk_size: 2048,

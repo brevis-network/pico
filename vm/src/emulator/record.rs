@@ -1,8 +1,6 @@
 use hashbrown::HashMap;
 use p3_field::PrimeCharacteristicRing;
 
-// set it temporarily for now
-
 pub trait RecordBehavior: Default + Send + Sync {
     fn name(&self) -> String;
 
@@ -13,8 +11,4 @@ pub trait RecordBehavior: Default + Send + Sync {
     fn public_values<F: PrimeCharacteristicRing>(&self) -> Vec<F>;
 
     fn chunk_index(&self) -> usize;
-
-    fn unconstrained(&self) -> bool {
-        false
-    }
 }

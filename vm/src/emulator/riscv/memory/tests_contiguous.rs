@@ -59,9 +59,6 @@ fn mark_accessed_behavior_matches_contract() {
 
     let _ = memory.get(0x2000);
     assert!(!memory.has_accessed(0x2000));
-
-    let _ = memory.get_mut_or_create(0x3000);
-    assert!(memory.has_accessed(0x3000));
 }
 
 #[test]
@@ -93,32 +90,21 @@ fn dword_access_out_of_range_panics() {
     memory.write_dword(VALUES_SIZE as u64, 1, 0, 0);
 }
 
-/// The bitmap-only clear and `reset` both reach every marked word: the first and last word of a
-/// cache line of the bitmap, and its last word. `reset` zeroes the cells under them; the bitmap-only
-/// clear leaves them as they were.
+/// `reset` reaches every marked word: the first and last word of a cache line of the bitmap, and its
+/// last word. It clears each one and zeroes the cells under it.
 #[test]
-fn the_sparse_clears_reach_every_marked_word() {
+fn the_sparse_reset_reaches_every_marked_word() {
     let addrs = [0x100, 0xff8, 0x1000, VALUES_SIZE as u64 - 8];
     let record = MemoryRecord {
         value: 0xdead_beef,
         chunk: 3,
         timestamp: 5,
     };
-    let mark = |memory: &mut ContiguousRiscvMemory| {
-        for addr in addrs {
-            memory.insert_u64(addr, record);
-        }
-    };
     let mut memory = ContiguousRiscvMemory::new();
 
-    mark(&mut memory);
-    memory.clear_accessed_bitmap();
     for addr in addrs {
-        assert!(!memory.has_accessed(addr), "{addr:#x} is still marked");
-        assert_eq!(memory.get(addr), record, "{addr:#x} lost its cell");
+        memory.insert_u64(addr, record);
     }
-
-    mark(&mut memory);
     memory.reset();
     for addr in addrs {
         assert!(

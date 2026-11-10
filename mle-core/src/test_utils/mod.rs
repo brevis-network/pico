@@ -315,6 +315,7 @@ impl<SC: StarkProtocolConfig> TestFixture<SC> for CachedFixture11<SC> {
                     cached_mains: vec![cached_data],
                     common_main: common,
                     public_values: vec![],
+                    real_rows: None,
                 }
             })
             .into_iter()

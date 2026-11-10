@@ -133,7 +133,7 @@ type SchedulerProof = ProofWithVk;
 pub struct BlockJob {
     /// The block this stdin proves. Carried only so a caller need not track it alongside.
     pub block: u64,
-    pub stdin: EmulatorStdin<Program, Vec<u8>>,
+    pub stdin: EmulatorStdin,
 }
 
 /// What one block produced, for a caller that has to report it somewhere rather than only log it.
@@ -712,14 +712,16 @@ mod recursion_lane_tests {
 
 /// The engine the snapshot pipeline's replay workers run, once per process.
 /// `MLE_REPLAY_WORKERS=aot` replays each chunk on the AOT-compiled guest's recording bodies;
-/// `=interpreter`, the default when unset or empty, on the interpreter. AOT stays opt-in until it
-/// is shown to shorten a whole block on the production launch. Both write the same records into the
-/// same history slots.
+/// `=interpreter`, on the interpreter. Unset or empty means `aot` when this process registered a
+/// program with recording bodies, and the interpreter otherwise (a build without `aot-emulator`, or
+/// a refused registration). Both write the same records into the same history slots.
 ///
 /// Both binaries call this right after registering the AOT program, so a value the process cannot
-/// honour stops it before any setup. Nothing falls back, since a fallback would run under the name
-/// of the arm that was asked for. What each block's replay actually ran is the pipeline's own
-/// `bench` line (`emulate_snapshot_pipeline_with`).
+/// honour stops it before any setup. An explicit `aot` never falls back, since a fallback would run
+/// under the name of the arm that was asked for; only the unset default picks the interpreter when
+/// nothing is registered. This line names the process default; an embedded run that passes its own
+/// options can differ, and what each block's replay actually ran is the pipeline's own `bench` line
+/// (`emulate_snapshot_pipeline_with`).
 pub fn replay_workers() -> ReplayWorkers {
     static RESOLVED: std::sync::OnceLock<ReplayWorkers> = std::sync::OnceLock::new();
     *RESOLVED.get_or_init(|| {
@@ -784,6 +786,7 @@ fn replay_workers_from(
         )
     };
     match word.as_deref() {
+        None | Some("") if registered.replay => Ok(ReplayWorkers::Aot),
         None | Some("") | Some("interpreter") => Ok(ReplayWorkers::Interpreter),
         Some("aot") if registered.replay => Ok(ReplayWorkers::Aot),
         Some("aot") if registered.program => Err(
@@ -825,9 +828,18 @@ mod replay_workers_tests {
     };
 
     #[test]
-    fn unset_and_empty_are_the_interpreter() {
+    fn unset_and_empty_are_aot_with_a_registered_replay_program() {
         for raw in [None, Some(""), Some("  ")] {
-            for registered in [NONE, PROGRAM, REPLAY] {
+            assert_eq!(replay_workers_from(raw, REPLAY), Ok(ReplayWorkers::Aot));
+        }
+    }
+
+    #[test]
+    fn unset_and_empty_are_the_interpreter_without_one() {
+        // No program (a build without aot-emulator, or a refused registration), or a program
+        // without a recording entry point: the default never refuses, it takes the interpreter.
+        for raw in [None, Some(""), Some("  ")] {
+            for registered in [NONE, PROGRAM] {
                 assert_eq!(
                     replay_workers_from(raw, registered),
                     Ok(ReplayWorkers::Interpreter)
@@ -1669,8 +1681,8 @@ fn load_program_elf(cfg: &MleSingleNodeConfig) -> Arc<[u8]> {
 
 /// The stdin for **one** block. This is the only thing a sweep changes between blocks; everything
 /// else it holds resident, which is the whole point of the split.
-fn stdin_for_block(cfg: &MleSingleNodeConfig, n: u32) -> EmulatorStdin<Program, Vec<u8>> {
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+fn stdin_for_block(cfg: &MleSingleNodeConfig, n: u32) -> EmulatorStdin {
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     match cfg.elf.as_str() {
         "fib" | "fibonacci" | "f" => {
             stdin.write(&n);
@@ -2848,7 +2860,7 @@ fn run_pipeline(
             // up as `preparers_spawned -> emu_start` rather than inside the thread's own span.
             vram_probe("emu_start", iteration.unwrap_or(0), prover_count);
             let corrupted = Arc::new(AtomicBool::new(false));
-            let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<KoalaBear>, Vec<u8>>::
+            let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<KoalaBear>>::
                 setup_for_mle_riscv(program, stdin, emulator_opts);
             vram_probe("emu_witness", iteration.unwrap_or(0), prover_count);
             let emulated = {

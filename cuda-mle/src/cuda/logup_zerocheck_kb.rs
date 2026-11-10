@@ -5,7 +5,7 @@ use p3_field::PrimeCharacteristicRing;
 
 use crate::{
     cuda::{
-        field_kernels::GkrLens,
+        field_kernels::{GkrInputRows, GkrLens, SegTabFfi},
         logup_zerocheck::{
             BlockCtx, EvalCoreCtx, LogupCtx, LogupMonomialCommonCtx, LogupMonomialCtx,
             MainMatrixPtrs, MonomialAirCtx, ZerocheckCtx,
@@ -29,6 +29,105 @@ extern "C" {
         real_len: usize,
         log_n: u32,
         alpha: EF,
+    ) -> i32;
+
+    // Segmented input (`logup_zerocheck::seg_virtual`).
+    pub fn _kb_gkr_seg_k3(
+        storage: *mut Frac<EF>,
+        storage_len: usize,
+        tab: SegTabFfi,
+        alpha: EF,
+    ) -> i32;
+    pub fn _kb_gkr_seg_build(
+        storage: *mut Frac<EF>,
+        storage_len: usize,
+        tab: SegTabFfi,
+        level: u32,
+        two: bool,
+    ) -> i32;
+    pub fn _kb_gkr_seg_round_revert(
+        eq_lo: *const EF,
+        eq_hi: *const EF,
+        storage: *mut Frac<EF>,
+        storage_len: usize,
+        tab: SegTabFfi,
+        level: u32,
+        eq_lo_cap: usize,
+        lambda: EF,
+        round_out: *mut EF,
+        round_scratch: *mut EF,
+    ) -> i32;
+    pub fn _kb_gkr_seg_round_fold(
+        eq_lo: *const EF,
+        eq_hi: *const EF,
+        src: *const Frac<EF>,
+        src_sh: u32,
+        dst: *mut Frac<EF>,
+        dst_sh: u32,
+        storage_len: usize,
+        tab: SegTabFfi,
+        c_in: u32,
+        eq_lo_cap: usize,
+        lambda: EF,
+        r_prev: EF,
+        round_out: *mut EF,
+        round_scratch: *mut EF,
+    ) -> i32;
+    pub fn _kb_gkr_seg_precompute_m_build(
+        src: *const Frac<EF>,
+        src_sh: u32,
+        storage_len: usize,
+        tab: SegTabFfi,
+        c_src: u32,
+        wbits: u32,
+        fold_inline: bool,
+        lambda: EF,
+        fold_r: EF,
+        tail_eq_lo: *const EF,
+        tail_eq_hi: *const EF,
+        tail_eq_lo_len: usize,
+        tile_len: usize,
+        partials: *mut EF,
+        partials_len: usize,
+        m_mat: *mut EF,
+    ) -> i32;
+    pub fn _kb_gkr_seg_multifold(
+        src: *const Frac<EF>,
+        src_sh: u32,
+        dst: *mut Frac<EF>,
+        dst_sh: u32,
+        storage_len: usize,
+        tab: SegTabFfi,
+        c_src: u32,
+        wbits: u32,
+        win_eq: *const EF,
+    ) -> i32;
+    pub fn _kb_gkr_seg_gather(
+        src: *const Frac<EF>,
+        src_sh: u32,
+        tab: SegTabFfi,
+        leaf_gran: *const u32,
+        padtab: *const Frac<EF>,
+        pad_level: u32,
+        c: u32,
+        dst: *mut Frac<EF>,
+        n_log: u32,
+    ) -> i32;
+    pub fn _kb_gkr_seg_pad_table(
+        consts: *const Frac<EF>,
+        n_consts: u32,
+        alpha: EF,
+        padtab: *mut Frac<EF>,
+    ) -> i32;
+    pub fn _kb_gkr_seg_pad_sum(
+        pads: *const crate::logup_zerocheck::seg_virtual::SegBlk,
+        n_pads: u32,
+        padtab: *const Frac<EF>,
+        level: u32,
+        lambda: EF,
+        xi_rev: *const EF,
+        log_len: u32,
+        out: *mut EF,
     ) -> i32;
 
     fn _kb_frac_build_tree_layer(
@@ -245,6 +344,9 @@ extern "C" {
         live_nodes_len: usize,
         height: u32,
         rows_per_tile: u32,
+        row0: u32,
+        n_eval: u32,
+        out_stride: u32,
     ) -> i32;
 
     // ---- logup_round0.cu ----
@@ -1093,6 +1195,7 @@ pub unsafe fn logup_gkr_input_eval_kb(
     pair_indices: &DeviceBuffer<u32>,
     height: u32,
     rows_per_tile: u32,
+    rows: GkrInputRows,
 ) -> Result<(), CudaError> {
     debug_assert_eq!(live_nodes.len(), pair_indices.len());
     CudaError::from_result(_kb_logup_gkr_input_eval(
@@ -1109,6 +1212,9 @@ pub unsafe fn logup_gkr_input_eval_kb(
         live_nodes.len(),
         height,
         rows_per_tile,
+        rows.row0,
+        rows.n_eval,
+        rows.out_stride,
     ))
 }
 

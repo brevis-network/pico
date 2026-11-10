@@ -58,7 +58,9 @@ export MLE_HEAP_PREWARM_GB="${MLE_HEAP_PREWARM_GB:-6}"
 export TCMALLOC_RELEASE_RATE="${TCMALLOC_RELEASE_RATE:-0}"
 export NUM_THREADS="${NUM_THREADS:-8}"
 # MLE_REPLAY_WORKERS is left unset, as in single_node_mle.sh: the replay workers run the
-# interpreter. MLE_REPLAY_WORKERS=aot puts them on the AOT-compiled guest's recording bodies.
+# AOT-compiled guest's recording bodies when the binary registered them (aot-emulator, and the
+# guest's crate generated into aot-generated/), and the interpreter otherwise; `MLE replay
+# workers: <engine>` in the log says which. MLE_REPLAY_WORKERS=interpreter forces the interpreter.
 export RAYON_NUM_THREADS="${RAYON_NUM_THREADS:-32}"
 export PICO_GPU_MEM="${PICO_GPU_MEM:-5090}"
 export MEM_POOL_RESERVE_SIZE="${MEM_POOL_RESERVE_SIZE:-28000000000}"

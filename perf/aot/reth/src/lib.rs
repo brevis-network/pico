@@ -38,7 +38,7 @@ pub fn register_aot() -> Result<(), pico_aot_runtime::AotError> {
 }
 
 pub type RethWitness =
-    ProvingWitness<RiscvKBSC, RiscvChipType<<RiscvKBSC as StarkGenericConfig>::Val>, Vec<u8>>;
+    ProvingWitness<RiscvKBSC, RiscvChipType<<RiscvKBSC as StarkGenericConfig>::Val>>;
 
 pub fn build_witness(elf_bytes: &[u8], opts: EmulatorOpts, block_input: &[u8]) -> RethWitness {
     let compiler =
@@ -50,7 +50,6 @@ pub fn build_witness(elf_bytes: &[u8], opts: EmulatorOpts, block_input: &[u8]) -
         program: Some(program),
         vk_root: None,
         stdin: Some(stdin),
-        flag_empty_stdin: false,
         config: None,
         opts: Some(opts),
         records: vec![],

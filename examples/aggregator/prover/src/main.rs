@@ -32,10 +32,7 @@ use pico_mle_core::{
     protocol::proof::Proof,
 };
 use pico_vm::{
-    compiler::riscv::{
-        compiler::{Compiler, SourceType},
-        program::Program,
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
         opts::EmulatorOpts,
@@ -202,10 +199,10 @@ fn read_elf(path: &str) -> eyre::Result<Vec<u8>> {
 /// Emulate a guest over the stdin `write_input` fills, and prove its RISC-V chunks.
 fn prove_riscv(
     elf: &[u8],
-    write_input: impl FnOnce(&mut EmulatorStdinBuilder<Vec<u8>, KoalaBearPoseidon2>),
+    write_input: impl FnOnce(&mut EmulatorStdinBuilder<KoalaBearPoseidon2>),
 ) -> eyre::Result<Proved> {
     let program = Arc::new(Compiler::new(SourceType::RISCV, elf)?.compile());
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     write_input(&mut stdin);
     let opts = EmulatorOpts::from_env_chunk_size(1 << LOG_STACKED_HEIGHT);
     // `CHUNK_SIZE` can widen a chunk past the stacked height, which proves the wrong shape.

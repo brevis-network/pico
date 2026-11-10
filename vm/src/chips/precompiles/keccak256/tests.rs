@@ -1,4 +1,5 @@
-//! CPU/GPU trace-generation parity for the two Keccak AIRs (main trace and byte lookups).
+//! CPU/GPU trace-generation parity for the Keccak AIRs (main trace and byte lookups): the control
+//! chip, the sliced compute chip and its tables.
 
 #[cfg(feature = "cuda")]
 use crate::{
@@ -8,9 +9,9 @@ use crate::{
             riscv_memory::event::{MemoryReadRecord, MemoryWriteRecord},
         },
         precompiles::keccak256::{
-            columns::{NUM_KECCAK_MEM_COLS, NUM_KECCAK_PERM_COLS},
             control::NUM_KECCAK_CONTROL_COLS,
-            KeccakControlChip, KeccakPermuteChip, STATE_SIZE,
+            sliced::{NUM_SLICED_COLS, TABLES_MAIN_COLS},
+            KeccakControlChip, KeccakSlicedChip, KeccakTables, STATE_SIZE,
         },
         tests::init_test_stream,
         trace::TraceData,
@@ -28,10 +29,6 @@ use crate::{
     },
     machine::chip::{ChipBehavior, GpuChipBehavior},
 };
-#[cfg(feature = "cuda")]
-use p3_field::PrimeCharacteristicRing;
-#[cfg(feature = "cuda")]
-use p3_keccak_air::NUM_ROUNDS;
 #[cfg(feature = "cuda")]
 use p3_koala_bear::KoalaBear;
 #[cfg(feature = "cuda")]
@@ -189,29 +186,13 @@ fn assert_cpu_gpu_parity<C: GpuChipBehavior<F, Record = EmulationRecord>>(
 
 #[cfg(feature = "cuda")]
 #[test]
-fn test_keccak_gpu_generate_extra_record_and_main() {
-    // 2^10 permutations x 24 rows -> 2^15 rows (with dummy padding) x 2537 cols.
-    let num_events = 1 << 10;
-    let record = generate_keccak_record(num_events);
-    let chip = KeccakPermuteChip::<F>::default();
-    assert_cpu_gpu_parity(&chip, &record, NUM_KECCAK_MEM_COLS);
-
-    // The state bus fires once per permutation: `export` is 1 on every 24th real row only.
-    let complete = record.clone();
-    let trace = chip.generate_main(&complete, &mut EmulationRecord::default());
-    let export_col = NUM_ROUNDS; // `KeccakCols { step_flags: [T; 24], export, .. }`
-    let rows = trace.values.len() / NUM_KECCAK_MEM_COLS;
-    let exported = (0..rows)
-        .filter(|row| trace.values[row * NUM_KECCAK_MEM_COLS + export_col] == F::ONE)
-        .count();
-    assert_eq!(exported, num_events);
-    // The input goes out on the first step: `export_in` is 1 on every 24th real row only.
-    let export_in_col = NUM_KECCAK_PERM_COLS + 3; // `KeccakMemCols { keccak, chunk, clk, is_real, export_in }`
-    let exported_in = (0..rows)
-        .filter(|row| trace.values[row * NUM_KECCAK_MEM_COLS + export_in_col] == F::ONE)
-        .count();
-    assert_eq!(exported_in, num_events);
-    println!("KeccakPermute GPU correctness test passed for {num_events} events!");
+fn test_keccak_sliced_gpu_generate_extra_record_and_main() {
+    // An odd count, so the last real slot has no B and the dummy slots follow it.
+    for num_events in [1, 19, (1 << 10) + 1] {
+        let record = generate_keccak_record(num_events);
+        assert_cpu_gpu_parity(&KeccakSlicedChip::<F>::default(), &record, NUM_SLICED_COLS);
+        assert_cpu_gpu_parity(&KeccakTables::<F>::default(), &record, TABLES_MAIN_COLS);
+    }
 }
 
 #[cfg(feature = "cuda")]

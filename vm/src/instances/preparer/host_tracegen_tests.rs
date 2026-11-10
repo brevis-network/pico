@@ -228,7 +228,7 @@ fn record_with(records: &[EmulationRecord], code: SyscallCode) -> EmulationRecor
 
 /// `perf/bench_data/rv64/poseidon2-elf`, hashing twice.
 fn poseidon2_records() -> Vec<EmulationRecord> {
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     stdin.write(&2u32);
     test_rv64_emulate(bench_elf("poseidon2"), stdin.finalize())
 }
@@ -236,7 +236,7 @@ fn poseidon2_records() -> Vec<EmulationRecord> {
 /// `perf/bench_data/rv64/ed25519-elf` with the input `--elf ed25519` gives it
 /// (`examples/common/parse_args.rs`): the basepoint and its negation, then two scalars.
 fn ed25519_records() -> Vec<EmulationRecord> {
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     let mut basepoint = [0x66u8; 32];
     basepoint[0] = 0x58;
     stdin.write(&basepoint);

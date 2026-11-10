@@ -419,8 +419,43 @@ where
     SC: StarkProtocolConfig<EF = FK::ValExt>,
     TS: FiatShamirTranscript<SC>,
 {
-    let (round_evals, reduced_evals) =
-        expand_round_poly_evals::<FK>(d_round_sums, *running_claim, xi_coord, *eq_prefix_product)?;
+    absorb_round_and_sample_plus::<FK, SC, TS>(
+        d_round_sums,
+        FK::ValExt::ZERO,
+        challenger,
+        inner_round_polys,
+        sampled_rs,
+        running_claim,
+        xi_coord,
+        eq_prefix_product,
+    )
+}
+
+/// [`absorb_round_and_sample`] with `extra` added to both of the GPU's sums, s'(1) and s'(2): the
+/// pad blocks' share of a segmented round, which the kernels leave out.
+#[allow(clippy::too_many_arguments)]
+fn absorb_round_and_sample_plus<FK, SC, TS>(
+    d_round_sums: &DeviceBuffer<FK::ValExt>,
+    extra: FK::ValExt,
+    challenger: &mut TS,
+    inner_round_polys: &mut Vec<[FK::ValExt; ROUND_POLY_DEG]>,
+    sampled_rs: &mut Vec<FK::ValExt>,
+    running_claim: &mut FK::ValExt,
+    xi_coord: FK::ValExt,
+    eq_prefix_product: &mut FK::ValExt,
+) -> Result<FK::ValExt, FractionalSumcheckError>
+where
+    FK: FieldKernels,
+    SC: StarkProtocolConfig<EF = FK::ValExt>,
+    TS: FiatShamirTranscript<SC>,
+{
+    let (round_evals, reduced_evals) = expand_round_poly_evals::<FK>(
+        d_round_sums,
+        extra,
+        *running_claim,
+        xi_coord,
+        *eq_prefix_product,
+    )?;
 
     for &eval in &round_evals {
         challenger.observe_ext(eval);
@@ -1583,6 +1618,755 @@ where
     ))
 }
 
+// ─── Segmented input ────────────────────────────────────────────────────────────────────────────
+//
+// See `seg_virtual`. The storage holds the real blocks' leaves; each block's tree is built in
+// place up to level g - 1, the layer at level g - 1 is gathered into a dense prefix tree (L >> (g-1)
+// leaves), and the tree above it is dense. An outer round whose layer is at level g - 1 or above
+// runs dense on the prefix. One below runs the segmented kernels: the revert and every fold while
+// each block still has at least 8 entries (level + folds <= g - 2), the pad blocks' share added to
+// each round from `gkr_seg_pad_sum`; then the vector, L >> (g - 2) entries, is gathered dense and
+// the rest of the round is the dense kernels'. Earlier outer rounds fold the tree into a segmented
+// scratch (storage >> (level + 1) entries); the last one folds the tree in place, its blocks no
+// longer needed. Values, and so the proof, are exactly the dense prover's.
+
+/// A segmented GKR input: the real blocks' leaves in leaf order, denominators not yet shifted; the
+/// padding leaves (`plan.n_consts` of them, 0 the zero leaf); and the plan.
+pub struct SegInput<E> {
+    pub storage: DeviceBuffer<Frac<E>>,
+    pub consts: DeviceBuffer<Frac<E>>,
+    pub plan: super::seg_virtual::SegPlan,
+}
+
+/// [`fractional_sumcheck_gpu`] over a segmented input.
+#[instrument(skip_all)]
+pub fn fractional_sumcheck_gpu_seg<FK, SC, TS>(
+    challenger: &mut TS,
+    input: SegInput<FK::ValExt>,
+    alpha: FK::ValExt,
+    assert_zero: bool,
+    mem: &mut MemTracker,
+) -> Result<(FracSumcheckProof<SC>, Vec<FK::ValExt>), FractionalSumcheckError>
+where
+    FK: FieldKernels,
+    SC: StarkProtocolConfig<EF = FK::ValExt>,
+    TS: FiatShamirTranscript<SC>,
+{
+    use crate::{cuda::field_kernels::SegTabFfi, runtime::copy::MemCopyH2D};
+    let SegInput {
+        storage,
+        consts,
+        plan,
+    } = input;
+    let profile_rounds = std::env::var("FRAC_PROF").is_ok();
+    let fn_start = std::time::Instant::now();
+    let g = plan.granule_log as usize;
+    let log_len = plan.log_len as usize;
+    let tree_depth = log_len;
+    let s_len = plan.storage_len;
+    assert!(
+        g >= 11 && log_len >= g + 2 && plan.smallest_block_log() as usize >= g,
+        "segmented GKR input: g={g} log_len={log_len}"
+    );
+    assert!(storage.len() >= s_len && consts.len() >= plan.n_consts);
+    assert!(!FK::use_cpu_gkr(), "the CPU GKR prover takes a dense input");
+
+    // Tables (the host vectors stay alive until the first sync below reads them).
+    let tables = plan.device_tables();
+    let d_real = tables.real.to_device()?;
+    let d_cgran = tables.storage_gran.to_device()?;
+    let d_lgran = tables.leaf_gran.to_device()?;
+    let d_pads = if tables.pads.is_empty() {
+        DeviceBuffer::new()
+    } else {
+        tables.pads.to_device()?
+    };
+    let tab = SegTabFfi {
+        blk: d_real.as_ptr(),
+        cgran: d_cgran.as_ptr(),
+        g: g as u32,
+        log_len: log_len as u32,
+    };
+    let padtab = DeviceBuffer::<Frac<FK::ValExt>>::with_capacity(plan.n_consts * 32);
+    let (_pad_dens_host, pad_dens) = padding_dens::<FK>(alpha)?;
+    let seg_err = FractionalSumcheckError::SegmentTree;
+    unsafe {
+        FK::gkr_seg_pad_table(
+            consts.as_ptr(),
+            plan.n_consts as u32,
+            alpha,
+            padtab.as_mut_ptr(),
+        )
+        .map_err(seg_err)?;
+    }
+
+    // Block trees up to level g - 1.
+    let top = g - 1;
+    unsafe {
+        FK::gkr_seg_k3(storage.as_mut_ptr(), s_len, tab, alpha).map_err(seg_err)?;
+        let mut level = 3;
+        while level + 2 <= top {
+            FK::gkr_seg_build(storage.as_mut_ptr(), s_len, tab, level as u32, true)
+                .map_err(seg_err)?;
+            level += 2;
+        }
+        if level < top {
+            FK::gkr_seg_build(storage.as_mut_ptr(), s_len, tab, level as u32, false)
+                .map_err(seg_err)?;
+        }
+    }
+    // The dense prefix: level g - 1, then the tree above it.
+    let p_log = log_len - top;
+    let p_len = 1usize << p_log;
+    let dense_p = GkrLens::dense(p_len);
+    let mut prefix = DeviceBuffer::<Frac<FK::ValExt>>::with_capacity(p_len);
+    unsafe {
+        FK::gkr_seg_gather(
+            storage.as_ptr(),
+            0,
+            tab,
+            d_lgran.as_ptr(),
+            padtab.as_ptr(),
+            top as u32,
+            top as u32,
+            prefix.as_mut_ptr(),
+            p_log as u32,
+        )
+        .map_err(seg_err)?;
+        let mut i = 0;
+        while i + 1 < p_log {
+            FK::frac_build_tree_two_layers_virt(&mut prefix, p_len >> (i + 2), dense_p, &pad_dens)
+                .map_err(seg_err)?;
+            i += 2;
+        }
+        if i < p_log {
+            FK::frac_build_tree_layer_virt(&mut prefix, p_len >> i, dense_p, false, &pad_dens)
+                .map_err(seg_err)?;
+        }
+    }
+    mem.emit_metrics_with_label("frac_sumcheck.segment_tree");
+    let mut one_elem_scratch = DeviceBuffer::<Frac<FK::ValExt>>::with_capacity(1);
+    let root_frac = read_device_element(&prefix, 0, &mut one_elem_scratch)?;
+    if profile_rounds {
+        tracing::info!(
+            "[fracprof] seg tree_build={}us",
+            fn_start.elapsed().as_micros()
+        );
+    }
+    unsafe {
+        FK::frac_build_tree_layer_virt(&mut prefix, 2, dense_p, true, &pad_dens)
+            .map_err(seg_err)?;
+    }
+    if assert_zero {
+        if root_frac.p != FK::ValExt::ZERO {
+            return Err(FractionalSumcheckError::NonzeroRootSum {
+                p: format!("{:?}", root_frac.p),
+                q: format!("{:?}", root_frac.q),
+            });
+        }
+    } else {
+        challenger.observe_ext(root_frac.p);
+    }
+    challenger.observe_ext(root_frac.q);
+
+    let mut layer_claims = Vec::with_capacity(tree_depth);
+    let mut layer_round_polys = Vec::with_capacity(tree_depth);
+    let claim_lo = read_device_element(&prefix, 0, &mut one_elem_scratch)?;
+    let claim_hi = read_device_element(&prefix, 1, &mut one_elem_scratch)?;
+    layer_claims.push(GkrLayerClaims {
+        p_xi_0: claim_lo.p,
+        q_xi_0: claim_lo.q,
+        p_xi_1: claim_hi.p,
+        q_xi_1: claim_hi.q,
+    });
+    for claim_val in [claim_lo.p, claim_lo.q, claim_hi.p, claim_hi.q] {
+        challenger.observe_ext(claim_val);
+    }
+    let first_mu = challenger.sample_ext();
+    let mut xi_point = vec![first_mu];
+    let mut d_round_sums = DeviceBuffer::<FK::ValExt>::with_capacity(2);
+
+    // The dense vector of a segmented round once gathered, also the prefix rounds' fold target.
+    let mut dense_buf = super::buf_cache_checkout::<Frac<FK::ValExt>>(
+        "gkr_seg_dense",
+        1usize << (log_len - (g - 2)),
+    );
+    // Windowed precompute (as in fractional_sumcheck_gpu), on the segmented rounds too.
+    let windowed_enabled = windowed_precompute_requested();
+    let min_tail_blocks = min_tail_blocks_from_env();
+    let target_tail_blocks = target_tail_blocks_from_env();
+    let tile_override = tail_tile_override_from_env();
+    let min_vars = min_window_vars_from_env();
+    // The first window of a segmented round, if it has one: its width, when every block still has
+    // a tail point (level + 2 + width <= g).
+    // MLE_GKR_SEG_WINDOWED=0: segmented rounds fold one variable per round (A/B runs).
+    let seg_windowed = !matches!(env::var("MLE_GKR_SEG_WINDOWED").as_deref(), Ok("0"));
+    let first_seg_window = |round: usize| -> Option<usize> {
+        let level = tree_depth - 1 - round;
+        if !seg_windowed {
+            return None;
+        }
+        if pick_inner_round_mode(
+            round,
+            windowed_enabled,
+            min_tail_blocks,
+            target_tail_blocks,
+            tile_override,
+            min_vars,
+        ) != InnerRoundMode::WindowedPrecompute
+        {
+            return None;
+        }
+        let window_stop = round.div_ceil(2);
+        pick_window_width(
+            round - 1,
+            window_stop - 1,
+            min_tail_blocks,
+            target_tail_blocks,
+            tile_override,
+            min_vars,
+        )
+        .filter(|&w| level + 2 + w <= g)
+    };
+    // Earlier outer rounds' segmented folds: a round at level l folds the tree into scratch at
+    // storage >> (l + 1), or windowed, l + 1 + width.
+    let scratch_len = (1..tree_depth)
+        .map(|round| (round, tree_depth - 1 - round))
+        .filter(|&(_, level)| level >= 1 && level < top)
+        .map(|(round, level)| match first_seg_window(round) {
+            Some(w) => s_len >> (level + 1 + w),
+            None => s_len >> (level + 1),
+        })
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let scratch = super::buf_cache_checkout::<Frac<FK::ValExt>>("gkr_work", scratch_len);
+    let mut m_table = DeviceBuffer::<FK::ValExt>::new();
+    let mut m_partials = DeviceBuffer::<FK::ValExt>::new();
+    let d_eq_prefix = DeviceBuffer::<FK::ValExt>::with_capacity(1usize << PRECOMPUTE_WINDOW_VARS);
+    let d_eq_suffix = DeviceBuffer::<FK::ValExt>::with_capacity(1usize << PRECOMPUTE_WINDOW_VARS);
+    // Per-block sums of every round launch. The launch shape is not monotone in the work (small
+    // launches take more, smaller blocks to fill the SMs), so take the largest over every size a
+    // round launches with: the dense rounds' x_count = 2^k, a segmented kernel's 2 * (S >> sh).
+    let block_partials_cap = (1..tree_depth)
+        .map(|k| 1usize << k)
+        .chain((2..=g).map(|sh| 2 * (s_len >> sh)))
+        .filter(|&x| x > 1)
+        .map(|x| unsafe { FK::frac_compute_round_temp_buffer_size(x as u32) } as usize)
+        .max()
+        .unwrap_or(2);
+    let mut block_partials = DeviceBuffer::<FK::ValExt>::with_capacity(block_partials_cap.max(2));
+    let d_pad_sum = DeviceBuffer::<FK::ValExt>::with_capacity(1);
+    let mut d_xi_rev = DeviceBuffer::<FK::ValExt>::with_capacity(tree_depth);
+
+    let mut round_micros: Vec<u128> = Vec::new();
+    for round in 1..tree_depth {
+        let round_span = debug_span!("GKR", round).entered();
+        let round_start = std::time::Instant::now();
+        let level = tree_depth - 1 - round;
+        debug_assert_eq!(xi_point.len(), round);
+        let mut eq_layers = SqrtEqLayersFor::from_xi_with_kernels::<FK>(&xi_point[1..])
+            .map_err(FractionalSumcheckError::EvalEqHypercube)?;
+        let mut inner_round_polys = Vec::with_capacity(round);
+        let mut sampled_rs = Vec::with_capacity(round);
+        let mut pq_len = 2usize << round;
+        let batch_lambda = challenger.sample_ext();
+        let (numer_at_mu, denom_at_mu) =
+            combine_layer_claims_at::<FK, SC>(layer_claims.last().unwrap(), xi_point[0]);
+        let mut running_claim = numer_at_mu + batch_lambda * denom_at_mu;
+        let mut eq_prefix_product = FK::ValExt::ONE;
+
+        if level >= top {
+            // Dense, on the prefix tree, which stays intact for the next round's revert.
+            let first_r = revert_and_first_inner_round::<FK, SC, TS>(
+                &mut eq_layers,
+                &mut prefix,
+                pq_len,
+                dense_p,
+                &pad_dens,
+                batch_lambda,
+                challenger,
+                &mut d_round_sums,
+                &mut block_partials,
+                &mut inner_round_polys,
+                &mut sampled_rs,
+                &mut running_claim,
+                xi_point[0],
+                &mut eq_prefix_product,
+            )?;
+            let mut last_r = first_r;
+            let mut live_in_dense = false;
+            for &xi_coord in xi_point.iter().skip(1) {
+                last_r = if live_in_dense {
+                    fused_round_in_place::<FK, SC, TS>(
+                        &mut eq_layers,
+                        &mut dense_buf,
+                        pq_len,
+                        batch_lambda,
+                        last_r,
+                        challenger,
+                        &mut d_round_sums,
+                        &mut block_partials,
+                        &mut inner_round_polys,
+                        &mut sampled_rs,
+                        &mut running_claim,
+                        xi_coord,
+                        &mut eq_prefix_product,
+                    )?
+                } else {
+                    live_in_dense = true;
+                    fused_round_out_of_place::<FK, SC, TS>(
+                        &mut eq_layers,
+                        &prefix,
+                        &mut dense_buf,
+                        pq_len,
+                        GkrLens::dense(0),
+                        &pad_dens,
+                        batch_lambda,
+                        last_r,
+                        challenger,
+                        &mut d_round_sums,
+                        &mut block_partials,
+                        &mut inner_round_polys,
+                        &mut sampled_rs,
+                        &mut running_claim,
+                        xi_coord,
+                        &mut eq_prefix_product,
+                    )?
+                };
+                pq_len >>= 1;
+            }
+            unsafe {
+                if live_in_dense {
+                    FK::fold_ef_frac_columns_inplace(&mut dense_buf, pq_len, last_r)
+                } else {
+                    FK::fold_ef_frac_columns_virt(
+                        &prefix,
+                        dense_buf.as_mut_ptr(),
+                        pq_len,
+                        GkrLens::dense(0),
+                        last_r,
+                        &pad_dens,
+                    )
+                }
+                .map_err(FractionalSumcheckError::FoldColumns)?;
+            }
+            pq_len >>= 1;
+        } else {
+            // Segmented. The pad blocks' share of every segmented inner round of this layer.
+            let pad_add = if d_pads.is_empty() {
+                FK::ValExt::ZERO
+            } else {
+                let xi_rev: Vec<FK::ValExt> = xi_point.iter().rev().copied().collect();
+                xi_rev.copy_to(&mut d_xi_rev)?;
+                unsafe {
+                    FK::gkr_seg_pad_sum(
+                        d_pads.as_ptr(),
+                        d_pads.len() as u32,
+                        padtab.as_ptr(),
+                        level as u32,
+                        batch_lambda,
+                        d_xi_rev.as_ptr(),
+                        log_len as u32,
+                        d_pad_sum.as_mut_ptr(),
+                    )
+                    .map_err(FractionalSumcheckError::ComputeRound)?;
+                }
+                let v = d_pad_sum.to_host()?[0];
+                drop(xi_rev);
+                v
+            };
+            unsafe {
+                FK::gkr_seg_round_revert(
+                    &eq_layers,
+                    storage.as_mut_ptr(),
+                    s_len,
+                    tab,
+                    level as u32,
+                    batch_lambda,
+                    &mut d_round_sums,
+                    &mut block_partials,
+                )
+                .map_err(FractionalSumcheckError::ComputeRound)?;
+            }
+            eq_layers.drop_layer();
+            let mut last_r = absorb_round_and_sample_plus::<FK, SC, TS>(
+                &d_round_sums,
+                pad_add,
+                challenger,
+                &mut inner_round_polys,
+                &mut sampled_rs,
+                &mut running_claim,
+                xi_point[0],
+                &mut eq_prefix_product,
+            )?;
+            let last_outer_round = level == 0;
+            // Windowed: each window builds M from the segmented vector (pad blocks' share added
+            // to every round) and multifolds it, the first one folding the tree into scratch (in
+            // place on the last outer round), later ones in place; after the last window the
+            // vector is gathered dense and the round finishes as fractional_sumcheck_gpu's.
+            let mut windowed_done = false;
+            if first_seg_window(round).is_some() {
+                let window_stop = round.div_ceil(2);
+                let mut window_base = 1usize;
+                let mut fold_pending = true;
+                let mut cur: (*mut Frac<FK::ValExt>, u32) = (storage.as_mut_ptr(), 0);
+                let mut c = level;
+                let mut host_eq_window = vec![FK::ValExt::ZERO; 1 << (PRECOMPUTE_WINDOW_VARS + 1)];
+                let mut host_eq_prefix = vec![FK::ValExt::ZERO; 1 << PRECOMPUTE_WINDOW_VARS];
+                let mut host_eq_suffix = vec![FK::ValExt::ZERO; 1 << PRECOMPUTE_WINDOW_VARS];
+                while window_base < window_stop {
+                    let vars_left = round - window_base;
+                    let rounds_avail = window_stop - window_base;
+                    let Some(window_vars) = pick_window_width(
+                        vars_left,
+                        rounds_avail,
+                        min_tail_blocks,
+                        target_tail_blocks,
+                        tile_override,
+                        min_vars,
+                    ) else {
+                        break;
+                    };
+                    let sh = c + if fold_pending { 2 } else { 1 } + window_vars;
+                    if sh > g {
+                        break; // a block would have no tail point
+                    }
+                    if m_table.is_empty() {
+                        m_table =
+                            DeviceBuffer::with_capacity(1usize << (2 * PRECOMPUTE_WINDOW_VARS));
+                    }
+                    let n_items = s_len >> sh;
+                    let tile_len = tile_override.unwrap_or_else(|| {
+                        n_items
+                            .div_ceil(target_tail_blocks.max(min_tail_blocks).max(1))
+                            .clamp(TAIL_TILE_MIN, TAIL_TILE_MAX)
+                    });
+                    let partials_len = n_items.div_ceil(tile_len) << (2 * window_vars);
+                    if partials_len > m_partials.len() {
+                        m_partials = DeviceBuffer::with_capacity(partials_len);
+                    }
+                    let (eq_low_ptr, eq_high_ptr, low_stride, _) =
+                        eq_suffix_pointers(&eq_layers, window_vars - 1);
+                    let pending_r = last_r;
+                    unsafe {
+                        FK::gkr_seg_precompute_m_build(
+                            cur.0,
+                            cur.1,
+                            s_len,
+                            tab,
+                            c as u32,
+                            window_vars as u32,
+                            fold_pending,
+                            batch_lambda,
+                            pending_r,
+                            eq_low_ptr,
+                            eq_high_ptr,
+                            low_stride,
+                            tile_len,
+                            m_partials.as_mut_ptr(),
+                            partials_len,
+                            m_table.as_mut_ptr(),
+                        )
+                        .map_err(FractionalSumcheckError::ComputeRound)?;
+                    }
+                    let mut window_challenges = Vec::with_capacity(window_vars);
+                    for step in 0..window_vars {
+                        fill_eq_table_host(&window_challenges, &mut host_eq_prefix);
+                        fill_eq_table_host(
+                            &xi_point[window_base + step + 1..window_base + window_vars],
+                            &mut host_eq_suffix,
+                        );
+                        upload_to_device_ptr(
+                            d_eq_prefix.as_mut_ptr(),
+                            &host_eq_prefix[..(1usize << step)],
+                        )?;
+                        upload_to_device_ptr(
+                            d_eq_suffix.as_mut_ptr(),
+                            &host_eq_suffix[..(1usize << (window_vars - step - 1))],
+                        )?;
+                        unsafe {
+                            FK::frac_precompute_m_eval_round_raw(
+                                m_table.as_ptr(),
+                                window_vars,
+                                step,
+                                d_eq_prefix.as_ptr(),
+                                d_eq_suffix.as_ptr(),
+                                d_round_sums.as_mut_ptr(),
+                            )
+                            .map_err(FractionalSumcheckError::ComputeRound)?;
+                        }
+                        eq_layers.drop_layer();
+                        last_r = absorb_round_and_sample_plus::<FK, SC, TS>(
+                            &d_round_sums,
+                            pad_add,
+                            challenger,
+                            &mut inner_round_polys,
+                            &mut sampled_rs,
+                            &mut running_claim,
+                            xi_point[window_base + step],
+                            &mut eq_prefix_product,
+                        )?;
+                        window_challenges.push(last_r);
+                    }
+                    let fold_vars = if fold_pending {
+                        let mut fold_rs = Vec::with_capacity(window_vars + 1);
+                        fold_rs.push(pending_r);
+                        fold_rs.extend_from_slice(&window_challenges);
+                        fill_eq_table_host(&fold_rs, &mut host_eq_window);
+                        window_vars + 1
+                    } else {
+                        fill_eq_table_host(&window_challenges, &mut host_eq_window);
+                        window_vars
+                    };
+                    // The window's eq table borrows block_partials, idle until the next round
+                    // launch.
+                    let d_eq_window = block_partials.as_mut_ptr();
+                    upload_to_device_ptr(d_eq_window, &host_eq_window[..(1 << fold_vars)])?;
+                    let dst = if !fold_pending || last_outer_round {
+                        cur
+                    } else {
+                        (scratch.as_mut_ptr(), (level + fold_vars) as u32)
+                    };
+                    unsafe {
+                        FK::gkr_seg_multifold(
+                            cur.0,
+                            cur.1,
+                            dst.0,
+                            dst.1,
+                            s_len,
+                            tab,
+                            c as u32,
+                            fold_vars as u32,
+                            d_eq_window,
+                        )
+                        .map_err(FractionalSumcheckError::FoldColumns)?;
+                    }
+                    c += fold_vars;
+                    cur = dst;
+                    pq_len >>= fold_vars;
+                    fold_pending = false;
+                    window_base += window_vars;
+                }
+                if !fold_pending {
+                    windowed_done = true;
+                    let n_log = log_len - c;
+                    debug_assert_eq!(pq_len, 1usize << n_log);
+                    if dense_buf.len() < (1usize << n_log) {
+                        dense_buf = DeviceBuffer::with_capacity(1usize << n_log);
+                    }
+                    unsafe {
+                        FK::gkr_seg_gather(
+                            cur.0,
+                            cur.1,
+                            tab,
+                            d_lgran.as_ptr(),
+                            padtab.as_ptr(),
+                            level as u32,
+                            c as u32,
+                            dense_buf.as_mut_ptr(),
+                            n_log as u32,
+                        )
+                        .map_err(seg_err)?;
+                    }
+                    if window_base < round {
+                        // The vector is already folded: the next round only computes.
+                        unsafe {
+                            FK::frac_compute_round(
+                                &eq_layers,
+                                &dense_buf,
+                                pq_len / 2,
+                                batch_lambda,
+                                &mut d_round_sums,
+                                &mut block_partials,
+                            )
+                            .map_err(FractionalSumcheckError::ComputeRound)?;
+                        }
+                        eq_layers.drop_layer();
+                        last_r = absorb_round_and_sample::<FK, SC, TS>(
+                            &d_round_sums,
+                            challenger,
+                            &mut inner_round_polys,
+                            &mut sampled_rs,
+                            &mut running_claim,
+                            xi_point[window_base],
+                            &mut eq_prefix_product,
+                        )?;
+                        for &xi_coord in xi_point.iter().skip(window_base + 1) {
+                            last_r = fused_round_in_place::<FK, SC, TS>(
+                                &mut eq_layers,
+                                &mut dense_buf,
+                                pq_len,
+                                batch_lambda,
+                                last_r,
+                                challenger,
+                                &mut d_round_sums,
+                                &mut block_partials,
+                                &mut inner_round_polys,
+                                &mut sampled_rs,
+                                &mut running_claim,
+                                xi_coord,
+                                &mut eq_prefix_product,
+                            )?;
+                            pq_len >>= 1;
+                        }
+                    }
+                    unsafe {
+                        FK::fold_ef_frac_columns_inplace(&mut dense_buf, pq_len, last_r)
+                            .map_err(FractionalSumcheckError::FoldColumns)?;
+                    }
+                    pq_len >>= 1;
+                }
+            }
+            // Fused: inner round t folds the vector at level + t - 1; the first one whose blocks
+            // would drop below 8 entries is gathered dense first.
+            let densify_at = g - 1 - level;
+            let mut cur: (*const Frac<FK::ValExt>, u32) = (storage.as_ptr(), 0);
+            let mut dense = windowed_done;
+            for (t, &xi_coord) in xi_point
+                .iter()
+                .enumerate()
+                .skip(1)
+                .filter(|_| !windowed_done)
+            {
+                let c_in = level + t - 1;
+                if t < densify_at {
+                    let (dst, dst_sh) = if last_outer_round {
+                        (storage.as_mut_ptr(), 0u32)
+                    } else {
+                        (scratch.as_mut_ptr(), level as u32 + 1)
+                    };
+                    unsafe {
+                        FK::gkr_seg_round_fold(
+                            &eq_layers,
+                            cur.0,
+                            cur.1,
+                            dst,
+                            dst_sh,
+                            s_len,
+                            tab,
+                            c_in as u32,
+                            batch_lambda,
+                            last_r,
+                            &mut d_round_sums,
+                            &mut block_partials,
+                        )
+                        .map_err(FractionalSumcheckError::ComputeRound)?;
+                    }
+                    eq_layers.drop_layer();
+                    last_r = absorb_round_and_sample_plus::<FK, SC, TS>(
+                        &d_round_sums,
+                        pad_add,
+                        challenger,
+                        &mut inner_round_polys,
+                        &mut sampled_rs,
+                        &mut running_claim,
+                        xi_coord,
+                        &mut eq_prefix_product,
+                    )?;
+                    cur = (dst as *const _, dst_sh);
+                } else {
+                    if t == densify_at {
+                        debug_assert_eq!(pq_len, 1usize << (log_len - c_in));
+                        unsafe {
+                            FK::gkr_seg_gather(
+                                cur.0,
+                                cur.1,
+                                tab,
+                                d_lgran.as_ptr(),
+                                padtab.as_ptr(),
+                                level as u32,
+                                c_in as u32,
+                                dense_buf.as_mut_ptr(),
+                                (log_len - c_in) as u32,
+                            )
+                            .map_err(seg_err)?;
+                        }
+                        dense = true;
+                    }
+                    last_r = fused_round_in_place::<FK, SC, TS>(
+                        &mut eq_layers,
+                        &mut dense_buf,
+                        pq_len,
+                        batch_lambda,
+                        last_r,
+                        challenger,
+                        &mut d_round_sums,
+                        &mut block_partials,
+                        &mut inner_round_polys,
+                        &mut sampled_rs,
+                        &mut running_claim,
+                        xi_coord,
+                        &mut eq_prefix_product,
+                    )?;
+                }
+                pq_len >>= 1;
+            }
+            assert!(dense, "segmented round ended before going dense");
+            if !windowed_done {
+                unsafe {
+                    FK::fold_ef_frac_columns_inplace(&mut dense_buf, pq_len, last_r)
+                        .map_err(FractionalSumcheckError::FoldColumns)?;
+                }
+                pq_len >>= 1;
+            }
+        }
+
+        let next_claims = [
+            read_device_element(&dense_buf, 0, &mut one_elem_scratch)?,
+            read_device_element(&dense_buf, pq_len / 2, &mut one_elem_scratch)?,
+        ];
+        layer_claims.push(GkrLayerClaims {
+            p_xi_0: next_claims[0].p,
+            q_xi_0: next_claims[0].q,
+            p_xi_1: next_claims[1].p,
+            q_xi_1: next_claims[1].q,
+        });
+        for v in [
+            next_claims[0].p,
+            next_claims[0].q,
+            next_claims[1].p,
+            next_claims[1].q,
+        ] {
+            challenger.observe_ext(v);
+        }
+        let layer_mu = challenger.sample_ext();
+        xi_point = [vec![layer_mu], sampled_rs].concat();
+        layer_round_polys.push(inner_round_polys);
+        if profile_rounds {
+            let _ = crate::runtime::stream::current_stream_sync();
+            round_micros.push(round_start.elapsed().as_micros());
+        }
+        round_span.exit();
+    }
+    if profile_rounds {
+        let total: u128 = round_micros.iter().sum();
+        tracing::info!(
+            target: "bench",
+            "[fracprof] seg total={total}us rounds={} per_round={round_micros:?}",
+            round_micros.len()
+        );
+        tracing::info!(
+            "[fracprof] seg fn_total={}us",
+            fn_start.elapsed().as_micros()
+        );
+    }
+    mem.emit_metrics_with_label("frac_sumcheck.gkr_rounds");
+    drop(tables);
+    super::buf_cache_checkin("gkr_leaves", storage);
+    super::buf_cache_checkin("gkr_work", scratch);
+    super::buf_cache_checkin("gkr_seg_dense", dense_buf);
+
+    Ok((
+        FracSumcheckProof {
+            fractional_sum: (root_frac.p, root_frac.q),
+            claims_per_layer: layer_claims,
+            sumcheck_polys: layer_round_polys,
+        },
+        xi_point,
+    ))
+}
+
 /// Node `pos` of a tree layer with `active` entries, read as the kernels read it: an all-padding
 /// node of a virtual tree is (0, alpha^(logical_len / active)) and never touches the buffer.
 fn read_tree_node<E: Field>(
@@ -1651,12 +2435,16 @@ where
 /// s(X) = eq(xi_coord, X) * s'(X); also returns s' at {0, 1, 2}.
 fn expand_round_poly_evals<FK: FieldKernels>(
     d_round_sums: &DeviceBuffer<FK::ValExt>,
+    extra: FK::ValExt,
     running_claim: FK::ValExt,
     xi_coord: FK::ValExt,
     eq_prefix_product: FK::ValExt,
 ) -> Result<([FK::ValExt; ROUND_POLY_DEG], [FK::ValExt; ROUND_POLY_DEG]), FractionalSumcheckError> {
-    let gpu_partials = d_round_sums.to_host()?;
+    let mut gpu_partials = d_round_sums.to_host()?;
     debug_assert_eq!(gpu_partials.len(), ROUND_POLY_DEG - 1);
+    for v in &mut gpu_partials {
+        *v += extra;
+    }
 
     // reduced_evals: s'(X) scaled by eq(xi_{j+1..}, r_{j+1..}), sampled at X = 0, 1, 2
     let mut reduced_evals = [FK::ValExt::ZERO; ROUND_POLY_DEG];
@@ -2080,6 +2868,148 @@ mod tests {
             l - l / 8,
             l - 1,
         ]
+    }
+
+    /// A random segmented input (random slabs, real rows, padding leaves) proved by the segmented
+    /// prover, against the CPU prover on the dense input.
+    fn seg_vs_cpu(seed: u64, g: u32, max_extra: u32) {
+        use super::super::seg_virtual::{tests as segt, SegPlan};
+        use crate::runtime::copy::MemCopyH2D;
+        use mle_core::{
+            config::koala_bear_poseidon2::{
+                default_duplex_sponge, KoalaBearPoseidon2Config as KbSC,
+            },
+            prover::fractional_sumcheck_gkr::{fractional_sumcheck, Frac},
+        };
+        type KbEF = <KoalaBearKernels as super::FieldKernels>::ValExt;
+
+        let mut rng = segt::Lcg(seed);
+        let (slabs, used) = segt::random_slabs(&mut rng, g, max_extra);
+        let logical_len = (1usize << (usize::BITS - used.leading_zeros())).max(1 << (g + 2));
+        let Some(plan) = SegPlan::new(&slabs, used, logical_len, g) else {
+            return; // no real leaf
+        };
+        let mut ef = || KbEF::from_u32((rng.next() as u32) % 0x7f00_0000 + 1);
+        let zero = Frac {
+            p: KbEF::ZERO,
+            q: KbEF::ZERO,
+        };
+        // dense leaves, before the shift
+        let mut dense = vec![zero; logical_len];
+        for slab in &slabs {
+            let height = 1usize << slab.log_height;
+            for i in 0..slab.interactions {
+                let pad = Frac { p: ef(), q: ef() };
+                for row in 0..height {
+                    dense[slab.offset + i * height + row] = if row < slab.real_rows {
+                        Frac { p: ef(), q: ef() }
+                    } else {
+                        pad
+                    };
+                }
+            }
+        }
+        let mut storage_host = vec![zero; plan.storage_len];
+        for (leaf, v) in dense.iter().enumerate() {
+            if let Some(s) = plan.storage_of(leaf) {
+                storage_host[s] = *v;
+            }
+        }
+        let mut consts_host = vec![zero; plan.n_consts];
+        for (slab, w) in slabs.iter().zip(&plan.writes) {
+            if let Some(k) = w.konst {
+                let height = 1usize << slab.log_height;
+                for i in 0..slab.interactions {
+                    consts_host[k as usize + i] = dense[slab.offset + i * height + w.rows];
+                }
+            }
+        }
+        let alpha = KbEF::from_u32(7);
+        let input = super::SegInput {
+            storage: storage_host.to_device().unwrap(),
+            consts: consts_host.to_device().unwrap(),
+            plan: plan.clone(),
+        };
+        let mut gpu_transcript = KoalaBearDuplexSpongeGpu::new();
+        let mut mem = MemTracker::start("test.seg");
+        let (gpu_proof, gpu_xi) = super::fractional_sumcheck_gpu_seg::<KoalaBearKernels, KbSC, _>(
+            &mut gpu_transcript,
+            input,
+            alpha,
+            false,
+            &mut mem,
+        )
+        .unwrap();
+        current_stream_sync().expect("sync");
+
+        for leaf in &mut dense {
+            leaf.q += alpha;
+        }
+        let mut cpu_transcript = default_duplex_sponge();
+        let (cpu_proof, cpu_xi) =
+            fractional_sumcheck::<KbSC, _>(&mut cpu_transcript, &dense, false)
+                .unwrap_or_else(|e| panic!("CPU GKR failed: {e:?}"));
+        let case = format!(
+            "seed={seed} g={g} L=2^{} storage={} blocks={}",
+            plan.log_len,
+            plan.storage_len,
+            plan.blocks.len()
+        );
+        assert_eq!(
+            gpu_proof.fractional_sum, cpu_proof.fractional_sum,
+            "{case}: root"
+        );
+        for (round, (gp, cp)) in gpu_proof
+            .sumcheck_polys
+            .iter()
+            .zip(&cpu_proof.sumcheck_polys)
+            .enumerate()
+        {
+            assert_eq!(
+                gp,
+                cp,
+                "{case}: round polynomials of outer round {}",
+                round + 1
+            );
+        }
+        assert_eq!(
+            gpu_proof.claims_per_layer, cpu_proof.claims_per_layer,
+            "{case}: claims"
+        );
+        assert_eq!(gpu_xi, cpu_xi, "{case}: final point");
+    }
+
+    /// The segmented prover with the windowed precompute on every round it fits (thresholds low
+    /// enough for small inputs), against the CPU prover. Run with --test-threads=1.
+    #[test]
+    fn test_seg_matches_cpu_windowed() {
+        // SAFETY: mutates the process environment; run with --test-threads=1.
+        unsafe {
+            std::env::set_var("MLE_CUDA_GKR_PRECOMPUTE_M", "1");
+            std::env::set_var("MLE_CUDA_GKR_PRECOMPUTE_M_MIN_N", "6");
+            std::env::set_var("MLE_CUDA_GKR_PRECOMPUTE_M_MIN_BLOCKS", "1");
+        }
+        for seed in 0..60u64 {
+            seg_vs_cpu(seed, 11, 5);
+        }
+        for seed in 100..110u64 {
+            seg_vs_cpu(seed, 12, 7);
+        }
+        unsafe {
+            std::env::remove_var("MLE_CUDA_GKR_PRECOMPUTE_M_MIN_N");
+            std::env::remove_var("MLE_CUDA_GKR_PRECOMPUTE_M_MIN_BLOCKS");
+        }
+    }
+
+    /// The segmented prover against the CPU prover on random inputs.
+    #[test]
+    fn test_seg_matches_cpu() {
+        for seed in 0..40u64 {
+            seg_vs_cpu(seed, 11, 4);
+        }
+        for seed in 100..110u64 {
+            seg_vs_cpu(seed, 12, 6);
+        }
     }
 
     /// The virtual input against the CPU prover, fused folds only. Run with --test-threads=1.

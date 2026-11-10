@@ -349,7 +349,7 @@ fn row_differences((this, left): (&str, &Heights), (that, right): (&str, &Height
 #[inline(always)]
 pub fn begin_pipeline(
     program: Option<&Program>,
-    stdin: Option<&EmulatorStdin<Program, Vec<u8>>>,
+    stdin: Option<&EmulatorStdin>,
     opts: &EmulatorOpts,
     deferred_split: DeferredSplit,
 ) {
@@ -419,7 +419,7 @@ mod live {
 
     pub(super) fn begin_pipeline(
         program: Option<&Program>,
-        stdin: Option<&EmulatorStdin<Program, Vec<u8>>>,
+        stdin: Option<&EmulatorStdin>,
         opts: &EmulatorOpts,
         deferred_split: DeferredSplit,
     ) {
@@ -701,6 +701,11 @@ mod tests {
         "MLE_DEBUG_GKR_FRACS",
         "MLE_DEBUG_ROUND0",
         "MLE_DUMP_ZCR0",
+        "MLE_GKR_SEG",
+        "MLE_GKR_SEG_GRANULE_LOG",
+        "MLE_GKR_SEG_MAX_RATIO",
+        "MLE_GKR_SEG_REPORT",
+        "MLE_GKR_SEG_WINDOWED",
         "MLE_GKR_VIRTUAL_PADDING",
         "MLE_GKR_ZC_BUDGET_LOG",
         "MLE_GPU_ZC",

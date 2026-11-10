@@ -1040,7 +1040,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_low32_slot_helpers_use_eight_byte_spacing() {
+    fn low_32_bit_slot_helpers_space_slots_eight_bytes_apart() {
         let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
 
         emu.write_mem_low32_slot_span_at_clk(0x1_0100, &[0x1122_3344, 0x5566_7788], 0);
@@ -1054,7 +1054,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_contiguous_word_span_read_reuses_single_backing_dword() {
+    fn a_word_span_read_takes_both_words_from_one_dword() {
         let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
         emu.write_mem_dword(0x1_0100, 0x5566_7788_1122_3344);
 
@@ -1065,7 +1065,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_contiguous_word_span_write_reuses_single_backing_dword() {
+    fn a_word_span_write_puts_both_words_in_one_dword() {
         let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
         emu.write_mem_dword(0x1_0100, 0);
 

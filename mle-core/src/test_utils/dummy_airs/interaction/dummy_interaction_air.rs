@@ -234,6 +234,7 @@ impl<SC: StarkProtocolConfig> DummyInteractionChip<SC> {
             }],
             common_main: ColMajorMatrix::from_row_major(&common_main_rm),
             public_values: vec![],
+            real_rows: None,
         }
     }
 

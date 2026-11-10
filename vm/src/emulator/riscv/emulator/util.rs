@@ -1,7 +1,6 @@
 use super::{EmulationError, RiscvEmulator};
 use crate::{
     chips::chips::riscv_memory::event::MemoryAccessPosition,
-    compiler::riscv::program::Program,
     emulator::{
         riscv::{
             event_types::{RvAddr, RvChunk, RvClk, RvTimestamp, RvValue},
@@ -15,10 +14,8 @@ use crate::{
 };
 use alloc::sync::Arc;
 
-type Stdin = EmulatorStdin<Program, Vec<u8>>;
-
 impl RiscvEmulator {
-    pub fn write_stdin(&mut self, stdin: &Stdin) {
+    pub fn write_stdin(&mut self, stdin: &EmulatorStdin) {
         for input in &*stdin.inputs {
             self.state.input_stream.push(input.clone());
         }
@@ -31,7 +28,7 @@ impl RiscvEmulator {
     /// This function will return an error if the program emulation fails.
     pub fn run(
         &mut self,
-        stdin: Option<Stdin>,
+        stdin: Option<EmulatorStdin>,
     ) -> Result<(Vec<EmulationRecord>, Vec<EmulationReport>), EmulationError> {
         if let Some(stdin) = stdin {
             self.write_stdin(&stdin);

@@ -62,7 +62,7 @@ const POSEIDON2_ELF: &[u8] = include_bytes!(concat!(
 ));
 
 type Chips = RiscvChips<KoalaBearPoseidon2>;
-type Witness = ProvingWitness<KoalaBearPoseidon2, Chips, Vec<u8>>;
+type Witness = ProvingWitness<KoalaBearPoseidon2, Chips>;
 
 /// The bootstrap stub's code under a digest `register` takes: every block interpreted. The snapshot
 /// thread runs its ordinary entry point, so its cuts land on any instruction, and the factory's
@@ -219,7 +219,7 @@ fn witness(elf: &[u8], input: u32, chunk_size: u32) -> Witness {
     let program: Arc<Program> = Compiler::new(SourceType::RISCV, elf)
         .expect("the ELF parses")
         .compile();
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     stdin.write(&input);
     // Every field stated, since `EmulatorOpts::default` reads the environment.
     let opts = EmulatorOpts {

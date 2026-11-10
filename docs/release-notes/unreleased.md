@@ -26,7 +26,7 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
 - **`execute` is pure execution.** It runs the guest to its halt without the proving pipeline; the
   previous `execute` is `execute_chunked`. Both follow the rules above and agree on the committed
   bytes, the cycles, the misaligned-access count and the reason a run ends.
-- **AOT code must be regenerated.** `AOT_CODEGEN_STAMP` is 7, and the pure-mode ABI is version 2:
+- **AOT code must be regenerated.** `AOT_CODEGEN_STAMP` is 8, and the pure-mode ABI is version 2:
   run `cargo pico aot` again, and rebuild cached pure-mode libraries.
 - **The catch-all shape is refused.** A chunk that fits no whitelist shape but the catch-all
   (m = 31, too large to prove in practice) ends the prove with `ProveError::CatchAllShape`: on
@@ -40,8 +40,9 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
   `pico-sdk` supplies the `__atomic_*` functions that `std` calls. The guest's ELF, and so its
   program vk, now depends on whether the installed toolchain ships a prebuilt `std` (the build
   prints which it used): with one, a rebuilt guest's ELF changes.
-- **GPU kernels.** The `cuda` build pins pico-gpu at `edd0ceb`, its kernels for the code-range
-  and stack-guard columns; the 3.1 kernels do not match this tree.
+- **GPU kernels.** The `cuda` build needs the kernels `Cargo.toml` names: they fill the
+  code-range and stack-guard columns and take the segmented GKR input; the 3.1 kernels do not
+  match this tree.
 
 ## Added
 

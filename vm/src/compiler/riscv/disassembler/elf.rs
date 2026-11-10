@@ -8,9 +8,12 @@ use elf::{
 };
 use std::collections::BTreeMap;
 
-use crate::primitives::{
-    consts::WORD_SIZE,
-    layout::{self, MIN_SEGMENT_ADDR},
+use crate::{
+    compiler::riscv::program::{ProfiledFunction, MEMORY_FUNCTIONS},
+    primitives::{
+        consts::WORD_SIZE,
+        layout::{self, MIN_SEGMENT_ADDR},
+    },
 };
 
 // TODO(rv64im-3r4): remove or repurpose this generic ceiling once memory/event address handling is fully widened end-to-end.
@@ -57,6 +60,8 @@ pub struct Elf {
     pub(crate) pc_base: u64,
     /// The initial memory image, useful for global constants.
     pub(crate) memory_image: Arc<BTreeMap<u64, u64>>,
+    /// The memory functions' ranges, for profiling (`Program::profiled_functions`).
+    pub(crate) profiled_functions: Arc<[ProfiledFunction]>,
 }
 
 impl Elf {
@@ -282,11 +287,44 @@ impl Elf {
         }
 
         Ok(Self {
+            profiled_functions: Self::profiled_functions(&elf, pc_base, stream_end),
             instructions,
             pc_start: entry,
             pc_base,
             memory_image: image.into(),
         })
+    }
+
+    /// The memory functions' ranges from the symbol table, for profiling only: what the program
+    /// is comes from the segments alone, so a missing or odd symbol table changes nothing but the
+    /// profile. One name per address (`bcmp` is often `memcmp` under another name), and only
+    /// ranges inside the instructions.
+    fn profiled_functions(
+        elf: &ElfBytes<'_, LittleEndian>,
+        pc_base: u64,
+        stream_end: u64,
+    ) -> Arc<[ProfiledFunction]> {
+        let Ok(Some((symbols, strings))) = elf.symbol_table() else {
+            return Arc::new([]);
+        };
+        let mut found: Vec<ProfiledFunction> = Vec::new();
+        for name in MEMORY_FUNCTIONS {
+            let range = symbols.iter().find_map(|symbol| {
+                let start = symbol.st_value;
+                let end = start.checked_add(symbol.st_size)?;
+                (symbol.st_size > 0
+                    && strings.get(symbol.st_name as usize).ok() == Some(name)
+                    && pc_base <= start
+                    && end <= stream_end)
+                    .then_some(start..end)
+            });
+            if let Some(range) = range {
+                if found.iter().all(|f| f.range.start != range.start) {
+                    found.push(ProfiledFunction { name, range });
+                }
+            }
+        }
+        found.into()
     }
 
     pub fn compile(&self) -> Arc<Program> {
@@ -303,6 +341,7 @@ impl Elf {
             pc_base: self.pc_base,
             memory_image: self.memory_image.clone(),
             preprocessed_shape: None,
+            profiled_functions: self.profiled_functions.clone(),
         }
         .into()
     }

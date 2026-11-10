@@ -568,6 +568,7 @@ where
                     cached_mains: vec![],
                     common_main: gpu_matrix,
                     public_values: air_ctx.public_values,
+                    real_rows: air_ctx.real_rows,
                 },
             ))
         })

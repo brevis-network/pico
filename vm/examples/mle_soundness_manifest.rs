@@ -83,10 +83,7 @@ use pico_mle_core::{
     StarkEngine, SystemParams,
 };
 use pico_vm::{
-    compiler::riscv::{
-        compiler::{Compiler, SourceType},
-        program::Program,
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
     machine::logger::setup_logger,
@@ -382,7 +379,7 @@ fn main() {
     let mut rows: Vec<Row> = Vec::new();
 
     // Dev set: fib-10 proved through the combine root.
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     stdin.write(&FIB_N);
     let stdin = stdin.finalize();
     // `test_mle_e2e`'s emulator options, so its records -- and with them the convert keys -- match.

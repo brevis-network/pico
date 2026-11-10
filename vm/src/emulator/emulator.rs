@@ -26,27 +26,26 @@ use std::marker::PhantomData;
 
 // Meta emulator that encapsulates multiple emulators
 // SC and C for configs in the emulated machine
-// P and I for the native program and input types
 // E for the emulator type
-pub struct MetaEmulator<SC, C, P, I, E>
+pub struct MetaEmulator<SC, C, E>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>,
 {
-    pub stdin: EmulatorStdin<P, I>,
+    pub stdin: EmulatorStdin,
     pub emulator: Option<E>,
     pub _sc_and_chip: PhantomData<(SC, C)>,
 }
 
 // MetaEmulator for riscv
-impl<SC, C> MetaEmulator<SC, C, Program, Vec<u8>, RiscvEmulator>
+impl<SC, C> MetaEmulator<SC, C, RiscvEmulator>
 where
     SC: StarkGenericConfig,
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config,
     C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
 {
     pub fn setup_riscv(
-        proving_witness: &ProvingWitness<SC, C, Vec<u8>>,
+        proving_witness: &ProvingWitness<SC, C>,
         final_pvs_state: Arc<RecordFinalPvsState>,
     ) -> Self {
         // create a new emulator based on the emulator type
@@ -66,7 +65,7 @@ where
     }
 
     pub fn recover_riscv(
-        witness: &ProvingWitness<SC, C, Vec<u8>>,
+        witness: &ProvingWitness<SC, C>,
         state: RiscvEmulationState,
         shared_ds: SharedDeferredState,
         target_clk: u64,
@@ -194,7 +193,7 @@ where
     C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
 {
     pub fn setup_riscv(
-        proving_witness: &ProvingWitness<SC, C, Vec<u8>>,
+        proving_witness: &ProvingWitness<SC, C>,
         final_pvs_state: Arc<RecordFinalPvsState>,
     ) -> Self {
         let opts = proving_witness.opts.as_ref().expect("witness.opts not set");
@@ -284,7 +283,7 @@ where
     /// If no AOT replay factory is registered, which only a program with a recording entry point
     /// installs.
     pub fn recover_riscv(
-        witness: &ProvingWitness<SC, C, Vec<u8>>,
+        witness: &ProvingWitness<SC, C>,
         state: RiscvEmulationState,
         shared_ds: SharedDeferredState,
         target_clk: u64,
@@ -394,7 +393,7 @@ where
     }
 }
 
-impl<SC, C> SnapshotEmulator for MetaEmulator<SC, C, Program, Vec<u8>, RiscvEmulator>
+impl<SC, C> SnapshotEmulator for MetaEmulator<SC, C, RiscvEmulator>
 where
     SC: StarkGenericConfig,
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config,

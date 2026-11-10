@@ -31,8 +31,8 @@ impl Precompile for Uint256MulSyscall {
         let y_ptr = arg2;
         assert_dword_aligned_precompile(y_ptr, "uint256 y_ptr");
 
-        // First read the words for the x value. We can read a slice_unsafe here because we write
-        // the computed result to x later.
+        // First read the words for the x value. We can read with `dword_slice_unsafe` here because
+        // we write the computed result to x later.
         // The legacy uint256 chip contract counts eight 32-bit words, but the RV64 guest ABI
         // stores the same 256-bit value as four packed 64-bit dwords in memory.
         let num_memory_words = UINT256_NUM_WORDS;

@@ -2,19 +2,12 @@
 use pico_aot_dispatch::AotEmulatorCore;
 #[cfg(feature = "aot")]
 use pico_vm::{
-    compiler::riscv::program::Program,
     emulator::{
-        aot::{register_aot_factory, AotSnapshotEmulator},
         opts::EmulatorOpts,
-        riscv::{
-            chunk_split::ChunkSplitConfig, public_values::RecordFinalPvsState,
-            riscv_emulator::EmulationError, state::RiscvEmulationState,
-        },
+        riscv::{chunk_split::ChunkSplitConfig, state::RiscvEmulationState},
     },
     machine::report::EmulationReport,
 };
-#[cfg(feature = "aot")]
-use std::sync::Arc;
 
 pub mod bench;
 pub mod validate;
@@ -89,52 +82,6 @@ pub fn next_state_batch_impl(
     }
 
     Ok((snapshot, report))
-}
-
-#[cfg(feature = "aot")]
-struct VmAotAdapter {
-    core: AotEmulatorCore,
-    opts: EmulatorOpts,
-}
-
-#[cfg(feature = "aot")]
-impl AotSnapshotEmulator for VmAotAdapter {
-    fn next_state_batch(
-        &mut self,
-    ) -> Result<(RiscvEmulationState, EmulationReport), EmulationError> {
-        next_state_batch_impl(&mut self.core, self.opts).map_err(|s| {
-            tracing::error!(error = %s, "AOT adapter error");
-            EmulationError::Aot(s)
-        })
-    }
-
-    fn cycles(&self) -> u64 {
-        self.core.insn_count
-    }
-
-    fn get_pv_stream(&mut self) -> Vec<u8> {
-        core::mem::take(&mut self.core.public_values_stream)
-    }
-}
-
-#[cfg(feature = "aot")]
-fn aot_factory(
-    program: Arc<Program>,
-    input_stream: Vec<Vec<u8>>,
-    opts: EmulatorOpts,
-    // This adapter drives the AOT core directly and emits no record, so it has nothing to publish
-    // into the shared final-pvs cell the factory signature carries.
-    _final_pvs_state: Arc<RecordFinalPvsState>,
-) -> Box<dyn AotSnapshotEmulator> {
-    Box::new(VmAotAdapter {
-        core: AotEmulatorCore::new(program, input_stream),
-        opts,
-    })
-}
-
-#[cfg(feature = "aot")]
-pub fn register_with_vm() {
-    register_aot_factory(aot_factory);
 }
 
 #[cfg(feature = "aot")]

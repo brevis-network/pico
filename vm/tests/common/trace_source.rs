@@ -1,8 +1,10 @@
-//! A guest's records, emulated through the history sink, for the tests that trace them.
+//! A guest's records, emulated by the serial interpreter through the history sink, for the suites
+//! that read them.
 
 use std::sync::Arc;
 
 use pico_vm::{
+    compiler::riscv::program::Program,
     emulator::riscv::{
         public_values::RecordFinalPvsState,
         record::EmulationRecord,
@@ -27,10 +29,20 @@ pub fn history_run(
     elf: &[u8],
     input: &[Vec<u8>],
     chunk_size: u32,
-    mut on_record: impl FnMut(EmulationRecord),
+    on_record: impl FnMut(EmulationRecord),
 ) {
+    history_emulation(program(elf), input, chunk_size, on_record);
+}
+
+/// [`history_run`] on a compiled program, returning the emulator as the run left it, for a check
+/// that reads its end state.
+pub fn history_emulation(
+    program: Arc<Program>,
+    input: &[Vec<u8>],
+    chunk_size: u32,
+    mut on_record: impl FnMut(EmulationRecord),
+) -> RiscvEmulator {
     hold_records_unbounded();
-    let program = program(elf);
     let mut emulator = RiscvEmulator::new_single::<Kb>(
         program.clone(),
         Arc::new(RecordFinalPvsState::default()),
@@ -48,4 +60,5 @@ pub fn history_run(
             break;
         }
     }
+    emulator
 }

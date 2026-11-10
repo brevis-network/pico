@@ -27,6 +27,14 @@
 //!   `--airs` air too, generated `n` times in turn. Held until emulation returns, they hold heap
 //!   copies of their histories meanwhile, so neither keeps a slot a later chunk's emulation waits
 //!   for; the alternation uploads them from two pinned slots of an arena of their own.
+//! - `--digest-out <path>`, beside the default mode or `--poison-history`: once emulation returns,
+//!   pass or fail, `path` gets one line per air the device generated for a checked record,
+//!   `<record> <air> <rows> <cols> <sha256>`, in record order and then air id. `<record>` is
+//!   `chunk-<n>` for CPU chunk `n` and `deferred-<n>` for the record the verdict lines call
+//!   `deferred record of chunk <n>`. The hash covers every cell of the device trace in the
+//!   device's own row order, each as its canonical `u32` little-endian, taken before any rule
+//!   pairs a unit. A tree that must keep every device trace bit-identical writes the same file:
+//!   `diff` the two.
 //!
 //! ```text
 //! CUDA_VISIBLE_DEVICES=0 MLE_SPLIT_REPLAY=1 cargo run --release -p pico-vm --features cuda \
@@ -34,10 +42,12 @@
 //! ... -- --elf perf/bench_data/rv64/reth-elf --input perf/bench_data/rv64/reth-23993050.bin \
 //!   --chunks 5,6,37 --alternate 10
 //! ... -- --guest chip-coverage --corrupt-history add
+//! ... -- --elf perf/bench_data/rv64/reth-elf --input perf/bench_data/rv64/reth-23993050.bin \
+//!   --chunks 5,6,37 --digest-out reth-23993050.digests
 //! ```
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     num::NonZeroUsize,
     path::{Path, PathBuf},
     process::ExitCode,
@@ -64,12 +74,13 @@ use pico_vm::{
             trace_oracle::{
                 self,
                 corrupt::{self, Corruption},
-                poison, ChunkFailure, HistoryReads, HostSide,
+                poison, ChunkFailure, HistoryReads, HostSide, Trace,
             },
         },
     },
     proverchain::riscv::{emulate_snapshot_pipeline_with, DeferredSplit},
 };
+use sha2::{Digest, Sha256};
 
 #[path = "../tests/common/chip_coverage.rs"]
 mod chip_coverage;
@@ -113,6 +124,9 @@ struct Args {
     poison_history: bool,
     #[arg(long)]
     alternate: Option<usize>,
+    /// Each checked record's device traces, one digest line per air, written here.
+    #[arg(long, conflicts_with_all = ["corrupt_history", "alternate"])]
+    digest_out: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -186,12 +200,11 @@ fn run(args: Args) -> Result<(), String> {
         poison::arm();
     }
 
-    let witness =
-        ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<Kb>, Vec<u8>>::setup_for_mle_riscv(
-            record_parity::program(&elf),
-            stdin,
-            EmulatorOpts::bench_riscv_ops(),
-        );
+    let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<Kb>>::setup_for_mle_riscv(
+        record_parity::program(&elf),
+        stdin,
+        EmulatorOpts::bench_riscv_ops(),
+    );
     let workers = env_u32("NUM_THREADS")
         .and_then(|n| NonZeroUsize::new(n as usize))
         .unwrap_or(NonZeroUsize::MIN);
@@ -206,6 +219,9 @@ fn run(args: Args) -> Result<(), String> {
         history_reads: usize,
         failed: Vec<String>,
         held: Vec<PreparedChunk>,
+        /// Each record's digest lines in air-id order, by its index and then deferred after CPU:
+        /// the workers hand records over out of order.
+        digests: BTreeMap<(usize, bool), Vec<String>>,
     }
     let state = Mutex::new(State {
         seen: BTreeSet::new(),
@@ -213,6 +229,7 @@ fn run(args: Args) -> Result<(), String> {
         history_reads: 0,
         failed: Vec::new(),
         held: Vec::new(),
+        digests: BTreeMap::new(),
     });
     let selected = |cpu: bool, chunk: usize| {
         if cpu {
@@ -273,7 +290,30 @@ fn run(args: Args) -> Result<(), String> {
                 }
             },
         };
-        let verdict = trace_oracle::generate_and_check(&host, &orchestrator, &prepared, &required);
+        let digesting = args.digest_out.is_some();
+        let label = format!("{}-{chunk}", if cpu { "chunk" } else { "deferred" });
+        let mut digests = BTreeMap::<usize, String>::new();
+        let verdict = trace_oracle::generate_and_check_with(
+            &host,
+            &orchestrator,
+            &prepared,
+            &required,
+            |air, trace| {
+                if digesting {
+                    digests.insert(air, digest_line(&label, air, trace));
+                }
+            },
+        );
+        if digesting
+            && state
+                .digests
+                .insert((chunk, !cpu), digests.into_values().collect())
+                .is_some()
+        {
+            state.failed.push(format!(
+                "{what}: a second record labelled {label}: the digest file cannot tell them apart"
+            ));
+        }
         match (verdict, moved) {
             (Ok((verdict, reads)), None) => {
                 trace_oracle::log_verdict(chunk, &verdict);
@@ -362,6 +402,23 @@ fn run(args: Args) -> Result<(), String> {
         }
     }
     poison::disarm();
+    if let Some(path) = &args.digest_out {
+        let airs: usize = state.digests.values().map(Vec::len).sum();
+        let text: String = state
+            .digests
+            .values()
+            .flatten()
+            .map(|line| format!("{line}\n"))
+            .collect();
+        match std::fs::write(path, text) {
+            Ok(()) => println!(
+                "{name}: {airs} device trace digest(s) of {} record(s) written to {}",
+                state.digests.len(),
+                path.display()
+            ),
+            Err(err) => state.failed.push(format!("{}: {err}", path.display())),
+        }
+    }
     if state.checked == 0 {
         state.failed.push(format!("{name}: no record checked"));
     }
@@ -424,6 +481,25 @@ fn moved_airs(
         return Err("the change moves no host trace, so the control would prove nothing".into());
     }
     Ok(moved)
+}
+
+/// `label`'s line for `air`: the air's name, its rows and columns, and the SHA-256 of its cells in
+/// row order, each as its canonical `u32` little-endian.
+fn digest_line(label: &str, air: usize, trace: Trace<'_>) -> String {
+    let mut hasher = Sha256::new();
+    let mut bytes = Vec::with_capacity(4 << 16);
+    for cells in trace.cells.chunks(1 << 16) {
+        bytes.clear();
+        bytes.extend(cells.iter().flat_map(|cell| cell.to_le_bytes()));
+        hasher.update(&bytes);
+    }
+    let name = air_name(air).map_or_else(|| format!("air-{air}"), str::to_owned);
+    format!(
+        "{label} {name} {} {} {}",
+        trace.height(),
+        trace.width,
+        hex::encode(hasher.finalize())
+    )
 }
 
 fn names(airs: &BTreeSet<usize>) -> String {

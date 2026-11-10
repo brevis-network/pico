@@ -17,6 +17,7 @@
 //! path additionally offers on-device trace generation via [`build_ctx_gpu`].
 
 use std::{
+    borrow::{Borrow, Cow},
     collections::BTreeMap,
     num::NonZeroUsize,
     sync::{Arc, Mutex, PoisonError},
@@ -63,7 +64,7 @@ use crate::{
         precompiles::{
             edwards::{EdAddAssignChip, EdDecompressChip},
             fptower::{fp::FpOpChip, fp2_addsub::Fp2AddSubChip, fp2_mul::Fp2MulChip},
-            keccak256::{KeccakControlChip, KeccakPermuteChip},
+            keccak256::KeccakControlChip,
             poseidon2::FieldSpecificPrecompilePoseidon2Chip,
             sha256::{
                 compress::{ShaCompressChip, ShaCompressControlChip},
@@ -438,6 +439,9 @@ pub mod air_id {
     /// The loads and stores whose address is not a multiple of their width; appended last
     /// for the same reason.
     pub const MEM_UNALIGNED: usize = 50;
+    /// The sliced Keccak chip's two lookup tables (chi rows, xor5 parities) in one
+    /// preprocessed AIR, present in Keccak chunks only.
+    pub const KECCAK_TABLES: usize = 51;
 }
 
 /// Maps brevis chip `name()` → AIR id for the core set. Chips not listed are excluded from both
@@ -496,10 +500,43 @@ const INCLUDED: &[(&str, usize)] = &[
     ("EdAddAssign", air_id::ED_ADD),
     ("EdDecompress", air_id::ED_DECOMPRESS),
     ("MemoryUnaligned", air_id::MEM_UNALIGNED),
+    ("KeccakTables", air_id::KECCAK_TABLES),
 ];
+
+/// Chips whose padding rows differ from each other: the sliced KeccakPermute pads with dummy
+/// 27-row slots (two permutations each), so its padding leaves cycle with the clock; ShaCompress's device tracegen fills
+/// each padding row's octet / round selectors and round constant, an 80-row cycle.
+#[cfg(feature = "cuda")]
+const PADDING_NOT_CONSTANT: &[&str] = &["KeccakPermute", "ShaCompress"];
 
 pub fn air_id_for(name: &str) -> Option<usize> {
     INCLUDED.iter().find(|(n, _)| *n == name).map(|(_, id)| *id)
+}
+
+/// Sets each AIR's prover-only `real_rows` hint to its natural height: the rows past it are the
+/// chip's padding rows, which evaluate every interaction to one leaf, so the GKR input stores and
+/// computes them once per interaction. Capped at the trace height. An AIR the natural map does not
+/// name (the preprocessed tables) keeps `None`, every row real, as does a chip whose padding rows
+/// are not one constant row (`PADDING_NOT_CONSTANT`; the GKR input checks the rest and stops
+/// trusting an AIR whose padding varies).
+#[cfg(feature = "cuda")]
+fn mark_real_rows(
+    ctx: &mut ProvingContext<Pb>,
+    record: &EmulationRecord,
+    counter: &crate::instances::preparer::EventCounter,
+) {
+    let natural = crate::mle::machine::shape::mle_natural_heights_from_counter(record, counter);
+    for (id, air_ctx) in ctx.per_trace.iter_mut() {
+        let Some((name, _)) = INCLUDED.iter().find(|(_, air)| air == id) else {
+            continue;
+        };
+        if PADDING_NOT_CONSTANT.contains(name) {
+            continue;
+        }
+        if let Some(&rows) = natural.get(*name) {
+            air_ctx.real_rows = Some(rows.min(air_ctx.height()));
+        }
+    }
 }
 
 /// Per-AIR log-heights, in `vk.inner.per_air` order, of a shape given as `(chip name, log
@@ -664,32 +701,41 @@ fn resolved_concurrency(explicit: Option<NonZeroUsize>) -> usize {
 }
 
 /// Runs `job` on every record, `concurrency` at a time, each inside the [`ProveSlot`] the stage
-/// ledger names it by, and returns the results in record order. `job` is given the record's index.
+/// ledger names it by, and returns the results in record order. `job` is given the record's index
+/// and the record as `records` yields it: an owned record is the job's, and drops when the job is
+/// done with it rather than with the run.
 ///
 /// [`RiscvMachine::prove`] and [`trace_records`] both run through here, so a record carries the same
 /// `record`, `chunk` and lane in a ledger whichever of them wrote it.
-fn par_in_prove_slots<T: Send, E: Send>(
-    records: &[EmulationRecord],
+fn par_in_prove_slots<R: Borrow<EmulationRecord> + Send, T: Send, E: Send>(
+    records: impl IntoIterator<Item = R>,
     concurrency: usize,
-    job: impl Fn(usize, &EmulationRecord) -> Result<T, E> + Sync,
+    job: impl Fn(usize, R) -> Result<T, E> + Sync,
 ) -> Result<Vec<T>, E> {
+    assert!(concurrency > 0, "proving needs at least one slot");
+    let records: Vec<R> = records.into_iter().collect();
     // The CPU chunk each record is, counted in proving order, which is chunk order: the stage
     // ledger names a chunk by the same index on both sides of the run.
     let mut cpu_chunks = 0u64;
     let chunk_of: Vec<Option<u64>> = records
         .iter()
         .map(|record| {
-            record.is_cpu_chunk.then(|| {
+            record.borrow().is_cpu_chunk.then(|| {
                 cpu_chunks += 1;
                 cpu_chunks - 1
             })
         })
         .collect();
     let mut results = Vec::with_capacity(records.len());
-    for (batch_idx, batch) in records.chunks(concurrency).enumerate() {
-        let base = batch_idx * concurrency;
+    let mut records = records.into_iter();
+    loop {
+        let batch: Vec<R> = records.by_ref().take(concurrency).collect();
+        if batch.is_empty() {
+            break;
+        }
+        let base = results.len();
         let batch_results: Vec<T> = batch
-            .par_iter()
+            .into_par_iter()
             .enumerate()
             .map(|(j, record)| {
                 let slot = ProveSlot {
@@ -739,6 +785,7 @@ pub fn riscv_constraint_dump(bucket: bool) -> String {
         pc_base: 0,
         memory_image: Default::default(),
         preprocessed_shape: None,
+        profiled_functions: Default::default(),
     };
     let airs = mle_riscv_air_refs(Arc::new(program), bucket);
     let names: Vec<String> = airs.iter().map(|a| a.name()).collect();
@@ -784,7 +831,9 @@ pub fn mle_riscv_air_refs(program: Arc<Program>, bucket: bool) -> Vec<AirRef<Sc>
         Arc::new(FieldSpecificPoseidon2Chip::<Kb>::default()), // 19 (POSEIDON2_BUS receiver)
         // Compute precompiles: present in the verifying key. They activate on programs that
         // use them (omitted from a proof as optional AIRs when the chunk has no such events).
-        Arc::new(KeccakPermuteChip::<Kb>::default()),
+        // The sliced lookup layout under the `KeccakPermute` name (two permutations per
+        // 27-row slot).
+        Arc::new(crate::chips::precompiles::keccak256::KeccakSlicedChip::<Kb>::default()),
         Arc::new(ShaExtendChip::<Kb>::default()),
         Arc::new(ShaExtendControlChip::<Kb>::default()),
         Arc::new(ShaCompressChip::<Kb>::default()),
@@ -815,6 +864,7 @@ pub fn mle_riscv_air_refs(program: Arc<Program>, bucket: bool) -> Vec<AirRef<Sc>
         Arc::new(EdAddAssignChip::<Kb, Ed25519>::default()),            // 48
         Arc::new(EdDecompressChip::<Kb, Ed25519Parameters>::default()), // 49
         Arc::new(MemoryUnalignedChip::<Kb>::default()),                 // 50
+        Arc::new(crate::chips::precompiles::keccak256::KeccakTables::<Kb>::default()), // 51
     ]
 }
 
@@ -890,7 +940,7 @@ pub enum EmulateError {
 /// instead, and lifts it the same way, since its caller may still hold what it is handed.
 pub fn emulate_with_opts(
     program: Arc<Program>,
-    stdin: &EmulatorStdin<Program, Vec<u8>>,
+    stdin: &EmulatorStdin,
     opts: EmulatorOpts,
 ) -> Result<EmulationOutput, EmulateError> {
     let mut records = Vec::new();
@@ -903,7 +953,7 @@ pub fn emulate_with_opts(
 /// is empty.
 pub fn emulate_with_opts_streaming(
     program: Arc<Program>,
-    stdin: &EmulatorStdin<Program, Vec<u8>>,
+    stdin: &EmulatorStdin,
     opts: EmulatorOpts,
     mut handle_record: impl FnMut(EmulationRecord),
 ) -> Result<EmulationOutput, EmulateError> {
@@ -951,7 +1001,7 @@ pub fn emulate_with_opts_streaming(
 /// emulator's `pc` there, and both name the instruction after the last one emulated.
 pub fn emulate_with_pipeline(
     program: Arc<Program>,
-    stdin: &EmulatorStdin<Program, Vec<u8>>,
+    stdin: &EmulatorStdin,
     opts: EmulatorOpts,
     workers: NonZeroUsize,
 ) -> Result<EmulationOutput, EmulateError> {
@@ -970,7 +1020,7 @@ pub fn emulate_with_pipeline(
 /// [`emulate_with_opts`] does.
 pub fn emulate_with_pipeline_streaming(
     program: Arc<Program>,
-    stdin: &EmulatorStdin<Program, Vec<u8>>,
+    stdin: &EmulatorStdin,
     opts: EmulatorOpts,
     workers: NonZeroUsize,
     handle_record: impl FnMut(EmulationRecord) + Send,
@@ -988,11 +1038,10 @@ pub fn emulate_with_pipeline_streaming(
         return Err(EmulateError::AotUnavailable);
     }
     let _unbounded = unbounded_scope();
-    let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<Kb>, Vec<u8>> {
+    let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<Kb>> {
         program: Some(program),
         vk_root: None,
         stdin: Some(stdin.clone()),
-        flag_empty_stdin: false,
         config: None,
         opts: Some(opts),
         records: Vec::new(),
@@ -1045,7 +1094,7 @@ pub fn emulate_with_pipeline_streaming(
 /// `committed_bytes` and `reports` are [`emulate_with_pipeline`]'s.
 pub fn execute_with_pipeline(
     program: Arc<Program>,
-    stdin: &EmulatorStdin<Program, Vec<u8>>,
+    stdin: &EmulatorStdin,
     opts: EmulatorOpts,
     workers: NonZeroUsize,
     on_record: impl Fn(&EmulationRecord) + Send + Sync,
@@ -1065,7 +1114,7 @@ pub const DEFAULT_MAX_CHUNK_SIZE: u32 = 1 << 22;
 /// decides the proof shape; `CHUNK_SIZE` wins over both.
 pub fn emulate(
     program: Arc<Program>,
-    stdin: EmulatorStdin<Program, Vec<u8>>,
+    stdin: EmulatorStdin,
     chunk_size: Option<u32>,
 ) -> Vec<EmulationRecord> {
     emulate_with_committed_bytes(program, stdin, chunk_size).0
@@ -1075,7 +1124,7 @@ pub fn emulate(
 /// `committed_value_digest` its proof carries, and what an on-chain verifier is called with.
 pub fn emulate_with_committed_bytes(
     program: Arc<Program>,
-    stdin: EmulatorStdin<Program, Vec<u8>>,
+    stdin: EmulatorStdin,
     chunk_size: Option<u32>,
 ) -> (Vec<EmulationRecord>, Vec<u8>) {
     let mut records = Vec::new();
@@ -1090,7 +1139,7 @@ pub fn emulate_with_committed_bytes(
 /// here it does not, as long as `on_record` drops what it is given.
 pub fn emulate_each(
     program: Arc<Program>,
-    stdin: EmulatorStdin<Program, Vec<u8>>,
+    stdin: EmulatorStdin,
     chunk_size: Option<u32>,
     mut on_record: impl FnMut(EmulationRecord),
 ) -> Vec<u8> {
@@ -1269,9 +1318,19 @@ pub fn build_ctx(
     build_ctx_augmented(chips, augmented_record(chips, record), bucket)
 }
 
-/// [`build_ctx`] over a record [`augmented_record`] already returned, for a caller that also reads
-/// the augmented events.
-pub(crate) fn build_ctx_augmented(
+/// [`build_ctx`] on a record the caller gives up: the extra-record pass runs on the record itself
+/// ([`augment_record`]), so nothing is copied and no `prove.augment.clone` line is written.
+pub fn build_ctx_owned(
+    chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
+    record: EmulationRecord,
+    bucket: bool,
+) -> ProvingContext<HostPb> {
+    build_ctx_augmented(chips, augment_record(chips, record), bucket)
+}
+
+/// [`build_ctx`] over a record [`augmented_record`] or [`augment_record`] already returned, for a
+/// caller that also reads the augmented events.
+pub fn build_ctx_augmented(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
     mut record: EmulationRecord,
     bucket: bool,
@@ -1771,14 +1830,17 @@ pub struct TraceReport {
 /// (`None`: `PROVE_CONCURRENCY`, else [`DEFAULT_PROVE_CONCURRENCY`]), so a stage ledger reads the
 /// same `prove.augment.*`, `prove.shape` and `prove.tracegen.*` lines here as in a host prove, and
 /// `prove.prove` and `prove.verify` as skipped. A record's traces drop before its slot takes the next record, so the
-/// peak is `concurrency` records' traces, not the run's.
+/// peak is `concurrency` records' traces, not the run's. The records are borrowed, so each is
+/// copied before its extra-record pass (`prove.augment.clone`), as [`RiscvMachine::prove`] copies
+/// them; [`RiscvMachine::prove_owned`] traces the records it is given in place and writes no
+/// such line.
 pub fn trace_records(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
     records: &[EmulationRecord],
     bucket: bool,
     concurrency: Option<NonZeroUsize>,
 ) -> TraceReport {
-    let traced = par_in_prove_slots::<_, std::convert::Infallible>(
+    let traced = par_in_prove_slots::<_, _, std::convert::Infallible>(
         records,
         resolved_concurrency(concurrency),
         |_, record| {
@@ -2186,10 +2248,11 @@ impl RiscvMachine {
     /// [`Self::prove_chunk`].
     #[cfg(feature = "cuda")]
     pub fn build_chunk_ctx(&self, chunk: &PreparedChunk) -> ProvingContext<Pb> {
-        let ctx = build_ctx_gpu(&chunk.record, &chunk.prepared, &self.orchestrator_chips);
+        let mut ctx = build_ctx_gpu(&chunk.record, &chunk.prepared, &self.orchestrator_chips);
         if crate::mle::env_flag("MLE_TRACE_COMPARE") {
             compare_gpu_ctx_against_cpu(&self.chips, &chunk.record, &ctx);
         }
+        mark_real_rows(&mut ctx, &chunk.record, &chunk.prepared.event_counter);
         ctx
     }
 
@@ -2363,7 +2426,24 @@ impl RiscvMachine {
     }
 
     pub fn prove(&self, records: &[EmulationRecord]) -> Result<RiscvProof, ProveRiscvError> {
-        let chunk_proofs = par_in_prove_slots::<_, ProveRiscvError>(
+        self.prove_each(records.iter().map(Cow::Borrowed))
+    }
+
+    /// [`Self::prove`] on records the caller gives up: each is traced without the copy `prove`
+    /// makes of it ([`build_ctx_owned`]; under `cuda`, staged for the device without one), and
+    /// drops once its prove job is done with it rather than with the run.
+    pub fn prove_owned(
+        &self,
+        records: Vec<EmulationRecord>,
+    ) -> Result<RiscvProof, ProveRiscvError> {
+        self.prove_each(records.into_iter().map(Cow::Owned))
+    }
+
+    fn prove_each<'a>(
+        &self,
+        records: impl IntoIterator<Item = Cow<'a, EmulationRecord>>,
+    ) -> Result<RiscvProof, ProveRiscvError> {
+        let chunk_proofs = par_in_prove_slots::<_, _, ProveRiscvError>(
             records,
             resolved_concurrency(self.concurrency),
             |idx, record| {
@@ -2372,19 +2452,25 @@ impl RiscvMachine {
                 // With chunks proved concurrently, a worker can interleave two chunks' work.
                 let _span = tracing::info_span!("riscv_chunk_prove", chunk = idx).entered();
                 let started = Instant::now();
-                // Only the GPU staging needs the record owned; the CPU build proves it borrowed.
-                // The shape choice is part of the record's prove job, so its stage lands in the
-                // slot too.
+                // The GPU staging takes the record owned, so a borrowed one is copied. The CPU
+                // build traces a borrowed record from a copy and an owned one in place, which
+                // consumes it, so the chunk index the prove line carries is read first. The shape
+                // choice is part of the record's prove job, so its stage lands in the slot too.
                 #[cfg(feature = "cuda")]
-                let proof =
-                    self.try_prove_chunk(&self.prepare_chunk_shaped(record.clone()), idx, false)?;
-                #[cfg(not(feature = "cuda"))]
-                let proof = self.try_prove_ctx(
-                    ctx_to_engine(build_ctx(&self.chips, record, self.bucket)),
+                let proof = self.try_prove_chunk(
+                    &self.prepare_chunk_shaped(record.into_owned()),
                     idx,
-                    record.public_values.chunk,
                     false,
                 )?;
+                #[cfg(not(feature = "cuda"))]
+                let proof = {
+                    let pv_chunk = record.public_values.chunk;
+                    let ctx = match record {
+                        Cow::Borrowed(record) => build_ctx(&self.chips, record, self.bucket),
+                        Cow::Owned(record) => build_ctx_owned(&self.chips, record, self.bucket),
+                    };
+                    self.try_prove_ctx(ctx_to_engine(ctx), idx, pv_chunk, false)?
+                };
                 tracing::info!(
                     "chunk {idx}: MLE prove OK ({} ms)",
                     started.elapsed().as_millis()
@@ -2616,10 +2702,9 @@ mod tests {
         (word(0), word(1), word(2))
     }
 
-    fn fib_stdin(n: u32) -> EmulatorStdin<Program, Vec<u8>> {
-        let mut builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<
-            crate::configs::stark_config::KoalaBearPoseidon2,
-        >();
+    fn fib_stdin(n: u32) -> EmulatorStdin {
+        let mut builder =
+            EmulatorStdin::new_builder::<crate::configs::stark_config::KoalaBearPoseidon2>();
         builder.write(&n);
         builder.finalize()
     }
@@ -2839,7 +2924,7 @@ mod tests {
             })
             .collect();
         let named =
-            par_in_prove_slots::<_, std::convert::Infallible>(&records, 2, |idx, record| {
+            par_in_prove_slots::<_, _, std::convert::Infallible>(&records, 2, |idx, record| {
                 let slot = ledger::current_prove_slot().expect("a job runs inside its slot");
                 assert_eq!(slot.record, idx as u64);
                 Ok((idx, slot.chunk, slot.slot, record.is_cpu_chunk))
@@ -2862,7 +2947,7 @@ mod tests {
     fn par_in_prove_slots_starts_no_batch_after_a_failed_one() {
         let records = vec![EmulationRecord::default(); 5];
         let started = std::sync::Mutex::new(Vec::new());
-        let result = par_in_prove_slots::<(), usize>(&records, 2, |idx, _| {
+        let result = par_in_prove_slots::<_, (), usize>(&records, 2, |idx, _| {
             started.lock().unwrap().push(idx);
             if idx == 2 {
                 Err(idx)
@@ -2925,6 +3010,7 @@ mod tests {
             pc_base: 0,
             memory_image: Default::default(),
             preprocessed_shape: None,
+            profiled_functions: Default::default(),
         }
     }
     // The CPU-engine verify tests below (and their fixtures/codec helpers) are compiled out under

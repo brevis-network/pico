@@ -467,7 +467,6 @@ where
         device::launched(kernels, stream);
         device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        device::wait(stream).unwrap();
         device::wait(main_stream).unwrap();
 
         TraceData::Gpu(num_fp2_addsub_cols::<P>(), d_trace)

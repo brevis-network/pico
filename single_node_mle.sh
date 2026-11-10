@@ -104,9 +104,10 @@ export TCMALLOC_RELEASE_RATE="${TCMALLOC_RELEASE_RATE:-0}"
 export NUM_THREADS="${NUM_THREADS:-8}"
 
 # The replay workers' engine: MLE_REPLAY_WORKERS=aot | interpreter. Unset, the workers replay on
-# the interpreter; `aot` puts them on the recording bodies of the AOT-compiled guest the binary
-# registered, and refuses to start where it registered none. `MLE replay workers: <engine>` in the
-# log says which ran. Not defaulted here, so the prover's own default is the one in force.
+# the recording bodies of the AOT-compiled guest the binary registered, and on the interpreter
+# where it registered none; `aot` set explicitly refuses to start where it registered none.
+# `MLE replay workers: <engine>` in the log says which ran. Not defaulted here, so the prover's own
+# default is the one in force.
 
 # Global rayon pool; rayon otherwise sizes it from num_cpus (124 on the box measured here).
 # 32 is worth -3.3% e2e, and it lands in the riscv and convert phases -- combine goes +4.0% the
@@ -185,7 +186,8 @@ export MLE_STEP="${MLE_STEP:-combine}"
 # PICO_CUDA=0 asks for the CPU prover (see detect_cuda.sh); an explicit FEATURES wins over both.
 # NOTE: aot-emulator requires the per-ELF AOT dispatch crate to be generated first:
 #   cargo run -r -p pico-aot-codegen --bin generate_crates -- perf/bench_data/rv64/reth-elf
-# (run once per ELF; without it the `aot-generated` crate is a stub and the build fails).
+# (run once per ELF; without it the `aot-generated` crate is the committed stub: the build
+# succeeds, the registration is refused with a warning, and emulation and replay interpret).
 if [ -z "${FEATURES:-}" ]; then
     . "$(dirname "$0")/detect_cuda.sh"
     pico_cuda_detect

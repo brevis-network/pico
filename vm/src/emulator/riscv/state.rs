@@ -74,6 +74,8 @@ impl RiscvEmulationState {
     #[must_use]
     /// Create a new [`EmulationState`].
     pub fn new(pc_start: RvAddr) -> Self {
+        // Every field is written out: `..Default::default()` would build a whole default state,
+        // a second multi-gigabyte `ContiguousRiscvMemory` with it, only to drop that memory.
         Self {
             global_clk: 0,
             current_batch: 0,
@@ -82,8 +84,13 @@ impl RiscvEmulationState {
             clk: RvClk::from(CHUNK_CLK_START),
             pc: pc_start,
             registers: [RuntimeRegisterRecord::default(); 32],
+            uninitialized_memory: Memory64::default(),
+            input_stream: Vec::new(),
+            input_stream_ptr: 0,
+            public_values_stream: Vec::new(),
             memory: ContiguousRiscvMemory::new(),
-            ..Default::default()
+            syscall_counts: HashMap::default(),
+            misaligned_accesses: 0,
         }
     }
 

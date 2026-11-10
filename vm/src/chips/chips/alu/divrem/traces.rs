@@ -601,7 +601,6 @@ impl<F: PrimeField32> DivRemChip<F> {
             owner: main_stream,
             appended,
         });
-        device::wait(stream).unwrap();
         device::wait(main_stream).unwrap();
 
         info!("[divrem-chip] generate_extra_record_and_main from the history on GPU");

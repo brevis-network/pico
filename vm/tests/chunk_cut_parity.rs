@@ -11,7 +11,7 @@
 //! `chunk_split::leaf_cap` reads `CHUNK_LEAF_CAP` once per process, so the cap needs its own test
 //! binary.
 
-use std::sync::{Mutex, Once, PoisonError};
+use std::sync::Once;
 
 use pico_vm::{
     emulator::{
@@ -21,11 +21,11 @@ use pico_vm::{
     mle::machine::riscv::{emulate_with_opts_streaming, emulate_with_pipeline_streaming},
 };
 
-// Only the guests and the run setup are used here.
+// Only the guests, the run setup and the pipeline's turn are used here.
 #[allow(dead_code)]
 #[path = "common/record_parity.rs"]
 mod record_parity;
-use record_parity::{opts, program, stdin, workers, GUESTS, WHOLE};
+use record_parity::{guest, one_at_a_time, opts, program, stdin, workers, WHOLE};
 
 /// About 2.9 million leaves above a chunk's charge before its first step (3.4 million), so the leaf
 /// arm closes each chunk after some thousands of instructions, long before `WHOLE`'s other limits.
@@ -34,9 +34,6 @@ const LEAF_CAP: u64 = 6 << 20;
 /// Below this the leaf cap did not cut the run: `WHOLE`'s other limits alone give the field guests
 /// 2 and 6 chunks.
 const AT_LEAST_CHUNKS: usize = 16;
-
-/// The pipeline takes its snapshot memory from one process-wide pool, so runs go one at a time.
-static PIPELINE: Mutex<()> = Mutex::new(());
 
 static SET_CAP: Once = Once::new();
 
@@ -75,7 +72,7 @@ impl Cut {
 /// Runs `elf` down both paths; the pipeline's value comes first in every message.
 fn check(label: &str, elf: &[u8], input: &[Vec<u8>]) {
     set_leaf_cap();
-    let _one_at_a_time = PIPELINE.lock().unwrap_or_else(PoisonError::into_inner);
+    let _one_at_a_time = one_at_a_time();
     let program = program(elf);
     let stdin = stdin(input);
     let opts = opts(WHOLE);
@@ -144,10 +141,7 @@ fn check(label: &str, elf: &[u8], input: &[Vec<u8>]) {
 }
 
 fn check_guest(name: &str) {
-    let guest = GUESTS
-        .iter()
-        .find(|guest| guest.name == name)
-        .unwrap_or_else(|| panic!("no guest {name}"));
+    let guest = guest(name);
     let run = guest.runs().into_iter().next().expect("a run");
     check(name, guest.elf, &run.stdin);
 }

@@ -10,10 +10,7 @@ use aot::AotEmulatorCore;
 #[cfg(feature = "aot")]
 use aot_common::{recycle_snapshot_memory, AotRun};
 use pico_vm::{
-    compiler::riscv::{
-        compiler::{Compiler, SourceType},
-        program::Program,
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2 as RiscvKBSC,
     emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
 };
@@ -63,9 +60,9 @@ fn main() {
     println!("Warmup runs: {}", warmup_runs);
     println!("Benchmark runs: {}\n", bench_runs);
 
-    let mut stdin_builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<RiscvKBSC>();
+    let mut stdin_builder = EmulatorStdin::new_builder::<RiscvKBSC>();
     stdin_builder.write(&n);
-    let stdin = stdin_builder.finalize::<Program>();
+    let stdin = stdin_builder.finalize();
     let input_stream = stdin.inputs.to_vec();
 
     let opts = EmulatorOpts::bench_riscv_ops();

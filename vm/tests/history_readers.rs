@@ -28,7 +28,7 @@ use pico_vm::{
 #[allow(dead_code)]
 #[path = "common/record_parity.rs"]
 mod record_parity;
-use record_parity::{opts, program, stdin, Guest, Run, GUESTS};
+use record_parity::{guest, opts, program, stdin, Guest, Run};
 
 #[derive(Debug, PartialEq)]
 struct Reading {
@@ -178,10 +178,7 @@ fn batches(guest: &Guest, run: &Run, batch_size: u32) -> RunReading {
 }
 
 fn check(name: &str) {
-    let guest = GUESTS
-        .iter()
-        .find(|guest| guest.name == name)
-        .unwrap_or_else(|| panic!("no guest {name}"));
+    let guest = guest(name);
     let mut branches = 0;
     for run in guest.runs() {
         let one = batches(guest, &run, 1);

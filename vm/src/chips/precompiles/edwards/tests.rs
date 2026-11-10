@@ -128,8 +128,9 @@ fn emulate(
         pc_base: 0,
         memory_image: Arc::new(memory_image),
         preprocessed_shape: None,
+        profiled_functions: Default::default(),
     };
-    let stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>().finalize();
+    let stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>().finalize();
     test_rv64_emulate(Arc::new(program), stdin)
 }
 
@@ -535,7 +536,7 @@ mod hook {
             },
             utils::field_params::FieldParameters,
         },
-        emulator::riscv::hook::ed_decompress::hint_ed_decompress,
+        emulator::riscv::hook::ed_decompress::ed_decompress,
     };
     use num::{BigUint, One, Zero};
 
@@ -553,7 +554,7 @@ mod hook {
     }
 
     fn call(y: &BigUint) -> Vec<Vec<u8>> {
-        hint_ed_decompress(&buf(y))
+        ed_decompress(&buf(y))
     }
 
     /// The FD is wired to the hook this module tests.
@@ -589,7 +590,7 @@ mod hook {
     #[test]
     #[should_panic(expected = "64 bytes")]
     fn a_32_byte_write_is_rejected() {
-        let _ = hint_ed_decompress(&[0u8; 32]);
+        let _ = ed_decompress(&[0u8; 32]);
     }
 
     /// For a `y` that is not on the curve, the hook returns the two witnesses the guest

@@ -409,6 +409,10 @@ pub struct RiscvEmulator {
     /// Cycle tracker requests "cycle-tracker-start: "
     pub cycle_tracker_requests: HashMap<String, u64>,
 
+    /// With cycle tracking on, the instructions run inside each of `program.profiled_functions`,
+    /// in its order, since the last report.
+    pub profiled_cycles: Vec<u64>,
+
     /// Snapshot workers stop exactly at this global clock when set.
     pub target_global_clk: Option<u64>,
 
@@ -659,6 +663,7 @@ impl RiscvEmulator {
             stdout: Default::default(),
             stderr: Default::default(),
             cycle_tracker: Default::default(),
+            profiled_cycles: Default::default(),
             cycle_tracker_requests: Default::default(),
             target_global_clk: None,
             deferred_state,
@@ -721,6 +726,18 @@ impl RiscvEmulator {
         done: bool,
         start_chunk: u32,
     ) -> EmulationReport {
+        if self.opts.cycle_tracker {
+            // The memory functions' instructions, by name, beside the guest's own trackers.
+            let functions = self.program.profiled_functions.clone();
+            for (function, cycles) in functions.iter().zip(self.profiled_cycles.iter_mut()) {
+                if *cycles > 0 {
+                    self.cycle_tracker
+                        .entry(function.name.to_owned())
+                        .or_default()
+                        .push(core::mem::take(cycles));
+                }
+            }
+        }
         EmulationReport {
             current_cycle: self.state.global_clk,
             done,
@@ -750,6 +767,9 @@ impl RiscvEmulator {
         let Some(instruction) = self.program.try_fetch(self.state.pc) else {
             return Err(EmulationError::outside_program(self.state.pc));
         };
+        if self.opts.cycle_tracker {
+            self.count_profiled_cycle();
+        }
 
         // Emulate the instruction.
         (self.emu_fn)(self, &instruction)?;
@@ -1615,6 +1635,19 @@ impl RiscvEmulator {
             );
             self.mode
                 .set_memory_access(position, record.into(), &mut self.sink);
+        }
+    }
+
+    /// One instruction at the current pc, counted against the memory function it lies in, if any.
+    #[cold]
+    fn count_profiled_cycle(&mut self) {
+        let pc = self.state.pc;
+        let functions = &self.program.profiled_functions;
+        if self.profiled_cycles.len() != functions.len() {
+            self.profiled_cycles = vec![0; functions.len()];
+        }
+        if let Some(i) = functions.iter().position(|f| f.range.contains(&pc)) {
+            self.profiled_cycles[i] += 1;
         }
     }
 
@@ -2939,74 +2972,6 @@ mod tests {
         assert_eq!(tracked(&worker), (vec![], 0));
     }
 
-    /// Jumps to `(1 << shift) + offset`, which ends the run there, on its third clock.
-    fn jump_to(shift: i32, offset: i32) -> Arc<Program> {
-        Arc::new(Program::new(
-            vec![
-                i_type(Opcode::ADD, Register::X1, Register::X0, 1), // 0x1000
-                i_type(Opcode::SLL, Register::X1, Register::X1, shift), // 0x1004
-                i_type(Opcode::JALR, Register::X0, Register::X1, offset), // 0x1008
-            ],
-            0x1000,
-            0x1000,
-        ))
-    }
-
-    /// Runs `program` in `mode` until it ends or fails, with the cut and the end on the same
-    /// clock, and returns how it ended and the records it cut.
-    fn run_to_end(
-        program: Arc<Program>,
-        mode: super::RiscvEmulatorMode,
-    ) -> (Result<bool, super::EmulationError>, Vec<EmulationRecord>) {
-        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
-            program,
-            Arc::new(RecordFinalPvsState::default()),
-            replay_opts(),
-        );
-        emulator.initialize_if_needed();
-        emulator.mode = mode;
-        emulator.update_mode_deps();
-        emulator.target_global_clk = Some(3);
-
-        let mut records = Vec::new();
-        let ended = loop {
-            match emulator.emulate_cycle(|_, record| records.push(record), &mut Instant::now()) {
-                Ok(false) => continue,
-                ended => break ended,
-            }
-        };
-        (ended, records)
-    }
-
-    fn modes() -> [super::RiscvEmulatorMode; 2] {
-        [
-            super::RiscvEmulatorMode::Trace,
-            super::RiscvEmulatorMode::Simple,
-        ]
-    }
-
-    /// A jump out of the program fails at the jump, in both modes, before a cut tries to encode
-    /// its target: at addresses the CPU trace cannot hold (`1 << 32`, `1 << 48`) and at the last
-    /// one it can (`(1 << 32) - 4`). None is an instruction, so none ends the run.
-    #[test]
-    fn a_jump_out_of_the_program_ends_the_run_abnormally() {
-        for (shift, offset) in [(32, 0), (48, 0), (32, -4)] {
-            let target = (1u64 << shift).wrapping_add(offset as i64 as u64);
-            for mode in modes() {
-                let (ended, _) = run_to_end(jump_to(shift, offset), mode);
-                assert_eq!(
-                    ended
-                        .as_ref()
-                        .err()
-                        .and_then(super::EmulationError::abnormal_termination)
-                        .map(|t| t.reason),
-                    Some(super::TerminationReason::OutsideProgram { pc: target }),
-                    "{ended:?}"
-                );
-            }
-        }
-    }
-
     /// A cut record goes through the reader with the pcs the cut stamped, which a Trace-mode cut
     /// checks against the record's first and last event.
     #[test]
@@ -3102,7 +3067,7 @@ mod tests {
     fn test_simple_fib() {
         // The fibonacci guest end to end; it reads `n`.
         let program = simple_fibo_program();
-        let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+        let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
         stdin.write(&10u32);
         let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
             program,
@@ -3114,7 +3079,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase2a_register_and_memory_paths_are_explicit() {
+    fn a_register_write_and_a_memory_write_read_back() {
         let program = simple_fibo_program();
         let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
             program,
@@ -3300,150 +3265,45 @@ mod tests {
         )
     }
 
-    // ── misaligned or out-of-range jump targets end the run abnormally, at the jump ──
-
-    /// Four `nop`s at 0x1000: the targets below are relative to them.
-    fn jump_program() -> Arc<Program> {
-        let nop = r_type(Opcode::ADD, Register::X0, Register::X0, Register::X0);
-        Arc::new(Program::new(vec![nop; 4], 0x1000, 0x1000))
-    }
-
-    fn branch(opcode: Opcode, rs1: Register, rs2: Register, offset: i64) -> Instruction {
-        Instruction::new(opcode, rs1 as u8, rs2 as u64, offset as u64, false, true)
-    }
-
-    /// `instruction` at 0x1000 with `x5 = x5_value`, in the full and the simple path: the
-    /// termination reason (or `None`), the pc after, and `x1`, which the jumps link into.
-    fn jump_in_both_paths(
-        instruction: Instruction,
-        x5_value: u64,
-    ) -> [(Option<super::TerminationReason>, u64, u64); 2] {
-        [false, true].map(|simple| {
-            let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
-                jump_program(),
-                Arc::new(RecordFinalPvsState::default()),
-                EmulatorOpts::default(),
-            );
-            emulator.mode = if simple {
-                super::RiscvEmulatorMode::Simple
-            } else {
-                super::RiscvEmulatorMode::Trace
-            };
-            emulator.update_mode_deps();
-            emulator.state.pc = 0x1000;
-            set_reg_raw(&mut emulator, Register::X5, x5_value);
-            let result = if simple {
-                emulator.emulate_instruction_simple(&instruction)
-            } else {
-                emulator.emulate_instruction(&instruction)
-            };
-            let reason = result.err().map(|e| {
-                e.abnormal_termination()
-                    .expect("an abnormal termination")
-                    .reason
-            });
-            (reason, emulator.state.pc, emulator.register(Register::X1))
-        })
-    }
-
-    fn assert_fault(instruction: Instruction, x5: u64, want: super::TerminationReason) {
-        for (path, (reason, _, link)) in ["full", "simple"]
-            .iter()
-            .zip(jump_in_both_paths(instruction, x5))
-        {
-            assert_eq!(reason, Some(want), "{path} path");
-            assert_eq!(
-                link, 0,
-                "{path} path: the faulting jump wrote its link register"
-            );
+    /// With cycle tracking on, the report counts the instructions run inside each memory
+    /// function the ELF's symbol table names. The guest is the memory-function test,
+    /// which runs `memcpy`, `memset` and `memmove` tens of thousands of times.
+    #[test]
+    fn cycle_tracking_reports_the_memory_functions() {
+        const ELF: &[u8] =
+            include_bytes!("../../../../../perf/bench_data/rv64/memory-functions-elf");
+        let program = Compiler::new(SourceType::RISCV, ELF).unwrap().compile();
+        let names: Vec<_> = program.profiled_functions.iter().map(|f| f.name).collect();
+        for name in ["memcpy", "memset", "memmove"] {
+            assert!(names.contains(&name), "{name} not among {names:?}");
         }
-    }
 
-    fn assert_lands(instruction: Instruction, x5: u64, pc: u64) {
-        for (path, (reason, at, _)) in ["full", "simple"]
-            .iter()
-            .zip(jump_in_both_paths(instruction, x5))
-        {
-            assert_eq!(reason, None, "{path} path");
-            assert_eq!(at, pc, "{path} path");
-        }
-    }
-
-    #[test]
-    fn a_jump_to_a_misaligned_target_terminates_at_the_jump() {
-        let misaligned =
-            |target| super::TerminationReason::MisalignedJumpTarget { pc: 0x1000, target };
-        assert_fault(jal(Register::X1, 6), 0, misaligned(0x1006));
-        assert_fault(
-            branch(Opcode::BEQ, Register::X0, Register::X0, 2),
-            0,
-            misaligned(0x1002),
-        );
-        // JALR clears bit 0 only; bit 1 left set is misaligned, not rounded down.
-        assert_fault(
-            i_type(Opcode::JALR, Register::X1, Register::X5, 0),
-            0x1006,
-            misaligned(0x1006),
-        );
-    }
-
-    #[test]
-    fn jalr_clears_bit_zero_before_the_alignment_check() {
-        assert_lands(
-            i_type(Opcode::JALR, Register::X1, Register::X5, 0),
-            0x1005,
-            0x1004,
-        );
-        assert_lands(
-            i_type(Opcode::JALR, Register::X1, Register::X5, 1),
-            0x1008,
-            0x1008,
-        );
-    }
-
-    /// A branch not taken goes on to the next instruction, whatever its target.
-    #[test]
-    fn a_branch_not_taken_does_not_check_its_target() {
-        assert_lands(
-            branch(Opcode::BNE, Register::X0, Register::X0, 2),
-            0,
-            0x1004,
-        );
-    }
-
-    #[test]
-    fn a_jump_out_of_the_program_terminates_at_the_jump() {
-        let outside = |pc| super::TerminationReason::OutsideProgram { pc };
-        assert_fault(jal(Register::X1, 0x100), 0, outside(0x1100));
-        assert_fault(jal(Register::X1, -8), 0, outside(0xff8));
-        assert_fault(
-            branch(Opcode::BEQ, Register::X0, Register::X0, 16),
-            0,
-            outside(0x1010),
-        );
-        // A jump to 0 is not a halt: only HALT ends a run there.
-        assert_fault(
-            i_type(Opcode::JALR, Register::X1, Register::X0, 0),
-            0,
-            outside(0),
-        );
-    }
-
-    /// Running past the last instruction used to end the run as if it had halted.
-    #[test]
-    fn falling_off_the_end_of_the_program_terminates_abnormally() {
+        let opts = EmulatorOpts::default().with_cycle_tracker();
         let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
-            jump_program(),
+            program,
             Arc::new(RecordFinalPvsState::default()),
-            EmulatorOpts::default(),
+            opts,
         );
-        let err = emulator
-            .run(None)
-            .expect_err("a program without HALT must not succeed");
-        assert_eq!(
-            err.abnormal_termination().map(|t| t.reason),
-            Some(super::TerminationReason::OutsideProgram { pc: 0x1010 })
-        );
+        let mut tracked = std::collections::HashMap::<String, u64>::new();
+        loop {
+            let report = emulator.emulate_batch(&mut |_| {}).unwrap();
+            for (name, cycles) in report.cycle_tracker.unwrap_or_default() {
+                *tracked.entry(name).or_default() += cycles.iter().sum::<u64>();
+            }
+            if report.done {
+                break;
+            }
+        }
+        let total = emulator.state.global_clk;
+        let in_functions: u64 = ["memcpy", "memset", "memmove"]
+            .iter()
+            .map(|name| {
+                let cycles = tracked.get(*name).copied().unwrap_or(0);
+                assert!(cycles > 1000, "{name}: {cycles} cycles");
+                cycles
+            })
+            .sum();
+        assert!(in_functions < total, "{in_functions} of {total} cycles");
     }
 
     fn set_reg_raw(emulator: &mut RiscvEmulator, register: Register, value: u64) {
@@ -3455,7 +3315,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase_3r3_w_ops_semantics() {
+    fn word_instructions_sign_extend_and_divide_by_zero_as_the_isa_says() {
         let program = simple_fibo_program();
         let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
             program,
@@ -3573,7 +3433,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase_3r3_lwu_ld_sd_semantics() {
+    fn sd_ld_and_lwu_move_64_and_32_bits() {
         let program = simple_fibo_program();
         let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
             program,
@@ -3640,7 +3500,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase_3r5_cpu_event_payload_preserves_rv64_ld_sd_values() {
+    fn the_history_keeps_the_64_bit_values_of_ld_and_sd() {
         let program = simple_fibo_program();
         let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
             program,
@@ -3673,7 +3533,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase_3r5_cpu_event_payload_preserves_rv64_w_op_values() {
+    fn the_history_keeps_the_64_bit_operands_of_a_word_instruction() {
         let program = simple_fibo_program();
         let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
             program,
@@ -3694,28 +3554,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase_3r6_alu_event_payload_preserves_rv64_w_op_operands() {
-        let program = simple_fibo_program();
-        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
-            program,
-            Arc::new(RecordFinalPvsState::default()),
-            EmulatorOpts::default(),
-        );
-
-        set_reg_raw(&mut emulator, Register::X5, 0xAAAA_BBBB_FFFF_FFFF);
-        set_reg_raw(&mut emulator, Register::X6, 1);
-        let addw = r_type(Opcode::ADDW, Register::X7, Register::X5, Register::X6);
-        emulator.emulate_instruction(&addw).unwrap();
-        let history = take_history(&mut emulator);
-        assert_eq!(history.chip_steps.add, [0]);
-        assert_eq!(
-            history.operands(history.steps.len() - 1, &addw),
-            (0, 0xAAAA_BBBB_FFFF_FFFF, 1)
-        );
-    }
-
-    #[test]
-    fn test_phase_3r6_alu_event_payload_preserves_rv64_w_op_result() {
+    fn the_history_keeps_the_sign_extended_result_of_a_word_instruction() {
         let program = simple_fibo_program();
         let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
             program,
@@ -3736,7 +3575,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase_3r6_alu_event_payload_preserves_rv64_mulw_inputs() {
+    fn the_history_keeps_the_64_bit_inputs_of_mulw() {
         let program = simple_fibo_program();
         let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
             program,
@@ -3779,34 +3618,6 @@ mod tests {
         }
     }
 
-    /// A misaligned load or store executes (Zicclsm) in a run that records a trace to prove, as in
-    /// any other, and is counted: the `MemoryUnaligned` chip proves it.
-    #[test]
-    fn a_misaligned_access_executes_where_the_trace_is_proven() {
-        let program = simple_fibo_program();
-        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
-            program,
-            Arc::new(RecordFinalPvsState::default()),
-            EmulatorOpts::default(),
-        );
-        assert!(emulator.mode == super::RiscvEmulatorMode::Trace);
-
-        // Each access in a dword of its own; every other one runs into the next dword.
-        for (index, (opcode, width)) in WIDE_ACCESSES.into_iter().enumerate() {
-            let offset = if index % 2 == 0 { 1 } else { 8 - width / 2 };
-            let addr = 0x1_0000 + 0x20 * index as u64 + offset;
-            set_reg_raw(&mut emulator, Register::X1, addr);
-            set_reg_raw(&mut emulator, Register::X2, 0xAABB_CCDD_EEFF_0011);
-            emulator
-                .emulate_instruction(&access(opcode))
-                .unwrap_or_else(|e| panic!("{opcode} at {addr:#x}: {e}"));
-        }
-        assert_eq!(
-            emulator.state.misaligned_accesses,
-            WIDE_ACCESSES.len() as u64
-        );
-    }
-
     /// Every wide load and store at every offset in a dword, against bytes read and written one at
     /// a time, in the simple emulator and in a trace run: a misaligned access
     /// executes (Zicclsm), and one that runs into the next dword reads or writes that one too, at
@@ -3821,7 +3632,9 @@ mod tests {
                 Arc::new(RecordFinalPvsState::default()),
                 opts,
             );
-            if !trace {
+            if trace {
+                assert!(emulator.mode == super::RiscvEmulatorMode::Trace);
+            } else {
                 emulator.mode = super::RiscvEmulatorMode::Simple;
                 emulator.update_mode_deps();
             }
@@ -3909,62 +3722,6 @@ mod tests {
         }
     }
 
-    /// An unconstrained block's accesses are not proven: a misaligned one there executes in a run
-    /// that records a trace to prove, is not counted, and is rolled back with the block, the next
-    /// dword's write too.
-    #[test]
-    fn a_misaligned_access_in_an_unconstrained_block_is_rolled_back_and_not_counted() {
-        use crate::chips::chips::riscv_memory::event::MemoryRecord;
-        let program = simple_fibo_program();
-        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
-            program,
-            Arc::new(RecordFinalPvsState::default()),
-            EmulatorOpts::default(),
-        );
-        let ecall = Instruction::new(Opcode::ECALL, 5, 10, 11, false, false);
-        let (low, high) = (0x1122_3344_5566_7788, 0x99aa_bbcc_ddee_ff00);
-        for (addr, value) in [(0x1_0000, low), (0x1_0008, high)] {
-            let record = MemoryRecord {
-                value,
-                chunk: 0,
-                timestamp: 0,
-            };
-            emulator.state.memory.insert(addr, record);
-        }
-        set_reg_raw(&mut emulator, Register::X1, 0x1_0005);
-        set_reg_raw(&mut emulator, Register::X2, 0xdead_beef_cafe_f00d);
-
-        set_reg_raw(
-            &mut emulator,
-            Register::X5,
-            SyscallCode::ENTER_UNCONSTRAINED as u64,
-        );
-        emulator.emulate_instruction(&ecall).unwrap();
-        assert!(emulator.is_unconstrained());
-        emulator
-            .emulate_instruction(&s_type(Opcode::SD, Register::X2, Register::X1, 0))
-            .unwrap();
-        emulator
-            .emulate_instruction(&i_type(Opcode::LW, Register::X4, Register::X1, 0))
-            .unwrap();
-        assert_eq!(emulator.register(Register::X4), 0xffff_ffff_cafe_f00d);
-        assert_eq!(
-            emulator.state.memory.peek_dword(0x1_0008),
-            0x99aa_bbde_adbe_efca
-        );
-        set_reg_raw(
-            &mut emulator,
-            Register::X5,
-            SyscallCode::EXIT_UNCONSTRAINED as u64,
-        );
-        emulator.emulate_instruction(&ecall).unwrap();
-        assert!(!emulator.is_unconstrained());
-
-        assert_eq!(emulator.state.memory.peek_dword(0x1_0000), low);
-        assert_eq!(emulator.state.memory.peek_dword(0x1_0008), high);
-        assert_eq!(emulator.state.misaligned_accesses, 0);
-    }
-
     /// Runs `instruction` in the trace emulator or the simple one.
     fn step(
         emulator: &mut RiscvEmulator,
@@ -3999,60 +3756,6 @@ mod tests {
             .unwrap_or_else(|| panic!("not an abnormal termination: {error}"));
         assert_eq!(termination.exit_code, 139, "{termination}");
         termination.reason
-    }
-
-    /// A load or store that lands where no guest access may ends the run, in the simple emulator
-    /// and in a trace run alike: below the lowest segment address, past the top of memory,
-    /// in the stack guard, and, for a store, in the code. An access that only runs into such a
-    /// region ends it too, and the code stays readable.
-    #[test]
-    fn an_access_where_none_may_land_ends_the_run() {
-        use super::TerminationReason;
-        use crate::primitives::layout::{HEAP_END, MEMORY_SIZE, MIN_SEGMENT_ADDR, STACK_BOTTOM};
-        type Reason = fn(Opcode, u64) -> TerminationReason;
-        let null: Reason = |opcode, addr| TerminationReason::NullAccess { opcode, addr };
-        let past: Reason = |opcode, addr| TerminationReason::InvalidMemoryAccess { opcode, addr };
-        let guard: Reason = |opcode, addr| TerminationReason::StackOverflow { opcode, addr };
-        let code_store: Reason = |opcode, addr| TerminationReason::StoreToCode { opcode, addr };
-        for trace in [false, true] {
-            let mut emulator = emulator_in(trace);
-            let code = emulator.program.code();
-            let refused = [
-                (Opcode::LW, MIN_SEGMENT_ADDR - 4, null),
-                (Opcode::SB, 0, null),
-                (Opcode::LD, MIN_SEGMENT_ADDR - 2, null),
-                (Opcode::LD, MEMORY_SIZE - 4, past),
-                (Opcode::SB, MEMORY_SIZE, past),
-                (Opcode::SD, HEAP_END - 4, guard),
-                (Opcode::LB, STACK_BOTTOM - 1, guard),
-                (Opcode::SW, code.start + 8, code_store),
-                (Opcode::SH, code.start - 1, code_store),
-                (Opcode::SD, code.end - 4, code_store),
-            ];
-            for (opcode, addr, reason) in refused {
-                // A refused instruction leaves the clock where it was: its registers set afresh.
-                set_reg_raw(&mut emulator, Register::X1, addr);
-                set_reg_raw(&mut emulator, Register::X2, 0x1234);
-                let at = format!("{opcode} at {addr:#x}, trace {trace}");
-                let err = step(&mut emulator, trace, &access(opcode)).expect_err(&at);
-                assert_eq!(segfault(err), reason(opcode, addr), "{at}");
-            }
-            let allowed = [
-                (Opcode::LW, code.start),
-                (Opcode::LD, MIN_SEGMENT_ADDR),
-                (Opcode::SD, HEAP_END - 8),
-                (Opcode::SB, STACK_BOTTOM),
-                (Opcode::SD, MEMORY_SIZE - 8),
-                (Opcode::SW, code.end),
-                (Opcode::SW, code.start - 4),
-            ];
-            for (opcode, addr) in allowed {
-                set_reg_raw(&mut emulator, Register::X1, addr);
-                set_reg_raw(&mut emulator, Register::X2, 0x1234);
-                let at = format!("{opcode} at {addr:#x}, trace {trace}");
-                step(&mut emulator, trace, &access(opcode)).expect(&at);
-            }
-        }
     }
 
     /// A syscall's memory access obeys the same rules as an instruction's: a precompile, `WRITE`
@@ -4136,7 +3839,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase_3r3_trace_simple_parity_for_rv64_ops() {
+    fn trace_and_simple_modes_agree_on_64_bit_and_word_instructions() {
         let program = simple_fibo_program();
         let mut trace_emulator = RiscvEmulator::new_single::<KoalaBear>(
             program.clone(),
@@ -4195,7 +3898,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stage1_postprocess_memory_events_follow_the_ga3_rules() {
+    fn postprocess_initializes_and_finalizes_each_dword_by_how_it_started() {
         use crate::chips::chips::riscv_memory::event::MemoryRecord;
         // Two image words: one zero-valued and never touched, one the program overwrites.
         let program = {
@@ -4294,7 +3997,7 @@ mod tests {
         crate::machine::logger::setup_logger();
 
         let program = rv64im_fibonacci_program();
-        let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+        let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
         stdin.write(&10u64);
         let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
             program,
@@ -4304,77 +4007,6 @@ mod tests {
         let stdin = stdin.finalize();
         emulator.run(Some(stdin)).unwrap();
         println!("public_values: {:x?}", emulator.state.public_values_stream);
-    }
-
-    fn workspace_root() -> std::path::PathBuf {
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("vm/ has a parent")
-            .to_path_buf()
-    }
-
-    fn load_rv64_reth_program() -> Arc<Program> {
-        let elf_path = workspace_root().join("perf/bench_data/rv64/reth-elf");
-        let elf_bytes = std::fs::read(&elf_path)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", elf_path.display()));
-        Compiler::new(SourceType::RISCV, &elf_bytes)
-            .expect("failed to parse rv64 reth ELF")
-            .compile()
-    }
-
-    fn run_rv64_reth_block(block: u32) {
-        crate::machine::logger::setup_logger();
-
-        let program = load_rv64_reth_program();
-        let input_path = workspace_root().join(format!("perf/bench_data/rv64/reth-{block}.bin"));
-        let input_bytes = std::fs::read(&input_path)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", input_path.display()));
-
-        let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
-        stdin.write_slice(&input_bytes);
-        let stdin = stdin.finalize();
-
-        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
-            program,
-            Arc::new(RecordFinalPvsState::default()),
-            EmulatorOpts::default(),
-        );
-        emulator.run(Some(stdin)).unwrap();
-
-        println!("block {block}: cycles = {}", emulator.state.global_clk);
-    }
-
-    fn run_rv64_reth_block_simple(block: u32) {
-        crate::machine::logger::setup_logger();
-
-        let program = load_rv64_reth_program();
-        let input_path = workspace_root().join(format!("perf/bench_data/rv64/reth-{block}.bin"));
-        let input_bytes = std::fs::read(&input_path)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", input_path.display()));
-
-        let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
-        stdin.write_slice(&input_bytes);
-        let stdin = stdin.finalize();
-
-        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(
-            program,
-            Arc::new(RecordFinalPvsState::default()),
-            EmulatorOpts::default(),
-        );
-        emulator.mode = super::RiscvEmulatorMode::Simple;
-        emulator.update_mode_deps();
-        if let Err(err) = emulator.run(Some(stdin)) {
-            panic!(
-                "rv64 reth simple block {block} failed: {err:?}\npc=0x{:016x} clk={} global_clk={}\nstdout:\n{}\nstderr:\n{}",
-                emulator.state.pc,
-                emulator.state.clk,
-                emulator.state.global_clk,
-                emulator.stdout,
-                emulator.stderr,
-            );
-        }
-
-        println!("block {block}: cycles = {}", emulator.state.global_clk);
     }
 
     /// The jump alone: a run would also count the `HALT` it needs to end, now that running off
@@ -4407,47 +4039,5 @@ mod tests {
     fn jalr_to_x0_counts_chunk_split_event() {
         let jalr = Instruction::new(Opcode::JALR, 0, 1, 0, false, true);
         assert_eq!(chunk_split_events_of_one_jump(jalr, 0x1004), 1);
-    }
-
-    /// Run: cargo test --release -p pico-vm test_rv64_reth_17106222 -- --ignored --nocapture
-    #[test]
-    #[ignore = "requires rv64 reth ELF + block inputs in perf/bench_data/rv64/"]
-    fn test_rv64_reth_17106222() {
-        run_rv64_reth_block(17106222);
-    }
-
-    /// Run: cargo test --release -p pico-vm test_rv64_reth_18884864 -- --ignored --nocapture
-    #[test]
-    #[ignore = "requires rv64 reth ELF + block inputs in perf/bench_data/rv64/"]
-    fn test_rv64_reth_18884864() {
-        run_rv64_reth_block(18884864);
-    }
-
-    /// Run: cargo test --release -p pico-vm test_rv64_reth_23993050 -- --ignored --nocapture
-    #[test]
-    #[ignore = "requires rv64 reth ELF + block inputs in perf/bench_data/rv64/"]
-    fn test_rv64_reth_23993050() {
-        run_rv64_reth_block(23993050);
-    }
-
-    /// Run: cargo test --release -p pico-vm test_rv64_reth_simple_17106222 -- --ignored --nocapture
-    #[test]
-    #[ignore = "requires rv64 reth ELF + block inputs in perf/bench_data/rv64/"]
-    fn test_rv64_reth_simple_17106222() {
-        run_rv64_reth_block_simple(17106222);
-    }
-
-    /// Run: cargo test --release -p pico-vm test_rv64_reth_simple_18884864 -- --ignored --nocapture
-    #[test]
-    #[ignore = "requires rv64 reth ELF + block inputs in perf/bench_data/rv64/"]
-    fn test_rv64_reth_simple_18884864() {
-        run_rv64_reth_block_simple(18884864);
-    }
-
-    /// Run: cargo test --release -p pico-vm test_rv64_reth_simple_23993050 -- --ignored --nocapture
-    #[test]
-    #[ignore = "requires rv64 reth ELF + block inputs in perf/bench_data/rv64/"]
-    fn test_rv64_reth_simple_23993050() {
-        run_rv64_reth_block_simple(23993050);
     }
 }

@@ -10,7 +10,7 @@ use alloc::sync::Arc;
 /// plus the records they produce. The FRI proving/verifying keys and proofs that used to ride
 /// along were removed with the FRI path (see tag `legacy-fri-last`); the MLE backend keys itself.
 #[derive(Default)]
-pub struct ProvingWitness<SC, C, I>
+pub struct ProvingWitness<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>,
@@ -19,9 +19,7 @@ where
 
     pub vk_root: Option<[Val<SC>; DIGEST_SIZE]>,
 
-    pub stdin: Option<EmulatorStdin<C::Program, I>>,
-
-    pub flag_empty_stdin: bool,
+    pub stdin: Option<EmulatorStdin>,
 
     pub config: Option<Arc<SC>>,
 
@@ -30,7 +28,7 @@ where
     pub records: Vec<C::Record>,
 }
 
-impl<SC, C, I> ProvingWitness<SC, C, I>
+impl<SC, C> ProvingWitness<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>,
@@ -40,7 +38,6 @@ where
             program: None,
             vk_root: None,
             stdin: None,
-            flag_empty_stdin: false,
             config: None,
             opts: None,
             records,
@@ -50,26 +47,18 @@ where
     pub fn records(&self) -> &[C::Record] {
         &self.records
     }
-}
 
-// implement Witness for riscv machine
-impl<SC, C> ProvingWitness<SC, C, Vec<u8>>
-where
-    SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>,
-{
     /// Keyless witness for the MLE single-node path: drives emulation only (reads
     /// `program`/`stdin`/`opts`). The MLE backend proves with its own key.
     pub fn setup_for_mle_riscv(
         program: Arc<C::Program>,
-        stdin: EmulatorStdin<C::Program, Vec<u8>>,
+        stdin: EmulatorStdin,
         opts: EmulatorOpts,
     ) -> Self {
         Self {
             program: Some(program),
             vk_root: None,
             stdin: Some(stdin),
-            flag_empty_stdin: false,
             opts: Some(opts),
             config: None,
             records: vec![],

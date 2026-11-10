@@ -79,6 +79,7 @@ pub(crate) mod jit_emit;
 mod mle_round;
 pub(crate) mod round0;
 pub(crate) mod rules;
+pub(crate) mod seg_virtual;
 
 use batch_mle::{evaluate_logup_batched, TraceCtx};
 use batch_mle_monomial::{
@@ -513,30 +514,79 @@ where
     let step_prof = std::env::var("STEP_PROF").is_ok();
     let t_ie = std::time::Instant::now();
     let real_leaves = total_interactions as usize;
-    let virtual_padding =
-        has_interactions && fractional::use_virtual_padding::<FK>(real_leaves, total_leaves);
-    let (inputs, alpha) = if has_interactions {
-        log_gkr_input_evals::<FK, HS>(
+    let seg_plan = if has_interactions {
+        let slabs = seg_virtual::slabs_of(
             &zc_prover.trace_interactions,
-            mpk,
             ctx,
+            |air| mpk.per_air[air].vk.symbolic_constraints.interactions.len(),
+            |air| !seg_virtual::air_denied(&mpk.per_air[air].air_name),
             log_skip,
-            alpha_logup,
-            &zc_prover.d_challenges,
-            total_leaves,
+        );
+        let plan = seg_virtual::SegPlan::new(
+            &slabs,
             real_leaves,
-            virtual_padding,
-        )?
+            total_leaves,
+            seg_virtual::granule_log(),
+        );
+        seg_virtual::report(plan.as_ref(), real_leaves, total_leaves);
+        plan
     } else {
-        (DeviceBuffer::new(), FK::ValExt::ZERO)
+        None
     };
+    // The segmented input when it saves enough over the virtual one (see `seg_virtual`).
+    let seg_plan = seg_plan.filter(|plan| {
+        seg_virtual::seg_requested()
+            && !FK::use_cpu_gkr()
+            && !FK::use_cpu_gkr_input_eval()
+            && (!FK::use_cpu_zerocheck_mle() || force_gpu_zc_site("treebuild"))
+            && (plan.storage_len as f64) <= seg_virtual::max_ratio() * real_leaves as f64
+    });
+    let mut seg_plan = seg_plan;
+    let mut virtual_padding = seg_plan.is_none()
+        && has_interactions
+        && fractional::use_virtual_padding::<FK>(real_leaves, total_leaves);
+    let inputs = if has_interactions {
+        let eval = |virtual_padding: bool, seg: Option<&seg_virtual::SegPlan>| {
+            log_gkr_input_evals::<FK, HS>(
+                &zc_prover.trace_interactions,
+                mpk,
+                ctx,
+                log_skip,
+                alpha_logup,
+                &zc_prover.d_challenges,
+                total_leaves,
+                real_leaves,
+                virtual_padding,
+                seg,
+            )
+        };
+        match eval(virtual_padding, seg_plan.as_ref()) {
+            // Some AIR's padding is not constant: prove this input unsegmented.
+            Err(InteractionGpuError::SegPadding(airs)) => {
+                for air in &airs {
+                    seg_virtual::deny_air(air);
+                }
+                seg_plan = None;
+                virtual_padding = fractional::use_virtual_padding::<FK>(real_leaves, total_leaves);
+                eval(virtual_padding, None)?
+            }
+            other => other?,
+        }
+    } else {
+        gkr_input::GkrInputs {
+            leaves: DeviceBuffer::new(),
+            alpha: FK::ValExt::ZERO,
+            consts: None,
+        }
+    };
+    let alpha = inputs.alpha;
     let gkr_lens = if virtual_padding {
         GkrLens {
             real_len: real_leaves,
             logical_len: total_leaves,
         }
     } else {
-        GkrLens::dense(inputs.len())
+        GkrLens::dense(inputs.leaves.len())
     };
     if step_prof {
         let _ = crate::runtime::stream::current_stream_sync();
@@ -546,10 +596,10 @@ where
     // layout holds and frees before the batch MLE runs. A virtual input frees less, but its budget
     // stays at that dense size, capped (`gkr_zc_budget_leaves`) so that a chunk padded past the cap
     // does not hand the batch MLE the memory the virtual input just saved.
-    let budget_leaves = if virtual_padding {
+    let budget_leaves = if virtual_padding || seg_plan.is_some() {
         total_leaves.min(fractional::gkr_zc_budget_leaves())
     } else {
-        inputs.len()
+        inputs.leaves.len()
     };
     zc_prover.gkr_mem_contribution = budget_leaves * std::mem::size_of::<Frac<FK::ValExt>>();
     zc_prover.memory_limit_bytes = zc_prover.gkr_mem_contribution;
@@ -576,14 +626,29 @@ where
         .emit_metrics_with_label("prover.gkr_input_evals");
 
     let t_fr = std::time::Instant::now();
-    let (frac_out, mut xi) = fractional_sumcheck_gpu::<FK, HS::SC, _>(
-        transcript,
-        inputs,
-        gkr_lens,
-        alpha,
-        true,
-        &mut zc_prover.mem,
-    )?;
+    let (frac_out, mut xi) = match seg_plan {
+        Some(plan) => fractional::fractional_sumcheck_gpu_seg::<FK, HS::SC, _>(
+            transcript,
+            fractional::SegInput {
+                storage: inputs.leaves,
+                consts: inputs
+                    .consts
+                    .expect("a segmented input has its padding leaves"),
+                plan,
+            },
+            alpha,
+            true,
+            &mut zc_prover.mem,
+        )?,
+        None => fractional_sumcheck_gpu::<FK, HS::SC, _>(
+            transcript,
+            inputs.leaves,
+            gkr_lens,
+            alpha,
+            true,
+            &mut zc_prover.mem,
+        )?,
+    };
     if step_prof {
         let _ = crate::runtime::stream::current_stream_sync();
         tracing::info!(target: "bench", "[stepprof][{}] fractional_sumcheck_synced={}us", crate::prove_phase(), t_fr.elapsed().as_micros());

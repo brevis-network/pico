@@ -2,14 +2,15 @@
 //!
 //! Receives the syscall, checks the state pointer, and performs the 25 u64 reads (at `clk`) and
 //! 25 u64 writes (at `clk + 1`) of the permutation state. The permutation itself is proven by
-//! `KeccakPermuteChip` (24 rows per permutation); the two meet on the `LookupType::KeccakPermute`
-//! bus, on which this chip sends two tagged messages per row, `[chunk, clk, 0, read limbs x100]`
-//! and `[chunk, clk, 1, write limbs x100]`, and the compute AIR receives each once per
-//! permutation (the input on its first step, the output on its final step). Modelled on
-//! `ShaCompressControlChip`.
+//! `KeccakSlicedChip` (two permutations per 27-row slot); the two meet on the
+//! `LookupType::KeccakPermute` bus, on which this chip sends two tagged messages per row,
+//! `[chunk, clk, 0, read limbs x100]` and `[chunk, clk, 1, write limbs x100]`, and the compute AIR
+//! receives each once per permutation (the input on its slot's first row, the output on its
+//! output row). Modelled on `ShaCompressControlChip`.
 //!
-//! No range checks on the state limbs here: the bus equates them limb-by-limb with the p3 `a`
-//! (first step) / `a'''` (final step) columns, which p3 pins to u16 by bit decomposition.
+//! No range checks on the state limbs here: the compute AIR binds each received limb to the
+//! 16-bit recomposition of boolean state bits, which pins it to u16 (`sliced` module docs,
+//! soundness step 6).
 
 use super::{
     KeccakControlChip, KECCAK_STATE_BUS_INPUT_TAG, KECCAK_STATE_BUS_OUTPUT_TAG, STATE_NUM_WORDS,
@@ -273,7 +274,6 @@ impl<F: PrimeField32> GpuChipBehavior<F> for KeccakControlChip<F> {
         device::launched(kernels, stream);
         device::wait(stream).unwrap();
         let d_trace = d_trace.swap_stream(main_stream);
-        device::wait(stream).unwrap();
         device::wait(main_stream).unwrap();
 
         TraceData::Gpu(num_cols_per_row, d_trace)
@@ -384,11 +384,11 @@ where
             local.is_real,
         );
 
-        // Send the pre- and post-permutation state to `KeccakPermuteChip`, limb by limb (no
+        // Send the pre- and post-permutation state to `KeccakSlicedChip`, limb by limb (no
         // packing: KoalaBear is smaller than 2^32, so a `lo + 2^16 * hi` pair is not injective),
         // as two tagged messages (one message of both would exceed the logUp message-length
-        // limit of 128). Word order `i = 0..25` matches the p3 y-major `(i / 5, i % 5)` on the
-        // receiving side.
+        // limit of 128). Word order `i = 0..25` matches the y-major lane `5y + x` on the receiving
+        // side.
         //
         // Soundness of splitting into two messages rests on the `(chunk, clk)` key being unique
         // per real row: the syscall receive above balances this row against the Ecall chip's

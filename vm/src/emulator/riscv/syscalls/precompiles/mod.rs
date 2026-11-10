@@ -60,7 +60,9 @@ pub enum PrecompileEvent {
     Secp256r1Double(EllipticCurveDoubleEvent),
     /// Secp256r1 curve decompress precompile event.
     Secp256r1Decompress(EllipticCurveDecompressEvent),
-    /// K256 curve decompress precompile event.
+    /// Nothing constructs this variant (the syscall is `SECP256K1_DECOMPRESS`), but it stays:
+    /// the enum is serialized with bincode, which writes a variant's position, and removing it
+    /// would renumber every variant after it and so change every digest taken over records.
     K256Decompress(EllipticCurveDecompressEvent),
     /// Bn254 curve add precompile event.
     Bn254Add(EllipticCurveAddEvent),
@@ -267,14 +269,6 @@ impl PrecompileEvents {
     #[must_use]
     pub fn len(&self) -> usize {
         self.events.len()
-    }
-
-    #[allow(dead_code)]
-    #[inline]
-    pub(crate) fn into_iter(
-        self,
-    ) -> impl Iterator<Item = (SyscallCode, Vec<(SyscallEvent, PrecompileEvent)>)> {
-        self.events.into_iter()
     }
 
     #[inline]

@@ -67,7 +67,7 @@ mod tests {
     use super::{packed_dwords_to_u32_words, u32_words_to_packed_dwords};
 
     #[test]
-    fn phase5_uint256_packed_dword_round_trip() {
+    fn uint256_words_round_trip_through_packed_dwords() {
         let words = [
             0x0001_0002,
             0x0003_0004,

@@ -28,6 +28,7 @@ use pico_aot_pure::{
 use pico_vm::{
     compiler::riscv::{opcode::Opcode, program::Program, register::Register},
     emulator::riscv::{
+        hook::{default_hook_map, Hook},
         riscv_emulator::{
             guard::{access_fault, access_width},
             AbnormalTermination, EmulationError, TerminationReason, MIN_MAIN_MEMORY_ADDR,
@@ -41,7 +42,6 @@ use pico_vm::{
 };
 
 use crate::{
-    hook::{default_hook_map, Hook},
     precompiles::PrecompileMemory,
     syscall::{
         decode_syscall_id_u32, decode_u32_abi_index, decode_u32_abi_word, digest_leaf_word_u32,

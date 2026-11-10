@@ -39,7 +39,7 @@ use std::{fs, path::PathBuf, sync::Arc};
 #[allow(dead_code)] // kept for the chip tests to be rewritten on the MLE engine
 pub(crate) fn test_rv64_emulate(
     program: Arc<Program>,
-    stdin: EmulatorStdin<Program, Vec<u8>>,
+    stdin: EmulatorStdin,
 ) -> Vec<crate::emulator::riscv::record::EmulationRecord> {
     test_rv64_emulate_with_opts(program, stdin, EmulatorOpts::default())
 }
@@ -48,7 +48,7 @@ pub(crate) fn test_rv64_emulate(
 #[allow(dead_code)] // kept for the chip tests to be rewritten on the MLE engine
 pub(crate) fn test_rv64_emulate_with_opts(
     program: Arc<Program>,
-    stdin: EmulatorStdin<Program, Vec<u8>>,
+    stdin: EmulatorStdin,
     opts: EmulatorOpts,
 ) -> Vec<crate::emulator::riscv::record::EmulationRecord> {
     println!("Setting up emulator (chunk_size={})", opts.chunk_size);
@@ -81,7 +81,7 @@ pub(crate) fn fib_records() -> Vec<EmulationRecord> {
     let program = Compiler::new(SourceType::RISCV, FIB_ELF)
         .expect("parse the fib ELF")
         .compile();
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     stdin.write(&10u32);
     let opts = EmulatorOpts {
         chunk_size: 2048,
@@ -216,14 +216,14 @@ pub(crate) fn init_test_stream() -> &'static CudaStream {
 pub(crate) fn generate_test_chunks(elf: TestElf, input: TestInput) -> Vec<EmulationRecord> {
     let elf = elf.elf();
 
-    let mut stdin_builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let mut stdin_builder = EmulatorStdin::new_builder::<KoalaBearPoseidon2>();
     let input_bytes = input.input_bytes();
     stdin_builder.write_slice(&input_bytes);
     let stdin = stdin_builder.finalize();
 
     let program = Compiler::new(SourceType::RISCV, &elf).unwrap().compile();
     let chips = RiscvChipType::<F>::all_chips();
-    let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<F>, _>::setup_for_mle_riscv(
+    let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<F>>::setup_for_mle_riscv(
         program,
         stdin,
         EmulatorOpts::bench_riscv_ops(),

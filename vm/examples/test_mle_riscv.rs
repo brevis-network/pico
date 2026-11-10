@@ -38,7 +38,7 @@ use pico_vm::{
                 read_write::columns::{MemoryChipCols, MemoryChipValueCols},
             },
         },
-        precompiles::keccak256::columns::KeccakMemCols,
+        precompiles::keccak256::sliced::KeccakSlicedCols,
     },
     compiler::{
         program::ProgramBehavior,
@@ -74,7 +74,7 @@ fn reject_forged_memory_witness(program: Arc<Program>, records: &[EmulationRecor
         Mem(fn(&mut MemoryChipValueCols<riscv::Kb>) -> &mut riscv::Kb),
         Cpu(fn(&mut CpuCols<riscv::Kb>) -> &mut riscv::Kb),
         Local(fn(&mut SingleMemoryLocal<riscv::Kb>) -> &mut riscv::Kb),
-        Keccak(fn(&mut KeccakMemCols<riscv::Kb>) -> &mut riscv::Kb),
+        Keccak(fn(&mut KeccakSlicedCols<riscv::Kb>) -> &mut riscv::Kb),
     }
     use Target::{Cpu, Keccak, Local, Mem};
 
@@ -86,17 +86,18 @@ fn reject_forged_memory_witness(program: Arc<Program>, records: &[EmulationRecor
     /// be accepted and prove nothing. `InChunk` / `Sentinel` (MemoryLocal only) select one of the
     /// two entry shapes, because the constraints that hold differ between them: forging the same
     /// column is caught algebraically on one shape and only by the buses on the other, so an arm
-    /// that spanned both would not pin down which. `FirstStep` (KeccakPermute only) selects the
-    /// first-step row of each real permutation, the row that exports the permutation input.
+    /// that spanned both would not pin down which. `Slot(lo, hi)` (KeccakPermute only) selects the
+    /// rows at slot positions `lo..=hi` of every in-use slot of the sliced chip (0 = the input row,
+    /// 1..=24 = the round rows, 25 = the sliced output, 26 = A's output bits).
     #[derive(Clone, Copy, PartialEq)]
     enum Rows {
         AllReal,
         NonZero,
         InChunk,
         Sentinel,
-        FirstStep,
+        Slot(usize, usize),
     }
-    use Rows::{AllReal, FirstStep, InChunk, NonZero, Sentinel};
+    use Rows::{AllReal, InChunk, NonZero, Sentinel, Slot};
 
     let engine: riscv::Engine = StarkEngine::new(riscv_params_with_128_bits_security(
         riscv::log_stacked_height_from_env(),
@@ -386,20 +387,43 @@ fn reject_forged_memory_witness(program: Arc<Program>, records: &[EmulationRecor
             InChunk,
             1,
         ),
-        // The permutation input goes onto the state bus from the first step, gated by
-        // `export_in = step_flags[0] * is_real`; any other value of the flag fails that definition.
+        // Every state-bus receive and every table lookup of the sliced chip is gated by the slot's
+        // use flag, which must be boolean.
         (
-            "Keccak input export flag (export_in)",
-            Keccak(|c| &mut c.export_in),
+            "Keccak slot use flag (in_use_a)",
+            Keccak(|c| &mut c.in_use_a),
             NonZero,
             1,
         ),
-        // The exported input is the first step's `a`, which theta_4 ties limb by limb to the bit
-        // columns; a forged limb on the first-step row breaks that limb equation.
+        // The input limbs on a slot's first row are bound to the recomposition of its input bits;
+        // a forged limb breaks that binding (and the bus message it feeds).
         (
-            "Keccak first-step input limb (a[0][0][0])",
-            Keccak(|c| &mut c.keccak.a[0][0][0]),
-            FirstStep,
+            "Keccak input limb (c[0], slot row 0)",
+            Keccak(|c| &mut c.c[0]),
+            Slot(0, 0),
+            1,
+        ),
+        // An input bit feeds the limb binding, the boundary families and round 0's lookups.
+        (
+            "Keccak input bit (state[0], slot row 0)",
+            Keccak(|c| &mut c.state[0]),
+            Slot(0, 0),
+            1,
+        ),
+        // A round row's parities are the values of its xor5 lookups and feed theta; no other
+        // constraint reads them, so only the table buses can reject a forged one.
+        (
+            "Keccak round parity (c[0], round rows)",
+            Keccak(|c| &mut c.c[0]),
+            Slot(1, 24),
+            1,
+        ),
+        // A round state (rows 2..=24) is the output of the previous row's chi lookups, so only the
+        // chi table bus can reject it.
+        (
+            "Keccak round state (state[0], rows 2..=24)",
+            Keccak(|c| &mut c.state[0]),
+            Slot(2, 24),
             1,
         ),
     ] {
@@ -449,7 +473,7 @@ fn reject_forged_memory_witness(program: Arc<Program>, records: &[EmulationRecor
                                 let live = match rows {
                                     AllReal => real,
                                     NonZero => *cell != riscv::Kb::ZERO,
-                                    InChunk | Sentinel | FirstStep => {
+                                    InChunk | Sentinel | Slot(..) => {
                                         panic!("{what}: shape selectors are chip-specific")
                                     }
                                 };
@@ -463,21 +487,21 @@ fn reject_forged_memory_witness(program: Arc<Program>, records: &[EmulationRecor
                             let live = match rows {
                                 AllReal => real,
                                 NonZero => *cell != riscv::Kb::ZERO,
-                                InChunk | Sentinel | FirstStep => {
+                                InChunk | Sentinel | Slot(..) => {
                                     panic!("{what}: shape selectors are chip-specific")
                                 }
                             };
                             forge(cell, live);
                         }
                         Keccak(pick) => {
-                            let cols: &mut KeccakMemCols<riscv::Kb> = row.borrow_mut();
-                            let real = cols.is_real != riscv::Kb::ZERO;
-                            let first_step = cols.keccak.step_flags[0] != riscv::Kb::ZERO;
+                            let cols: &mut KeccakSlicedCols<riscv::Kb> = row.borrow_mut();
+                            let real = cols.in_use_a != riscv::Kb::ZERO;
+                            let pos = cols.clk.iter().position(|&f| f != riscv::Kb::ZERO);
                             let cell = pick(cols);
                             let live = match rows {
                                 AllReal => real,
                                 NonZero => *cell != riscv::Kb::ZERO,
-                                FirstStep => real && first_step,
+                                Slot(lo, hi) => real && pos.is_some_and(|g| (lo..=hi).contains(&g)),
                                 InChunk | Sentinel => {
                                     panic!("{what}: shape selectors are MemoryLocal-only")
                                 }
@@ -495,8 +519,8 @@ fn reject_forged_memory_witness(program: Arc<Program>, records: &[EmulationRecor
                                     NonZero => *cell != riscv::Kb::ZERO,
                                     InChunk => real && in_chunk,
                                     Sentinel => real && !in_chunk,
-                                    FirstStep => {
-                                        panic!("{what}: FirstStep is KeccakPermute-only")
+                                    Slot(..) => {
+                                        panic!("{what}: Slot is KeccakPermute-only")
                                     }
                                 };
                                 forge(cell, live);

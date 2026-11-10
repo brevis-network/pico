@@ -134,32 +134,6 @@ impl ContiguousRiscvMemory {
     pub fn clear(&mut self) {
         self.reset();
     }
-
-    /// Clear only the accessed bitmap, leaving values/metadata untouched. Sparse, as
-    /// [`Self::reset`] is.
-    #[inline]
-    pub fn clear_accessed_bitmap(&mut self) {
-        clear_marked_words(&mut self.accessed_bitmap, |_| {});
-    }
-
-    /// Get a raw pointer to the values array.
-    #[inline(always)]
-    pub fn values_ptr(&mut self) -> *mut u8 {
-        self.backing.values.as_mut_ptr()
-    }
-}
-impl ContiguousRiscvMemory {
-    /// Get a raw pointer to the packed metadata array (low 32 bits = chunk, high 32 = timestamp).
-    #[inline(always)]
-    pub fn metadata_ptr(&mut self) -> *mut u64 {
-        self.backing.metadata.as_mut_ptr()
-    }
-
-    /// Returns true if this memory instance uses mmap-based storage.
-    #[inline(always)]
-    pub const fn is_mmap_backed() -> bool {
-        cfg!(feature = "mmap-memory")
-    }
 }
 
 impl fmt::Debug for ContiguousRiscvMemory {
@@ -171,7 +145,7 @@ impl fmt::Debug for ContiguousRiscvMemory {
                 "accessed_bitmap_size_bytes",
                 &(self.accessed_bitmap.len() * 8),
             )
-            .field("is_mmap_backed", &Self::is_mmap_backed())
+            .field("is_mmap_backed", &cfg!(feature = "mmap-memory"))
             .finish()
     }
 }

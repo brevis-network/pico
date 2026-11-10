@@ -726,11 +726,11 @@ pub(crate) fn dispatch_precompile(
 #[cfg(test)]
 mod tests {
     use super::AotEmulatorCore;
-    use crate::hook::Hook;
     use pico_vm::{
         compiler::riscv::program::Program,
         emulator::riscv::{
             emulator::error::halt_reason,
+            hook::Hook,
             riscv_emulator::{AbnormalTermination, EmulationError, TerminationReason},
             syscalls::SyscallCode,
         },
@@ -798,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_hint_read_writes_exact_dword_for_eight_byte_input() {
+    fn a_hint_read_of_eight_bytes_writes_one_dword() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4, 5, 6, 7, 8]]);
 
         emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0100, 8)
@@ -812,7 +812,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_hint_read_zero_pads_short_tail() {
+    fn a_hint_read_zero_pads_a_short_tail() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![9, 8, 7]]);
 
         emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x1_0100, 3)
@@ -827,7 +827,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_hint_read_writes_full_dwords_plus_single_padded_tail() {
+    fn a_hint_read_writes_whole_dwords_then_one_padded_tail() {
         let mut emu =
             AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
 
@@ -866,7 +866,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_hint_read_rejects_unaligned_pointer() {
+    fn a_hint_read_to_an_unaligned_pointer_is_refused() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
 
         let err = emu
@@ -876,7 +876,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_hint_read_rejects_a_length_the_element_does_not_hold() {
+    fn a_hint_read_of_a_length_the_element_does_not_hold_is_refused() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
 
         let err = emu
@@ -887,7 +887,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_hint_read_rejects_duplicate_initialization_per_dword() {
+    fn a_second_hint_read_into_a_dword_is_refused() {
         let mut emu =
             AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4], vec![5, 6, 7, 8]]);
 
@@ -902,7 +902,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_hint_read_rejects_an_address_memory_already_holds() {
+    fn a_hint_read_over_memory_already_written_is_refused() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
         emu.write_mem_dword(0x1_0100, 0x55);
 
@@ -913,7 +913,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_hint_read_past_the_end_of_stdin_is_insufficient_input() {
+    fn a_hint_read_past_the_end_of_stdin_is_insufficient_input() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
         emu.input_stream_ptr = 1;
 
@@ -930,7 +930,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_write_fd4_replenishes_input_before_next_hint_cycle() {
+    fn a_write_to_fd_4_replenishes_the_input_before_the_next_hint() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
         install_write_bytes(&mut emu, 0x1_0200, &[9, 8, 7]);
 
@@ -960,7 +960,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_hint_write_goes_ahead_of_unread_input() {
+    fn a_hint_write_goes_ahead_of_unread_input() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
         install_write_bytes(&mut emu, 0x1_0200, &[9, 8, 7]);
 
@@ -976,7 +976,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_write_hook_splices_results_at_current_input_cursor() {
+    fn a_hook_write_splices_its_answer_at_the_input_cursor() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![0xaa], vec![0xbb]]);
         install_write_bytes(&mut emu, 0x1_0200, &[0xde, 0xad, 0xbe, 0xef]);
         emu.input_stream_ptr = 1;
@@ -1007,7 +1007,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_write_to_an_unknown_fd_is_ignored_as_the_interpreter_does() {
+    fn a_write_to_an_unknown_fd_is_ignored_as_the_interpreter_does() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![0xaa]]);
         install_write_bytes(&mut emu, 0x1_0200, &[1, 2, 3]);
 
@@ -1021,7 +1021,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_second_hint_len_errors_without_replenished_input() {
+    fn a_second_hint_len_without_new_input_is_insufficient_input() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
 
         assert_eq!(
@@ -1045,7 +1045,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_commit_digest_word_accepts_sign_extended_payload() {
+    fn a_commit_digest_word_accepts_a_sign_extended_payload() {
         assert_eq!(
             super::digest_leaf_word_u32(0xffff_ffff_ffff_ffff, "digest").unwrap(),
             u32::MAX
@@ -1057,7 +1057,7 @@ mod tests {
     }
 
     #[test]
-    fn phase5_execute_syscall_accepts_sign_extended_hint_ids() {
+    fn a_syscall_accepts_sign_extended_hint_ids() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
 
         let (hint_len, _, _, _) = emu

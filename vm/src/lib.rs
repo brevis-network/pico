@@ -54,7 +54,7 @@ pub mod thread;
 /// would make every `generate_crates` build compile the runtime. `aot-emulator` is on in every
 /// `pico-prover` build regardless, since pure `execute` runs on the runtime. Until an AOT program is
 /// registered it changes only what the stage ledger records for the snapshot split.
-pub const AOT_CODEGEN_STAMP: u32 = 7;
+pub const AOT_CODEGEN_STAMP: u32 = 8;
 
 #[cfg(feature = "tcmalloc")]
 #[global_allocator]

@@ -99,35 +99,8 @@ impl ContiguousRiscvMemory {
     }
 
     // ------------------------------------------------------------------------
-    // Word (4-byte) operations — peek only, metadata uses dword index
+    // Word (4-byte) operations — metadata uses dword index
     // ------------------------------------------------------------------------
-
-    /// Read a word (4 bytes) from the given address without modifying metadata.
-    /// Uses Little Endian byte order.
-    #[inline(always)]
-    pub fn peek_word(&self, addr: RvAddr) -> u32 {
-        let addr = Self::guest_addr_to_usize_for_word(addr);
-        let ptr = self.backing.values.as_slice().as_ptr();
-        unsafe { std::ptr::read_unaligned(ptr.add(addr) as *const u32) }
-    }
-
-    /// Read a word and update the containing dword's metadata.
-    /// Returns the word value (Little Endian).
-    #[inline(always)]
-    pub fn read_word(
-        &mut self,
-        addr: RvAddr,
-        new_chunk: RvChunk,
-        new_timestamp: RvTimestamp,
-    ) -> u32 {
-        let value = self.peek_word(addr);
-        let idx = Self::guest_addr_to_dword_index(addr);
-        let metadata = self.backing.metadata.as_mut_slice();
-        unsafe {
-            *metadata.get_unchecked_mut(idx) = Self::pack_metadata(new_chunk, new_timestamp);
-        }
-        value
-    }
 
     /// Read metadata for the dword containing the given address.
     /// Returns (chunk, timestamp).
@@ -155,111 +128,8 @@ impl ContiguousRiscvMemory {
     }
 
     // ------------------------------------------------------------------------
-    // Byte operations
-    // ------------------------------------------------------------------------
-
-    /// Read a single byte without modifying metadata.
-    #[inline(always)]
-    pub fn peek_byte(&self, addr: RvAddr) -> u8 {
-        let addr = Self::guest_addr_to_usize(addr);
-        let values = self.backing.values.as_slice();
-        // SAFETY: Address range is validated separately for SDK limit.
-        unsafe { *values.get_unchecked(addr) }
-    }
-
-    /// Read a single byte and update the containing dword's metadata.
-    #[inline(always)]
-    pub fn read_byte(
-        &mut self,
-        addr: RvAddr,
-        new_chunk: RvChunk,
-        new_timestamp: RvTimestamp,
-    ) -> u8 {
-        let value = self.peek_byte(addr);
-        // Update metadata for the containing dword (addr >> 3).
-        let idx = Self::guest_addr_to_dword_index(addr);
-        let metadata = self.backing.metadata.as_mut_slice();
-        // SAFETY: idx is at most 2^30 - 1, which is within bounds.
-        unsafe {
-            *metadata.get_unchecked_mut(idx) = Self::pack_metadata(new_chunk, new_timestamp);
-        }
-        value
-    }
-
-    /// Write a single byte and update the containing dword's metadata.
-    #[inline(always)]
-    pub fn write_byte(&mut self, addr: RvAddr, value: u8, chunk: RvChunk, timestamp: RvTimestamp) {
-        let addr = Self::guest_addr_to_usize(addr);
-        let values = self.backing.values.as_mut_slice();
-        unsafe {
-            *values.get_unchecked_mut(addr) = value;
-        }
-        // Update metadata for the containing dword.
-        let idx = addr >> 3;
-        let metadata = self.backing.metadata.as_mut_slice();
-        // SAFETY: idx is at most 2^30 - 1, which is within bounds.
-        unsafe {
-            *metadata.get_unchecked_mut(idx) = Self::pack_metadata(chunk, timestamp);
-        }
-    }
-
-    // ------------------------------------------------------------------------
     // Compatibility helpers for MemoryRecord-based API
     // ------------------------------------------------------------------------
-
-    /// Read a word and return full previous metadata.
-    /// Returns (value, prev_chunk, prev_timestamp).
-    /// Also updates metadata to (new_chunk, new_timestamp).
-    #[inline(always)]
-    pub fn read_word_full(
-        &mut self,
-        addr: RvAddr,
-        new_chunk: RvChunk,
-        new_timestamp: RvTimestamp,
-    ) -> (u32, RvChunk, RvTimestamp) {
-        let value = self.peek_word(addr);
-        let (prev_chunk, prev_timestamp) = self.peek_metadata(addr);
-        let idx = Self::guest_addr_to_dword_index(addr);
-        let metadata = self.backing.metadata.as_mut_slice();
-        unsafe {
-            *metadata.get_unchecked_mut(idx) = Self::pack_metadata(new_chunk, new_timestamp);
-        }
-        (value, prev_chunk, prev_timestamp)
-    }
-
-    /// Write a word and return previous value and metadata.
-    /// Returns (prev_value, prev_chunk, prev_timestamp).
-    #[inline(always)]
-    pub fn write_word_full(
-        &mut self,
-        addr: RvAddr,
-        value: u32,
-        new_chunk: RvChunk,
-        new_timestamp: RvTimestamp,
-    ) -> (u32, RvChunk, RvTimestamp) {
-        let prev_value = self.peek_word(addr);
-        let (prev_chunk, prev_timestamp) = self.peek_metadata(addr);
-        self.write_word(addr, value, new_chunk, new_timestamp);
-        (prev_value, prev_chunk, prev_timestamp)
-    }
-
-    /// Check if the dword at addr is uninitialized (value=0, chunk=0, timestamp=0).
-    #[inline(always)]
-    pub fn is_uninitialized(&self, addr: RvAddr) -> bool {
-        let value = self.peek_dword(addr);
-        let (chunk, timestamp) = self.peek_metadata(addr);
-        value == 0 && chunk == 0 && timestamp == 0
-    }
-
-    /// Set just the dword value at addr without modifying metadata.
-    #[inline(always)]
-    pub fn set_value(&mut self, addr: RvAddr, value: RvValue) {
-        let addr = Self::guest_addr_to_usize_for_dword(addr);
-        let ptr = self.backing.values.as_mut_ptr();
-        unsafe {
-            std::ptr::write_unaligned(ptr.add(addr) as *mut u64, value);
-        }
-    }
 
     /// Set just the metadata at addr (uses dword index: addr >> 3).
     #[inline(always)]
@@ -275,7 +145,6 @@ impl ContiguousRiscvMemory {
     // Compatibility methods for MemoryRecord-based API (byte-address based).
     // ------------------------------------------------------------------------
 
-    // Three core api for RiscvEmulator, get, insert, get_mut_or_create
     // TODO: rename get to peek
     /// Get a MemoryRecord at the given 8-byte-aligned address.
     #[inline(always)]
@@ -341,36 +210,6 @@ impl ContiguousRiscvMemory {
                 std::ptr::write_unaligned(ptr.add(byte_addr) as *mut u64, value);
             }
             self.mark_accessed(addr);
-        }
-    }
-
-    #[inline(always)]
-    pub fn peek_insert(&mut self, addr: RvAddr, record: MemoryRecord) -> MemoryRecord {
-        let (chunk, timestamp) = self.peek_metadata(addr);
-        let prev = MemoryRecord {
-            value: self.peek_dword(addr),
-            chunk,
-            timestamp,
-        };
-        self.write_dword(addr, record.value, record.chunk, record.timestamp);
-        prev
-    }
-
-    // replace entry (checked: all entry in pico should mark_accessed in original code)
-    // in snapshot_addr_if_needed, snapshot_record_if_needed, HintReadSyscall, we do not use
-    // get_mut_or_create (original use entry)
-    /// Get or create a mutable-like access to memory at the given 8-byte-aligned address.
-    #[inline(always)]
-    pub fn get_mut_or_create(&mut self, addr: RvAddr) -> MemoryRecordRef<'_> {
-        let value = self.peek_dword(addr);
-        let (chunk, timestamp) = self.peek_metadata(addr);
-        self.mark_accessed(addr);
-        MemoryRecordRef {
-            memory: self,
-            addr,
-            value,
-            chunk,
-            timestamp,
         }
     }
 
@@ -592,61 +431,5 @@ impl Iterator for BitIterator {
         self.bits &= !(1 << bit_offset);
 
         Some(self.base_addr + u64::from(bit_offset << 3))
-    }
-}
-
-/// A temporary reference to a memory record that allows mutation.
-/// Changes are committed when the struct is dropped or when `commit()` is called.
-pub struct MemoryRecordRef<'a> {
-    pub(super) memory: &'a mut ContiguousRiscvMemory,
-    addr: RvAddr,
-    pub value: RvValue,
-    pub chunk: RvChunk,
-    pub timestamp: RvTimestamp,
-}
-
-impl<'a> MemoryRecordRef<'a> {
-    /// Commit changes back to memory.
-    #[inline(always)]
-    pub fn commit(self) {
-        // Drop will handle the commit
-    }
-}
-
-impl<'a> Drop for MemoryRecordRef<'a> {
-    fn drop(&mut self) {
-        self.memory
-            .write_dword(self.addr, self.value, self.chunk, self.timestamp);
-    }
-}
-
-impl<'a> MemoryRecordRef<'a> {
-    /// Convert to a MemoryRecord (snapshot of current state).
-    #[inline(always)]
-    pub fn to_record(&self) -> MemoryRecord {
-        MemoryRecord {
-            value: self.value,
-            chunk: self.chunk,
-            timestamp: self.timestamp,
-        }
-    }
-}
-
-impl FromIterator<(u64, MemoryRecord)> for ContiguousRiscvMemory {
-    fn from_iter<T: IntoIterator<Item = (u64, MemoryRecord)>>(iter: T) -> Self {
-        let mut memory = Self::new();
-        for (addr, record) in iter {
-            memory.write_dword(addr, record.value, record.chunk, record.timestamp);
-            memory.mark_accessed(addr);
-        }
-        memory
-    }
-}
-
-impl FromIterator<(u32, MemoryRecord)> for ContiguousRiscvMemory {
-    fn from_iter<T: IntoIterator<Item = (u32, MemoryRecord)>>(iter: T) -> Self {
-        iter.into_iter()
-            .map(|(addr, record)| (u64::from(addr), record))
-            .collect()
     }
 }

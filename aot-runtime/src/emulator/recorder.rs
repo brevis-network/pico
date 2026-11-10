@@ -1026,18 +1026,23 @@ mod tests {
         emulator::{
             opts::EmulatorOpts,
             riscv::{
-                history::Slots,
+                history::{Slots, UnalignedStep},
                 history_arena::Table,
+                memory::ContiguousRiscvMemory,
                 public_values::RecordFinalPvsState,
                 record::{AluStream, EmulationRecord},
                 record_digest::{field_digests, first_difference, is_compared},
                 record_slots::{hold_records_unbounded, init_record_slots},
-                riscv_emulator::{EmulationDeferredState, RiscvEmulator},
+                riscv_emulator::{
+                    guard::access_width, AbnormalTermination, EmulationDeferredState,
+                    EmulationError, RiscvEmulator, RiscvEmulatorMode, TerminationReason,
+                },
                 sink::BlockRows,
                 state::RiscvEmulationState,
                 syscalls::SyscallCode,
             },
         },
+        primitives::layout::{HEAP_END, MEMORY_SIZE, MIN_SEGMENT_ADDR, STACK_BOTTOM},
     };
 
     use super::Recorder;
@@ -1218,12 +1223,14 @@ mod tests {
     }
 
     /// `program` run by one-instruction recording blocks: the run's result, its chunk and the core.
+    /// As in a generated crate, no block answers a pc outside the program.
     fn recorded_one_by_one(
         program: Arc<Program>,
     ) -> (Result<(), String>, EmittedChunk, AotEmulatorCore) {
+        let code = program.code();
         let mut emu = recorder_core(program);
         let block: RecordBlockFn = one_instruction_block;
-        let ran = emu.run_record_blocks(|_| Some(block));
+        let ran = emu.run_record_blocks(|pc| code.contains(&pc).then_some(block));
         assert!(emu.is_emitting(), "the sink is back on the core");
         let recorded = cut(&mut emu);
         (ran, recorded, emu)
@@ -1365,10 +1372,15 @@ mod tests {
     }
 
     /// A block of the one instruction at the core's pc as the code generator writes its plain
-    /// body, emitting: a load or a store through its `_no_count` helper, anything else through
-    /// the fallback.
+    /// body: a load, a store, a jump or a branch through its `_no_count` helper, a jump's target
+    /// checked where the generated code checks it, and anything else through the fallback, as
+    /// everything inside an unconstrained region is.
     fn emitting_block(emu: &mut AotEmulatorCore) -> Result<NextStep, String> {
         use Opcode::*;
+        if emu.is_unconstrained_mode() {
+            emu.debug_interpret_single_step()?;
+            return Ok(NextStep::Dynamic(emu.pc));
+        }
         let (pc, insn) = (emu.pc, emu.program.fetch(emu.pc));
         let emitting = emu.is_emitting();
         let (a, b, c, next_pc) = (
@@ -1377,256 +1389,867 @@ mod tests {
             insn.op_c,
             pc + 4,
         );
-        match insn.opcode {
-            LB => emu.lb_no_count(emitting, a, b, c, next_pc)?,
-            LBU => emu.lbu_no_count(emitting, a, b, c, next_pc)?,
-            LH => emu.lh_no_count(emitting, a, b, c, next_pc)?,
-            LHU => emu.lhu_no_count(emitting, a, b, c, next_pc)?,
-            LW => emu.lw_no_count(emitting, a, b, c, next_pc)?,
-            LWU => emu.lwu_no_count(emitting, a, b, c, next_pc)?,
-            LD => emu.ld_no_count(emitting, a, b, c, next_pc)?,
-            SB => emu.sb_no_count(emitting, a, b, c, next_pc)?,
-            SH => emu.sh_no_count(emitting, a, b, c, next_pc)?,
-            SW => emu.sw_no_count(emitting, a, b, c, next_pc)?,
-            SD => emu.sd_no_count(emitting, a, b, c, next_pc)?,
-            _ => emu.debug_interpret_single_step()?,
-        }
-        Ok(NextStep::Dynamic(emu.pc))
+        let target = match insn.opcode {
+            JAL => {
+                let target = pc.wrapping_add(insn.op_b);
+                emu.check_jump_target(pc, target)?;
+                emu.jal_no_count(emitting, a, pc, insn.op_b);
+                target
+            }
+            JALR => emu.jalr_no_count(emitting, a, b, pc, c)?,
+            BEQ | BNE | BLT | BGE | BLTU | BGEU => {
+                let taken = match insn.opcode {
+                    BEQ => emu.beq_no_count(emitting, a, b, pc, c),
+                    BNE => emu.bne_no_count(emitting, a, b, pc, c),
+                    BLT => emu.blt_no_count(emitting, a, b, pc, c),
+                    BGE => emu.bge_no_count(emitting, a, b, pc, c),
+                    BLTU => emu.bltu_no_count(emitting, a, b, pc, c),
+                    _ => emu.bgeu_no_count(emitting, a, b, pc, c),
+                };
+                if taken {
+                    emu.check_jump_target(pc, pc.wrapping_add(c))?;
+                    pc.wrapping_add(c)
+                } else {
+                    next_pc
+                }
+            }
+            _ => {
+                match insn.opcode {
+                    LB => emu.lb_no_count(emitting, a, b, c, next_pc)?,
+                    LBU => emu.lbu_no_count(emitting, a, b, c, next_pc)?,
+                    LH => emu.lh_no_count(emitting, a, b, c, next_pc)?,
+                    LHU => emu.lhu_no_count(emitting, a, b, c, next_pc)?,
+                    LW => emu.lw_no_count(emitting, a, b, c, next_pc)?,
+                    LWU => emu.lwu_no_count(emitting, a, b, c, next_pc)?,
+                    LD => emu.ld_no_count(emitting, a, b, c, next_pc)?,
+                    SB => emu.sb_no_count(emitting, a, b, c, next_pc)?,
+                    SH => emu.sh_no_count(emitting, a, b, c, next_pc)?,
+                    SW => emu.sw_no_count(emitting, a, b, c, next_pc)?,
+                    SD => emu.sd_no_count(emitting, a, b, c, next_pc)?,
+                    _ => emu.debug_interpret_single_step()?,
+                }
+                return Ok(NextStep::Dynamic(emu.pc));
+            }
+        };
+        emu.pc = target;
+        emu.update_insn_clock();
+        Ok(NextStep::Dynamic(target))
     }
 
-    /// `program` run by [`emitting_block`]s: the run's result, its chunk and the core.
+    /// `program` run by [`emitting_block`]s on a replay worker: the run's result, its chunk and the
+    /// core.
     fn emitted_one_by_one(
         program: Arc<Program>,
     ) -> (Result<(), String>, EmittedChunk, AotEmulatorCore) {
+        let code = program.code();
         let mut emu = recorder_core(program);
         let block: BlockFn = emitting_block;
-        let ran = emu.run_blocks(|_| Some(block));
+        let ran = emu.run_blocks(|pc| code.contains(&pc).then_some(block));
         let emitted = cut(&mut emu);
         (ran, emitted, emu)
     }
 
-    /// Runs `program` through the recording blocks and through the emitting bodies, and checks
-    /// that both end the same way and leave the same rows, the unaligned table's included, the
-    /// same registers and the same count of misaligned accesses. Returns the recorded run.
-    fn recorded_as_emitted(
+    /// `program` run by [`recording_block`]s, each block whole: the run's result, its chunk and the
+    /// core.
+    fn recorded_in_blocks(
         program: Arc<Program>,
-        what: &str,
     ) -> (Result<(), String>, EmittedChunk, AotEmulatorCore) {
-        let (ran, recorded, emu) = recorded_one_by_one(program.clone());
-        let (emitted_ran, emitted, emitting) = emitted_one_by_one(program);
-        assert_eq!(ran, emitted_ran, "{what}: how the run ended");
-        assert_eq!(
-            format!("{:?}", emu.fault),
-            format!("{:?}", emitting.fault),
-            "{what}: the fault"
-        );
-        let history = |chunk: &EmittedChunk| chunk.record.history.clone().expect("a history");
-        let (recorded_history, emitted_history) = (history(&recorded), history(&emitted));
-        assert_eq!(
-            recorded_history.unaligned.as_slice(),
-            emitted_history.unaligned.as_slice(),
-            "{what}: the unaligned table"
-        );
-        assert_eq!(
-            first_difference(&emitted.record, &recorded.record),
-            None,
-            "{what}"
-        );
-        assert_eq!(emu.registers, emitting.registers, "{what}: the registers");
-        assert_eq!(
-            (
-                emu.misaligned_accesses,
-                emu.chunk_split_state.num_misaligned
-            ),
-            (
-                emitting.misaligned_accesses,
-                emitting.chunk_split_state.num_misaligned
-            ),
-            "{what}: the misaligned accesses counted"
-        );
+        let code = program.code();
+        let mut emu = recorder_core(program);
+        let block: RecordBlockFn = recording_block;
+        let ran = emu.run_record_blocks(|pc| code.contains(&pc).then_some(block));
+        assert!(emu.is_emitting(), "the sink is back on the core");
+        let recorded = cut(&mut emu);
         (ran, recorded, emu)
     }
 
-    /// Every load and store width at a misaligned address, within its dword and running into the
-    /// next, over dwords whose high bits are set so the sign fill shows; a crossing load into `x0`;
-    /// crossing stores into a dword written whole, one merged into and one never written; then
-    /// each dword read back whole, and a halt.
-    fn misaligned_program() -> Arc<Program> {
+    /// `program` run by the AOT core's fallback interpreter alone, on a replay worker: the run's
+    /// result, its chunk and the core.
+    fn fallback_run(program: Arc<Program>) -> (Result<(), String>, EmittedChunk, AotEmulatorCore) {
+        let mut emu = recorder_core(program);
+        let ran = emu.run_blocks(|_| None);
+        let chunk = cut(&mut emu);
+        (ran, chunk, emu)
+    }
+
+    /// One instruction case, which every engine runs ([`assert_engines_agree`]).
+    struct Case {
+        what: String,
+        program: Arc<Program>,
+        /// `None` for a run that halts.
+        fault: Option<TerminationReason>,
+        /// Register values every engine leaves.
+        registers: Vec<(usize, u64)>,
+        /// The misaligned accesses a run that halts counts.
+        misaligned: u64,
+        /// What a case that halts pins in the chunk its whole recording blocks cut, besides that
+        /// count.
+        pins: fn(&EmittedChunk),
+    }
+
+    /// A case at 0x1000 that runs `insns`, then halts.
+    fn halting(
+        what: &str,
+        mut insns: Vec<Instruction>,
+        registers: Vec<(usize, u64)>,
+        misaligned: u64,
+    ) -> Case {
+        insns.extend([addi(5, 0, u64::from(HALT)), self::ECALL]);
+        Case {
+            what: what.to_string(),
+            program: Arc::new(Program::new(insns, 0x1000, 0x1000)),
+            fault: None,
+            registers,
+            misaligned,
+            pins: |_| {},
+        }
+    }
+
+    fn folded(rd: u8, value: u64) -> Instruction {
+        Instruction::new(Opcode::ADD, rd, value, 0, true, true)
+    }
+
+    /// A load into `rd`, or a store of it, at `rs1 + imm`.
+    fn access(opcode: Opcode, rd: u8, rs1: u64, imm: u64) -> Instruction {
+        Instruction::new(opcode, rd, rs1, imm, false, true)
+    }
+
+    fn branch(opcode: Opcode, rs1: u8, rs2: u64, offset: i64) -> Instruction {
+        Instruction::new(opcode, rs1, rs2, offset as u64, false, true)
+    }
+
+    fn jal(rd: u8, offset: i64) -> Instruction {
+        Instruction::new(Opcode::JAL, rd, offset as u64, 0, true, true)
+    }
+
+    fn jalr(rd: u8, rs1: u64, imm: i64) -> Instruction {
+        Instruction::new(Opcode::JALR, rd, rs1, imm as u64, false, true)
+    }
+
+    /// Where each jump case's jump is; its target is relative to it.
+    const JUMP_PC: u64 = 0x1008;
+    /// What `x6` holds before the jump: a link a jump that fails leaves alone.
+    const KEPT: u64 = 0x5eed;
+
+    /// `x6 = KEPT` and `x5 = base`, then `jump` at [`JUMP_PC`], `x7 = 1` and a halt.
+    fn jump_program(base: u64, jump: Instruction) -> Arc<Program> {
+        Arc::new(Program::new(
+            vec![
+                folded(6, KEPT),
+                folded(5, base),
+                jump,
+                addi(7, 0, 1),
+                addi(5, 0, u64::from(HALT)),
+                self::ECALL,
+            ],
+            0x1000,
+            0x1000,
+        ))
+    }
+
+    /// A jump that fails for `reason` writes nothing: its `rd` keeps what it held.
+    fn jump_fails(what: &str, base: u64, jump: Instruction, reason: TerminationReason) -> Case {
+        let rd = usize::from(jump.op_a);
+        let held = match rd {
+            5 => base,
+            6 => KEPT,
+            _ => 0,
+        };
+        Case {
+            what: format!("{what}: {jump:?}, x5 = {base:#x}"),
+            program: jump_program(base, jump),
+            fault: Some(reason),
+            registers: vec![(5, base), (6, KEPT), (rd, held)],
+            misaligned: 0,
+            pins: |_| {},
+        }
+    }
+
+    /// A jump that lands, leaving its link in `x1` and the marker `x7` as given.
+    fn jump_lands(what: &str, base: u64, jump: Instruction, link: u64, marker: u64) -> Case {
+        Case {
+            what: format!("{what}: {jump:?}, x5 = {base:#x}"),
+            program: jump_program(base, jump),
+            fault: None,
+            registers: vec![(1, link), (7, marker)],
+            misaligned: 0,
+            pins: |_| {},
+        }
+    }
+
+    fn jump_cases() -> Vec<Case> {
+        use Opcode::{BEQ, BNE};
+        use TerminationReason::{MisalignedJumpTarget, OutsideProgram};
+        let misaligned = |target| MisalignedJumpTarget {
+            pc: JUMP_PC,
+            target,
+        };
+        let outside = |pc| OutsideProgram { pc };
+        let (marker, end) = (JUMP_PC + 4, JUMP_PC + 16);
+        let nop = Instruction::new(Opcode::ADD, 0, 0, 0, false, false);
+        let mut cases = vec![
+            jump_fails(
+                "a JAL to a misaligned target",
+                0,
+                jal(1, 6),
+                misaligned(JUMP_PC + 6),
+            ),
+            jump_fails(
+                "a taken branch to one",
+                0,
+                branch(BEQ, 0, 0, 2),
+                misaligned(JUMP_PC + 2),
+            ),
+            // JALR clears bit 0 only: bit 1 left set is misaligned, not rounded down.
+            jump_fails(
+                "a JALR to one",
+                JUMP_PC + 6,
+                jalr(1, 5, 0),
+                misaligned(JUMP_PC + 6),
+            ),
+            jump_fails(
+                "a JAL past the program",
+                0,
+                jal(1, 0x100),
+                outside(JUMP_PC + 0x100),
+            ),
+            jump_fails("a JAL below it", 0, jal(1, -12), outside(0x1000 - 4)),
+            jump_fails(
+                "a taken branch to its end",
+                0,
+                branch(BEQ, 0, 0, 16),
+                outside(end),
+            ),
+            // Only HALT ends a run at 0.
+            jump_fails("a JALR to 0", 0, jalr(1, 0, 0), outside(0)),
+            // Past the pcs a CPU row holds, and the last one it holds: the run ends before a cut
+            // on the jump's clock would encode the target.
+            jump_fails("a JALR to 2^48", 1 << 48, jalr(0, 5, 0), outside(1 << 48)),
+            jump_fails(
+                "a JALR to 2^32 - 4",
+                1 << 32,
+                jalr(0, 5, -4),
+                outside((1 << 32) - 4),
+            ),
+            jump_lands("a JALR clears bit 0", marker + 1, jalr(1, 5, 0), marker, 1),
+            jump_lands(
+                "a JALR clears bit 0 after adding its immediate",
+                JUMP_PC + 3,
+                jalr(1, 5, 2),
+                marker,
+                1,
+            ),
+            jump_lands(
+                "a JALR past the marker",
+                marker + 4,
+                jalr(1, 5, 1),
+                marker,
+                0,
+            ),
+            jump_lands(
+                "a branch not taken checks no target",
+                0,
+                branch(BNE, 0, 0, 2),
+                0,
+                1,
+            ),
+            Case {
+                what: "running past the last instruction".to_string(),
+                program: Arc::new(Program::new(vec![nop, nop], 0x1000, 0x1000)),
+                fault: Some(outside(0x1008)),
+                registers: Vec::new(),
+                misaligned: 0,
+                pins: |_| {},
+            },
+        ];
+        // Whether its link is its base, another register or `x0`.
+        for (base, reason) in [
+            (0x1002, misaligned(0x1002)),
+            (0x2000, outside(0x2000)),
+            (1 << 32, outside(1 << 32)),
+        ] {
+            for rd in [0, 5, 6] {
+                cases.push(jump_fails(
+                    "a JALR whose target fails its check",
+                    base,
+                    jalr(rd, 5, 0),
+                    reason,
+                ));
+            }
+        }
+        cases
+    }
+
+    fn misaligned_cases() -> Vec<Case> {
         use Opcode::*;
-        let folded = |rd, value| Instruction::new(ADD, rd, value, 0, true, true);
-        let load = |opcode, rd, rs1, imm| Instruction::new(opcode, rd, rs1, imm, false, true);
-        let store = |opcode, rs2, rs1, imm| Instruction::new(opcode, rs2, rs1, imm, false, true);
-        let insns = vec![
-            addi(1, 0, BASE),
-            folded(2, 0x8899_aabb_ccdd_eeff),
-            folded(3, 0xf0e1_d2c3_b4a5_9687),
-            store(SD, 2, 1, 0),
-            store(SD, 3, 1, 8),
-            // Within the dword.
-            load(LH, 4, 1, 1),
-            load(LHU, 5, 1, 3),
-            load(LW, 6, 1, 2),
-            load(LWU, 7, 1, 1),
-            load(LB, 8, 1, 7),
-            load(LBU, 9, 1, 5),
-            // Into the next dword; `a0` and `a1` stay clear for the halt.
-            load(LH, 20, 1, 7),
-            load(LHU, 21, 1, 7),
-            load(LW, 12, 1, 5),
-            load(LWU, 13, 1, 6),
-            load(LD, 14, 1, 3),
-            load(LD, 15, 1, 9),
-            load(LW, 0, 1, 6),
-            // Stores within the dword, then into the next: one written whole, one merged into, and
-            // one never written.
-            store(SH, 3, 1, 1),
-            store(SW, 3, 1, 10),
-            store(SH, 2, 1, 7),
-            store(SW, 2, 1, 14),
-            store(SD, 3, 1, 4),
-            store(SD, 2, 1, 21),
-            store(SB, 3, 1, 3),
-            load(LD, 16, 1, 0),
-            load(LD, 17, 1, 8),
-            load(LD, 18, 1, 16),
-            load(LD, 19, 1, 24),
-            addi(5, 0, u64::from(HALT)),
+        const LOW: u64 = 0x1122_3344_5566_7788;
+        const HIGH: u64 = 0x99aa_bbcc_ddee_ff00;
+        let mut every_width = halting(
+            "every width at a misaligned address, within its dword and into the next",
+            vec![
+                addi(1, 0, BASE),
+                folded(2, 0x8899_aabb_ccdd_eeff),
+                folded(3, 0xf0e1_d2c3_b4a5_9687),
+                access(SD, 2, 1, 0),
+                access(SD, 3, 1, 8),
+                // Within the dword, over high bits set so the sign fill shows.
+                access(LH, 4, 1, 1),
+                access(LHU, 5, 1, 3),
+                access(LW, 6, 1, 2),
+                access(LWU, 7, 1, 1),
+                access(LB, 8, 1, 7),
+                access(LBU, 9, 1, 5),
+                // Into the next dword; `a0` and `a1` stay clear for the halt.
+                access(LH, 20, 1, 7),
+                access(LHU, 21, 1, 7),
+                access(LW, 12, 1, 5),
+                access(LWU, 13, 1, 6),
+                access(LD, 14, 1, 3),
+                access(LD, 15, 1, 9),
+                access(LW, 0, 1, 6),
+                // Stores within the dword, then into the next: one written whole, one merged
+                // into, and one never written.
+                access(SH, 3, 1, 1),
+                access(SW, 3, 1, 10),
+                access(SH, 2, 1, 7),
+                access(SW, 2, 1, 14),
+                access(SD, 3, 1, 4),
+                access(SD, 2, 1, 21),
+                access(SB, 3, 1, 3),
+                access(LD, 16, 1, 0),
+                access(LD, 17, 1, 8),
+                access(LD, 18, 1, 16),
+                access(LD, 19, 1, 24),
+            ],
+            // LH and LW sign-extend.
+            vec![(4, 0xffff_ffff_ffff_ddee), (12, 0xffff_ffff_8788_99aa)],
+            17,
+        );
+        every_width.pins = |chunk| {
+            // Every instruction but the closing `ECALL` ran direct, none through the fallback.
+            assert_eq!(chunk.recorder_direct_insns, chunk.cycles - 1);
+            let history = chunk.record.history.as_ref().expect("a history");
+            let crossing = history
+                .unaligned
+                .iter()
+                .filter(|unaligned| unaligned.crosses != 0)
+                .count();
+            // Four loads and two stores within their dword; seven loads and four stores across.
+            assert_eq!(crossing, 11);
+            assert_eq!(history.operand_exceptions.len(), 1, "the crossing `LW x0`");
+        };
+        let over_words = halting(
+            "misaligned accesses over words stored aligned, and read back",
+            vec![
+                addi(1, 0, BASE),
+                addi(2, 0, 0x7654_3210),
+                addi(3, 0, (-0x1234_5679_i64) as u64),
+                access(SW, 2, 1, 0),
+                access(SW, 3, 1, 4),
+                access(SW, 2, 1, 8),
+                access(SW, 3, 1, 12),
+                access(LH, 4, 1, 1),
+                access(LHU, 5, 1, 7),
+                access(LW, 6, 1, 2),
+                access(LWU, 7, 1, 6),
+                access(LD, 8, 1, 3),
+                access(SH, 2, 1, 9),
+                access(SH, 3, 1, 15),
+                access(SW, 3, 1, 13),
+                access(SW, 2, 1, 17),
+                access(SD, 8, 1, 21),
+                access(LD, 9, 1, 8),
+                access(LD, 10, 1, 16),
+                access(LD, 11, 1, 24),
+                access(LW, 12, 1, 23),
+                access(LD, 13, 1, 26),
+                // The halt's exit code.
+                addi(10, 0, 0),
+            ],
+            Vec::new(),
+            12,
+        );
+        let one_dword_across = halting(
+            "an LD and an SD across a dword boundary",
+            vec![
+                addi(1, 0, BASE),
+                folded(2, 0x8877_6655_4433_2211),
+                access(SD, 2, 1, 0),
+                folded(2, 0xffee_ddcc_bbaa_9900),
+                access(SD, 2, 1, 8),
+                folded(2, 0x0123_4567_89ab_cdef),
+                access(LD, 3, 1, 4),
+                access(SD, 2, 1, 4),
+                access(LD, 7, 1, 0),
+                access(LD, 8, 1, 8),
+            ],
+            vec![
+                (3, 0xbbaa_9900_8877_6655),
+                (7, 0x89ab_cdef_4433_2211),
+                (8, 0xffee_ddcc_0123_4567),
+            ],
+            2,
+        );
+        // Inside the region a value other than the one expected branches to a misaligned target,
+        // which ends the run; `EXIT_UNCONSTRAINED` resumes at the branch past the region with
+        // `t0 = 0`. A store across into a dword never written rolls back as one across into a
+        // dword written before the region does.
+        let region = [
+            access(SD, 2, 1, 5),
+            access(LW, 4, 1, 5),
+            branch(BNE, 4, 13, 2),
+            access(LD, 15, 1, 8),
+            branch(BNE, 15, 16, 2),
+            access(SD, 2, 1, 0x15),
+            addi(5, 0, SyscallCode::EXIT_UNCONSTRAINED as u64),
             self::ECALL,
         ];
-        Arc::new(Program::new(insns, 0x1000, 0x1000))
-    }
-
-    /// A recording block runs a misaligned load or store natively, as the emitting body does:
-    /// the same rows, an unaligned step with its next dword's access where it crosses, the same
-    /// values and the same count. pico-vm's interpreter agrees.
-    #[test]
-    fn misaligned_accesses_record_as_the_emitting_body_does() {
-        hold_records_unbounded();
-        let program = misaligned_program();
-        let (ran, recorded, emu) = recorded_as_emitted(program.clone(), "misaligned");
-        ran.expect("the guest halts");
-        let history = recorded.record.history.as_ref().expect("a history");
-        let crossing = history
-            .unaligned
-            .iter()
-            .filter(|unaligned| unaligned.crosses != 0)
-            .count();
-        // Four loads and two stores within their dword; seven loads and four stores across.
-        assert_eq!((history.unaligned.len(), crossing), (17, 11));
-        assert_eq!(emu.misaligned_accesses, 17);
-        assert_eq!(history.operand_exceptions.len(), 1, "the crossing `LW x0`");
-        assert_eq!(
-            emu.registers[4].value, 0xffff_ffff_ffff_ddee,
-            "LH sign-extends"
-        );
-        assert_eq!(
-            emu.registers[12].value, 0xffff_ffff_8788_99aa,
-            "LW sign-extends"
-        );
-
-        let (reference, _) = interpreted(program.clone());
-        assert_eq!(first_difference(&reference, &recorded.record), None);
-        let (vm, vm_registers) =
-            vm_replayed(program, recorded.cycles).expect("pico-vm's replay halts");
-        assert_eq!(
-            differences_from_vm(&vm, &recorded.record),
-            Vec::<String>::new()
-        );
-        assert_eq!(emu.registers.0.map(|register| register.value), vm_registers);
-    }
-
-    /// The same accesses in one recording block, its rows reserved for the whole body as the code
-    /// generator reserves them: the steps land where the interpreter puts them.
-    #[test]
-    fn a_block_of_misaligned_accesses_records_as_the_interpreter_does() {
-        hold_records_unbounded();
-        let program = misaligned_program();
-        let mut emu = recorder_core(program.clone());
-        let block: RecordBlockFn = recording_block;
-        emu.run_record_blocks(|_| Some(block))
-            .expect("the guest halts");
-        // Every instruction but the closing `ECALL` ran direct, none through the fallback.
-        assert_eq!(
-            emu.recorder_direct_insns(),
-            program.instructions.len() as u64 - 1
-        );
-        let recorded = cut(&mut emu);
-        let history = recorded.record.history.as_ref().expect("a history");
-        assert_eq!(history.unaligned.len(), 17);
-        assert_eq!(emu.misaligned_accesses, 17);
-        let (reference, _) = interpreted(program);
-        assert_eq!(first_difference(&reference, &recorded.record), None);
-    }
-
-    /// A load or store the memory guard refuses ends the run where the emitting body ends it,
-    /// with the same fault, after the same register reads and before memory is touched: below the
-    /// floor, in the stack guard, into the code and past the top of memory, each width.
-    #[test]
-    fn a_refused_access_fails_as_the_emitting_body_does() {
-        use pico_vm::primitives::layout::{HEAP_END, MEMORY_SIZE};
-        use Opcode::*;
-        hold_records_unbounded();
-        // Above the floor, so its code can be stored into.
-        const CODE: u64 = 0x3_0000;
-        let (null, stack, top, code) = (
-            "null access",
-            "stack overflow",
-            "invalid memory access",
-            "store into code",
-        );
-        let accesses = [
-            (null, 0x100, [LB, LHU, LW, SB, SH, SD]),
-            (stack, HEAP_END, [LBU, LH, LD, SB, SW, SD]),
-            // Its last byte past the top.
-            (top, MEMORY_SIZE - 1, [LH, LHU, LWU, LD, SH, SW]),
+        let mut unconstrained = vec![
+            addi(1, 0, BASE),
+            folded(2, LOW),
+            access(SD, 2, 1, 0),
+            folded(2, HIGH),
+            access(SD, 2, 1, 8),
+            folded(2, 0xdead_beef_cafe_f00d),
+            folded(13, 0xffff_ffff_cafe_f00d),
+            folded(16, 0x99aa_bbde_adbe_efca),
+            addi(5, 0, SyscallCode::ENTER_UNCONSTRAINED as u64),
+            self::ECALL,
+            branch(BEQ, 5, 0, 4 * (region.len() as i64 + 1)),
         ];
-        let mut cases: Vec<_> = accesses
-            .into_iter()
-            .flat_map(|(kind, addr, opcodes)| opcodes.map(|opcode| (kind, addr, opcode)))
-            .collect();
-        // Crossing into the stack guard from below, a byte at the top, and a store into the code.
-        cases.extend([(stack, HEAP_END - 2, LW), (stack, HEAP_END - 4, SD)]);
-        cases.extend([(top, MEMORY_SIZE, LB), (top, MEMORY_SIZE, SB)]);
-        cases.extend([SB, SH, SW, SD].map(|opcode| (code, CODE + 4, opcode)));
-        // A load from the code is no fault.
-        cases.extend([LB, LD].map(|opcode| ("", CODE + 4, opcode)));
-        for (kind, addr, opcode) in cases {
-            let access = Instruction::new(opcode, 4, 1, 0, false, true);
-            let program = Arc::new(Program::new(
+        unconstrained.extend(region);
+        unconstrained.extend([
+            access(LD, 17, 1, 0),
+            access(LD, 18, 1, 8),
+            access(LD, 19, 1, 0x18),
+        ]);
+        let unconstrained = halting(
+            "misaligned accesses in an unconstrained region, rolled back and not counted",
+            unconstrained,
+            vec![(4, 0), (15, 0), (17, LOW), (18, HIGH), (19, 0)],
+            0,
+        );
+        vec![every_width, over_words, one_dword_across, unconstrained]
+    }
+
+    /// The pc base of the guarded access cases, above the memory floor so their code can be
+    /// stored into.
+    const CODE: u64 = 0x3_0000;
+    /// Where those programs' code ends: five instructions on.
+    const CODE_END: u64 = CODE + 4 * 5;
+    /// What `x4` holds before the access: what a store writes and a refused load leaves.
+    const STORED: u64 = 0x1234;
+
+    /// `x1 = addr` and `x4 = STORED`, then `opcode` at `x1`, a load into `x4` or a store of it, and
+    /// a halt: refused for `reason`, or run.
+    fn guarded_access(opcode: Opcode, addr: u64, reason: Option<TerminationReason>) -> Case {
+        let insn = access(opcode, 4, 1, 0);
+        let mut registers = vec![(1, addr)];
+        if reason.is_some() {
+            registers.push((4, STORED));
+        }
+        Case {
+            what: format!("{insn:?} at {addr:#x}"),
+            program: Arc::new(Program::new(
                 vec![
-                    Instruction::new(ADD, 1, 0, addr, true, true),
-                    access,
+                    folded(1, addr),
+                    folded(4, STORED),
+                    insn,
                     addi(5, 0, u64::from(HALT)),
                     self::ECALL,
                 ],
                 CODE,
                 CODE,
-            ));
-            let what = format!("{kind}: {access:?} at {addr:#x}");
-            let (ran, recorded, emu) = recorded_as_emitted(program.clone(), &what);
-            if kind.is_empty() {
-                ran.expect(&what);
-                continue;
+            )),
+            fault: reason,
+            registers,
+            misaligned: u64::from(!addr.is_multiple_of(access_width(opcode))),
+            pins: |_| {},
+        }
+    }
+
+    /// Below the floor, in the stack guard, past the top of memory and, for a store, into the
+    /// code, at each width, where the access starts and where it only runs into the region; and
+    /// beside each, where the access may land.
+    fn guarded_access_cases() -> Vec<Case> {
+        use Opcode::*;
+        type Reason = fn(Opcode, u64) -> TerminationReason;
+        let null: Reason = |opcode, addr| TerminationReason::NullAccess { opcode, addr };
+        let guard: Reason = |opcode, addr| TerminationReason::StackOverflow { opcode, addr };
+        let past: Reason = |opcode, addr| TerminationReason::InvalidMemoryAccess { opcode, addr };
+        let code: Reason = |opcode, addr| TerminationReason::StoreToCode { opcode, addr };
+        let mut refused: Vec<(Opcode, u64, Reason)> = Vec::new();
+        refused.extend([LB, LHU, LW, SB, SH, SD].map(|opcode| (opcode, 0x100, null)));
+        refused.extend([LBU, LH, LD, SB, SW, SD].map(|opcode| (opcode, HEAP_END, guard)));
+        refused.extend([LH, LHU, LWU, LD, SH, SW].map(|opcode| (opcode, MEMORY_SIZE - 1, past)));
+        refused.extend([SB, SH, SW, SD].map(|opcode| (opcode, CODE + 4, code)));
+        refused.extend([
+            (SB, 0, null),
+            (LW, MIN_SEGMENT_ADDR - 4, null),
+            (LD, MIN_SEGMENT_ADDR - 2, null),
+            (LW, HEAP_END - 2, guard),
+            (SD, HEAP_END - 4, guard),
+            (LB, STACK_BOTTOM - 1, guard),
+            (LD, MEMORY_SIZE - 4, past),
+            (LB, MEMORY_SIZE, past),
+            (SB, MEMORY_SIZE, past),
+            (SW, CODE + 8, code),
+            (SH, CODE - 1, code),
+            (SD, CODE_END - 4, code),
+        ]);
+        // A load from the code is no fault.
+        let allowed = [
+            (LB, CODE + 4),
+            (LD, CODE + 4),
+            (LW, CODE),
+            (SW, CODE - 4),
+            (SW, CODE_END),
+            (LD, MIN_SEGMENT_ADDR),
+            (SD, HEAP_END - 8),
+            (SB, STACK_BOTTOM),
+            (SD, MEMORY_SIZE - 8),
+        ];
+        refused
+            .into_iter()
+            .map(|(opcode, addr, reason)| guarded_access(opcode, addr, Some(reason(opcode, addr))))
+            .chain(
+                allowed
+                    .into_iter()
+                    .map(|(opcode, addr)| guarded_access(opcode, addr, None)),
+            )
+            .collect()
+    }
+
+    /// How a run ends: at its `HALT`, or abnormally.
+    type Ending = Result<(), AbnormalTermination>;
+
+    fn termination(error: &EmulationError) -> AbnormalTermination {
+        *error
+            .abnormal_termination()
+            .unwrap_or_else(|| panic!("not an abnormal termination: {error}"))
+    }
+
+    /// The opcode and address of the access a fault refused, if it refused one.
+    fn refused_access(reason: &TerminationReason) -> Option<(Opcode, u64)> {
+        use TerminationReason::*;
+        match *reason {
+            NullAccess { opcode, addr }
+            | InvalidMemoryAccess { opcode, addr }
+            | StackOverflow { opcode, addr }
+            | StoreToCode { opcode, addr } => Some((opcode, addr)),
+            _ => None,
+        }
+    }
+
+    /// What a run of pico-vm's interpreter left, `clocks` the instructions it completed.
+    struct VmRun {
+        ended: Ending,
+        message: Option<String>,
+        registers: [u64; 32],
+        misaligned: u64,
+        clocks: u64,
+    }
+
+    /// `program` run by pico-vm's interpreter in `mode` from its start until it ends, the chunk
+    /// cut on global clock `cut_at` when given.
+    fn vm_run(program: &Arc<Program>, mode: RiscvEmulatorMode, cut_at: Option<u64>) -> VmRun {
+        let opts = EmulatorOpts {
+            chunk_size: 1 << 22,
+            chunk_batch_size: 1,
+            max_cycles: Some(1 << 20),
+            ..EmulatorOpts::test_opts()
+        };
+        let mut vm = RiscvEmulator::new_single::<KoalaBear>(
+            program.clone(),
+            Arc::new(RecordFinalPvsState::default()),
+            opts,
+        );
+        vm.mode = mode;
+        vm.update_mode_deps();
+        vm.target_global_clk = cut_at;
+        let error = loop {
+            match vm.emulate_batch(&mut |_| {}) {
+                Ok(report) if report.done => break None,
+                Ok(_) => {}
+                Err(error) => break Some(error),
             }
-            let error = ran.expect_err(&what);
-            assert!(error.contains(kind), "{what}: {error}");
-            assert!(emu.is_emitting(), "{what}: the sink is back on the core");
+        };
+        VmRun {
+            ended: error
+                .as_ref()
+                .map_or(Ok(()), |error| Err(termination(error))),
+            message: error.map(|error| error.to_string()),
+            registers: vm.registers(),
+            misaligned: vm.state.misaligned_accesses,
+            clocks: vm.state.global_clk,
+        }
+    }
+
+    /// What a run leaves in the core besides its records: what the next instruction, the snapshot
+    /// and the chunk split read.
+    fn core_state(emu: &AotEmulatorCore) -> String {
+        let cells = |memory: &ContiguousRiscvMemory| {
+            let mut addrs: Vec<_> = memory.accessed_keys().collect();
+            addrs.sort_unstable();
+            addrs
+                .into_iter()
+                .map(|addr| (addr, memory.get(addr)))
+                .collect::<Vec<_>>()
+        };
+        let split = &emu.chunk_split_state;
+        format!(
+            "{:?} {:?} {:?} {:?} {:?} {:#x} {} {} {}",
+            emu.registers,
+            emu.touched_registers,
+            cells(&emu.memory),
+            cells(&emu.memory_snapshot),
+            (
+                emu.misaligned_accesses,
+                split.num_misaligned,
+                split.num_syscall_events,
+                split.num_syscall_memory_events,
+                split.num_memory_read_write_events,
+                split.num_global_lookup_base,
+            ),
+            emu.pc,
+            emu.clk,
+            emu.insn_count,
+            emu.current_chunk,
+        )
+    }
+
+    fn unaligned(record: &EmulationRecord) -> &[UnalignedStep] {
+        record
+            .history
+            .as_ref()
+            .expect("a history")
+            .unaligned
+            .as_slice()
+    }
+
+    /// That the AOT core's run ended as pico-vm's did, with its message and register values, its
+    /// misaligned accesses counted where it halts, and without touching the memory of an access
+    /// it refused.
+    fn assert_ends_as(
+        case: &Case,
+        vm: &VmRun,
+        engine: &str,
+        ran: &Result<(), String>,
+        emu: &AotEmulatorCore,
+    ) {
+        let what = &case.what;
+        assert_eq!(ran.as_ref().err(), vm.message.as_ref(), "{what}: {engine}");
+        let ended = emu
+            .fault
+            .as_ref()
+            .map_or(Ok(()), |fault| Err(termination(fault)));
+        assert_eq!(ended, vm.ended, "{what}: {engine}");
+        assert_eq!(
+            emu.registers.0.map(|register| register.value),
+            vm.registers,
+            "{what}: {engine}'s registers"
+        );
+        if case.fault.is_none() {
             assert_eq!(
-                table_rows(&recorded.record),
-                (1, 0, 1, 0),
-                "{what}: rows past the first instruction"
+                emu.misaligned_accesses, case.misaligned,
+                "{what}: {engine}'s misaligned accesses"
             );
-            let (reference, interpreter) = interpreted(program);
+        }
+        if let Some((opcode, addr)) = case.fault.as_ref().and_then(refused_access) {
+            let end = addr.saturating_add(access_width(opcode));
+            assert!(
+                emu.memory
+                    .accessed_keys()
+                    .all(|dword| dword + 8 <= addr || dword >= end),
+                "{what}: {engine} touched the memory it refused"
+            );
+        }
+    }
+
+    /// Runs `case` on every engine: pico-vm's interpreter recording a trace, which the others are
+    /// held to, and in simple mode; the AOT core's fallback interpreter, its plain body and its
+    /// recording body, one instruction a block and whole blocks, on a replay worker; and the
+    /// fallback and the plain body on a core with no sink, which a halting run has to leave as it
+    /// does with one. Where the run halts or an access is refused, every AOT record is the
+    /// fallback's, and where it halts, pico-vm's replay worker's too. A jump that fails is not
+    /// compared row by row: the generated code writes a branch's row before it checks the target,
+    /// the fallback checks first, and the run fails, so neither row is read.
+    fn assert_engines_agree(case: &Case) {
+        let (what, program) = (case.what.as_str(), &case.program);
+        let halts = case.fault.is_none();
+
+        let vm = vm_run(program, RiscvEmulatorMode::Trace, None);
+        assert_eq!(
+            vm.ended.err().map(|end| end.reason),
+            case.fault,
+            "{what}: pico-vm, {:?}",
+            vm.message
+        );
+        for &(reg, value) in &case.registers {
+            assert_eq!(vm.registers[reg], value, "{what}: pico-vm's x{reg}");
+        }
+        if halts {
+            assert_eq!(vm.misaligned, case.misaligned, "{what}: pico-vm's count");
+        }
+        if let (Err(end), Some(_)) = (vm.ended, case.fault.as_ref().and_then(refused_access)) {
+            assert_eq!(end.exit_code, 139, "{what}: SIGSEGV's code");
+        }
+        // A run that fails does so before a cut on the clock of the instruction that fails.
+        let last = if halts { vm.clocks } else { vm.clocks + 1 };
+        let simple = vm_run(program, RiscvEmulatorMode::Simple, (!halts).then_some(last));
+        assert_eq!(
+            (simple.ended, &simple.message, simple.registers),
+            (vm.ended, &vm.message, vm.registers),
+            "{what}: pico-vm in simple mode"
+        );
+        if halts {
+            assert_eq!(simple.misaligned, vm.misaligned, "{what}: in simple mode");
+        }
+        let replayed = vm_replayed(program.clone(), last);
+
+        let (fallback_ran, fallback_chunk, fallback) = fallback_run(program.clone());
+        let (plain_ran, plain_chunk, plain) = emitted_one_by_one(program.clone());
+        let (recorded_ran, recorded_chunk, recorded) = recorded_one_by_one(program.clone());
+        let (blocks_ran, blocks_chunk, blocks) = recorded_in_blocks(program.clone());
+        let others = [
+            ("the plain body", &plain_ran, &plain_chunk, &plain),
+            (
+                "the recording body",
+                &recorded_ran,
+                &recorded_chunk,
+                &recorded,
+            ),
+            (
+                "whole recording blocks",
+                &blocks_ran,
+                &blocks_chunk,
+                &blocks,
+            ),
+        ];
+        assert_ends_as(case, &vm, "the fallback", &fallback_ran, &fallback);
+        for (engine, ran, _, emu) in others {
+            assert_ends_as(case, &vm, engine, ran, emu);
+        }
+        assert_eq!(
+            (
+                recorded.misaligned_accesses,
+                recorded.chunk_split_state.num_misaligned
+            ),
+            (
+                plain.misaligned_accesses,
+                plain.chunk_split_state.num_misaligned
+            ),
+            "{what}: the misaligned accesses the recording body counted, then the plain body"
+        );
+
+        assert!(
+            recorded_chunk.recorder_direct_insns > 0 && blocks_chunk.recorder_direct_insns > 0,
+            "{what}: the recording body wrote no row itself"
+        );
+
+        let reference = &fallback_chunk.record;
+        let refused = case.fault.as_ref().and_then(refused_access).is_some();
+        if halts || refused {
+            for (engine, _, chunk, _) in others {
+                assert_eq!(
+                    first_difference(reference, &chunk.record),
+                    None,
+                    "{what}: {engine}, the fallback's record first"
+                );
+                assert_eq!(
+                    unaligned(reference),
+                    unaligned(&chunk.record),
+                    "{what}: {engine}'s unaligned table"
+                );
+            }
             assert_eq!(
-                first_difference(&reference, &recorded.record),
-                None,
+                recorded.registers, plain.registers,
+                "{what}: the recording body's register records"
+            );
+        }
+        if refused {
+            assert_eq!(
+                table_rows(reference),
+                (2, 0, 2, 0),
+                "{what}: the two constants' rows, and none for the refused access"
+            );
+        }
+        if halts {
+            let (vm_record, vm_registers) =
+                replayed.unwrap_or_else(|error| panic!("{what}: pico-vm's replay: {error}"));
+            assert_eq!(vm_registers, vm.registers, "{what}: pico-vm's replay");
+            assert_eq!(
+                differences_from_vm(&vm_record, reference),
+                Vec::<String>::new(),
                 "{what}"
             );
+            assert_eq!(recorded.registers, fallback.registers, "{what}");
             assert_eq!(
-                format!("{:?}", emu.fault),
-                format!("{:?}", interpreter.fault),
-                "{what}: the interpreter's fault"
+                unaligned(reference).len() as u64,
+                case.misaligned,
+                "{what}: the unaligned steps"
             );
+            (case.pins)(&blocks_chunk);
+        } else {
+            assert_eq!(replayed.err(), vm.message, "{what}: pico-vm's replay");
+        }
+
+        for (body, block) in [
+            ("the fallback", None),
+            ("the plain body", Some(emitting_block as BlockFn)),
+        ] {
+            let code = program.code();
+            let run = |emitting: bool| {
+                let mut emu = AotEmulatorCore::new(program.clone(), Vec::new());
+                if emitting {
+                    emu.emit_records();
+                }
+                let ran = emu.run_blocks(|pc| block.filter(|_| code.contains(&pc)));
+                (ran, emu)
+            };
+            let (quiet_ran, quiet) = run(false);
+            assert_ends_as(case, &vm, &format!("{body}, no sink"), &quiet_ran, &quiet);
+            if halts {
+                assert_eq!(
+                    core_state(&run(true).1),
+                    core_state(&quiet),
+                    "{what}: {body}, the run with a sink first"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_jump_ends_or_lands_alike_on_every_engine() {
+        hold_records_unbounded();
+        let cases = jump_cases();
+        assert_eq!(cases.len(), 23, "the jump table lost or gained a case");
+        for case in cases {
+            assert_engines_agree(&case);
+        }
+    }
+
+    #[test]
+    fn a_misaligned_access_runs_alike_on_every_engine() {
+        hold_records_unbounded();
+        let cases = misaligned_cases();
+        assert_eq!(cases.len(), 4, "the misaligned table lost or gained a case");
+        for case in cases {
+            assert_engines_agree(&case);
+        }
+    }
+
+    #[test]
+    fn a_guarded_access_ends_or_runs_alike_on_every_engine() {
+        hold_records_unbounded();
+        let cases = guarded_access_cases();
+        assert_eq!(
+            cases.len(),
+            43,
+            "the guarded-access table lost or gained a case"
+        );
+        for case in cases {
+            assert_engines_agree(&case);
         }
     }
 
@@ -1660,65 +2283,6 @@ mod tests {
                 "target {target}: {error}"
             );
             assert!(emu.take_emitted_chunks().is_empty(), "target {target}");
-        }
-    }
-
-    /// A `JALR` whose target fails its check, misaligned, outside the program or past every row,
-    /// fails with the interpreter's error and leaves `rd` as it was, whether `rd` is `rs1` or not:
-    /// through the recording entry, and through the ordinary helper, emitting or not.
-    #[test]
-    fn a_bad_jalr_leaves_its_link_unwritten() {
-        hold_records_unbounded();
-        const KEPT: u64 = 0x5eed;
-        let (link, base_reg) = (6_u8, 1_u8);
-        for base in [0x1002, 0x2000, 1 << 32] {
-            for rd in [link, base_reg] {
-                let jalr = Instruction::new(Opcode::JALR, rd, u64::from(base_reg), 0, false, true);
-                let program = Arc::new(Program::new(
-                    vec![
-                        addi(link, 0, KEPT),
-                        addi(base_reg, 0, base),
-                        jalr,
-                        addi(5, 0, u64::from(HALT)),
-                        self::ECALL,
-                    ],
-                    0x1000,
-                    0x1000,
-                ));
-                let kept = |emu: &AotEmulatorCore| {
-                    let value = |reg: u8| emu.registers[usize::from(reg)].value;
-                    (value(link), value(base_reg))
-                };
-                // Both, whichever the JALR would have written.
-                let before = (KEPT, base);
-                let case = format!("x{rd} <- JALR x{base_reg} = {base:#x}");
-
-                let mut interpreter = recorder_core(program.clone());
-                let theirs = interpreter
-                    .run_blocks(|_| None)
-                    .expect_err("the interpreter fails the jump");
-                assert_eq!(kept(&interpreter), before, "{case}: the interpreter");
-
-                let (ours, _, recorded) = recorded_one_by_one(program.clone());
-                assert_eq!(ours, Err(theirs.clone()), "{case}: the recording entry");
-                assert_eq!(kept(&recorded), before, "{case}: the recording entry");
-
-                for emitting in [false, true] {
-                    let mut emu = recorder_core(program.clone());
-                    emu.write_reg(usize::from(link), KEPT);
-                    emu.write_reg(usize::from(base_reg), base);
-                    emu.update_insn_clock();
-                    let ours = emu.jalr_no_count(
-                        emitting,
-                        usize::from(rd),
-                        usize::from(base_reg),
-                        0x1008,
-                        0,
-                    );
-                    assert_eq!(ours, Err(theirs.clone()), "{case}: the helper, {emitting}");
-                    assert_eq!(kept(&emu), before, "{case}: the helper, {emitting}");
-                }
-            }
         }
     }
 

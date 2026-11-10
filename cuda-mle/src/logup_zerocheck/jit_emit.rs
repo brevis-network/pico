@@ -146,16 +146,19 @@ pub fn emit_interaction_kernel<F: PrimeField32>(
     s.push_str(
         r#"
 extern "C" __global__ void jit_interactions(
-    EXT *out,                 // FpExt array: out[(pair>>1)*H*2 ... ] interpreter layout
+    EXT *out,                 // FpExt array: out[((pair>>1)*S + i)*2 + parity], interpreter layout
     const u64 *parts,        // device pointers to main partitions
     const u32 *prep,         // preprocessed matrix (col-major), may be null
     const u32 *pubv,         // public values, may be null
     const EXT *chal,          // challenges (ext field)
-    u32 H,
-    u32 n_rows
+    u32 H,                   // trace height
+    u32 n_rows,              // rows evaluated: R0 .. R0 + n_rows
+    u32 R0,
+    u32 S                    // output stride per interaction
 ) {
-    u32 row = blockIdx.x * blockDim.x + threadIdx.x;
-    if (row >= n_rows) return;
+    u32 out_row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (out_row >= n_rows) return;
+    u32 row = R0 + out_row;
 "#,
     );
 
@@ -207,12 +210,12 @@ extern "C" __global__ void jit_interactions(
             .or_default()
             .push(pair_idxs[u]);
     }
-    // Interpreter layout: reinterpret<FpExt*>(d_fracs)[(interaction*H + row)*2 + parity].
+    // Interpreter layout: reinterpret<FpExt*>(d_fracs)[(interaction*S + out_row)*2 + parity].
     let store_out = |s: &mut String, val: &str, pair: u32| {
         let interaction = pair >> 1;
         let parity = pair & 1;
         s.push_str(&format!(
-            "    estore(out + ((u64){interaction}u * H + row) * 2u + {parity}u, {val});\n"
+            "    estore(out + ((u64){interaction}u * S + out_row) * 2u + {parity}u, {val});\n"
         ));
     };
     let mut emitted = 0usize;
