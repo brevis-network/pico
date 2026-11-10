@@ -601,6 +601,7 @@ mod tests {
         "MEMORY_POOL_LOW_WATER",
         "MEMORY_RECYCLER_THREADS",
         "TCMALLOC_RELEASE_RATE",
+        "MEM_POOL_MAX_SIZE",
         "MEM_POOL_RESERVE_SIZE",
         "MLE_EVENT_POOL_SIZE",
         "MLE_HISTORY_SLOTS",

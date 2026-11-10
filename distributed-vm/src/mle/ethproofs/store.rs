@@ -14,6 +14,9 @@
 //!
 //! What a proved block is submitted as depends on the mode its root was proved in:
 //!
+//! - **`--step compress`, whitelist mode**: v4, `PICOMLE\0` | 4 | zstd(bincode of
+//!   [`MleCompressProofV4`]). The compress proof alone: it verifies under the whitelist's one
+//!   compress key, which `pico_verifier` ships, so no key travels with it (`verify_compress`).
 //! - **Whitelist mode** (`VK_VERIFICATION=true`): v3, `PICOMLE\0` | 3 | zstd(bincode of
 //!   [`MleRootProofV3`]). The root's vk travels with the proof, and a verifier accepts it only as a
 //!   member of the whitelist it pins, so a party that trusts nothing the prover sent can check it.
@@ -23,7 +26,10 @@
 //!   verifier keygen a circuit that constrains nothing. Fine between builds that trust each other,
 //!   never for an untrusted verifier.
 
-use crate::{mle::RootProofExport, ProofInfo, ProofType};
+use crate::{
+    mle::{CompressProofExport, RootProofExport},
+    ProofInfo, ProofType,
+};
 use dashmap::DashMap;
 use prost_types::Duration as PbDuration;
 use serde::{Deserialize, Serialize};
@@ -89,10 +95,16 @@ pub struct MleRootEnvelope {
 /// the pinned whitelist instead of rebuilding it from layouts it would have to trust. The magic is
 /// what routes these bytes to the MLE verifier inside ethproofs' `verify_stark("Pico", ..)`; the
 /// FRI proofs sharing that entry are bincode and never start with it.
-pub use pico_verifier::envelope::{MleRootProofV3, ENVELOPE_V3, PROOF_MAGIC};
+pub use pico_verifier::envelope::{
+    MleCompressProofV4, MleRootProofV3, ENVELOPE_V3, ENVELOPE_V4_COMPRESS, PROOF_MAGIC,
+};
 
 fn encode_v3(body: &MleRootProofV3) -> Result<Vec<u8>, String> {
     pico_verifier::envelope::encode_v3(body).map_err(|e| e.to_string())
+}
+
+fn encode_compress_v4(body: &MleCompressProofV4) -> Result<Vec<u8>, String> {
+    pico_verifier::envelope::encode_compress_v4(body).map_err(|e| e.to_string())
 }
 
 /// How many finished blocks stay answerable.
@@ -158,7 +170,15 @@ impl ProvingResultStore {
                         "v3 {} B = zstd(proof {proof_len} B + root vk {vk_len} B)",
                         bytes.len()
                     );
-                    self.store(block, cycles, proving, bytes, verifier_id, &parts);
+                    self.store(
+                        block,
+                        cycles,
+                        proving,
+                        ProofType::Combine,
+                        bytes,
+                        verifier_id,
+                        &parts,
+                    );
                     true
                 }
                 Err(e) => {
@@ -205,16 +225,61 @@ impl ProvingResultStore {
             bytes.len(),
             layouts_raw_len as f64 / layouts_len.max(1) as f64,
         );
-        self.store(block, cycles, proving, bytes, verifier_id, &parts);
+        self.store(
+            block,
+            cycles,
+            proving,
+            ProofType::Combine,
+            bytes,
+            verifier_id,
+            &parts,
+        );
         true
     }
 
+    /// Record a block proved to the compress proof (`--step compress`, whitelist mode) as a v4
+    /// envelope.
+    ///
+    /// Returns `false` when the envelope could not be encoded; see [`Self::complete`].
+    pub fn complete_compress(
+        &self,
+        block: u64,
+        cycles: u64,
+        proving: Duration,
+        compress: CompressProofExport,
+    ) -> bool {
+        let proof_len = compress.proof.len();
+        match encode_compress_v4(&MleCompressProofV4 {
+            proof: compress.proof,
+        }) {
+            Ok(bytes) => {
+                let parts = format!("v4 {} B = zstd(compress proof {proof_len} B)", bytes.len());
+                self.store(
+                    block,
+                    cycles,
+                    proving,
+                    ProofType::Compress,
+                    bytes,
+                    compress.riscv_vk_digest,
+                    &parts,
+                );
+                true
+            }
+            Err(e) => {
+                warn!("block {block}: v4 envelope failed; left unproved: {e}");
+                false
+            }
+        }
+    }
+
     /// File a serialized submission as the answer for `block`.
+    #[allow(clippy::too_many_arguments)]
     fn store(
         &self,
         block: u64,
         cycles: u64,
         proving: Duration,
+        proof_type: ProofType,
         bytes: Vec<u8>,
         verifier_id: String,
         parts: &str,
@@ -226,7 +291,7 @@ impl ProvingResultStore {
         let millis = proving.as_millis().max(1);
         let info = ProofInfo {
             block_number: block,
-            proof_type: ProofType::Combine as i32,
+            proof_type: proof_type as i32,
             proof_with_publics: bytes,
             proving_cycles: cycles,
             verifier_id,
@@ -286,6 +351,43 @@ mod tests {
         assert_eq!(body.proof, vec![7; 64]);
         assert_eq!(body.root_vk, vec![9; 32]);
         assert_eq!(info.verifier_id, "0xabc");
+    }
+
+    /// A compress proof submits as v4: the magic, version 4, then zstd of the bincode of
+    /// `MleCompressProofV4` -- the proof alone, no key -- typed as a compress proof.
+    #[test]
+    fn a_compress_proof_submits_v4() {
+        let store = ProvingResultStore::new();
+        let compress = CompressProofExport {
+            proof: vec![5; 48],
+            riscv_vk_digest: "0xdef".into(),
+        };
+        assert!(store.complete_compress(3, 10, Duration::from_millis(5), compress));
+        let info = store.get(3).expect("block 3 is answerable");
+        let bytes = &info.proof_with_publics;
+        assert_eq!(bytes[..8], PROOF_MAGIC);
+        assert_eq!(
+            u32::from_le_bytes(bytes[8..12].try_into().unwrap()),
+            ENVELOPE_V4_COMPRESS
+        );
+        let body: MleCompressProofV4 =
+            bincode::deserialize(&zstd::decode_all(&bytes[12..]).unwrap()).unwrap();
+        assert_eq!(body.proof, vec![5; 48]);
+        assert_eq!(info.proof_type, ProofType::Compress as i32);
+        assert_eq!(info.verifier_id, "0xdef");
+        // What `pico_verifier` decodes, byte for byte.
+        assert_eq!(
+            pico_verifier::envelope::decode_compress_v4(bytes).unwrap(),
+            MleCompressProofV4 { proof: vec![5; 48] }
+        );
+    }
+
+    /// A root submission is typed as a combine proof.
+    #[test]
+    fn a_root_submission_is_typed_combine() {
+        let store = ProvingResultStore::new();
+        assert!(store.complete(4, 10, Duration::from_millis(5), root(Some(vec![9; 32]))));
+        assert_eq!(store.get(4).unwrap().proof_type, ProofType::Combine as i32);
     }
 
     /// Without a root vk the submission stays v2, whose first bytes are its version rather than

@@ -1,9 +1,10 @@
 //! EthProofs entry point for the MLE/WHIR single-node prover.
 //!
 //! RSP owns the block selection and the submission to ethproofs; this process owns exactly one
-//! thing -- turning a witness into a verified combine root -- and exposes it over the
-//! `PicoProver` gRPC service RSP already speaks. Nothing here talks HTTP to ethproofs, and nothing
-//! here decides which block to prove.
+//! thing -- turning a witness into a verified proof (the combine root, or under `--step compress`
+//! the compress proof that re-proves it) -- and exposes it over the `PicoProver` gRPC service RSP
+//! already speaks. Nothing here talks HTTP to ethproofs, and nothing here decides which block to
+//! prove.
 //!
 //! Shape:
 //!
@@ -136,11 +137,14 @@ fn prewarm(cfg: &MleEthProofsConfig) {
     warm.n = block;
     let outcome = crate::mle::run_step(&warm, None, None);
 
+    // Under `--step compress` the root is left to the compress proof and not exported, so what
+    // the fixture must produce is what a block would be answered with: the compress proof.
     assert!(
-        outcome.root.is_some(),
-        "prewarm proved no root for fixture {block}; refusing to serve. \
-         Check MLE_ELF/MLE_ETHPROOFS_PREWARM_BLOCK, or set MLE_ETHPROOFS_PREWARM=0 to skip \
-         (and accept that the first real block will report this setup as proving time)."
+        outcome.root.is_some() || outcome.compress.is_some(),
+        "prewarm proved nothing to submit for fixture {block}; refusing to serve. \
+         Check MLE_ELF/MLE_ETHPROOFS_PREWARM_BLOCK (and VK_VERIFICATION=true under \
+         --step compress), or set MLE_ETHPROOFS_PREWARM=0 to skip (and accept that the first \
+         real block will report this setup as proving time)."
     );
 
     info!(
@@ -210,11 +214,27 @@ pub fn run(cfg: &MleEthProofsConfig) {
         );
 
         // Read the clock before touching the store, so serialization is not counted, and after the
-        // pipeline has fully finished -- `run_step` returns only once the root has been accepted.
+        // pipeline has fully finished -- `run_step` returns only once the proof it hands back (the
+        // root, or under `--step compress` the compress proof) has been accepted.
         let proving = received_at.elapsed();
 
-        match outcome.root {
-            Some(root) => {
+        // The compress proof, when there is one, is the final proof and the one submitted.
+        match (outcome.compress, outcome.root) {
+            (Some(compress), _) => {
+                if results.complete_compress(block, outcome.cycles, proving, compress) {
+                    proved += 1;
+                    info!(
+                        "block {block}: proved in {:.3}s (e2e {:.3}s + root-accept {:.3}s + \
+                         compress + witness decode and setup) | {proved} proved, {failed} failed",
+                        proving.as_secs_f64(),
+                        outcome.e2e_wall.as_secs_f64(),
+                        outcome.root_accept.as_secs_f64(),
+                    );
+                } else {
+                    failed += 1;
+                }
+            }
+            (None, Some(root)) => {
                 if results.complete(block, outcome.cycles, proving, root) {
                     proved += 1;
                     info!(
@@ -228,14 +248,14 @@ pub fn run(cfg: &MleEthProofsConfig) {
                     failed += 1;
                 }
             }
-            None => {
-                // No root: `--step` stopped short of combine, the root was left to the compress
-                // proof (`--step compress` without `MLE_VERIFY`), the block emulated to nothing, or
-                // the export failed. RSP keeps polling and gets no proof, which is the truthful
-                // answer -- there is none.
+            (None, None) => {
+                // Nothing to submit: `--step` stopped short of combine, the root was left to a
+                // compress proof that was not exported (`--step compress` outside whitelist mode),
+                // the block emulated to nothing, or the export failed. RSP keeps polling and gets
+                // no proof, which is the truthful answer -- there is none.
                 failed += 1;
                 warn!(
-                    "block {block}: finished WITHOUT a root proof after {:.3}s; \
+                    "block {block}: finished WITHOUT a proof to submit after {:.3}s; \
                      nothing to answer GetProveResult with | {proved} proved, {failed} failed",
                     proving.as_secs_f64(),
                 );

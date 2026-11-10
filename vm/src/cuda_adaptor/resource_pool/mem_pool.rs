@@ -4,6 +4,10 @@ use cudart::{
     memory_pools::{CudaMemPoolAttributeU64, CudaOwnedMemPool, DevicePoolAllocation},
     stream::CudaStream,
 };
+use cudart_sys::{
+    CudaMemAllocationHandleType, CudaMemAllocationType, CudaMemLocation, CudaMemLocationType,
+    CudaMemPoolProperties,
+};
 use std::{
     env,
     sync::{Mutex, OnceLock},
@@ -11,6 +15,50 @@ use std::{
 
 // deault memory pool reserved size (29G for RTX 5090)
 const DEFAULT_MEM_POOL_RESERVE_SIZE: usize = 29_000_000_000;
+
+/// The pool's `maxSize`: the ceiling on the virtual address range it may spread over. With the
+/// CUDA default (0), that range is about twice the card's memory, 62.7 GiB on a 32 GB card, and a
+/// long run scatters live blocks across all of it. A large request then finds no hole big enough
+/// while the driver still has the memory free -- a 16 GiB GKR buffer failed with 19.3 GiB free --
+/// and neither a trim nor a wait changes the layout. Address space costs no memory, so the ceiling
+/// sits far above any card. `MEM_POOL_MAX_SIZE` (bytes) overrides it; 0 restores the default.
+const DEFAULT_MEM_POOL_MAX_SIZE: usize = 1 << 40;
+
+/// A pool on `device_id` with pinned device memory and the address ceiling above: what
+/// `CudaOwnedMemPool::create_for_device` builds, plus `maxSize`.
+fn create_device_pool(device_id: usize, max_size: usize) -> CudaOwnedMemPool {
+    let props = CudaMemPoolProperties {
+        allocType: CudaMemAllocationType::Pinned,
+        handleTypes: CudaMemAllocationHandleType::None,
+        location: device_location(device_id),
+        maxSize: max_size,
+        ..Default::default()
+    };
+    CudaOwnedMemPool::create(&props).unwrap_or_else(|e| {
+        panic!("cannot create the memory pool for card {device_id} (maxSize {max_size}): {e:?}")
+    })
+}
+
+/// `device_id` as a `cudaMemLocation`. Its `id` is a plain field in the CUDA 12 bindings and sits
+/// in an anonymous union in CUDA 13's (the `cuda_13` cfg, set by `vm/build.rs`), as era-cuda's own
+/// `make_mem_location` has it.
+#[cfg(not(cuda_13))]
+fn device_location(device_id: usize) -> CudaMemLocation {
+    CudaMemLocation {
+        type_: CudaMemLocationType::Device,
+        id: device_id as i32,
+    }
+}
+
+#[cfg(cuda_13)]
+fn device_location(device_id: usize) -> CudaMemLocation {
+    CudaMemLocation {
+        type_: CudaMemLocationType::Device,
+        __bindgen_anon_1: cudart_sys::cudaMemLocation__bindgen_ty_1 {
+            id: device_id as i32,
+        },
+    }
+}
 
 #[derive(Debug)]
 // pub struct SyncMemPool(pub Mutex<CudaOwnedMemPool>);
@@ -34,7 +82,16 @@ pub fn create_ctx(device_id: usize) {
     }
     pools[device_id].get_or_init(|| {
         set_device(device_id as _).unwrap();
-        let mem_pool = CudaOwnedMemPool::create_for_device(device_id as i32).unwrap();
+        let max_size = env::var("MEM_POOL_MAX_SIZE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_MEM_POOL_MAX_SIZE);
+        let mem_pool = create_device_pool(device_id, max_size);
+        tracing::info!(
+            target: "bench",
+            "MLE pool: card {device_id} memory pool maxSize={max_size}{}",
+            if max_size == 0 { " (CUDA default)" } else { "" }
+        );
         mem_pool
             .set_attribute_value(CudaMemPoolAttributeU64::AttrReleaseThreshold, u64::MAX)
             .unwrap();

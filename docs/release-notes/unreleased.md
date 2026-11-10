@@ -52,6 +52,11 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
   (`shipped_compress_vk`, from `vm/src/mle/shape_vk_bins/mle_compress_vk.bin`).
 - **Compress on the GPU.** In a `cuda` build, a whitelist-mode `prove_to(Phase::Compress)` proves
   the root on the multi-card GPU pipeline, as `prove` does, then the compress layer on card 0.
+- **The ethproofs entry submits compress proofs.** With `MLE_STEP=compress` (whitelist mode,
+  `VK_VERIFICATION=true`), `mle-ethproofs-single-node` answers each block with its compress proof as
+  a v4 envelope, typed `COMPRESS`, which `pico_verifier::verify_compress` checks under the cluster's
+  VK bundle (the bundle already carries the compress key's membership). `MLE_STEP=combine`, the
+  default, still submits the v3 root. RSP needs no change.
 - **`cargo pico execute` serves a test harness.** `--public-output <file>` writes the committed
   bytes, `--exit-code-file <file>` the guest's exit code, and `--pure` runs the guest without
   chunking it, in constant memory.
