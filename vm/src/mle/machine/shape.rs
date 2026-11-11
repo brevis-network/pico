@@ -215,7 +215,8 @@ pub fn bucket_log_height(chip_name: &str, is_cpu_chunk: bool) -> usize {
 /// 2^10 or more in every row: a recent block can carry 2^7 Subw rows in one chunk where the corpus
 /// has none. Of the previous ladder's six envelope rows three are kept, and each of the other three
 /// lies under a new envelope row, so this ladder holds every chunk that one held (its last row was
-/// raised for a G1MSM chunk of block 26180455).
+/// raised for a G1MSM chunk of block 26180455). The rows from [`MLE_CORE_FITTED_ROWS`] on were
+/// added after the fit, for chunks of EF guests and word-op heavy programs that no fitted row holds.
 ///
 /// Refitted for the code-range check, which adds three interactions to every MemoryReadWrite row
 /// and one to every Program row. Under those counts six rows of the previous fit crossed TI = 2^28,
@@ -232,7 +233,8 @@ pub fn bucket_log_height(chip_name: &str, is_cpu_chunk: bool) -> usize {
 /// counts: +4.9%); on 18 more recent blocks the fit never saw, +4.1% (+7.4%).
 ///
 /// A chunk takes the FIRST entry that dominates it componentwise, and the rows sit
-/// cheapest-first by that price, so the first dominating row is the cheapest one; the catch-all
+/// cheapest-first by that price, so the first dominating row is the cheapest one. The rows added
+/// after the fit sit last, so they take only chunks no other row holds. The catch-all
 /// (not listed here, it is [`MLE_RISCV_MAIN_LOG_HEIGHTS`]) comes last. Every row keeps TI =
 /// sum(interactions x height) under 2^29: at 2^29 the GKR size m goes from 29 to 30 and the leaf
 /// buffer no longer fits a card, so a row past it would be CPU-only
@@ -939,11 +941,63 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Byte", 17),
         ("Program", 20),
     ],
+    // row 30 (added): row 25 with Bitwise at 2^22, for hash-table-heavy guests (EF ethrex);
+    // TI 0.79 x 2^29.
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
+        ("Sub", 20),
+        ("LessThan", 22),
+        ("Bitwise", 22),
+        ("ShiftLeft", 21),
+        ("ShiftRight", 21),
+        ("Mul", 19),
+        ("Addw", 19),
+        ("Subw", 15),
+        ("DivRem", 18),
+        ("SyscallRiscv", 19),
+        ("Ecall", 18),
+        ("MemoryLocal", 18),
+        ("Global", 21),
+        ("RiscvKoalaBearPoseidon2", 19),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 31 (added): row 18 with Addw at 2^21 and Subw at 2^19, for word-op heavy programs
+    // (byte-offset memcpy-style loops); TI 0.55 x 2^29.
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
+        ("Sub", 19),
+        ("LessThan", 21),
+        ("Bitwise", 20),
+        ("ShiftLeft", 19),
+        ("ShiftRight", 19),
+        ("Mul", 17),
+        ("Addw", 21),
+        ("Subw", 19),
+        ("DivRem", 11),
+        ("SyscallRiscv", 16),
+        ("Ecall", 16),
+        ("MemoryLocal", 18),
+        ("Global", 20),
+        ("RiscvKoalaBearPoseidon2", 18),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
 ];
 
-/// The rows of [`MLE_CORE_LADDER`] that are envelope rows (the coarse 3-class clustering with
-/// headroom, and the three kept from the previous ladder) rather than fitted classes; the run log names them so
-/// a run's cost can be attributed to them.
+/// The number of [`MLE_CORE_LADDER`] rows from the fit; the rows after them were added for chunks
+/// the fit never saw.
+pub const MLE_CORE_FITTED_ROWS: usize = 30;
+
+/// The fitted rows of [`MLE_CORE_LADDER`] that are envelope rows (the coarse 3-class clustering
+/// with headroom, and the three kept from the previous ladder) rather than classes; the run log
+/// names them so a run's cost can be attributed to them.
 pub const MLE_CORE_ENVELOPE_ROWS: &[usize] = &[19, 20, 25, 27, 28, 29];
 
 /// One precompile-family shape: the compute kind at a log height, its control sibling if it has
@@ -1607,6 +1661,7 @@ pub fn select_riscv_shape(
         // the classes around it and the catch-all several times a class.
         let name = match rung {
             r if r == MLE_CORE_LADDER.len() => "catch-all".to_string(),
+            r if r >= MLE_CORE_FITTED_ROWS => format!("added{r}"),
             r if MLE_CORE_ENVELOPE_ROWS.contains(&r) => format!("envelope{r}"),
             r => format!("class{r}"),
         };
@@ -1819,8 +1874,8 @@ pub enum RecursionTier {
 /// actually produces need W = 15..42. With rows, each child pads to the nearest row above it
 /// and the combine machine learns one child layout per row (`preregister_standard_shapes`).
 ///
-/// Of the 15,604 whitelist shapes since the sliced Keccak (with PackBlock one notch up in
-/// rows 1 and 2), row 0 holds 14,085, row 1 1,503 and row 2 16 (`mle_tier_probe`, 2026-11-07).
+/// Of the 15,606 whitelist shapes since the sliced Keccak (with PackBlock one notch up in
+/// rows 1 and 2), row 0 holds 14,085, row 1 1,505 and row 2 16 (`mle_tier_probe`, 2026-11-11).
 /// Before it, row 0 (W 19) held 14,085 of the 15,646 whitelist shapes: core classes 0 to 3, 7,539 of
 /// the 7,980 memory shapes and the small shapes of every precompile kind but keccak (all 284
 /// shapes of the two Ed25519 precompiles among them); row 1 (W 42) 1,482: core classes 4 to 27,
@@ -2484,7 +2539,7 @@ mod tests {
     /// shipped-artifact test derives the same count from the config and holds the artifact to it.
     #[test]
     fn the_whitelist_shape_count_is_pinned() {
-        assert_eq!(mle_riscv_shapes().len(), 15_604, "riscv whitelist shapes");
+        assert_eq!(mle_riscv_shapes().len(), 15_606, "riscv whitelist shapes");
     }
 
     /// The whitelist builder checkpoints keygens by shape CONTENT, so two admitted shapes must
