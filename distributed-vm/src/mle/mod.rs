@@ -1667,6 +1667,8 @@ fn load_reth_input(n: u32) -> Vec<u8> {
 /// running server neither changes nor breaks what it proves.
 fn load_program_elf(cfg: &MleSingleNodeConfig) -> Arc<[u8]> {
     if let Some(embedded) = &cfg.embedded {
+        #[cfg(feature = "aot-emulator")]
+        crate::aot::ensure_generated_from(&embedded.elf, "the embedded ELF");
         return Arc::clone(&embedded.elf);
     }
     static FIB: std::sync::OnceLock<Arc<[u8]>> = std::sync::OnceLock::new();
@@ -1676,7 +1678,10 @@ fn load_program_elf(cfg: &MleSingleNodeConfig) -> Arc<[u8]> {
         "reth" => ("reth", &RETH),
         other => panic!("unsupported --elf {other} (supported: fib | reth)"),
     };
-    Arc::clone(read.get_or_init(|| load_elf(name).into()))
+    let elf = Arc::clone(read.get_or_init(|| load_elf(name).into()));
+    #[cfg(feature = "aot-emulator")]
+    crate::aot::ensure_generated_from(&elf, &format!("{RV64_DIR}/{name}-elf"));
+    elf
 }
 
 /// The stdin for **one** block. This is the only thing a sweep changes between blocks; everything
