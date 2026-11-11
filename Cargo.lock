@@ -1753,6 +1753,7 @@ dependencies = [
  "rand 0.10.2",
  "reqwest",
  "serde",
+ "sha2",
  "strum",
  "strum_macros",
  "sysinfo",
