@@ -60,7 +60,7 @@ export MLE_LOG_STACKED_HEIGHT="${MLE_LOG_STACKED_HEIGHT:-23}"
 # Streaming column-block RS commit+open (cuda-mle stacked_pcs / whir): split the RS codeword
 # matrix into N column-blocks so its peak GPU memory is ~one block instead of the whole
 # codeword_height x width buffer. Required at CHUNK_SIZE=2^23 (see above); N=8 keeps each block
-# ~2GiB. Set RS_STREAM_BLOCKS= (empty) to force the monolithic path (only fits at <=2^22).
+# ~2GiB. Set RS_STREAM_BLOCKS=0 to force the monolithic path (only fits at <=2^22).
 export RS_STREAM_BLOCKS="${RS_STREAM_BLOCKS:-8}"
 export CHUNK_BATCH_SIZE="${CHUNK_BATCH_SIZE:-1}"
 

@@ -482,10 +482,11 @@ where
                 (qstride, rows_per_q)
             };
 
-            // Streaming open (RS_STREAM_BLOCKS=N): open the queried rows per commit without ever
-            // materializing the full RS codeword matrix (WHIR round 0's biggest allocation). Falls
-            // back to the monolithic re-derive + batch_open_rows when the gate is off or a backing
-            // matrix is already cached. `opened_cat` is per-commit → per-query concatenated rows.
+            // Streaming open (the default; `rs_stream::blocks`): open the queried rows per commit
+            // without ever materializing the full RS codeword matrix (WHIR round 0's biggest
+            // allocation). Falls back to the monolithic re-derive + batch_open_rows when
+            // `RS_STREAM_BLOCKS=0` or a backing matrix is already cached. `opened_cat` is per-commit →
+            // per-query concatenated rows.
             let sblk = crate::rs_stream::blocks();
             let opened_cat: Vec<Vec<Vec<FK::Val>>> = if let Some(nblk) = sblk {
                 let self_check = crate::rs_stream::verify();

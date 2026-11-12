@@ -99,8 +99,9 @@ pub fn stacked_commit<
     };
     // [rsprof] synced merkle timing, same gate/style as the rs_code sub-step timers.
     let rs_prof = std::env::var("RS_PROF").is_ok();
-    // Streaming column-block commit (RS_STREAM_BLOCKS=N): never materializes the full RS codeword
-    // matrix. Only supported on the non-cached-stacked-matrix path (the default prove config).
+    // Streaming column-block commit (the default; `rs_stream::blocks`): never materializes the
+    // full RS codeword matrix. Only supported on the non-cached-stacked-matrix path (the default
+    // prove config).
     let sblk = crate::rs_stream::blocks();
     let query_rows = 1 << k_whir;
     // `new_merkle_tree_streamed` returns `None` for a scheme without the streaming kernels, so a
@@ -787,7 +788,7 @@ fn rs_encode_block_in_place<Val: GpuNttField>(
 /// block, then tree-reduces the finished per-row digests. Peak GPU memory drops from the full
 /// matrix to `one block + state` (state = `codeword_height * 16` base elems).
 ///
-/// Selected by `RS_STREAM_BLOCKS`; bit-identical to the monolithic path (cross-check with
+/// The default (`rs_stream::blocks`); bit-identical to the monolithic path (cross-check with
 /// `RS_STREAM_VERIFY`). The [`StreamingMerkleHash`] bound is what restricts this to a scheme that
 /// actually has the streaming kernels — today only the base-field KoalaBear hash.
 pub fn rs_code_streamed_commit<Val, MH>(
@@ -1623,7 +1624,7 @@ mod tests {
     }
 
     /// The headline acceptance test: GPU `stacked_commit` at `l_skip > 0` vs the host oracle —
-    /// commitment root, RS codeword matrix (element-wise, `cache_rs_code_matrix`), and digest layers.
+    /// commitment root, RS codeword matrix (element-wise), and digest layers.
     #[test]
     fn gpu_stacked_commit_matches_host_at_l_skip_nonzero() {
         use crate::{
@@ -1679,8 +1680,16 @@ mod tests {
         // 2. RS codeword matrix, element-wise, against `mle_core::rs_code_matrix` (issue item 5).
         let host_stacked = host_stacked_matrix(l_skip, n_stack, &host_refs).unwrap().0;
         let host_codeword = host_rs(l_skip, log_blowup, &host_stacked).unwrap();
-        let gpu_codeword =
-            transport_matrix_d2h_col_major(gpu_data.tree.backing_matrix.as_ref().unwrap()).unwrap();
+        // The streamed commit (the default) keeps no codeword; derive it the monolithic way then.
+        let derived;
+        let codeword = match gpu_data.tree.backing_matrix.as_ref() {
+            Some(cached) => cached,
+            None => {
+                derived = rs_code_matrix(log_blowup, &gpu_data.layout, &dev_refs, &None).unwrap();
+                &derived
+            }
+        };
+        let gpu_codeword = transport_matrix_d2h_col_major(codeword).unwrap();
         assert_eq!(
             (gpu_codeword.height(), gpu_codeword.width()),
             (host_codeword.height(), host_codeword.width())
@@ -1807,10 +1816,9 @@ mod tests {
     }
 
     // ── Streaming Merkle commit parity ────────────────────────────────────────────────────
-    // `rs_code_streamed_commit` (`absorb_columns` + `finalize_leaf_digests`) has zero test
-    // coverage reachable without `RS_STREAM_BLOCKS` set — the only default is
-    // `single_node_mle.sh`, not Rust, so `cargo test` never took this arm before. Every test
-    // below calls the streaming entry point directly; none of them read or set an env var.
+    // Every test below calls the streaming entry point (`rs_code_streamed_commit`) directly and
+    // compares it with the monolithic path, so both stay covered whatever `RS_STREAM_BLOCKS`
+    // says; none of them read or set an env var.
     mod streaming {
         use test_case::test_case;
 

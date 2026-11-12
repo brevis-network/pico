@@ -54,17 +54,35 @@ pub use prove_phase::{prove_phase, set_prove_phase};
 pub mod rs_stream {
     use std::sync::OnceLock;
 
-    /// `RS_STREAM_BLOCKS=N` (N >= 1): split the RS codeword matrix into N column blocks so its peak
-    /// GPU allocation is ~one block instead of the whole `codeword_height x width` buffer. `None`
-    /// (unset, unparseable, or 0) keeps the monolithic path, which only fits up to CHUNK_SIZE=2^22.
+    /// The default block count.
+    pub const DEFAULT_BLOCKS: usize = 8;
+
+    /// Column blocks the RS codeword matrix is encoded in, so its peak GPU allocation is about
+    /// one block. [`DEFAULT_BLOCKS`] unless `RS_STREAM_BLOCKS` sets a count; `0` or empty selects
+    /// the whole-matrix path, which a 2^23 chunk does not fit on a 32 GB card. Streaming keeps no
+    /// codeword, so `cache_rs_code_matrix` has no effect while it is on.
     pub fn blocks() -> Option<usize> {
         static BLOCKS: OnceLock<Option<usize>> = OnceLock::new();
-        *BLOCKS.get_or_init(|| {
-            std::env::var("RS_STREAM_BLOCKS")
-                .ok()
-                .and_then(|s| s.parse::<usize>().ok())
-                .filter(|&n| n >= 1)
-        })
+        *BLOCKS.get_or_init(|| parse_blocks(std::env::var("RS_STREAM_BLOCKS").ok().as_deref()))
+    }
+
+    /// [`blocks`] for a given `RS_STREAM_BLOCKS` value; a value that is not a count keeps the
+    /// default, with a warning.
+    fn parse_blocks(value: Option<&str>) -> Option<usize> {
+        let Some(value) = value.map(str::trim) else {
+            return Some(DEFAULT_BLOCKS);
+        };
+        if value.is_empty() {
+            return None;
+        }
+        match value.parse::<usize>() {
+            Ok(0) => None,
+            Ok(n) => Some(n),
+            Err(_) => {
+                tracing::warn!("RS_STREAM_BLOCKS={value:?} is not a count; using {DEFAULT_BLOCKS}");
+                Some(DEFAULT_BLOCKS)
+            }
+        }
     }
 
     /// `RS_STREAM_VERIFY=1`: re-derive through the monolithic path and assert the results match
@@ -72,6 +90,21 @@ pub mod rs_stream {
     pub fn verify() -> bool {
         static VERIFY: OnceLock<bool> = OnceLock::new();
         *VERIFY.get_or_init(|| crate::cuda::jit::env_flag("RS_STREAM_VERIFY", false))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{parse_blocks, DEFAULT_BLOCKS};
+
+        #[test]
+        fn streams_by_default() {
+            assert_eq!(parse_blocks(None), Some(DEFAULT_BLOCKS));
+            assert_eq!(parse_blocks(Some("4")), Some(4));
+            assert_eq!(parse_blocks(Some("0")), None);
+            assert_eq!(parse_blocks(Some("")), None);
+            assert_eq!(parse_blocks(Some("00")), None);
+            assert_eq!(parse_blocks(Some("x")), Some(DEFAULT_BLOCKS));
+        }
     }
 }
 
