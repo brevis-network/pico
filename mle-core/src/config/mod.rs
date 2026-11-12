@@ -104,8 +104,8 @@ pub const RECURSION_MAX_CONSTRAINT_DEGREE: usize = 4;
 ///   is 24.
 /// - **Max constraints per AIR**: ≤ 5,000
 /// - **Num AIRs**: ≤ 100
-/// - **Max interactions per AIR**: ≤ 2,000
-/// - **Num trace columns** (unstacked, total across all AIRs): ≤ 40,000
+/// - **Max interactions per AIR**: ≤ 6,000
+/// - **Num trace columns** (unstacked, total across all AIRs): ≤ 50,000
 /// - **`w_stack`** = 2,048, bounding total stacked cells to `w_stack × 2^(n_stack + l_skip)`
 /// - **Max constraint degree**: [`RISCV_MAX_CONSTRAINT_DEGREE`] (3), enforced at keygen
 ///

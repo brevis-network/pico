@@ -103,6 +103,12 @@ extern "C" {
     /// Executes a BLS12-381 curve doubling on the given point.
     pub fn syscall_bls12381_double(p: *mut [u64; 12]);
 
+    /// Executes a BLS12-381 G2 addition on the given points.
+    pub fn syscall_bls12381_g2_add(p: *mut [u64; 24], q: *const [u64; 24]);
+
+    /// Executes a BLS12-381 G2 doubling on the given point.
+    pub fn syscall_bls12381_g2_double(p: *mut [u64; 24]);
+
     /// Executes the Keccak-256 permutation on the given state.
     pub fn syscall_keccak_permute(state: *mut [u64; 25]);
 

@@ -1053,7 +1053,7 @@ mod tests {
     #[test]
     fn every_air_has_a_policy_and_every_flagged_air_a_census() {
         let record = EmulationRecord::default();
-        for air in 0..=air_id::MEM_UNALIGNED {
+        for air in 0..=air_id::BLS12381_G2_DOUBLE {
             let name = air_name(air).unwrap_or_else(|| panic!("air {air} has no name"));
             let policy = air_policy(air).unwrap_or_else(|| panic!("{name} has no policy"));
             assert_eq!(
@@ -1062,7 +1062,7 @@ mod tests {
                 "{name}: classified by flags iff counted"
             );
         }
-        assert!(air_policy(air_id::MEM_UNALIGNED + 1).is_none());
+        assert!(air_policy(air_id::BLS12381_G2_DOUBLE + 1).is_none());
     }
 
     #[test]

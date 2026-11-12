@@ -106,8 +106,8 @@ keygen of the riscv, convert, combine, deferred, compress and embed machines log
 fields, `vk_pre_hash` and `bits`, for example:
 
 ```text
-INFO keygen soundness machine="riscv" backend="cpu" num_airs=50 max_constraints_per_air=2989
-  max_interactions_per_air=1843 num_trace_columns=32057 log_stacked_height=23 vk_pre_hash=[...]
+INFO keygen soundness machine="riscv" backend="cpu" num_airs=54 max_constraints_per_air=4292
+  max_interactions_per_air=4966 num_trace_columns=45823 log_stacked_height=23 vk_pre_hash=[...]
   bits=128.32
 ```
 
@@ -181,7 +181,7 @@ by hand. These records are for EF's soundcalc to score Pico's soundness and proo
 
 ## 3. Results
 
-Measured shapes: riscv 50 AIRs, per-AIR maxima of 2989 constraints and 1843 interactions, 32057
+Measured shapes: riscv 54 AIRs, per-AIR maxima of 4292 constraints and 4966 interactions, 45823
 columns; convert, combine, deferred, compress and embed share 21 recursion AIRs, per-AIR maxima of
 170 constraints and 34 interactions, 1409 columns, compress and embed at their own stacked height
 (over `KoalaBear^4`
@@ -201,11 +201,11 @@ same AIR set and preset and score the same. The shipped whitelist artifact
 
 | Machine / preset | LogUp | GKR sumcheck | GKR batching | ZeroCheck | Constraint batching | Stacked reduction | WHIR | **Total** |
 |---|---|---|---|---|---|---|---|---|
-| riscv (h = 23), measured | 133.95 | 152.94 | 153.94 | 149.04 | 143.38 | 138.98 | 128.32 | **128.32** |
+| riscv (h = 23), measured | 133.95 | 152.94 | 153.94 | 149.04 | 142.86 | 138.46 | 128.32 | **128.32** |
 | convert / combine / deferred, measured (dev set) | 133.95 | 152.94 | 153.94 | 148.71 | 147.29 | 143.48 | 128.39 | **128.39** |
 | compress (m = 2), measured (dev set) | 130.63 | 152.94 | 153.94 | 145.39 | 143.98 | 140.16 | 128.05 | **128.05** |
 | embed (m = 2), measured (dev set) | 130.63 | 152.94 | 153.94 | 145.39 | 143.98 | 140.16 | 128.05 | **128.05** |
-| riscv preset (h = 23), assumed bounds | 133.95 | 152.94 | 153.94 | 149.04 | 142.65 | 138.66 | 128.32 | **128.32** |
+| riscv preset (h = 23), assumed bounds | 133.95 | 152.94 | 153.94 | 149.04 | 142.65 | 138.33 | 128.32 | **128.32** |
 | recursion preset, assumed bounds | 133.95 | 152.94 | 153.94 | 148.71 | 144.93 | 142.98 | 128.39 | **128.39** |
 | compress and embed presets (m = 2), assumed bounds | 130.63 | 152.94 | 153.94 | 145.39 | 141.61 | 139.66 | 128.05 | **128.05** |
 
@@ -242,7 +242,7 @@ builder score each key as section 1 does and refuse one below 128 bits; the weak
 test utilities are keygen'd outside that check.
 
 **Assumed, not enforced**: the circuit-shape bounds in the preset doc comments (riscv preset:
-≤ 100 AIRs, ≤ 5000 constraints and ≤ 2000 interactions per AIR, ≤ 40 000 columns; recursion
+≤ 100 AIRs, ≤ 5000 constraints and ≤ 6000 interactions per AIR, ≤ 50 000 columns; recursion
 preset: ≤ 50, ≤ 1000, ≤ 100, ≤ 2000). `tests/soundness.rs` checks the measured shapes against them, and the `mle_soundness`
 keygen log line shows the live values and score of every key a run produces.
 

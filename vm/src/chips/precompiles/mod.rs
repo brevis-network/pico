@@ -1,3 +1,4 @@
+pub mod bls12381_g2;
 pub mod edwards;
 pub mod fptower;
 pub mod keccak256;
