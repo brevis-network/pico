@@ -80,6 +80,12 @@ pub const SECP256R1_DOUBLE: u32 = 0x00_00_01_31;
 #[allow(clippy::mistyped_literal_suffixes)]
 pub const SECP256R1_DECOMPRESS: u32 = 0x00_00_01_32;
 
+/// Executes the `BLS12381_G2_ADD` precompile.
+pub const BLS12381_G2_ADD: u32 = 0x00_01_01_33;
+
+/// Executes the `BLS12381_G2_DOUBLE` precompile.
+pub const BLS12381_G2_DOUBLE: u32 = 0x00_00_01_34;
+
 /// Executes `BN254_ADD`.
 pub const BN254_ADD: u32 = 0x00_01_01_0E;
 

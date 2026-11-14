@@ -118,6 +118,9 @@ where
         // The sliced Keccak tables, appended last: a device kernel, no byte lookups.
         const KECCAK_TABLES_CHIP_INDEX: usize = 51;
 
+        // The BLS12-381 G2 add and double precompiles: host tracegen, appended last.
+        const G2_CHIP_INDICES: RangeInclusive<usize> = 52..=53;
+
         let durations = DashMap::new();
         let mut chip_names_traces = Vec::new();
         let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
@@ -302,6 +305,7 @@ where
         // at a time and each one synchronizes its streams before returning -- keep it that way.
         for chip_index in HOST_TRACEGEN_PRECOMPILE_INDICES
             .chain([MEMORY_UNALIGNED_CHIP_INDEX, KECCAK_TABLES_CHIP_INDEX])
+            .chain(G2_CHIP_INDICES)
         {
             run_chip(chip_index, &mut preallocated_gpu_memory);
             snap_after!(chip_index);

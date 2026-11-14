@@ -39,6 +39,7 @@ use pico_vm::{
         syscalls::{
             host::{Precompile, SyscallHost},
             precompiles::{
+                bls12381_g2::{Bls12381G2AddSyscall, Bls12381G2DoubleSyscall},
                 edwards::{add::EdwardsAddAssignSyscall, decompress::EdwardsDecompressSyscall},
                 fptower::{fp::FpSyscall, fp2_addsub::Fp2AddSubSyscall, fp2_mul::Fp2MulSyscall},
                 keccak256::permute::Keccak256PermuteSyscall,
@@ -281,6 +282,8 @@ fn vm_precompile(code: SyscallCode) -> Option<Run> {
         C::SECP256R1_DECOMPRESS => |ctx, code, a, b| {
             WeierstrassDecompressSyscall::<Secp256r1>::new().emulate(ctx, code, a, b)
         },
+        C::BLS12381_G2_ADD => |ctx, code, a, b| Bls12381G2AddSyscall.emulate(ctx, code, a, b),
+        C::BLS12381_G2_DOUBLE => |ctx, code, a, b| Bls12381G2DoubleSyscall.emulate(ctx, code, a, b),
         C::BLS12381_DECOMPRESS => |ctx, code, a, b| {
             WeierstrassDecompressSyscall::<Bls12381>::new().emulate(ctx, code, a, b)
         },

@@ -67,11 +67,13 @@ pub fn local_mem_access_mut(event: &mut PrecompileEvent) -> &mut Vec<MemoryLocal
         | PrecompileEvent::Secp256k1Add(e)
         | PrecompileEvent::Secp256r1Add(e)
         | PrecompileEvent::Bn254Add(e)
-        | PrecompileEvent::Bls12381Add(e) => &mut e.local_mem_access,
+        | PrecompileEvent::Bls12381Add(e)
+        | PrecompileEvent::Bls12381G2Add(e) => &mut e.local_mem_access,
         PrecompileEvent::Secp256k1Double(e)
         | PrecompileEvent::Secp256r1Double(e)
         | PrecompileEvent::Bn254Double(e)
-        | PrecompileEvent::Bls12381Double(e) => &mut e.local_mem_access,
+        | PrecompileEvent::Bls12381Double(e)
+        | PrecompileEvent::Bls12381G2Double(e) => &mut e.local_mem_access,
         PrecompileEvent::Secp256k1Decompress(e)
         | PrecompileEvent::Secp256r1Decompress(e)
         | PrecompileEvent::K256Decompress(e)

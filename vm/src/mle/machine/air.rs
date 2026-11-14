@@ -154,6 +154,7 @@ use crate::chips::{
         field::secp256k1::Secp256k1BaseField,
     },
     precompiles::{
+        bls12381_g2::{add::Bls12381G2AddChip, double::Bls12381G2DoubleChip},
         edwards::{EdAddAssignChip, EdDecompressChip},
         fptower::{fp::FpOpChip, fp2_addsub::Fp2AddSubChip, fp2_mul::Fp2MulChip},
         keccak256::KeccakControlChip,
@@ -198,6 +199,8 @@ no_pvs_pf32!(
     FpOpChip<F, Secp256k1BaseField>,
     EdAddAssignChip<F, Ed25519>,
     EdDecompressChip<F, Ed25519Parameters>,
+    Bls12381G2AddChip<F>,
+    Bls12381G2DoubleChip<F>,
 );
 
 // ───────────────────────── PrepAir: preprocessed-table wrapper ─────────────────────────

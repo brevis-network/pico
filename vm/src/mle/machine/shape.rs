@@ -115,6 +115,8 @@ pub const MLE_RISCV_MAIN_LOG_HEIGHTS: &[(&str, usize)] = &[
     ("Poseidon2Permute", 15),
     ("EdAddAssign", 12),
     ("EdDecompress", 12),
+    ("Bls12381G2AddAssign", 12),
+    ("Bls12381G2DoubleAssign", 12),
 ];
 
 /// The `MemoryUnaligned` height in every core shape, the catch-all included: the chunk split closes
@@ -2137,7 +2139,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(seen, 52, "the machine's air list changed size");
+        assert_eq!(seen, 54, "the machine's air list changed size");
     }
 
     /// The three kinds the split sizes by the hardware-tier threshold rather than by cells: their
@@ -2539,7 +2541,7 @@ mod tests {
     /// shipped-artifact test derives the same count from the config and holds the artifact to it.
     #[test]
     fn the_whitelist_shape_count_is_pinned() {
-        assert_eq!(mle_riscv_shapes().len(), 15_606, "riscv whitelist shapes");
+        assert_eq!(mle_riscv_shapes().len(), 15_944, "riscv whitelist shapes");
     }
 
     /// The whitelist builder checkpoints keygens by shape CONTENT, so two admitted shapes must

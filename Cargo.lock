@@ -808,7 +808,7 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.8.0"
-source = "git+https://github.com/brevis-network/bls12_381?rev=79fbbface08629528c9ef6e326d98e38901c39bf#79fbbface08629528c9ef6e326d98e38901c39bf"
+source = "git+https://github.com/brevis-network/bls12_381?rev=a4725b3db277d6237d04aec3835a2d5c74a46e46#a4725b3db277d6237d04aec3835a2d5c74a46e46"
 dependencies = [
  "cfg-if",
  "digest 0.10.7",
