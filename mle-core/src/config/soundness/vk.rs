@@ -349,8 +349,8 @@ mod tests {
         // (max_constraints_per_air, num_airs, num_trace_columns): assumed bounds and measured shapes
         // (riscv and the recursion machines on KoalaBear^5).
         let shapes = [
-            (5000, 100, 40_000),
-            (2989, 50, 32_057),
+            (5000, 100, 50_000),
+            (4292, 54, 45_823),
             (1000, 50, 2000),
             (170, 21, 1409),
         ];

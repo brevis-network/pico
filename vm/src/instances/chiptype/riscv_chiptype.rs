@@ -1,5 +1,8 @@
 use crate::{
-    chips::precompiles::poseidon2::FieldSpecificPrecompilePoseidon2Chip,
+    chips::precompiles::{
+        bls12381_g2::{add::Bls12381G2AddChip, double::Bls12381G2DoubleChip},
+        poseidon2::FieldSpecificPrecompilePoseidon2Chip,
+    },
     compiler::riscv::opcode::Opcode,
 };
 use hashbrown::HashSet;
@@ -120,6 +123,8 @@ define_chip_type!(
         (WsDoubleBls381, WsDoubleBls381),
         (WsDoubleSecp256k1, WsDoubleSecp256k1),
         (WsDoubleSecp256r1, WsDoubleSecp256r1),
+        (Bls381G2Add, Bls12381G2AddChip),
+        (Bls381G2Double, Bls12381G2DoubleChip),
         (ShaExtend, ShaExtendChip),
         (ShaExtendControl, ShaExtendControlChip),
         (MemoryInitialize, MemoryInitializeFinalizeChip),
@@ -210,6 +215,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::WsDoubleBls381(Default::default()),
             Self::WsDoubleSecp256k1(Default::default()),
             Self::WsDoubleSecp256r1(Default::default()),
+            Self::Bls381G2Add(Default::default()),
+            Self::Bls381G2Double(Default::default()),
             Self::ShaExtend(Default::default()),
             Self::ShaExtendControl(Default::default()),
             Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
@@ -338,6 +345,10 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             // The sliced Keccak tables: a device kernel counts the record's permutations;
             // no byte lookups. Appended last for the same reason.
             Self::KeccakTab(Default::default()),
+            // The BLS12-381 G2 precompiles: host tracegen, appended last so the orchestrator's
+            // indices above stay put.
+            Self::Bls381G2Add(Default::default()),
+            Self::Bls381G2Double(Default::default()),
         ]
         .map(MetaChip::<F, RiscvChipType<F>>::new)
         .into()
@@ -585,6 +596,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::WsDoubleBls381(Default::default()),
             Self::WsDoubleSecp256k1(Default::default()),
             Self::WsDoubleSecp256r1(Default::default()),
+            Self::Bls381G2Add(Default::default()),
+            Self::Bls381G2Double(Default::default()),
             Self::ShaExtendControl(Default::default()),
             Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
                 MemoryChipType::Initialize,

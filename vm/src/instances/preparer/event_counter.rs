@@ -73,6 +73,8 @@ struct PrecompileCounts {
     bn254_double: usize,
     bls381_add: usize,
     bls381_double: usize,
+    bls381_g2_add: usize,
+    bls381_g2_double: usize,
     bls381_decompress: usize,
 
     // Field operations
@@ -112,6 +114,8 @@ struct PrecompileLocalMemCounts {
     bn254_double: usize,
     bls381_add: usize,
     bls381_double: usize,
+    bls381_g2_add: usize,
+    bls381_g2_double: usize,
     bls381_decompress: usize,
 
     // Field operations
@@ -199,6 +203,8 @@ impl EventCounter {
             SyscallCode::BN254_DOUBLE => self.precompile_counts.bn254_double,
             SyscallCode::BLS12381_ADD => self.precompile_counts.bls381_add,
             SyscallCode::BLS12381_DOUBLE => self.precompile_counts.bls381_double,
+            SyscallCode::BLS12381_G2_ADD => self.precompile_counts.bls381_g2_add,
+            SyscallCode::BLS12381_G2_DOUBLE => self.precompile_counts.bls381_g2_double,
             SyscallCode::BLS12381_DECOMPRESS => self.precompile_counts.bls381_decompress,
             SyscallCode::BN254_FP_ADD => self.precompile_counts.fp_bn254,
             SyscallCode::BLS12381_FP_ADD => self.precompile_counts.fp_bls381,
@@ -237,6 +243,8 @@ impl EventCounter {
             SyscallCode::BN254_DOUBLE => self.precompile_local_mem_counts.bn254_double,
             SyscallCode::BLS12381_ADD => self.precompile_local_mem_counts.bls381_add,
             SyscallCode::BLS12381_DOUBLE => self.precompile_local_mem_counts.bls381_double,
+            SyscallCode::BLS12381_G2_ADD => self.precompile_local_mem_counts.bls381_g2_add,
+            SyscallCode::BLS12381_G2_DOUBLE => self.precompile_local_mem_counts.bls381_g2_double,
             SyscallCode::BLS12381_DECOMPRESS => self.precompile_local_mem_counts.bls381_decompress,
             SyscallCode::BN254_FP_ADD => self.precompile_local_mem_counts.fp_bn254,
             SyscallCode::BLS12381_FP_ADD => self.precompile_local_mem_counts.fp_bls381,
@@ -274,6 +282,8 @@ impl EventCounter {
             + counts.bn254_double
             + counts.bls381_add
             + counts.bls381_double
+            + counts.bls381_g2_add
+            + counts.bls381_g2_double
             + counts.bls381_decompress
             + counts.fp_bn254
             + counts.fp_bls381
@@ -305,6 +315,8 @@ const SUPPORTED_PRECOMPILE_CODES: &[SyscallCode] = &[
     SyscallCode::BLS12381_ADD,
     SyscallCode::BLS12381_DOUBLE,
     SyscallCode::BLS12381_DECOMPRESS,
+    SyscallCode::BLS12381_G2_ADD,
+    SyscallCode::BLS12381_G2_DOUBLE,
     SyscallCode::BN254_FP_ADD,
     SyscallCode::BLS12381_FP_ADD,
     SyscallCode::SECP256K1_FP_ADD,
@@ -411,6 +423,14 @@ fn count_all_precompile_events(
             SyscallCode::BLS12381_DOUBLE => {
                 precompile_counts.bls381_double = event_count;
                 local_mem_counts.bls381_double = local_mem_count;
+            }
+            SyscallCode::BLS12381_G2_ADD => {
+                precompile_counts.bls381_g2_add = event_count;
+                local_mem_counts.bls381_g2_add = local_mem_count;
+            }
+            SyscallCode::BLS12381_G2_DOUBLE => {
+                precompile_counts.bls381_g2_double = event_count;
+                local_mem_counts.bls381_g2_double = local_mem_count;
             }
             SyscallCode::BLS12381_DECOMPRESS => {
                 precompile_counts.bls381_decompress = event_count;

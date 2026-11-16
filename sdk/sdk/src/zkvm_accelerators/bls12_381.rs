@@ -110,15 +110,18 @@ pub unsafe extern "C" fn zkvm_bls12_g2_msm(
     if pairs.is_empty() {
         return ZKVM_EFAIL;
     }
-    // The crate has an MSM for G1 only.
-    let mut acc = G2Projective::identity();
+    let mut points = Vec::with_capacity(pairs.len());
+    let mut scalars = Vec::with_capacity(pairs.len());
     for pair in pairs {
         let Some(p) = decode_g2(&pair.point, true) else {
             return ZKVM_EFAIL;
         };
-        acc += G2Projective::from(p) * scalar(&pair.scalar);
+        points.push(p);
+        scalars.push(scalar(&pair.scalar));
     }
-    result.write(encode_g2(acc));
+    result.write(encode_g2(G2Projective::msm_variable_base(
+        &points, &scalars,
+    )));
     ZKVM_EOK
 }
 

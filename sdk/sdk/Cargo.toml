@@ -34,7 +34,7 @@ coprocessor-sdk = { git = "https://github.com/brevis-network/Pico-zkCoprocessor"
 # The `zkvm_*` accelerators (`zkvm_accelerators`). The curve crates are Pico's patched forks, the
 # ones rsp uses: inside the zkVM they reach the curve and field syscalls.
 aurora-engine-modexp = { version = "1.2.0", default-features = false }
-bls12_381 = { git = "https://github.com/brevis-network/bls12_381", rev = "79fbbface08629528c9ef6e326d98e38901c39bf", default-features = false, features = ["groups", "pairings", "alloc", "experimental"] } # patch-v1.0.1-rv64
+bls12_381 = { git = "https://github.com/brevis-network/bls12_381", rev = "a4725b3db277d6237d04aec3835a2d5c74a46e46", default-features = false, features = ["groups", "pairings", "alloc", "experimental"] } # patch-v1.0.1-rv64
 k256 = { git = "https://github.com/brevis-network/elliptic-curves", rev = "d0c56392e728fd0df321820fb0cb495272d38673", default-features = false, features = ["ecdsa", "alloc"] } # k256-0.13.4-rv64
 p256 = { git = "https://github.com/brevis-network/elliptic-curves", rev = "94ffb195ad1d91a0d6678dfbc3432f83e25162b4", default-features = false, features = ["ecdsa", "alloc"] } # p256-0.13.2-rv64
 ripemd = { version = "0.1.3", default-features = false }
