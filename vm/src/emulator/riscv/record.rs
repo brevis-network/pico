@@ -331,6 +331,8 @@ const TAIL_GKR_PROGRAM_INTERACTIONS: u64 = 2;
 ///     fp2 mul = 22·WCP + 6·(L+W) + 8 ⇒ 754 / 1130 (precompiles/fptower/*.rs).
 ///   - UINT256_MUL 240 = 231 + 3×2 + 3, 231 = 33·WFE + (L+W=95) + 4
 ///     (precompiles/uint256/constraints.rs).
+///   - BLS12381 G2 add and double (precompiles/bls12381_g2): above the catch-all, so both need
+///     an entry; the test below pins the numbers.
 ///
 /// `interaction_counts_match_their_airs` below asserts all of this against real keygen —
 /// it is the arbiter, not this comment.
@@ -347,6 +349,8 @@ fn tail_gkr_interactions(syscall_code: SyscallCode) -> Option<u64> {
         SyscallCode::BLS12381_FP_ADD => 287,
         SyscallCode::BLS12381_FP2_MUL => 1130,
         SyscallCode::UINT256_MUL => 240,
+        SyscallCode::BLS12381_G2_ADD => 4670,
+        SyscallCode::BLS12381_G2_DOUBLE => 4966,
         _ => return None,
     })
 }
@@ -1291,11 +1295,13 @@ fn precompile_local_mem(event: &PrecompileEvent) -> &[MemoryLocalEvent] {
         | PrecompileEvent::Secp256k1Add(e)
         | PrecompileEvent::Secp256r1Add(e)
         | PrecompileEvent::Bn254Add(e)
-        | PrecompileEvent::Bls12381Add(e) => &e.local_mem_access,
+        | PrecompileEvent::Bls12381Add(e)
+        | PrecompileEvent::Bls12381G2Add(e) => &e.local_mem_access,
         PrecompileEvent::Secp256k1Double(e)
         | PrecompileEvent::Secp256r1Double(e)
         | PrecompileEvent::Bn254Double(e)
-        | PrecompileEvent::Bls12381Double(e) => &e.local_mem_access,
+        | PrecompileEvent::Bls12381Double(e)
+        | PrecompileEvent::Bls12381G2Double(e) => &e.local_mem_access,
         PrecompileEvent::Secp256k1Decompress(e)
         | PrecompileEvent::Secp256r1Decompress(e)
         | PrecompileEvent::K256Decompress(e)
@@ -1324,11 +1330,13 @@ fn precompile_local_mem_mut(event: &mut PrecompileEvent) -> &mut Vec<MemoryLocal
         | PrecompileEvent::Secp256k1Add(e)
         | PrecompileEvent::Secp256r1Add(e)
         | PrecompileEvent::Bn254Add(e)
-        | PrecompileEvent::Bls12381Add(e) => &mut e.local_mem_access,
+        | PrecompileEvent::Bls12381Add(e)
+        | PrecompileEvent::Bls12381G2Add(e) => &mut e.local_mem_access,
         PrecompileEvent::Secp256k1Double(e)
         | PrecompileEvent::Secp256r1Double(e)
         | PrecompileEvent::Bn254Double(e)
-        | PrecompileEvent::Bls12381Double(e) => &mut e.local_mem_access,
+        | PrecompileEvent::Bls12381Double(e)
+        | PrecompileEvent::Bls12381G2Double(e) => &mut e.local_mem_access,
         PrecompileEvent::Secp256k1Decompress(e)
         | PrecompileEvent::Secp256r1Decompress(e)
         | PrecompileEvent::K256Decompress(e)
@@ -1802,20 +1810,6 @@ mod tail_merge_constants {
             );
         }
 
-        // The catch-all bounds every AIR not in the table below, so it has to sit above the
-        // widest one in the machine -- under-counting there is what lets a record cross the
-        // 2^28-leaf line undetected.
-        let widest = pk
-            .per_air
-            .iter()
-            .map(|a| a.vk.num_interactions() as u64)
-            .max()
-            .expect("keygen produced no AIRs");
-        assert!(
-            widest <= TAIL_GKR_FALLBACK_INTERACTIONS,
-            "TAIL_GKR_FALLBACK_INTERACTIONS={TAIL_GKR_FALLBACK_INTERACTIONS} under-counts the \
-             widest AIR ({widest})"
-        );
         // The byte table's per-row count is the largest single term in `base_leaves`, and the
         // Program table's is the multiplier on the instruction count. Both were hand-copied.
         assert_eq!(
@@ -1880,7 +1874,32 @@ mod tail_merge_constants {
                 Some("Bls381BaseField"),
             ),
             (SyscallCode::UINT256_MUL, "Uint256MulChip", None),
+            (SyscallCode::BLS12381_G2_ADD, "Bls12381G2AddChip", None),
+            (
+                SyscallCode::BLS12381_G2_DOUBLE,
+                "Bls12381G2DoubleChip",
+                None,
+            ),
         ];
+        // The catch-all bounds every AIR not in the table above, so it has to sit above the
+        // widest of them -- under-counting there is what lets a record cross the 2^28-leaf line
+        // undetected. An AIR in the table is held to its own constant below.
+        let widest = pk
+            .per_air
+            .iter()
+            .filter(|a| {
+                !table.iter().any(|&(_, prefix, param)| {
+                    a.air_name.starts_with(prefix) && param.is_none_or(|p| a.air_name.contains(p))
+                })
+            })
+            .map(|a| a.vk.num_interactions() as u64)
+            .max()
+            .expect("keygen produced no AIRs");
+        assert!(
+            widest <= TAIL_GKR_FALLBACK_INTERACTIONS,
+            "TAIL_GKR_FALLBACK_INTERACTIONS={TAIL_GKR_FALLBACK_INTERACTIONS} under-counts the \
+             widest AIR outside the table ({widest})"
+        );
         // Collect every mismatch rather than tripping on the first: the constants move as a
         // group when a shared gadget changes, and one-at-a-time bisecting hides the pattern.
         let mut stale = Vec::new();

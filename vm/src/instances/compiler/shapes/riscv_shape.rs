@@ -219,6 +219,8 @@ pub(crate) fn precompile_syscall_code(chip_name: &str) -> SyscallCode {
         "Bls12381AddAssign" => SyscallCode::BLS12381_ADD,
         "Bls12381Decompress" => SyscallCode::BLS12381_DECOMPRESS,
         "Bls12381DoubleAssign" => SyscallCode::BLS12381_DOUBLE,
+        "Bls12381G2AddAssign" => SyscallCode::BLS12381_G2_ADD,
+        "Bls12381G2DoubleAssign" => SyscallCode::BLS12381_G2_DOUBLE,
         "Bls381Fp2AddSub" => SyscallCode::BLS12381_FP2_ADD,
         "Bls381Fp2Mul" => SyscallCode::BLS12381_FP2_MUL,
         "Bls381FpOp" => SyscallCode::BLS12381_FP_ADD,

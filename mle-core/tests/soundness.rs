@@ -38,8 +38,8 @@ fn riscv_log_stacked_heights() -> Vec<usize> {
 const RISCV_ASSUMED: VkShape = VkShape {
     num_airs: 100,
     max_constraints_per_air: 5000,
-    max_interactions_per_air: 2000,
-    num_trace_columns: 40_000,
+    max_interactions_per_air: 6000,
+    num_trace_columns: 50_000,
     log_stacked_height: 0,
 };
 const RECURSION_ASSUMED: VkShape = VkShape {
@@ -591,7 +591,7 @@ fn riscv_components_are_pinned() {
         logup: 133.95,
         zerocheck: 149.04,
         constraint_batching: 142.65,
-        stacked_reduction: 138.66,
+        stacked_reduction: 138.33,
         total: 128.32,
         whir: RISCV_WHIR,
     };

@@ -151,6 +151,12 @@ pub enum SyscallCode {
 
     /// Executes the `SECP256R1_DECOMPRESS` precompile.
     SECP256R1_DECOMPRESS = 0x00_00_01_32,
+
+    /// Executes the `BLS12381_G2_ADD` precompile.
+    BLS12381_G2_ADD = 0x00_01_01_33,
+
+    /// Executes the `BLS12381_G2_DOUBLE` precompile.
+    BLS12381_G2_DOUBLE = 0x00_00_01_34,
 }
 
 impl SyscallCode {
@@ -200,6 +206,8 @@ impl SyscallCode {
             0x00_01_01_30 => SyscallCode::SECP256R1_ADD,
             0x00_00_01_31 => SyscallCode::SECP256R1_DOUBLE,
             0x00_00_01_32_u32 => SyscallCode::SECP256R1_DECOMPRESS,
+            0x00_01_01_33 => SyscallCode::BLS12381_G2_ADD,
+            0x00_00_01_34 => SyscallCode::BLS12381_G2_DOUBLE,
             _ => return None,
         })
     }

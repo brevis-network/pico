@@ -152,6 +152,23 @@ struct Case {
     read_only: Range<u64>,
 }
 
+/// The record of the chunk `case`'s ECALL ran in.
+fn record_of(case: &Case) -> EmulationRecord {
+    let program = Program {
+        instructions: one_syscall(case.syscall, case.arg1, case.arg2).into(),
+        pc_start: 0,
+        pc_base: 0,
+        memory_image: Arc::new(case.image.clone()),
+        preprocessed_shape: None,
+        profiled_functions: Default::default(),
+    };
+    let stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>().finalize();
+    test_rv64_emulate(Arc::new(program), stdin)
+        .into_iter()
+        .find(|record| !record.precompile_events.is_empty())
+        .unwrap_or_else(|| panic!("{}: the ECALL raised no precompile event", case.name))
+}
+
 /// Runs `case` and holds `chip`'s row for its event to the code range rules.
 fn check<C>(chip: C, case: Case)
 where
@@ -159,19 +176,7 @@ where
         + for<'a> Air<DebugConstraintFolder<'a, F, EF>>,
 {
     let name = case.name;
-    let program = Program {
-        instructions: one_syscall(case.syscall, case.arg1, case.arg2).into(),
-        pc_start: 0,
-        pc_base: 0,
-        memory_image: Arc::new(case.image),
-        preprocessed_shape: None,
-        profiled_functions: Default::default(),
-    };
-    let stdin = EmulatorStdin::new_builder::<KoalaBearPoseidon2>().finalize();
-    let record = test_rv64_emulate(Arc::new(program), stdin)
-        .into_iter()
-        .find(|record| !record.precompile_events.is_empty())
-        .unwrap_or_else(|| panic!("{name}: the ECALL raised no precompile event"));
+    let record = record_of(&case);
     assert_eq!(
         record.precompile_events.all_events().count(),
         1,
@@ -419,6 +424,51 @@ fn weierstrass<E: EllipticCurve>(add: SyscallCode, double: SyscallCode) -> [Case
             read_only: A + point..A + point + 8,
         },
     ]
+}
+
+/// `g += 2g` and `g = 2g` in BLS12-381 G2, `g` its generator.
+fn g2_cases() -> [Case; 2] {
+    use crate::chips::precompiles::bls12381_g2::{
+        g2_double, point_to_dwords, tests::generator, G2_POINT_BYTES,
+    };
+    let point = u64::from(G2_POINT_BYTES);
+    let g = generator();
+    let g2 = g2_double(&g).unwrap();
+    let mut add_image = BTreeMap::new();
+    put(&mut add_image, A, &point_to_dwords(&g));
+    put(&mut add_image, B, &point_to_dwords(&g2));
+    let mut double_image = BTreeMap::new();
+    put(&mut double_image, A, &point_to_dwords(&g));
+    [
+        Case {
+            name: "G2 add",
+            syscall: SyscallCode::BLS12381_G2_ADD,
+            arg1: A,
+            arg2: B,
+            image: add_image,
+            written: A..A + point,
+            read_only: B..B + point,
+        },
+        Case {
+            name: "G2 double",
+            syscall: SyscallCode::BLS12381_G2_DOUBLE,
+            arg1: A,
+            arg2: 0,
+            image: double_image,
+            written: A..A + point,
+            read_only: A + point..A + point + 8,
+        },
+    ]
+}
+
+#[test]
+fn g2_chips_refuse_to_write_the_code() {
+    use crate::chips::precompiles::bls12381_g2::{
+        add::Bls12381G2AddChip, double::Bls12381G2DoubleChip,
+    };
+    let [add, double] = g2_cases();
+    check(Bls12381G2AddChip::<F>::default(), add);
+    check(Bls12381G2DoubleChip::<F>::default(), double);
 }
 
 /// The decompression of `E`'s generator, whose coordinates take `bytes`: `y` goes to the slice's
@@ -700,4 +750,39 @@ mod device {
             field_case("BLS12381_FP2_MUL", SyscallCode::BLS12381_FP2_MUL, 96),
         );
     }
+}
+
+/// The G2 chips' arithmetic: every row of an honest trace, padding included, satisfies the AIR,
+/// and a wrong result coordinate does not.
+#[test]
+fn g2_chips_constrain_the_result() {
+    use crate::chips::precompiles::bls12381_g2::{
+        add::{Bls12381G2AddChip, G2AddCols},
+        double::{Bls12381G2DoubleChip, G2DoubleCols},
+    };
+    use core::borrow::BorrowMut;
+
+    let [add, double] = g2_cases();
+    let chip = Bls12381G2AddChip::<F>::default();
+    let trace = chip.generate_main(&record_of(&add), &mut EmulationRecord::default());
+    for row in trace.values.chunks(trace.width()) {
+        assert_eq!(failures(&chip, row), Vec::<String>::new());
+    }
+    let mut row = trace.values[..trace.width()].to_vec();
+    let cols: &mut G2AddCols<F> = row.as_mut_slice().borrow_mut();
+    cols.result.y3_1.result[0] += F::ONE;
+    assert!(!failures(&chip, &row).is_empty(), "G2 add: a wrong y3.c1");
+
+    let chip = Bls12381G2DoubleChip::<F>::default();
+    let trace = chip.generate_main(&record_of(&double), &mut EmulationRecord::default());
+    for row in trace.values.chunks(trace.width()) {
+        assert_eq!(failures(&chip, row), Vec::<String>::new());
+    }
+    let mut row = trace.values[..trace.width()].to_vec();
+    let cols: &mut G2DoubleCols<F> = row.as_mut_slice().borrow_mut();
+    cols.result.x3_0.result[3] += F::ONE;
+    assert!(
+        !failures(&chip, &row).is_empty(),
+        "G2 double: a wrong x3.c0"
+    );
 }

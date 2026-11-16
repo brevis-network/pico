@@ -684,6 +684,35 @@ fn bls12381_affine_to_words(point: &Bls12381G1Affine) -> [u32; 24] {
     result
 }
 
+/// `BLS12381_G2_ADD`: `p ← p + q`, as the VM's syscall computes it and with its refusals.
+pub fn bls12381_g2_add(core: &mut impl PrecompileMemory, p_ptr: u64, q_ptr: u64) {
+    use pico_vm::chips::precompiles::bls12381_g2::{
+        g2_add_checked, point_from_dwords, point_to_dwords, G2_POINT_DWORDS,
+    };
+    assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
+    assert!(q_ptr.is_multiple_of(8), "q_ptr is unaligned");
+    let clk = core.clk();
+    let mut p = [0u64; G2_POINT_DWORDS];
+    let mut q = [0u64; G2_POINT_DWORDS];
+    core.read_mem_dword_span_snapshot_syscall(p_ptr, &mut p);
+    core.read_mem_dword_span_at_clk(q_ptr, &mut q, clk);
+    let sum = g2_add_checked(&point_from_dwords(&p), &point_from_dwords(&q));
+    core.write_mem_dword_span_at_clk(p_ptr, &point_to_dwords(&sum), clk + 1);
+}
+
+/// `BLS12381_G2_DOUBLE`: `p ← 2p`, as the VM's syscall computes it and with its refusals.
+pub fn bls12381_g2_double(core: &mut impl PrecompileMemory, p_ptr: u64) {
+    use pico_vm::chips::precompiles::bls12381_g2::{
+        g2_double_checked, point_from_dwords, point_to_dwords, G2_POINT_DWORDS,
+    };
+    assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
+    let clk = core.clk();
+    let mut p = [0u64; G2_POINT_DWORDS];
+    core.read_mem_dword_span_snapshot_syscall(p_ptr, &mut p);
+    let doubled = g2_double_checked(&point_from_dwords(&p));
+    core.write_mem_dword_span_at_clk(p_ptr, &point_to_dwords(&doubled), clk);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

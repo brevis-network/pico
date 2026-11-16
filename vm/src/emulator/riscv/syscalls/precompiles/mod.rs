@@ -1,3 +1,4 @@
+pub mod bls12381_g2;
 pub mod ec;
 pub mod edwards;
 pub mod fptower;
@@ -92,6 +93,10 @@ pub enum PrecompileEvent {
     Uint256Mul(Uint256MulEvent),
     /// Poseidon2 Permute precompile event
     Poseidon2Permute(Poseidon2PermuteEvent),
+    /// Bls12-381 G2 add precompile event.
+    Bls12381G2Add(EllipticCurveAddEvent),
+    /// Bls12-381 G2 double precompile event.
+    Bls12381G2Double(EllipticCurveDoubleEvent),
 }
 
 /// Trait to retrieve all the local memory events from a vec of precompile events.
@@ -125,13 +130,15 @@ impl PrecompileLocalMemory for Vec<(SyscallEvent, PrecompileEvent)> {
                 | PrecompileEvent::Secp256r1Add(e)
                 | PrecompileEvent::EdAdd(e)
                 | PrecompileEvent::Bn254Add(e)
-                | PrecompileEvent::Bls12381Add(e) => {
+                | PrecompileEvent::Bls12381Add(e)
+                | PrecompileEvent::Bls12381G2Add(e) => {
                     iterators.push(e.local_mem_access.iter());
                 }
                 PrecompileEvent::Secp256k1Double(e)
                 | PrecompileEvent::Secp256r1Double(e)
                 | PrecompileEvent::Bn254Double(e)
-                | PrecompileEvent::Bls12381Double(e) => {
+                | PrecompileEvent::Bls12381Double(e)
+                | PrecompileEvent::Bls12381G2Double(e) => {
                     iterators.push(e.local_mem_access.iter());
                 }
                 PrecompileEvent::Secp256k1Decompress(e)
