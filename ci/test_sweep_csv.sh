@@ -65,9 +65,10 @@ INFO [bench] MLE combine shapes: block keygens=5 hits=0 evictions=0
 INFO MLE bench: chunks=6 prover_count=4 lanes=2 | sum(prove)=2.957s avg/chunk=0.493s | prove(wall)=4.781s | keygen=22.082s | emulate=1.346s cycles=24512003 prepare=1.402s | e2e=4.785s | root-accept=0.310s | total=95.100s
 INFO MLE block: 1/2 block=18884864 done
 INFO MLE block: 2/2 block=24000020 starting
-INFO cross-chunk global cumulative sum == 0 ✓
+INFO MLE single-node: all 26 chunk(s) proved (per-chunk verify skipped; set MLE_VERIFY=1 to enable); cross-chunk global LogUp sum == 0 ✓
 INFO [primary-mle-prover-1] combine [0,1]: OK (is_final=false)
 INFO [primary-mle-prover-2] combine [2,3]: OK (is_final=false)
+INFO [primary-mle-prover-0] combine [18446744073709551615,25]: OK (is_final=true)
 INFO [bench] MLE combine shapes: block keygens=21 hits=4 evictions=0
 INFO MLE bench: chunks=26 prover_count=4 lanes=2 | sum(prove)=16.003s avg/chunk=0.615s | prove(wall)=7.865s | keygen=22.082s | emulate=2.857s cycles=108773449 prepare=2.901s | e2e=7.868s | root-accept=0.402s | total=103.900s
 INFO MLE block: 2/2 block=24000020 done
@@ -100,10 +101,13 @@ eq "block 2 shape keygens" "$(col "$sum" shape_keygens 3)" "21"
 eq "block 2 records the cross-block hits" "$(col "$sum" shape_hits 3)" "4"
 
 # --- correctness counters are per block, not run totals --------------------------------------
+# Block 1 states it as a prover with the cumulative sum does, block 2 as one with the global LogUp.
 eq "block 1 gcs closed once"    "$(col "$sum" gcs_ok 2)" "1"
 eq "block 2 gcs closed once"    "$(col "$sum" gcs_ok 3)" "1"
 eq "block 1 counts its combines" "$(col "$sum" combine_ok 2)" "1"
-eq "block 2 counts its combines" "$(col "$sum" combine_ok 3)" "2"
+# Block 2's third is the root: the join of the global LogUp's prefix, whose start has no chunk
+# index, with the node over every chunk.
+eq "block 2 counts its combines" "$(col "$sum" combine_ok 3)" "3"
 
 # --- the first block is marked, and inputs are joined ----------------------------------------
 eq "first block marked as warmup"     "$(col "$sum" warmup 2)" "1"

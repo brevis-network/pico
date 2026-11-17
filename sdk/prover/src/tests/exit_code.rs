@@ -5,10 +5,7 @@
 //! real bundle in which a chunk with no CPU rows carries a non-zero exit code, to exercise this
 //! check directly.
 
-use pico_vm::{
-    compiler::program::ProgramBehavior,
-    mle::machine::riscv::{self, air_id},
-};
+use pico_vm::mle::machine::riscv::{self, air_id};
 
 use super::fixture::{builder, emulate_fib_on, fib_program, LOG_STACKED_HEIGHT};
 use crate::{
@@ -44,7 +41,7 @@ fn a_proved_bundle_carrying_a_non_zero_exit_code_is_refused() {
         &bundle,
         bundle.vk.pre_hash,
         &[(air_id::PROGRAM, riscv::riscv_program_commit(&bundle.vk))],
-        program.initial_global_cumulative_sum(),
+        &riscv::ProgramIdentity::new(&program, &bundle.vk.inner.params).expect("the image fits"),
     )
     .expect("the bundle verifies at the RISC-V layer");
 
@@ -56,7 +53,7 @@ fn a_proved_bundle_carrying_a_non_zero_exit_code_is_refused() {
         verify_keys: false,
         program_id: prover.program_id(),
         committed: emulated.committed_bytes.clone(),
-        payload: LoadedPayload::Riscv(bundle),
+        payload: LoadedPayload::Riscv(Box::new(bundle)),
     };
     let err = prover
         .verify_artifact(artifact)

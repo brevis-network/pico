@@ -145,7 +145,6 @@ pub const KNOBS: &[&str] = &[
     "PICO_GPU_MEM",
     "PICO_HOST_MEM",
     "SHAPE_PROBE_NATURAL",
-    "SKIP_INITIAL_GCS",
     // The CUDA backend: its kernel paths and switches, caches, JIT settings, cross-checks and
     // profiles.
     "C1_FUSED_OFF",
@@ -232,6 +231,7 @@ pub const KNOBS: &[&str] = &[
     "MLE_ETHPROOFS_PREWARM_BLOCK",
     "MLE_ETHPROOFS_RESULT_CAPACITY",
     "MLE_EVENT_POOL_SIZE",
+    "MLE_GLOBAL_LOGUP_GROUP_LEN",
     "MLE_HEAP_PREWARM_GB",
     "MLE_HISTORY_SLOTS",
     "MLE_INPUT_DIR",

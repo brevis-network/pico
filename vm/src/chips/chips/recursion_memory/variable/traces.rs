@@ -11,9 +11,7 @@ use crate::{
 };
 use crate::{
     compiler::recursion::{
-        instruction::{
-            HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
-        },
+        instruction::{HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction},
         program::RecursionProgram,
     },
     emulator::recursion::emulator::RecursionRecord,
@@ -77,16 +75,6 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
                     output_addrs_mults,
                     input_addr: _, // No receive interaction for the hint operation
                 }) => output_addrs_mults.iter().collect(),
-                Instruction::HintAddCurve(instr) => {
-                    let HintAddCurveInstr {
-                        output_x_addrs_mults,
-                        output_y_addrs_mults, .. // No receive interaction for the hint operation
-                    } = instr.as_ref();
-                    output_x_addrs_mults
-                        .iter()
-                        .chain(output_y_addrs_mults.iter())
-                        .collect()
-                }
                 _ => vec![],
             })
             .collect::<Vec<_>>();
@@ -176,16 +164,6 @@ impl<F: PrimeField32> GpuChipBehavior<F> for MemoryVarChip<F> {
                         output_addrs_mults,
                         input_addr: _, // No receive interaction for the hint operation
                     }) => output_addrs_mults.iter().collect(),
-                    Instruction::HintAddCurve(instr) => {
-                        let HintAddCurveInstr {
-                            output_x_addrs_mults,
-                            output_y_addrs_mults, .. // No receive interaction for the hint operation
-                        } = instr.as_ref();
-                        output_x_addrs_mults
-                            .iter()
-                            .chain(output_y_addrs_mults.iter())
-                            .collect()
-                    }
                     _ => vec![],
                 })
                 .map(MemoryAccessCols::from)

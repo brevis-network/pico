@@ -42,17 +42,17 @@ where
             // equation and u8 checks below then zero `initial_value_lower / upper` too.
             //
             // Soundness: per address, the Global multiset's kind-Memory senders are the
-            // MemoryInitialize row, the image digest and (implicitly, as the missing receive)
+            // MemoryInitialize row, the image table and (implicitly, as the missing receive)
             // this declaration; the only receiver that is not itself an entry's receive is the
             // MemoryFinalize row, at most one per address. Every `has_initial = 1` entry nets
             // zero (one receive, one send), a fresh entry nets +1 (send only), so
             // `MemInit(X) + image(X) + fresh(X) = MemFinal(X) <= 1`: hiding a predecessor,
-            // declaring an image word or a register fresh (its MemoryInitialize row or the
-            // digest then has no receiver), or declaring twice all unbalance the sum. The
-            // declared value is pinned to zero, while a MemoryInitialize row's value is the
-            // prover's choice today (range-checked only), so the accepted set does not grow;
-            // in particular a register declared fresh with no MemoryInitialize chip at all
-            // still starts at zero, which is x0's only legal initial value.
+            // declaring an image word or a register fresh (its MemoryInitialize row or its
+            // row of the image table then has no receiver), or declaring twice all unbalance
+            // the sum. The declared value is pinned to zero, while a MemoryInitialize row's
+            // value is the prover's choice today (range-checked only), so the accepted set
+            // does not grow; in particular a register declared fresh with no MemoryInitialize
+            // chip at all still starts at zero, which is x0's only legal initial value.
             builder.assert_bool(local.has_initial);
             builder
                 .when_not(local.is_real)
@@ -102,7 +102,7 @@ where
             // entries by construction: an interval's initial state is the predecessor of its
             // first access and its final state is its last. It also rules out the entry whose
             // two Global messages carry the same payload (equal clk and equal values), whose
-            // digest contributions cancel and which would otherwise be free to add.
+            // terms cancel and which would otherwise be free to add.
             builder.range_check_u25_16_9(
                 local.final_clk.into() - local.initial_clk.into() - CB::Expr::ONE,
                 local.clk_diff_16bit_limb,

@@ -3,7 +3,7 @@
 
 use super::*;
 
-impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
+impl<F: PrimeField32 + TwoAdicField> Builder<F> {
     pub(super) fn new() -> Self {
         Builder {
             next_addr: 0,

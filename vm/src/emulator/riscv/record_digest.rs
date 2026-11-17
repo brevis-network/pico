@@ -169,11 +169,6 @@ pub fn field_digests(record: &EmulationRecord) -> Vec<FieldDigest> {
             0,
         ),
         (
-            "poseidon2_events",
-            record.poseidon2_events.len(),
-            digest(&record.poseidon2_events),
-        ),
-        (
             "global_lookup_events",
             record.global_lookup_events.len(),
             digest(&record.global_lookup_events),
@@ -223,7 +218,6 @@ pub fn record_streams(record: &EmulationRecord) -> Vec<(&'static str, usize, usi
         vec("memory_initialize_events", &record.memory_initialize_events),
         vec("memory_finalize_events", &record.memory_finalize_events),
         vec("cpu_local_memory_access", &record.cpu_local_memory_access),
-        vec("poseidon2_events", &record.poseidon2_events),
         vec("global_lookup_events", &record.global_lookup_events),
         (
             "precompile_events",
@@ -258,7 +252,7 @@ pub fn record_bytes(record: &EmulationRecord) -> usize {
 /// `cpu_local_memory_access` holds one window per address per stretch of the chunk, and splitting
 /// a chunk's replay gives an address live across a cut two chained windows where the unsplit
 /// replay had one. The two chain — one window's final access is the next one's initial — so they
-/// cancel on the global bus, which `cross-chunk GCS == 0` is the check on. The count differs
+/// cancel on the global bus, which the global LogUp is the check on. The count differs
 /// between the two replays by design, so it is reported rather than compared.
 ///
 /// What must not change is the chain each address is left in once the cancelling pairs are

@@ -10,6 +10,7 @@ use std::{
     cmp::max,
     iter::{self, zip},
     mem::take,
+    ops::Range,
 };
 
 use itertools::{izip, Itertools};
@@ -27,7 +28,7 @@ use pico_mle_core::{
         eq_sharp_uni_poly, eq_uni_poly, eval_eq_mle, eval_eq_sharp_uni, eval_eq_uni,
         evals_eq_hypercubes, matrix::MatrixDimensions, ntt::SerialRadix2Dft, UnivariatePoly,
     },
-    proof::{column_openings_by_rot, BatchConstraintProof, GkrProof},
+    proof::{column_openings_by_rot, BatchConstraintProof},
     protocol::stacking::{calculate_n_logup, lifted_log_height, StackedColumn, StackedLayout},
     prover::{
         error::LogupZerocheckError,
@@ -35,16 +36,19 @@ use pico_mle_core::{
             build_evaluator, build_view_pairs, eval_nodes_into, ConstraintEvaluator,
             InteractionEvalPlan, PackedConstraintEvaluator,
         },
-        fractional_sumcheck_gkr::{fractional_sumcheck, Frac},
+        fractional_sumcheck_gkr::Frac,
         sumcheck::sumcheck_round0_deg,
-        AirProvingContext, DeviceMultiStarkProvingKey, ProverBackend, ProvingContext,
-        ZerocheckLogupProof,
+        AirProvingContext, DeviceMultiStarkProvingKey, LogupChallenges, ProverBackend,
+        ProvingContext, ZerocheckLogupProof,
     },
     FiatShamirTranscript, StarkProtocolConfig,
 };
 use tracing::{debug, info_span, instrument};
 
-use crate::backend::CpuBackend;
+use crate::{
+    backend::CpuBackend,
+    gkr_runs::{fractional_sumcheck_over_runs, Runs},
+};
 
 // ============================================================================
 // Batch DFT helpers for row-major sumcheck
@@ -439,6 +443,110 @@ where
     // Assemble polynomial from coset evaluations
     let values: Vec<SC::EF> = evals;
     UnivariatePoly::from_geometric_cosets_evals_idft(RowMajorMatrix::new(values, d), g, g)
+}
+
+// ============================================================================
+// GKR input: a trace's leaves, its padding rows once
+// ============================================================================
+
+/// A trace's GKR leaves by row, one `(numerator, denominator)` per interaction for a row.
+struct TraceLeaves<F, EF> {
+    /// The rows before the padding, in order.
+    before: Vec<Vec<(F, EF)>>,
+    /// What every padding row evaluates to, and how many padding rows there are.
+    padding: Option<(Vec<(F, EF)>, usize)>,
+    /// The rows after the padding, in order.
+    after: Vec<Vec<(F, EF)>>,
+}
+
+impl<F, EF> TraceLeaves<F, EF> {
+    fn height(&self) -> usize {
+        let padding_len = self.padding.as_ref().map_or(0, |(_, len)| *len);
+        self.before.len() + padding_len + self.after.len()
+    }
+}
+
+/// The padding rows of a trace of `height` rows, as far as an interaction can tell: the rows
+/// `r`, `1 <= r < height - 1`, from which on every matrix of `mats` (as `view_mats_rowmaj`
+/// lists them) repeats its own last row. Such a row and the row after it hold the last row's
+/// values in every matrix, and its selectors are a middle row's, so every interaction
+/// evaluates to the same leaf on each of them. The first row and the last are left out: their
+/// selectors differ, and the row after the last is row 0. Empty when there are fewer than two
+/// such rows, or when a matrix does not have `height` rows.
+fn padding_rows<F: Field>(mats: &[(&RowMajorMatrix<F>, bool)], height: usize) -> Range<usize> {
+    // The first row from which every matrix repeats its last row.
+    let mut repeats_from = 0;
+    for &(mat, is_rot) in mats {
+        // A rotated view is of the matrix listed just before it.
+        if is_rot {
+            continue;
+        }
+        if mat.width == 0 || mat.values.len() != height * mat.width {
+            return 0..0;
+        }
+        let row = |index: usize| &mat.values[index * mat.width..(index + 1) * mat.width];
+        let mut from = height - 1;
+        while from > repeats_from && row(from - 1) == row(height - 1) {
+            from -= 1;
+        }
+        repeats_from = from;
+    }
+    let rows = repeats_from.max(1)..height - 1;
+    if rows.len() >= 2 {
+        rows
+    } else {
+        0..0
+    }
+}
+
+/// The stacked GKR input of `len` leaves, as runs: every interaction's slot holds its trace's
+/// leaves, a trace shorter than its slot as many copies of itself as fill it, with the
+/// numerators divided by their number; every other position holds the empty leaf, zero over
+/// `alpha`: `alpha` is added to every denominator, and an empty position's is zero before that.
+/// `traces[slot.mat_idx]` are the leaves of a slot's trace.
+///
+/// `StackedLayout::new` lists the slots in the order of their rows, with no gap between them.
+/// The sort and the gap fill keep this from depending on that.
+fn stacked_leaves<F: Field, EF: ExtensionField<F>>(
+    slots: &[StackedColumn],
+    traces: &[TraceLeaves<F, EF>],
+    alpha: EF,
+    len: usize,
+) -> Runs<Frac<EF>> {
+    let empty_leaf = Frac::new(EF::ZERO, alpha);
+    let mut slots = slots.to_vec();
+    slots.sort_by_key(|slot| slot.slice.row_idx);
+    let mut leaves = Runs::default();
+    for StackedColumn {
+        mat_idx: trace_idx,
+        src_col_idx: interaction_idx,
+        slice: s,
+    } in slots
+    {
+        let trace = &traces[trace_idx];
+        let height = trace.height();
+        debug_assert_eq!(s.col_idx, 0);
+        debug_assert_eq!(1 << s.log_height(), s.len(0));
+        debug_assert_eq!(s.len(0) % height, 0);
+        assert!(s.row_idx >= leaves.len(), "two interactions in one slot");
+        leaves.push_repeated(empty_leaf, s.row_idx - leaves.len());
+        let copies = s.len(0) / height;
+        let norm_factor = F::from_usize(copies).inverse();
+        let leaf = |row: &Vec<(F, EF)>| {
+            let (numer, denom) = row[interaction_idx];
+            Frac::new((numer * norm_factor).into(), denom + alpha)
+        };
+        let slot_leaves = |rows: &[Vec<(F, EF)>]| -> Vec<_> { rows.par_iter().map(leaf).collect() };
+        for _ in 0..copies {
+            leaves.push_stored(slot_leaves(&trace.before));
+            if let Some((row, count)) = &trace.padding {
+                leaves.push_repeated(leaf(row), *count);
+            }
+            leaves.push_stored(slot_leaves(&trace.after));
+        }
+    }
+    leaves.push_repeated(empty_leaf, len - leaves.len());
+    leaves
 }
 
 // ============================================================================
@@ -1167,6 +1275,7 @@ where
     SC::EF: TwoAdicField + ExtensionField<SC::F>,
     CpuBackend<SC>: ProverBackend<
         Val = SC::F,
+        Challenge = SC::EF,
         Matrix = RowMajorMatrix<SC::F>,
         OtherAirData = InteractionEvalPlan<SC::F>,
     >,
@@ -1195,9 +1304,12 @@ where
     debug!(%n_logup);
     let interactions_layout = StackedLayout::new(0, l_skip + n_logup, interactions_meta)?;
 
-    let logup_pow_witness = transcript.grind(mpk.params.logup.pow_bits);
-    let alpha_logup = transcript.sample_ext();
-    let beta_logup = transcript.sample_ext();
+    let challenges = LogupChallenges::<SC>::obtain(
+        transcript,
+        &mpk.params.logup,
+        ctx.external_logup_challenges,
+    )?;
+    let (alpha_logup, beta_logup) = (challenges.alpha, challenges.beta);
     debug!(%alpha_logup, %beta_logup);
 
     let mut prover =
@@ -1205,11 +1317,15 @@ where
 
     // GKR: compute logup input layer using row-major access
     let has_interactions = !prover.interactions_layout.sorted_cols.is_empty();
-    let gkr_input_evals = if !has_interactions {
-        vec![]
+    if challenges.external && !has_interactions {
+        return Err(LogupZerocheckError::ExternalModeWithoutInteractions);
+    }
+    let gkr_input = if !has_interactions {
+        Runs::default()
     } else {
-        // Per trace: row-major interaction evaluations using contiguous row access
-        let unstacked_interaction_evals = prover
+        // Per trace: the interactions of its rows, with contiguous row access. The padding rows
+        // all evaluate to one leaf per interaction, which is evaluated once.
+        let leaves_per_trace: Vec<TraceLeaves<SC::F, SC::EF>> = prover
             .eval_helpers
             .par_iter()
             .enumerate()
@@ -1217,49 +1333,36 @@ where
                 let trace_ctx = &ctx.per_trace[trace_idx].1;
                 let mats = helper.view_mats_rowmaj(trace_ctx);
                 let height = MatrixDimensions::height(&trace_ctx.common_main);
-                (0..height)
-                    .into_par_iter()
-                    .map(|i| {
-                        // Build row_parts from contiguous row-major memory
-                        let row_parts = RowMajorEvalHelper::<SC>::build_row_parts(&mats, i, height);
-                        helper.eval_interactions(&row_parts, &prover.beta_pows)
-                    })
-                    .collect::<Vec<_>>()
+                let interactions_at = |row: usize| {
+                    // Build row_parts from contiguous row-major memory
+                    let row_parts = RowMajorEvalHelper::<SC>::build_row_parts(&mats, row, height);
+                    helper.eval_interactions(&row_parts, &prover.beta_pows)
+                };
+                let padding_range = padding_rows(&mats, height);
+                let (before, after) = if padding_range.is_empty() {
+                    (0..height, height..height)
+                } else {
+                    (0..padding_range.start, padding_range.end..height)
+                };
+                TraceLeaves {
+                    before: before.into_par_iter().map(interactions_at).collect(),
+                    padding: (!padding_range.is_empty())
+                        .then(|| (interactions_at(padding_range.start), padding_range.len())),
+                    after: after.into_par_iter().map(interactions_at).collect(),
+                }
             })
-            .collect::<Vec<_>>();
-        let mut evals = vec![Frac::default(); 1 << (l_skip + n_logup)];
-        for StackedColumn {
-            mat_idx: trace_idx,
-            src_col_idx: interaction_idx,
-            slice: s,
-        } in prover.interactions_layout.sorted_cols.iter().copied()
-        {
-            let pq_evals = &unstacked_interaction_evals[trace_idx];
-            let height = pq_evals.len();
-            debug_assert_eq!(s.col_idx, 0);
-            debug_assert_eq!(1 << s.log_height(), s.len(0));
-            debug_assert_eq!(s.len(0) % height, 0);
-            let norm_factor_denom = s.len(0) / height;
-            let norm_factor = SC::F::from_usize(norm_factor_denom).inverse();
-            evals[s.row_idx..s.row_idx + s.len(0)]
-                .chunks_exact_mut(height)
-                .for_each(|evals| {
-                    evals
-                        .par_iter_mut()
-                        .zip(pq_evals)
-                        .for_each(|(pq_eval, evals_at_z)| {
-                            let (mut numer, denom) = evals_at_z[interaction_idx];
-                            numer *= norm_factor;
-                            *pq_eval = Frac::new(numer.into(), denom);
-                        });
-                });
-        }
-        evals.par_iter_mut().for_each(|frac| frac.q += alpha_logup);
-        evals
+            .collect();
+        stacked_leaves(
+            &prover.interactions_layout.sorted_cols,
+            &leaves_per_trace,
+            alpha_logup,
+            1 << (l_skip + n_logup),
+        )
     };
 
     let (frac_sum_proof, mut xi) =
-        fractional_sumcheck::<SC, _>(transcript, &gkr_input_evals, true)?;
+        fractional_sumcheck_over_runs::<SC, _>(transcript, &gkr_input, !challenges.external)?;
+    drop(gkr_input);
 
     let n_global = max(n_max, n_logup);
     debug!(%n_global);
@@ -1477,15 +1580,294 @@ where
         sumcheck_round_polys,
         column_openings,
     };
-    let gkr_proof = GkrProof::<SC> {
-        logup_pow_witness,
-        q0_claim: frac_sum_proof.fractional_sum.1,
-        claims_per_layer: frac_sum_proof.claims_per_layer,
-        sumcheck_polys: frac_sum_proof.sumcheck_polys,
-    };
+    let gkr_proof = challenges.gkr_proof(frac_sum_proof);
     Ok(ZerocheckLogupProof {
         gkr: gkr_proof,
         batch: batch_constraint_proof,
         eval_point: r,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
+    use p3_matrix::dense::RowMajorMatrix;
+    use pico_mle_core::{
+        config::koala_bear_poseidon2::{KoalaBearPoseidon2Config as SC, EF, F},
+        protocol::stacking::{
+            calculate_n_logup, lifted_log_height, StackedColumn, StackedLayout, StackedSlice,
+        },
+        prover::fractional_sumcheck_gkr::Frac,
+    };
+    use rand::{rngs::StdRng, RngExt, SeedableRng};
+
+    use super::{padding_rows, stacked_leaves, RowMajorEvalHelper, TraceLeaves};
+
+    /// A matrix of `width` columns whose row `i` holds `rows[i]` in every column.
+    fn matrix(rows: &[u32], width: usize) -> RowMajorMatrix<F> {
+        let values = rows
+            .iter()
+            .flat_map(|&value| std::iter::repeat_n(F::from_u32(value), width))
+            .collect();
+        RowMajorMatrix::new(values, width)
+    }
+
+    /// A matrix whose rows are given cell by cell.
+    fn matrix_of_rows<const WIDTH: usize>(rows: &[[u32; WIDTH]]) -> RowMajorMatrix<F> {
+        let values = rows
+            .iter()
+            .flatten()
+            .map(|&value| F::from_u32(value))
+            .collect();
+        RowMajorMatrix::new(values, WIDTH)
+    }
+
+    #[test]
+    fn padding_is_where_every_matrix_repeats_its_last_row() {
+        let a = matrix(&[5, 6, 7, 0, 0, 0, 0, 0], 2);
+        assert_eq!(padding_rows(&[(&a, false)], 8), 3..7);
+        // The rotated view of a matrix is the matrix again.
+        assert_eq!(padding_rows(&[(&a, false), (&a, true)], 8), 3..7);
+        // A matrix that repeats from a later row on decides.
+        let b = matrix(&[1, 1, 1, 1, 1, 9, 9, 9], 3);
+        assert_eq!(padding_rows(&[(&a, false), (&b, false)], 8), 5..7);
+        assert_eq!(padding_rows(&[(&b, false), (&a, false)], 8), 5..7);
+        // Every row the same: all but the first and the last.
+        let c = matrix(&[4; 8], 1);
+        assert_eq!(padding_rows(&[(&c, false)], 8), 1..7);
+        assert_eq!(padding_rows(&[(&matrix(&[4; 4], 1), false)], 4), 1..3);
+        // A row repeats the last one when every cell of it does: here rows 1 to 3 agree with
+        // the last in their first cell alone.
+        let d = matrix_of_rows(&[
+            [1, 1],
+            [0, 7],
+            [0, 7],
+            [0, 7],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+        ]);
+        assert_eq!(padding_rows(&[(&d, false)], 8), 4..7);
+    }
+
+    #[test]
+    fn a_trace_without_two_such_rows_has_no_padding() {
+        // No row repeats the last.
+        let a = matrix(&[0, 0, 0, 0, 0, 0, 0, 1], 2);
+        assert!(padding_rows(&[(&a, false)], 8).is_empty());
+        // One row does, and the last row itself is never padding.
+        let b = matrix(&[1, 2, 3, 4, 5, 6, 0, 0], 2);
+        assert!(padding_rows(&[(&b, false)], 8).is_empty());
+        // A matrix of another height than the trace's.
+        let c = matrix(&[0; 4], 2);
+        let d = matrix(&[0; 8], 2);
+        assert!(padding_rows(&[(&d, false), (&c, false)], 8).is_empty());
+        // Traces of one row, of two and of three.
+        assert!(padding_rows(&[(&matrix(&[3], 1), false)], 1).is_empty());
+        assert!(padding_rows(&[(&matrix(&[3, 3], 1), false)], 2).is_empty());
+        assert!(padding_rows(&[(&matrix(&[3, 3, 3], 1), false)], 3).is_empty());
+    }
+
+    /// What an interaction is evaluated on at a row, `build_row_parts`, is the same at every
+    /// padding row: the selectors, each matrix's row and, where the views are rotated, the row
+    /// after it.
+    #[test]
+    fn every_padding_row_gives_the_same_row_parts() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let mut with_padding = 0;
+        for _ in 0..2000 {
+            let height = rng.random_range(1..=24usize);
+            // Cells drawn one by one from two values, and a tail of the last row's, so that
+            // padding is common and rows that agree in some cells only are too.
+            let matrices: Vec<RowMajorMatrix<F>> = (0..rng.random_range(1..=3))
+                .map(|_| {
+                    let tail = rng.random_range(0..=height);
+                    let width = rng.random_range(1..=3usize);
+                    let last: Vec<u32> = (0..width).map(|_| rng.random_range(0..2)).collect();
+                    let values = (0..height)
+                        .flat_map(|row| {
+                            if row >= height - tail {
+                                last.clone()
+                            } else {
+                                (0..width).map(|_| rng.random_range(0..2)).collect()
+                            }
+                        })
+                        .map(F::from_u32)
+                        .collect();
+                    RowMajorMatrix::new(values, width)
+                })
+                .collect();
+            let needs_next = rng.random_range(0..2) == 1;
+            let mats: Vec<(&RowMajorMatrix<F>, bool)> = matrices
+                .iter()
+                .flat_map(|matrix| {
+                    let rotated = needs_next.then_some((matrix, true));
+                    [Some((matrix, false)), rotated].into_iter().flatten()
+                })
+                .collect();
+            let padding = padding_rows(&mats, height);
+            with_padding += usize::from(!padding.is_empty());
+            let row_parts =
+                |row: usize| RowMajorEvalHelper::<SC>::build_row_parts(&mats, row, height);
+            for row in padding.clone() {
+                assert_eq!(
+                    row_parts(row),
+                    row_parts(padding.start),
+                    "row {row} of {padding:?}"
+                );
+            }
+        }
+        assert!(with_padding > 100, "{with_padding} traces with padding");
+    }
+
+    type RowsOfLeaves = Vec<Vec<(F, EF)>>;
+
+    /// A trace of `height` rows of random leaves for `interactions` interactions, with the rows
+    /// of `padding` all one leaf: by row, and as [`TraceLeaves`].
+    fn random_trace(
+        rng: &mut StdRng,
+        height: usize,
+        interactions: usize,
+        padding: std::ops::Range<usize>,
+    ) -> (RowsOfLeaves, TraceLeaves<F, EF>) {
+        let mut row = || -> Vec<(F, EF)> {
+            (0..interactions)
+                .map(|_| {
+                    let denom = EF::from_basis_coefficients_fn(|_| F::from_u32(rng.random()));
+                    (F::from_u32(rng.random()), denom)
+                })
+                .collect()
+        };
+        let mut rows: RowsOfLeaves = (0..height).map(|_| row()).collect();
+        for at in padding.clone().skip(1) {
+            rows[at] = rows[padding.start].clone();
+        }
+        let leaves = if padding.is_empty() {
+            TraceLeaves {
+                before: rows.clone(),
+                padding: None,
+                after: vec![],
+            }
+        } else {
+            TraceLeaves {
+                before: rows[..padding.start].to_vec(),
+                padding: Some((rows[padding.start].clone(), padding.len())),
+                after: rows[padding.end..].to_vec(),
+            }
+        };
+        (rows, leaves)
+    }
+
+    /// The stacked input written position by position, every row of every trace in its slot.
+    fn dense_input(
+        slots: &[StackedColumn],
+        traces: &[RowsOfLeaves],
+        alpha: EF,
+        len: usize,
+    ) -> Vec<Frac<EF>> {
+        let mut input = vec![Frac::default(); len];
+        for &StackedColumn {
+            mat_idx,
+            src_col_idx,
+            slice,
+        } in slots
+        {
+            let rows = &traces[mat_idx];
+            let norm_factor = F::from_usize(slice.len(0) / rows.len()).inverse();
+            let slot = &mut input[slice.row_idx..slice.row_idx + slice.len(0)];
+            for copy in slot.chunks_exact_mut(rows.len()) {
+                for (leaf, row) in copy.iter_mut().zip(rows) {
+                    let (numer, denom) = row[src_col_idx];
+                    *leaf = Frac::new((numer * norm_factor).into(), denom);
+                }
+            }
+        }
+        for leaf in &mut input {
+            leaf.q += alpha;
+        }
+        input
+    }
+
+    fn assert_stacked_as_dense(
+        slots: &[StackedColumn],
+        traces: Vec<(RowsOfLeaves, TraceLeaves<F, EF>)>,
+        len: usize,
+    ) {
+        let alpha = EF::from_basis_coefficients_fn(|i| F::from_u32(1_000_003 + i as u32));
+        let (rows, leaves): (Vec<_>, Vec<_>) = traces.into_iter().unzip();
+        let stacked = stacked_leaves(slots, &leaves, alpha, len).to_vec();
+        let dense = dense_input(slots, &rows, alpha, len);
+        assert_eq!(stacked.len(), dense.len());
+        for (at, (stacked, dense)) in stacked.iter().zip(&dense).enumerate() {
+            assert_eq!((stacked.p, stacked.q), (dense.p, dense.q), "position {at}");
+        }
+    }
+
+    /// The layout of a proof: traces tallest first, some with padding long enough to stay a run
+    /// and some with a little, one with no interaction, and two shorter than their slots, which
+    /// they fill with copies.
+    #[test]
+    fn the_stacked_leaves_are_the_dense_input() {
+        let mut rng = StdRng::seed_from_u64(2);
+        let l_skip = 4;
+        // (height, interactions, padding rows)
+        let shapes = [
+            (256, 3, 100..255),
+            (64, 0, 0..0),
+            (64, 2, 60..63),
+            (32, 2, 0..0),
+            (8, 1, 1..7),
+            (2, 1, 0..0),
+        ];
+        let traces: Vec<_> = shapes
+            .iter()
+            .map(|(height, interactions, padding)| {
+                random_trace(&mut rng, *height, *interactions, padding.clone())
+            })
+            .collect();
+        let mut total_interactions = 0u64;
+        let meta: Vec<(usize, usize)> = shapes
+            .iter()
+            .map(|(height, interactions, _)| {
+                let log_lifted_height = lifted_log_height(height.ilog2() as usize, l_skip);
+                total_interactions += (*interactions as u64) << log_lifted_height;
+                (*interactions, log_lifted_height)
+            })
+            .collect();
+        let n_logup = calculate_n_logup(l_skip, total_interactions);
+        let layout = StackedLayout::new(0, l_skip + n_logup, meta).expect("layout");
+        assert_stacked_as_dense(&layout.sorted_cols, traces, 1 << (l_skip + n_logup));
+    }
+
+    /// A trace's padding is one repeated leaf in each of its slots, not a leaf a row: what a
+    /// chunk's Global table costs in memory rests on it.
+    #[test]
+    fn padding_is_stored_once_for_each_slot() {
+        let mut rng = StdRng::seed_from_u64(4);
+        let (_, trace) = random_trace(&mut rng, 256, 3, 100..255);
+        let layout = StackedLayout::new(0, 10, vec![(3, 8)]).expect("layout");
+        let alpha = EF::from_u32(7);
+        let leaves = stacked_leaves(&layout.sorted_cols, &[trace], alpha, 1 << 10);
+        // 100 rows before the padding and the last row, three times; the padding of each slot
+        // and the empty positions past the slots.
+        assert_eq!(leaves.stored_and_repeated(), (3 * 101, 3 + 1));
+    }
+
+    /// Slots out of order and with positions between them that no slot takes.
+    #[test]
+    fn slots_in_any_order_and_gaps_stack_as_the_dense_input() {
+        let mut rng = StdRng::seed_from_u64(3);
+        let traces = vec![
+            random_trace(&mut rng, 16, 2, 3..15),
+            random_trace(&mut rng, 16, 1, 0..0),
+        ];
+        let slot = |mat_idx, src_col_idx, row_idx| StackedColumn {
+            mat_idx,
+            src_col_idx,
+            slice: StackedSlice::new(0, row_idx, 4),
+        };
+        let slots = [slot(1, 0, 96), slot(0, 1, 16), slot(0, 0, 48)];
+        assert_stacked_as_dense(&slots, traces, 128);
+    }
 }

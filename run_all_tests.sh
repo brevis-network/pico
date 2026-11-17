@@ -10,10 +10,6 @@ fi
 
 tests=(
 "test_byte_gpu_generate_preprocessed"
-"test_riscv_poseidon2_gpu_generate_main"
-"bench_riscv_poseidon2_cpu_vs_gpu"
-"test_riscv_global_gpu_generate_extra_record_and_main"
-"bench_riscv_global_cpu_vs_gpu"
 "test_keccak_sliced_gpu_generate_extra_record_and_main"
 "test_sha_compress_gpu_generate_extra_record_and_main"
 "bench_sha_compress_cpu_vs_gpu"

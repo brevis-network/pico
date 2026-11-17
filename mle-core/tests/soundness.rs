@@ -8,6 +8,9 @@
 //! doc). Each preset is scored at two circuit shapes: the bounds
 //! its doc comment assumes, and the shape of every key in `soundness_manifest.json`, which
 //! `vm/examples/mle_soundness_manifest.rs` writes from a real keygen of the production machines.
+//! The global LogUp's group proofs prove with the riscv preset in the external challenge mode:
+//! they are scored without a LogUp round, and the round they leave out, the block's, is scored
+//! once on its own.
 //! Run with `--nocapture` to see the per-component breakdown.
 
 use std::collections::BTreeMap;
@@ -18,8 +21,14 @@ use pico_mle_core::{
         koala_bear_poseidon2::KoalaBearPoseidon2Config,
         recursion_params_with_128_bits_security, riscv_params_with_128_bits_security,
         soundness::{SoundnessCalculator, VkShape, DEGREE_BOUND, PRODUCTION_SECURITY_BITS},
-        try_riscv_params_with_128_bits_security, MAX_RISCV_LOG_STACKED_HEIGHT,
+        try_riscv_params_with_128_bits_security, WhirProximityStrategy,
+        MAX_RISCV_LOG_STACKED_HEIGHT,
     },
+    global_logup::{
+        group_params, LOG_COUNT_UNIT, MAX_COUNT, MAX_DIRECTION_ROWS, MAX_GLOBAL_LOG_HEIGHT,
+        MAX_GROUP_LEN,
+    },
+    interaction::LogUpChallengeMode,
     SystemParams,
 };
 use serde::Deserialize;
@@ -72,8 +81,10 @@ const REGENERATE: &str =
 /// the same one.
 const MANIFEST_DEGREE_BOUND: &str = "closed-form";
 
-/// The machines the recursion preset proves, as the manifest names them.
-const RECURSION_MACHINES: [&str; 3] = ["convert", "combine", "deferred"];
+/// The machines the recursion preset proves, as the manifest names them: the convert leaves, the
+/// global LogUp's image node and group nodes, the combine nodes and the deferred node.
+const RECURSION_MACHINES: [&str; 5] =
+    ["convert", "image_node", "group_node", "combine", "deferred"];
 
 #[derive(Deserialize)]
 struct Manifest {
@@ -81,6 +92,7 @@ struct Manifest {
     dirty: bool,
     dirty_paths: Vec<String>,
     calculator: String,
+    global_logup: GlobalLogUp,
     shipped_whitelist: String,
     apex: Apex,
     onchain_test_keys: OnchainTestKeys,
@@ -88,6 +100,19 @@ struct Manifest {
     /// manifest CI accepts.
     not_generated: Vec<serde_json::Value>,
     keys: Vec<ManifestKey>,
+}
+
+/// The α/β round of a block's global LogUp and the inputs it is scored from.
+#[derive(Deserialize)]
+struct GlobalLogUp {
+    bits: f64,
+    riscv_log_stacked_height: usize,
+    max_interaction_count: u32,
+    log_max_message_length: u32,
+    pow_bits: usize,
+    first_whir_round_within_unique_decoding: bool,
+    count_unit_rows: u64,
+    max_count: u64,
 }
 
 /// The identities an apex verifier is built from in whitelist mode, `vk_root` among them; `vm`'s
@@ -129,7 +154,8 @@ struct ManifestKey {
     params: SystemParams,
     soundness: BTreeMap<String, f64>,
     whir_details: BTreeMap<String, f64>,
-    /// Recorded on the whitelist set's convert, combine, deferred and compress keys only.
+    /// Recorded on the whitelist set's member keys only: convert, the global LogUp's image and
+    /// group nodes, combine, deferred and compress.
     in_shipped_whitelist: Option<bool>,
 }
 
@@ -176,9 +202,18 @@ impl Manifest {
         if DEGREE_BOUND != MANIFEST_DEGREE_BOUND {
             return;
         }
+        // A key in the external challenge mode has no LogUp round of its own, and no row for
+        // one: the round is the block's (`global_logup`).
+        let external = params.logup.challenge_mode == LogUpChallengeMode::External;
+        assert_eq!(s.logup_bits.is_infinite(), external, "{label}");
+        let components: Vec<(&str, f64)> = s
+            .components()
+            .into_iter()
+            .filter(|(name, _)| !(external && *name == "logup_bits"))
+            .collect();
         for (recorded, computed) in [
-            (&key.soundness, s.components()),
-            (&key.whir_details, s.whir_details.components()),
+            (&key.soundness, components),
+            (&key.whir_details, s.whir_details.components().to_vec()),
         ] {
             assert_eq!(
                 recorded.len(),
@@ -289,6 +324,31 @@ fn riscv_preset_meets_128_bits_at_assumed_bounds() {
     }
 }
 
+/// The α/β round of a block's global LogUp, which the block's group proofs share and none of
+/// them contains: scored under the group machines' parameters (the riscv preset's, in the
+/// external challenge mode) at every height the riscv preset admits. It is the bound of a riscv
+/// proof's own LogUp round.
+#[test]
+fn global_logup_meets_128_bits_and_is_pinned() {
+    for h in riscv_log_stacked_heights() {
+        let riscv = riscv_params_with_128_bits_security(h);
+        let bits = SoundnessCalculator::global_logup_bits_for::<KoalaBearPoseidon2Config>(
+            &group_params(&riscv),
+        );
+        println!("global LogUp at riscv({h}): {bits:.2} bits");
+        assert!(
+            bits >= PRODUCTION_SECURITY_BITS,
+            "global LogUp at riscv({h}): {bits:.2} bits < {PRODUCTION_SECURITY_BITS}"
+        );
+        assert!(
+            (bits - 133.95).abs() <= 0.01,
+            "global LogUp at riscv({h}) is {bits:.4} bits, pinned at 133.95"
+        );
+        let label = format!("riscv({h}) at assumed bounds");
+        assert_eq!(bits, score(&label, &riscv, &RISCV_ASSUMED).logup_bits);
+    }
+}
+
 #[test]
 fn recursion_preset_meets_128_bits_at_assumed_bounds() {
     let params = recursion_params_with_128_bits_security();
@@ -326,6 +386,96 @@ fn recursion_machines_meet_128_bits_at_measured_shape() {
     }
 }
 
+/// The group machines of the global LogUp, one key per group size: each is held to the manifest
+/// at the riscv height it was keygen'd at, then scored at every other height the riscv preset
+/// admits. Their proofs carry no LogUp round; the rest clears the target on its own.
+#[test]
+fn group_machines_meet_128_bits_at_measured_shape() {
+    let manifest = manifest();
+    let keys = manifest.keys_of("group");
+    assert_eq!(
+        keys.iter()
+            .map(|key| key.shape.num_airs)
+            .collect::<Vec<_>>(),
+        (1..=MAX_GROUP_LEN).collect::<Vec<_>>(),
+        "the manifest's group keys are not one per group size; {REGENERATE}"
+    );
+    for key in keys {
+        assert_eq!(key.mode, "any", "{}", key.label());
+        let keyed_at = key.shape.log_stacked_height;
+        let params = group_params(&riscv_params_with_128_bits_security(keyed_at));
+        Manifest::check_key(key, &params, &score(&key.label(), &params, &key.shape));
+        for h in riscv_log_stacked_heights() {
+            let label = format!("{} at h = {h}", key.label());
+            let params = group_params(&riscv_params_with_128_bits_security(h));
+            assert_target(&label, &score(&label, &params, &key.shape));
+        }
+    }
+}
+
+/// The round is scored under the parameters of the proofs that leave it out: a set in the
+/// internal mode has its round in each proof.
+#[test]
+#[should_panic(expected = "the one external-mode proofs leave out")]
+fn the_global_logup_is_not_scored_under_internal_mode_parameters() {
+    SoundnessCalculator::global_logup_bits_for::<KoalaBearPoseidon2Config>(
+        &riscv_params_with_128_bits_security(23),
+    );
+}
+
+/// The round is not scored where a commitment does not fix its table.
+#[test]
+#[should_panic(expected = "within the unique-decoding radius")]
+fn the_global_logup_is_not_scored_outside_unique_decoding() {
+    let mut params = group_params(&riscv_params_with_128_bits_security(23));
+    params.whir.proximity = WhirProximityStrategy::ListDecoding { m: 9 };
+    SoundnessCalculator::global_logup_bits_for::<KoalaBearPoseidon2Config>(&params);
+}
+
+/// The manifest's record of the global LogUp's round is what this build computes from the
+/// parameters it names, and those are the group machines'.
+#[test]
+fn manifest_global_logup_is_recorded() {
+    let recorded = manifest().global_logup;
+    let params = group_params(&riscv_params_with_128_bits_security(
+        recorded.riscv_log_stacked_height,
+    ));
+    assert_eq!(
+        (
+            recorded.max_interaction_count,
+            recorded.log_max_message_length,
+            recorded.pow_bits,
+            recorded.first_whir_round_within_unique_decoding,
+        ),
+        (
+            params.logup.max_interaction_count,
+            params.logup.log_max_message_length,
+            params.logup.pow_bits,
+            true,
+        ),
+        "the manifest's global LogUp inputs are not the group machines'; {REGENERATE}"
+    );
+    assert_eq!(
+        (recorded.count_unit_rows, recorded.max_count),
+        (1 << LOG_COUNT_UNIT, MAX_COUNT),
+        "the manifest's real-row bound is not this build's; {REGENERATE}"
+    );
+    // Below the field's order in each direction, with the image table on top of the sends: the
+    // bound the round is scored at allows a block `2 * max_interaction_count` terms.
+    assert_eq!(
+        recorded.count_unit_rows * recorded.max_count + (1 << MAX_GLOBAL_LOG_HEIGHT),
+        MAX_DIRECTION_ROWS
+    );
+    assert!(MAX_DIRECTION_ROWS < recorded.max_interaction_count as u64);
+    let bits = SoundnessCalculator::global_logup_bits_for::<KoalaBearPoseidon2Config>(&params);
+    assert!(
+        (recorded.bits - bits).abs() < 1e-6,
+        "the global LogUp scores {bits} but the manifest records {}; {REGENERATE}",
+        recorded.bits
+    );
+    assert!(bits >= PRODUCTION_SECURITY_BITS);
+}
+
 #[test]
 fn embed_machine_meets_128_bits_at_measured_shape() {
     let manifest = manifest();
@@ -358,7 +508,8 @@ fn measured_shapes_are_within_assumed_bounds() {
     for key in manifest().keys {
         let measured = &key.shape;
         let assumed = match key.machine.as_str() {
-            "riscv" => &RISCV_ASSUMED,
+            // A group machine proves at the riscv preset and is far inside its bounds.
+            "riscv" | "group" => &RISCV_ASSUMED,
             m if RECURSION_MACHINES.contains(&m) || m == "embed" || m == "compress" => {
                 &RECURSION_ASSUMED
             }
@@ -393,7 +544,15 @@ fn manifest_identities_are_recorded() {
     assert!(!manifest.shipped_whitelist.is_empty());
     // The whitelist set is complete: every key kind a whitelist-mode prover
     // keygens is scored, and the recursion ones among them are held to membership below.
-    for machine in ["convert", "combine", "deferred", "embed", "compress"] {
+    for machine in [
+        "convert",
+        "image_node",
+        "group_node",
+        "combine",
+        "deferred",
+        "embed",
+        "compress",
+    ] {
         assert!(
             manifest
                 .keys
@@ -409,14 +568,16 @@ fn manifest_identities_are_recorded() {
     );
     for key in &manifest.keys {
         // The keys the whitelist can hold: every KoalaBear-digest recursion key and the compress
-        // key; the riscv key is pinned by its pre-hash, the embed key is BN254-hashed.
-        let member_checked = key.machine != "riscv" && key.machine != "embed";
+        // key; the riscv key is pinned by its pre-hash, the group keys by the parameter digest
+        // the challenges are derived over, and the embed key is BN254-hashed.
+        let member_checked = !["riscv", "group", "embed"].contains(&key.machine.as_str());
         let expected = (key.mode == "whitelist" && member_checked).then_some(true);
         assert_eq!(
             key.in_shipped_whitelist,
             expected,
-            "{}: whitelist membership (every whitelist-mode convert, combine, deferred and compress \
-             key is a member of the shipped whitelist, and no other key records it); {REGENERATE}",
+            "{}: whitelist membership (every whitelist-mode convert, image-node, group-node, \
+             combine, deferred and compress key is a member of the shipped whitelist, and no \
+             other key records it); {REGENERATE}",
             key.label()
         );
     }
@@ -486,7 +647,7 @@ fn compress_preset_meets_128_bits_at_assumed_bounds() {
 /// The compress and embed presets carry the same values. They are separate presets because they
 /// are tuned for different costs (proof size; the Groth16 circuit's cost per query); embed verifies
 /// the compress proof, and keeping its values equal is a choice (the wrap circuit over them is
-/// 7,243,820 R1CS, 13.6% under 2^23). A retune for the wrap circuit moves
+/// 7,256,115 R1CS, 13.5% under 2^23). A retune for the wrap circuit moves
 /// the embed key, and with it the wrap circuit, its Groth16 setup and the soundness manifest, but
 /// not the whitelist; then this test goes.
 #[test]

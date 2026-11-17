@@ -23,7 +23,7 @@
 //!   made to the host's history says which airs it moves ([`HostSide::differing_airs`]); the
 //!   device must then fail in exactly those, and a change that moves none proves nothing. The
 //!   device buffers the orchestrator uploads beside the fill take no such control: the record the
-//!   device is given holds no global or Poseidon2 event, so the device writes every byte of those
+//!   device is given holds no global event, so the device writes every byte of those
 //!   buffers before any chip reads them.
 //! - **Alternation** ([`alternate`]). Two chunks whose host traces differ are generated in turn on
 //!   one device, so a kernel that reads what the previous chunk left behind diverges.
@@ -88,43 +88,35 @@ fn slot(width: usize, flags: Vec<usize>) -> AirPolicy {
 /// The rules for one air of the RISC-V machine, by air id.
 ///
 /// In order: the CPU chip (its row chain is constrained), memory initialize and finalize (the
-/// address chain runs through every row, `used = 0` rows included, so no row of theirs is
-/// padding), global (its accumulation runs down the trace and the last row's `cum` is the chunk's
-/// sum), ecall (its deferred-commit tally is a running total the last row publishes), program and
-/// byte (tables read at their index), and every precompile, compared cell for cell. As multisets of
-/// one event's columns: the ALU chips, compare, memory read/write and the RISC-V syscall chip (one
-/// event per row), memory local and Poseidon2 (four per row). An ALU event's `is_real` is the sum
-/// of its opcode flags.
+/// address chain runs through every row, `used = 0` rows included, so no row of theirs is padding),
+/// global (the rows are the chunk's committed event table, in the order the events are emitted),
+/// ecall (its deferred-commit tally is a running total the last row publishes), program and byte
+/// (tables read at their index), and every precompile, compared cell for cell. As multisets of one
+/// event's columns: the ALU chips, compare, memory read/write and the RISC-V syscall chip (one
+/// event per row), and memory local (four per row). An ALU event's `is_real` is the sum of its
+/// opcode flags.
 ///
 /// Padding is the host's padding in every column: no air frees one today. Of the airs compared
 /// cell for cell, memory initialize and finalize and the precompile syscall chip name the `is_real`
 /// that tells a device-only trace's padding; any other air the device alone generates fails.
 pub fn air_policy(air: usize) -> Option<AirPolicy> {
-    use crate::{
-        chips::chips::{
-            alu::{
-                add::columns::AddValueCols, addw::columns::AddwValueCols,
-                bitwise::columns::BitwiseValueCols, divrem::columns::DivRemValueCols,
-                lt::LtValueCols, mul::columns::MulValueCols, sll::ShiftLeftValueCols,
-                sr::columns::ShiftRightValueCols, sub::columns::SubValueCols,
-                subw::columns::SubwValueCols,
-            },
-            riscv_cpu::columns::CpuCols,
-            riscv_ecall::columns::EcallChipCols,
-            riscv_global::columns::GlobalCols,
-            riscv_memory::{
-                initialize_finalize::columns::MemoryInitializeFinalizeCols,
-                local::columns::SingleMemoryLocal, read_write::columns::MemoryChipValueCols,
-            },
-            riscv_poseidon2::columns::RiscvPoseidon2ValueCols,
-            syscall::columns::SyscallCols,
+    use crate::chips::chips::{
+        alu::{
+            add::columns::AddValueCols, addw::columns::AddwValueCols,
+            bitwise::columns::BitwiseValueCols, divrem::columns::DivRemValueCols, lt::LtValueCols,
+            mul::columns::MulValueCols, sll::ShiftLeftValueCols, sr::columns::ShiftRightValueCols,
+            sub::columns::SubValueCols, subw::columns::SubwValueCols,
         },
-        primitives::consts::KoalaBearConfig,
+        riscv_cpu::columns::CpuCols,
+        riscv_ecall::columns::EcallChipCols,
+        riscv_global::columns::GlobalCols,
+        riscv_memory::{
+            initialize_finalize::columns::MemoryInitializeFinalizeCols,
+            local::columns::SingleMemoryLocal, read_write::columns::MemoryChipValueCols,
+        },
+        syscall::columns::SyscallCols,
     };
     use std::mem::size_of;
-
-    type Poseidon2Slot = RiscvPoseidon2ValueCols<u8, KoalaBearConfig>;
-    // The global trace's last cells are the chunk's sum, which `GcsBindAir` binds.
 
     Some(match air {
         air_id::ADD => slot(
@@ -212,10 +204,6 @@ pub fn air_policy(air: usize) -> Option<AirPolicy> {
             size_of::<SingleMemoryLocal<u8>>(),
             vec![col!(SingleMemoryLocal<u8>, is_real)],
         ),
-        air_id::POSEIDON2 => slot(
-            size_of::<Poseidon2Slot>(),
-            vec![col!(Poseidon2Slot, is_real)],
-        ),
         air_id::CPU => row(
             Order::InOrder,
             Padding::Flags(vec![col!(CpuCols<u8>, is_real)]),
@@ -262,7 +250,6 @@ pub fn census(air: usize, augmented: &EmulationRecord) -> Option<usize> {
         air_id::SYSCALL_RISCV => augmented.syscalls().len(),
         air_id::MEM_LOCAL => augmented.get_local_mem_events().count(),
         air_id::GLOBAL => augmented.global_lookup_events.len(),
-        air_id::POSEIDON2 => augmented.poseidon2_events.len(),
         _ => return None,
     })
 }
@@ -1087,7 +1074,6 @@ mod tests {
                 "MemoryLocal",
                 "MemoryReadWrite",
                 "SyscallRiscv",
-                "RiscvKoalaBearPoseidon2",
             ]
         );
     }

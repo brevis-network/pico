@@ -292,13 +292,17 @@ fn serial_emulation_is_refused_with_aot() {
     );
 }
 
-/// Proves and verifies fib to [`Phase::Combine`] through the AOT pipeline, with the output bytes
-/// the interpreter commits, at the default worker count. The child's stdout carries the evidence
+/// Proves fib to [`Phase::Riscv`] through the AOT pipeline, with the output bytes the
+/// interpreter commits, at the default worker count. The child's stdout carries the evidence
 /// that the pipeline made the records: its banner, the worker count it ran, and the AOT runtime's
 /// end-of-run line naming fib's digest, once per emulation the child ran.
+///
+/// What is checked is who made the records, which the RISC-V proofs are enough to accept or
+/// refuse chunk by chunk. That the chunks form one execution is combine's to check, and
+/// [`aot_workers_prove_and_verify_to_combine`] takes an AOT run that far.
 #[test]
-fn an_aot_run_proves_and_verifies_to_combine() {
-    const TEST_NAME: &str = "tests::aot::an_aot_run_proves_and_verifies_to_combine";
+fn an_aot_run_proves_and_verifies_to_riscv() {
+    const TEST_NAME: &str = "tests::aot::an_aot_run_proves_and_verifies_to_riscv";
     const MARKER: &str = "[aot] fib proved through the AOT pipeline";
     if !is_child() {
         let mut envs = child_env();
@@ -341,8 +345,10 @@ fn an_aot_run_proves_and_verifies_to_combine() {
         "a {SMALL_CHUNK}-instruction chunk must split this run across workers"
     );
 
-    let proof = prover.prove(Stdin::from(&N)).expect("prove");
-    assert_eq!(proof.phase(), Phase::Combine);
+    let proof = prover
+        .prove_to(Stdin::from(&N), Phase::Riscv)
+        .expect("prove");
+    assert_eq!(proof.phase(), Phase::Riscv);
     assert_is_fib_output(proof.committed().as_bytes(), N);
     assert_eq!(proof.committed().as_bytes(), interpreted.committed_bytes);
 
@@ -357,10 +363,10 @@ fn an_aot_run_proves_and_verifies_to_combine() {
     println!("{MARKER}");
 }
 
-/// [`an_aot_run_proves_and_verifies_to_combine`] with the replay workers on the AOT program too
-/// ([`crate::ProverBuilder::aot_workers`]): the same banner, worker count and end-of-run line, the
-/// workers' banner beside them, and a run of the recording entry point on every chunk, none of the
-/// ordinary one.
+/// [`an_aot_run_proves_and_verifies_to_riscv`] with the replay workers on the AOT program too
+/// ([`crate::ProverBuilder::aot_workers`]), and on to [`Phase::Combine`]: the same banner, worker
+/// count and end-of-run line, the workers' banner beside them, and a run of the recording entry
+/// point on every chunk, none of the ordinary one.
 #[test]
 fn aot_workers_prove_and_verify_to_combine() {
     const TEST_NAME: &str = "tests::aot::aot_workers_prove_and_verify_to_combine";

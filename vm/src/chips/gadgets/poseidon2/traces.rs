@@ -45,8 +45,7 @@ pub(crate) fn populate_perm<
 
 /// Runs the permutation on `state` in place (external linear layer, then the three round groups),
 /// recording the per-round witnesses. Used by the full-width `Poseidon2ValueCols`
-/// (`populate_perm`); the riscv rate-8 layout has its own driver
-/// (`riscv_poseidon2::traces::populate_perm_rounds_riscv`, built from the per-round helpers below).
+/// (`populate_perm`).
 pub(crate) fn populate_perm_rounds<
     F: PrimeField,
     LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,

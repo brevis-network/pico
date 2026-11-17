@@ -2,7 +2,7 @@
 //! Single-pass classification avoids 9 redundant scans in gpu_generate_preprocessed.
 
 use super::{
-    instruction::{HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction},
+    instruction::{HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction},
     types::*,
 };
 use crate::chips::chips::recursion_memory::MemoryAccessCols;
@@ -61,10 +61,6 @@ impl<F: Field> InstructionBuckets<F> {
                 }) => {
                     n_mem_var += output_addrs_mults.len();
                 }
-                Instruction::HintAddCurve(instr) => {
-                    n_mem_var +=
-                        instr.output_x_addrs_mults.len() + instr.output_y_addrs_mults.len();
-                }
                 Instruction::Print(_) => {}
                 // MLE recursion instructions (Convert/Combine/Compress) carry no GPU bucket —
                 // their chips fall back to CPU trace-gen, so they are skipped here.
@@ -122,19 +118,6 @@ impl<F: Field> InstructionBuckets<F> {
                     output_addrs_mults, ..
                 }) => {
                     for am in output_addrs_mults {
-                        mem_var_accesses.push(MemoryAccessCols::from(am));
-                    }
-                }
-                Instruction::HintAddCurve(instr) => {
-                    let HintAddCurveInstr {
-                        output_x_addrs_mults,
-                        output_y_addrs_mults,
-                        ..
-                    } = instr.as_ref();
-                    for am in output_x_addrs_mults
-                        .iter()
-                        .chain(output_y_addrs_mults.iter())
-                    {
                         mem_var_accesses.push(MemoryAccessCols::from(am));
                     }
                 }

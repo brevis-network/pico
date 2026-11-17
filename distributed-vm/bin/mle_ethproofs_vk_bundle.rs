@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use distributed_vm::mle::ethproofs::vk_bundle::{
-    apex_from_bundle, decode_vk_bundle_v2, encode_vk_bundle_v2, riscv_vm_vk_for_elf,
+    apex_from_bundle, decode_vk_bundle_v3, encode_vk_bundle_v3, riscv_vm_vk_for_elf,
     root_capable_leaves, vm_vk_to_u32s,
 };
 use p3_field::PrimeField32;
@@ -37,8 +37,8 @@ fn main() -> Result<(), String> {
     let elf = std::fs::read(&args.elf).map_err(|e| format!("{}: {e}", args.elf.display()))?;
     let vm_vk = riscv_vm_vk_for_elf(&elf)?;
 
-    let bytes = encode_vk_bundle_v2(&vm_vk, &map)?;
-    let decoded = decode_vk_bundle_v2(&bytes).map_err(|e| e.to_string())?;
+    let bytes = encode_vk_bundle_v3(&vm_vk, &map)?;
+    let decoded = decode_vk_bundle_v3(&bytes).map_err(|e| e.to_string())?;
     let members = decoded.members.len();
     // `try_load` pinned the map to `MLE_VK_ROOT` when set, so this is the deployment's root.
     apex_from_bundle(&decoded, map.root()).map_err(|e| e.to_string())?;
@@ -58,10 +58,31 @@ fn main() -> Result<(), String> {
     );
     println!("whitelist root: {}", root.join(" "));
     println!(
-        "{members} root-capable member(s), leaves {:?} of {}",
-        root_capable_leaves(&map),
+        "{members} root-capable member(s), leaves {} of {}",
+        leaf_ranges(&root_capable_leaves(&map)),
         map.entries.len()
     );
     println!("wrote {} ({} B)", args.out.display(), bytes.len());
     Ok(())
+}
+
+/// A sorted list of leaves as its runs: `4265..4290, 4313`.
+fn leaf_ranges(leaves: &[usize]) -> String {
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    for &leaf in leaves {
+        match runs.last_mut() {
+            Some((_, end)) if *end == leaf => *end = leaf + 1,
+            _ => runs.push((leaf, leaf + 1)),
+        }
+    }
+    runs.iter()
+        .map(|&(start, end)| {
+            if end == start + 1 {
+                start.to_string()
+            } else {
+                format!("{start}..{end}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }

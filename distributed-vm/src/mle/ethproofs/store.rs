@@ -14,9 +14,11 @@
 //!
 //! What a proved block is submitted as depends on the mode its root was proved in:
 //!
-//! - **`--step compress`, whitelist mode**: v4, `PICOMLE\0` | 4 | zstd(bincode of
-//!   [`MleCompressProofV4`]). The compress proof alone: it verifies under the whitelist's one
-//!   compress key, which `pico_verifier` ships, so no key travels with it (`verify_compress`).
+//! - **`--step compress`, whitelist mode**: v5, `PICOMLE\0` | 5 | zstd(bincode of
+//!   [`MleCompressProofV5`]). The compress proof alone, its WHIR Merkle openings as multiproofs:
+//!   it verifies under the whitelist's one compress key, which `pico_verifier` ships, so no key
+//!   travels with it (`verify_compress`). The flat v4 that preceded it is retired: a verifier that
+//!   takes v5 refuses it, and one that only takes v4 refuses v5.
 //! - **Whitelist mode** (`VK_VERIFICATION=true`): v3, `PICOMLE\0` | 3 | zstd(bincode of
 //!   [`MleRootProofV3`]). The root's vk travels with the proof, and a verifier accepts it only as a
 //!   member of the whitelist it pins, so a party that trusts nothing the prover sent can check it.
@@ -96,15 +98,15 @@ pub struct MleRootEnvelope {
 /// what routes these bytes to the MLE verifier inside ethproofs' `verify_stark("Pico", ..)`; the
 /// FRI proofs sharing that entry are bincode and never start with it.
 pub use pico_verifier::envelope::{
-    MleCompressProofV4, MleRootProofV3, ENVELOPE_V3, ENVELOPE_V4_COMPRESS, PROOF_MAGIC,
+    MleCompressProofV5, MleRootProofV3, ENVELOPE_V3, ENVELOPE_V5_COMPRESS, PROOF_MAGIC,
 };
 
 fn encode_v3(body: &MleRootProofV3) -> Result<Vec<u8>, String> {
     pico_verifier::envelope::encode_v3(body).map_err(|e| e.to_string())
 }
 
-fn encode_compress_v4(body: &MleCompressProofV4) -> Result<Vec<u8>, String> {
-    pico_verifier::envelope::encode_compress_v4(body).map_err(|e| e.to_string())
+fn encode_compress_v5(body: &MleCompressProofV5) -> Result<Vec<u8>, String> {
+    pico_verifier::envelope::encode_compress_v5(body).map_err(|e| e.to_string())
 }
 
 /// How many finished blocks stay answerable.
@@ -237,7 +239,7 @@ impl ProvingResultStore {
         true
     }
 
-    /// Record a block proved to the compress proof (`--step compress`, whitelist mode) as a v4
+    /// Record a block proved to the compress proof (`--step compress`, whitelist mode) as a v5
     /// envelope.
     ///
     /// Returns `false` when the envelope could not be encoded; see [`Self::complete`].
@@ -249,11 +251,11 @@ impl ProvingResultStore {
         compress: CompressProofExport,
     ) -> bool {
         let proof_len = compress.proof.len();
-        match encode_compress_v4(&MleCompressProofV4 {
+        match encode_compress_v5(&MleCompressProofV5 {
             proof: compress.proof,
         }) {
             Ok(bytes) => {
-                let parts = format!("v4 {} B = zstd(compress proof {proof_len} B)", bytes.len());
+                let parts = format!("v5 {} B = zstd(compress proof {proof_len} B)", bytes.len());
                 self.store(
                     block,
                     cycles,
@@ -266,7 +268,7 @@ impl ProvingResultStore {
                 true
             }
             Err(e) => {
-                warn!("block {block}: v4 envelope failed; left unproved: {e}");
+                warn!("block {block}: v5 envelope failed; left unproved: {e}");
                 false
             }
         }
@@ -353,10 +355,10 @@ mod tests {
         assert_eq!(info.verifier_id, "0xabc");
     }
 
-    /// A compress proof submits as v4: the magic, version 4, then zstd of the bincode of
-    /// `MleCompressProofV4` -- the proof alone, no key -- typed as a compress proof.
+    /// A compress proof submits as v5: the magic, version 5, then zstd of the bincode of
+    /// `MleCompressProofV5` -- the proof alone, no key -- typed as a compress proof.
     #[test]
-    fn a_compress_proof_submits_v4() {
+    fn a_compress_proof_submits_v5() {
         let store = ProvingResultStore::new();
         let compress = CompressProofExport {
             proof: vec![5; 48],
@@ -368,17 +370,17 @@ mod tests {
         assert_eq!(bytes[..8], PROOF_MAGIC);
         assert_eq!(
             u32::from_le_bytes(bytes[8..12].try_into().unwrap()),
-            ENVELOPE_V4_COMPRESS
+            ENVELOPE_V5_COMPRESS
         );
-        let body: MleCompressProofV4 =
+        let body: MleCompressProofV5 =
             bincode::deserialize(&zstd::decode_all(&bytes[12..]).unwrap()).unwrap();
         assert_eq!(body.proof, vec![5; 48]);
         assert_eq!(info.proof_type, ProofType::Compress as i32);
         assert_eq!(info.verifier_id, "0xdef");
         // What `pico_verifier` decodes, byte for byte.
         assert_eq!(
-            pico_verifier::envelope::decode_compress_v4(bytes).unwrap(),
-            MleCompressProofV4 { proof: vec![5; 48] }
+            pico_verifier::envelope::decode_compress_v5(bytes).unwrap(),
+            MleCompressProofV5 { proof: vec![5; 48] }
         );
     }
 

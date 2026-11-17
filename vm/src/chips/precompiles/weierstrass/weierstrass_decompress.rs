@@ -1327,7 +1327,6 @@ mod tests {
         let mut counted_record = original_record.clone();
         let mut event_counter = precompute_event_size::<F>(&mut counted_record);
         // ignore events
-        event_counter.num_poseidon2_events = 0;
         event_counter.num_global_lookup_events = 0;
         event_counter.num_syscall_events = 0;
         event_counter.num_precompile_syscall_events = 0;
@@ -1520,7 +1519,6 @@ mod tests {
         let mut counted_record = original_record.clone();
         let mut event_counter = precompute_event_size::<F>(&mut counted_record);
         // ignore events
-        event_counter.num_poseidon2_events = 0;
         event_counter.num_global_lookup_events = 0;
         event_counter.num_syscall_events = 0;
         event_counter.num_precompile_syscall_events = 0;

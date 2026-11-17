@@ -1,11 +1,11 @@
 //! Combine prover (Phase 3, aggregation): tree-reduces N convert proofs into one complete
 //! proof. Per-node dynamic arity-2 with pass-through: each layer pairs consecutive proofs,
 //! a leftover proof promotes to the next layer unproven, and the final single node is built
-//! with `is_complete = true` (arming the completeness assertions — GCS equals the expected
-//! constant point etc.).
+//! with `is_complete = true` (arming the completeness assertions — the global LogUp closed over
+//! the tree's chunks etc.).
 //! Proving keys are keygen'd lazily, deduplicated by (ordered child-layout tuple, is_complete).
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 
 use p3_field::PrimeCharacteristicRing;
 // `Mutex`/`Weak` back the cross-card `PROGRAM_INDEX` and `Instruction` backs `instr_mix`, and all
@@ -15,9 +15,9 @@ use p3_field::PrimeCharacteristicRing;
 #[cfg(feature = "cuda")]
 use crate::compiler::recursion::instruction::Instruction;
 #[cfg(feature = "cuda")]
+use crate::mle::machine::recursion::setup_for_combine_with_program;
+#[cfg(feature = "cuda")]
 use std::sync::{Mutex, Weak};
-
-use p3_maybe_rayon::prelude::*;
 
 use crate::{
     compiler::recursion::program::RecursionProgram,
@@ -32,9 +32,10 @@ use crate::{
             recursion::{
                 build_proving_ctx, check_complete_root_public_values, extract_recursion_vk_layout,
                 recursion_air_refs_with_preprocessed, recursion_public_values,
-                recursion_vk_layouts_equal, setup_for_combine_with_program, CombineChild, Engine,
-                Kb, Sc,
+                recursion_vk_layouts_equal, setup_for_combine_with_program_within, CombineChild,
+                Engine, Kb, Sc,
             },
+            riscv::{par_bounded, recursion_proofs_at_once},
             vk_map::{vk_identity, MleVkMap},
         },
     },
@@ -42,6 +43,7 @@ use crate::{
 };
 use pico_mle_core::{
     config::soundness::{admit_production_vk, UnderBudgetError},
+    global_logup,
     keygen::types::{MultiStarkProvingKey, MultiStarkVerifyingKey},
     prover::DeviceDataTransporter,
     StarkEngine, SystemParams,
@@ -72,6 +74,18 @@ pub struct CombineMachine {
     vk_map: Option<Arc<MleVkMap>>,
     /// Test hook: skip the host-side node/leaf seam check so a broken seam reaches the circuit.
     skip_seam_check: bool,
+    /// Test hook: skip every host-side check of the nodes that lead the tree, so a wrong
+    /// arrangement reaches the circuit.
+    skip_prefix_checks: bool,
+    /// Tests only: verify every node of a tree as it is proved
+    /// ([`Self::verify_every_node_for_testing`]).
+    verify_every_node: bool,
+    /// The real-row limit of the global LogUp a complete root asserts: `MAX_COUNT`, or a test's
+    /// lower one.
+    max_global_row_count: u64,
+    /// How many nodes of a layer are proved at once, if the owner said
+    /// ([`Self::set_concurrency`]).
+    concurrency: Option<NonZeroUsize>,
 }
 
 impl CombineMachine {
@@ -87,7 +101,46 @@ impl CombineMachine {
             vk_verification,
             vk_map: None,
             skip_seam_check: false,
+            skip_prefix_checks: false,
+            verify_every_node: false,
+            max_global_row_count: global_logup::MAX_COUNT,
+            concurrency: None,
         }
+    }
+
+    /// Prove at most `n` nodes of a layer at once: as [`ConvertMachine::set_concurrency`] for the
+    /// leaves, and with the same default.
+    ///
+    /// [`ConvertMachine::set_concurrency`]: crate::mle::machine::convert::ConvertMachine::set_concurrency
+    pub fn set_concurrency(&mut self, n: NonZeroUsize) {
+        self.concurrency = Some(n);
+    }
+
+    /// Negative tests only: let any arrangement of the nodes that lead the tree reach the
+    /// circuit, whose continuity checks and root assertions are what has to reject a wrong one.
+    pub fn skip_prefix_checks_for_testing(&mut self) {
+        self.skip_prefix_checks = true;
+    }
+
+    /// Negative tests only: verify every node below the top of a tree as it is proved, and stop
+    /// at the first that does not verify, naming its layer. A release build proves a node whose
+    /// constraints do not hold and leaves the refusal to whoever verifies it; without this the
+    /// parent takes the bad proof in, and all a test sees is that the root does not verify, not
+    /// which node made the assertion that failed.
+    pub fn verify_every_node_for_testing(&mut self) {
+        self.verify_every_node = true;
+    }
+
+    /// Negative tests only: build this machine's complete roots with a real-row limit below
+    /// `MAX_COUNT`. A lower limit is still sound; a test puts it under a block's count to see
+    /// the root refuse the block. Before the first keygen, so no root of this machine has the
+    /// other limit.
+    pub fn set_max_global_row_count_for_testing(&mut self, max_count: u64) {
+        assert!(
+            self.pks.is_empty(),
+            "the real-row limit changed after a keygen"
+        );
+        self.max_global_row_count = max_count;
     }
 
     /// Negative tests only: let leaves that do not start the deferred chain where the nodes end
@@ -97,26 +150,30 @@ impl CombineMachine {
     }
 
     /// Keygen the standard node shapes — every ordered pair of child kinds, non-complete and
-    /// complete, plus the single-child complete roots — where a child kind is one convert
-    /// ladder row (C_r) or the combine tier (B), so their VKs exist BEFORE proving (the
-    /// whitelist must contain them; `child_vk` is any recursion VK of this machine, e.g. a
-    /// convert VK). Returns the keygen'd VKs: 2 (R+1)^2 + (R+1) of them for R convert rows.
+    /// complete — where a child kind is one convert ladder row (C_r; the global LogUp's image
+    /// node is a C_0), the group nodes' row (G) or the combine tier (B), so their VKs exist
+    /// BEFORE proving (the whitelist must contain them; `child_vk` is any recursion VK of this
+    /// machine, e.g. a convert VK). Returns the keygen'd VKs: 2 (R+2)^2 of them for R convert
+    /// rows. A tree has its image node, a group node and a chunk at least, so no root has a
+    /// single child.
     ///
     /// Note: whitelisting the complete shapes also admits a COMPLETE proof as a non-root
     /// child of a larger tree. Harmless — the parent overwrites `flag_complete`, continuity
-    /// still chains, and the `start_chunk == 1` chain permits only one chunk-1 leaf per tree
-    /// (no double GCS injection) — but it does widen the accepted proof-tree grammar.
+    /// still chains, the `start_chunk == 1` chain permits only one chunk-1 leaf per tree, and
+    /// the global LogUp's chain closes at the outer root only over the leaves of the whole
+    /// tree, the inner one's among them — but it does widen the accepted proof-tree grammar.
     pub fn preregister_standard_shapes(
         &mut self,
         child_vk: &MultiStarkVerifyingKey<Sc>,
     ) -> Result<Vec<Arc<MultiStarkVerifyingKey<Sc>>>, UnderBudgetError> {
-        let (layouts_c, _) = self.standard_child_layouts(child_vk);
+        let (layouts_c, layout_g, _) = self.standard_child_layouts(child_vk);
         let layout_b = self.combine_tier_child_layout(child_vk)?;
         // Every ordered child-type combination a tree can produce (pass-through nodes pair
         // convert-tier leftovers with combine-tier proofs in either order), for non-root and
-        // root nodes, plus the single-child roots. Row order first, B last, so the leaf order
-        // is a function of the tables alone.
-        let kinds: Vec<&RecursionVkLayout> = layouts_c.iter().chain([&layout_b]).collect();
+        // root nodes. Row order first, then G, B last, so the leaf order is a function of the
+        // tables alone.
+        let kinds: Vec<&RecursionVkLayout> =
+            layouts_c.iter().chain([&layout_g, &layout_b]).collect();
         let mut vks = Vec::new();
         for complete in [false, true] {
             for left in &kinds {
@@ -126,21 +183,16 @@ impl CombineMachine {
                 }
             }
         }
-        for single in &kinds {
-            let idx = self.keygen_for(&[(*single).clone()], true)?;
-            vks.push(self.pks[idx].4.clone());
-        }
         debug_assert_eq!(vks.len(), Self::standard_node_count());
         Ok(vks)
     }
 
     /// How many node VKs [`Self::preregister_standard_shapes`] emits: every ordered pair over
-    /// the child kinds (one per convert ladder row plus the combine tier), non-root and root,
-    /// plus the single-child roots. The whitelist's leaf count is the riscv shape count plus
-    /// this.
+    /// the child kinds (one per convert ladder row, the group nodes' row and the combine tier),
+    /// non-root and root.
     pub fn standard_node_count() -> usize {
-        let kinds = crate::mle::machine::shape::MLE_RECURSION_CONVERT_LADDER.len() + 1;
-        2 * kinds * kinds + kinds
+        let kinds = crate::mle::machine::shape::MLE_RECURSION_CONVERT_LADDER.len() + 2;
+        2 * kinds * kinds
     }
 
     /// The node [`Self::preregister_standard_shapes`] keygens first: the non-root combine over
@@ -151,10 +203,34 @@ impl CombineMachine {
         &mut self,
         child_vk: &MultiStarkVerifyingKey<Sc>,
     ) -> Result<Arc<MultiStarkVerifyingKey<Sc>>, UnderBudgetError> {
-        let (layouts_c, _) = self.standard_child_layouts(child_vk);
+        let (layouts_c, _, _) = self.standard_child_layouts(child_vk);
         let c_last = layouts_c.last().expect("the convert ladder is empty");
         let idx = self.keygen_for(&[c_last.clone(), c_last.clone()], false)?;
         Ok(self.pks[idx].4.clone())
+    }
+
+    /// One of the standard nodes, and its place among them: the node over the child kinds
+    /// `left` and `right`, counted in the order [`Self::preregister_standard_shapes`] takes them
+    /// in (the convert rows, then the group nodes' row, then the combine tier). For a test that
+    /// holds some of this binary's node keys against the whitelist's leaves without keygen'ing
+    /// all of them.
+    pub fn standard_node_vk(
+        &mut self,
+        child_vk: &MultiStarkVerifyingKey<Sc>,
+        left: usize,
+        right: usize,
+        complete: bool,
+    ) -> Result<(usize, Arc<MultiStarkVerifyingKey<Sc>>), UnderBudgetError> {
+        let (layouts_c, layout_g, _) = self.standard_child_layouts(child_vk);
+        let layout_b = self.combine_tier_child_layout(child_vk)?;
+        let kinds: Vec<&RecursionVkLayout> =
+            layouts_c.iter().chain([&layout_g, &layout_b]).collect();
+        let n = kinds.len();
+        let idx = self.keygen_for(&[kinds[left].clone(), kinds[right].clone()], complete)?;
+        Ok((
+            usize::from(complete) * n * n + left * n + right,
+            self.pks[idx].4.clone(),
+        ))
     }
 
     /// The layout of a combine-tier (B) proof as a child: what every combine node, root included,
@@ -164,7 +240,7 @@ impl CombineMachine {
         &mut self,
         child_vk: &MultiStarkVerifyingKey<Sc>,
     ) -> Result<RecursionVkLayout, UnderBudgetError> {
-        let (_, b_heights) = self.standard_child_layouts(child_vk);
+        let (_, _, b_heights) = self.standard_child_layouts(child_vk);
         let combine_vk0 = self.bootstrap_node_vk(child_vk)?;
         Ok(
             crate::mle::machine::recursion::extract_recursion_vk_layout_from_heights(
@@ -174,16 +250,22 @@ impl CombineMachine {
         )
     }
 
-    /// The standard child layouts: one convert layout per ladder row (C_r), synthesized from
-    /// `child_vk` at the row's heights, and the combine tier's heights the B layout is read at.
-    /// Heights are indexed by AIR id (the machine's chip order) -- the tier tables are keyed by
-    /// chip NAME, so they map through the machine's chip list.
+    /// The standard child layouts: one convert layout per ladder row (C_r) and the group
+    /// nodes' layout (G), synthesized from `child_vk` at the row's heights, and the combine
+    /// tier's heights the B layout is read at. Heights are indexed by AIR id (the machine's
+    /// chip order) -- the tier tables are keyed by chip NAME, so they map through the machine's
+    /// chip list.
     fn standard_child_layouts(
         &self,
         child_vk: &MultiStarkVerifyingKey<Sc>,
-    ) -> (Vec<RecursionVkLayout>, Vec<Option<usize>>) {
+    ) -> (
+        Vec<RecursionVkLayout>,
+        RecursionVkLayout,
+        Vec<Option<usize>>,
+    ) {
         use crate::mle::machine::shape::{
             MLE_RECURSION_COMBINE_LOG_HEIGHTS, MLE_RECURSION_CONVERT_LADDER,
+            MLE_RECURSION_GROUP_NODE_LOG_HEIGHTS,
         };
         let tier_heights = |table: &[(&str, usize)]| -> Vec<Option<usize>> {
             self.chips
@@ -204,16 +286,21 @@ impl CombineMachine {
         // the lean pre_hash depends only on shape, so every convert on row r shares one child
         // layout and every combine node (root included) emits one B-shaped proof, hence one B
         // child-layout, regardless of which node produced it.
+        let layout_at = |row: &[(&str, usize)]| {
+            crate::mle::machine::recursion::extract_recursion_vk_layout_from_heights(
+                child_vk,
+                Some(&tier_heights(row)),
+            )
+        };
         let layouts_c: Vec<RecursionVkLayout> = MLE_RECURSION_CONVERT_LADDER
             .iter()
-            .map(|row| {
-                crate::mle::machine::recursion::extract_recursion_vk_layout_from_heights(
-                    child_vk,
-                    Some(&tier_heights(row)),
-                )
-            })
+            .map(|row| layout_at(row))
             .collect();
-        (layouts_c, tier_heights(MLE_RECURSION_COMBINE_LOG_HEIGHTS))
+        (
+            layouts_c,
+            layout_at(MLE_RECURSION_GROUP_NODE_LOG_HEIGHTS),
+            tier_heights(MLE_RECURSION_COMBINE_LOG_HEIGHTS),
+        )
     }
 
     /// Supply the whitelist (vk_verification mode; call before proving).
@@ -257,11 +344,12 @@ impl CombineMachine {
             return Ok(idx);
         }
         let vk_refs: Vec<&RecursionVkLayout> = layouts.iter().collect();
-        let mut program = ConvertVerifierCircuit::build_verify_n_program_multi::<Kb>(
+        let mut program = ConvertVerifierCircuit::build_verify_n_program_multi_within::<Kb>(
             &vk_refs,
             false,
             is_complete,
             self.vk_verification,
+            self.max_global_row_count,
         );
         let child_ws: Vec<usize> = layouts
             .iter()
@@ -271,9 +359,10 @@ impl CombineMachine {
         // Every combine node takes the combine tier, the root included (FRI parity: the root
         // is just the last combine round with `is_complete = true`, not a shape case of its
         // own). Explicit padding (rather than natural heights) keeps the VKs from silently
-        // drifting with small circuit changes. `child_Ws` tells the child kinds apart in the
-        // check's log (a convert row and the combine tier have different stacked widths); the
-        // pair {combine, combine} is the fixpoint the tier tables have to close on.
+        // drifting with small circuit changes. `child_Ws` is each child's stacked width in the
+        // check's log; it does not tell every kind from every other (the first convert row and
+        // the combine tier have the same). The pair {combine, combine} is the fixpoint the tier
+        // tables have to close on.
         if self.vk_verification {
             crate::mle::machine::recursion::pad_recursion_program(
                 &format!(
@@ -360,7 +449,8 @@ impl CombineMachine {
         self.keygen_for(child_layouts, true).map(|_| ())
     }
 
-    /// Deferred nodes are admitted only at the HEAD of the tree.
+    /// Deferred nodes, and the global LogUp's image and group nodes, are admitted only at the
+    /// HEAD of the tree.
     ///
     /// That is an in-circuit fact already — chunk continuity rejects a deferred node anywhere else
     /// (the root pins `start_chunk == 1` and continuity numbers the leaves from there, so no leaf
@@ -368,7 +458,7 @@ impl CombineMachine {
     /// only changes WHERE the reader finds out: a sentence, rather than a root proof that fails
     /// to verify, several minutes later, with nothing naming the cause.
     ///
-    /// `start_chunk == next_chunk == 1` is what identifies a deferred node: every convert leaf
+    /// `start_chunk == next_chunk == 1` is what identifies such a node: every convert leaf
     /// sets `next_chunk = chunk + 1`, so no leaf of any kind can have it at 1.
     ///
     /// Under the whitelist (`vk_root` is its root) a node must also carry that root, which the
@@ -403,8 +493,8 @@ impl CombineMachine {
                 let pv = pv.expect("a deferred node was classified from its public values");
                 eyre::ensure!(
                     col.vk_root.iter().zip(root).all(|(&idx, r)| pv[idx] == r),
-                    "deferred node {i} does not carry this tree's whitelist root — prove it with a \
-                     `DeferredMachine` given the same vk map"
+                    "leading node {i} does not carry this tree's whitelist root — prove it with a \
+                     machine given the same vk map"
                 );
             }
         }
@@ -429,14 +519,88 @@ impl CombineMachine {
         Ok(())
     }
 
-    /// Tree-reduce the children (convert proofs with their VKs) to one complete root proof.
+    /// The global LogUp's chain across the children, said up front: each child ends where the
+    /// next one starts. The circuit rejects a break anyway, at the node above it and without
+    /// naming the cause, which is most often the nodes that lead the tree being missing or out
+    /// of the order `GlobalLogUpNodeMachine::prove` returns them in.
+    fn check_global_chain(children: &[ProofWithVk]) -> eyre::Result<()> {
+        let col = RECURSION_PUBLIC_VALUES_COL_MAP;
+        let pvs: Vec<Option<&[Kb]>> = children
+            .iter()
+            .map(|(proof, _)| recursion_public_values(&proof.public_values).ok())
+            .collect();
+        for (i, pair) in pvs.windows(2).enumerate() {
+            if let [Some(left), Some(right)] = pair {
+                eyre::ensure!(
+                    col.global_chain_end
+                        .iter()
+                        .zip(col.global_chain_start)
+                        .all(|(&end, start)| left[end] == right[start]),
+                    "the global LogUp's chain breaks between children {i} and {}: the tree takes \
+                     the image node, the group nodes from the last group to the first, any \
+                     deferred nodes, then the chunks' leaves in order",
+                    i + 1
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Tree-reduce the children (the nodes that lead the tree, then the convert proofs, each
+    /// with its VK) to one complete root proof. In whitelist mode a tree of one child is
+    /// refused: a root over one child is not among the standard shapes.
     pub fn prove_tree(&mut self, children: Vec<ProofWithVk>) -> eyre::Result<ProofWithVk> {
         eyre::ensure!(!children.is_empty(), "prove_tree needs at least one child");
-        Self::check_deferred_prefix(
-            &children,
-            self.vk_map.as_ref().map(|m| m.root()),
-            !self.skip_seam_check,
-        )?;
+        eyre::ensure!(
+            !self.vk_verification || children.len() >= 2,
+            "a tree of one child has no root on the whitelist: a block's tree has its image \
+             node, a group node and a chunk's leaf at least"
+        );
+        eyre::ensure!(
+            !self.vk_verification || self.vk_map.is_some(),
+            "vk_verification machine has no vk map at prove time (call set_vk_map)"
+        );
+        if !self.skip_prefix_checks {
+            Self::check_deferred_prefix(
+                &children,
+                self.vk_map.as_ref().map(|m| m.root()),
+                !self.skip_seam_check,
+            )?;
+            Self::check_global_chain(&children)?;
+        }
+        self.reduce(children, true)
+    }
+
+    /// Tree-reduce a run of consecutive children of one tree to the node over all of them, as
+    /// an inner node: it asserts their continuity and nothing a root does. A single child comes
+    /// back as it is.
+    ///
+    /// The nodes that lead a block's tree are reduced this way when the chunks' part of the
+    /// tree is built elsewhere and the two are joined at the root.
+    pub fn prove_partial_tree(
+        &mut self,
+        mut children: Vec<ProofWithVk>,
+    ) -> eyre::Result<ProofWithVk> {
+        eyre::ensure!(
+            !children.is_empty(),
+            "prove_partial_tree needs at least one child"
+        );
+        if !self.skip_prefix_checks {
+            Self::check_global_chain(&children)?;
+        }
+        if children.len() == 1 {
+            return Ok(children.pop().expect("one child"));
+        }
+        self.reduce(children, false)
+    }
+
+    /// Reduce `children` layer by layer, pairing neighbours; the last node is a complete root
+    /// when `complete_top`, an inner node otherwise.
+    fn reduce(
+        &mut self,
+        children: Vec<ProofWithVk>,
+        complete_top: bool,
+    ) -> eyre::Result<ProofWithVk> {
         let mut layer: Vec<ProofWithVk> = children;
         let mut level = 0usize;
 
@@ -447,6 +611,7 @@ impl CombineMachine {
             let num_nodes = if n == 1 { 1 } else { n / 2 };
             let leftover = if n == 1 { 0 } else { n % 2 };
             let is_root_layer = num_nodes == 1 && leftover == 0;
+            let is_complete = is_root_layer && complete_top;
 
             // Phase 1 (serial, &mut self): extract layouts + find-or-keygen per node.
             let mut node_inputs: Vec<(Vec<CombineChild>, usize)> = Vec::with_capacity(num_nodes);
@@ -485,7 +650,7 @@ impl CombineMachine {
                         );
                     }
                 }
-                let pk_idx = self.keygen_for(&layouts, is_root_layer)?;
+                let pk_idx = self.keygen_for(&layouts, is_complete)?;
                 node_inputs.push((tuples, pk_idx));
             }
             let passthrough: Vec<ProofWithVk> = layer_iter.collect();
@@ -493,16 +658,18 @@ impl CombineMachine {
 
             tracing::info!(
                 "combine layer {level}: {n} in -> {num_nodes} node(s) + {leftover} pass-through{}",
-                if is_root_layer { " (ROOT)" } else { "" }
+                if is_complete { " (ROOT)" } else { "" }
             );
 
-            // Phase 2 (parallel, &self): prove every node in the layer. Transport each
-            // distinct proving key to the device once per layer (nodes of the same shape
-            // share it) instead of once per node.
+            // Phase 2 (parallel, &self): prove every node in the layer, as many at once as the
+            // chunks are (`recursion_proofs_at_once`). Transport each distinct proving key to
+            // the device once per layer (nodes of the same shape share it) instead of once per
+            // node.
             let engine = &self.engine;
             let chips = &self.chips;
             let pks = &self.pks;
             let vk_map = &self.vk_map;
+            let max_global_row_count = self.max_global_row_count;
             let mut d_pks = HashMap::new();
             for (_, pk_idx) in &node_inputs {
                 d_pks
@@ -510,37 +677,45 @@ impl CombineMachine {
                     .or_insert_with(|| engine.device().transport_pk_to_device(&pks[*pk_idx].3));
             }
             let d_pks = &d_pks;
-            let proved: Vec<ProofWithVk> = node_inputs
-                .into_par_iter()
-                .enumerate()
-                .map(|(i, (tuples, pk_idx))| {
+            let at_once = recursion_proofs_at_once(self.concurrency, node_inputs.len());
+            let proved: Vec<ProofWithVk> =
+                par_bounded(node_inputs, at_once, |i, (tuples, pk_idx)| {
                     // One span per combine node (see `convert_prove`); `level` is the tree layer,
                     // `root` marks the last one.
                     let _span =
-                        tracing::info_span!("combine_node_prove", level, i, root = is_root_layer)
+                        tracing::info_span!("combine_node_prove", level, i, root = is_complete)
                             .entered();
                     let (_, _, program, _, vk) = &pks[pk_idx];
-                    let (_, record) = setup_for_combine_with_program(
+                    let (_, record) = setup_for_combine_with_program_within(
                         &tuples,
                         Arc::clone(program),
-                        is_root_layer,
+                        is_complete,
                         vk_map.as_deref(),
+                        max_global_row_count,
                     );
                     let ctx = build_proving_ctx(
                         &record,
                         chips,
-                        if is_root_layer { "root" } else { "combine" },
+                        if is_complete { "root" } else { "combine" },
                     );
                     engine
                         .prove(&d_pks[&pk_idx], ctx)
                         .map(|proof| (proof, vk.clone()))
                         .map_err(|e| eyre::eyre!("{e:?}"))
-                })
-                .collect::<eyre::Result<Vec<_>>>()?;
+                })?;
 
             if is_root_layer {
                 let mut proved = proved;
                 return Ok(proved.pop().expect("root layer proves exactly one node"));
+            }
+            if self.verify_every_node {
+                for (i, (proof, vk)) in proved.iter().enumerate() {
+                    self.engine.verify(vk, proof).map_err(|e| {
+                        eyre::eyre!(
+                            "the inner node {i} of combine layer {level} failed STARK verify: {e:?}"
+                        )
+                    })?;
+                }
             }
             layer = proved.into_iter().chain(passthrough).collect();
             level += 1;
@@ -554,11 +729,12 @@ impl CombineMachine {
     ///      `self.pks`), not the caller-supplied one — pins the recursion circuit.
     ///   2. `flag_complete == 1` (arms the in-circuit universal completeness asserts).
     ///   3. `riscv_vk_digest == RiscvVmVk::digest()` — the single exe-identity anchor. The
-    ///      convert circuit computes `H(DOMAIN ‖ program_commit ‖ pc_start ‖ initial_gcs)`
-    ///      in-circuit from the witnessed identity (program_commit Merkle-hard-bound as the
-    ///      program table's WHIR stacking root); the chunk-1 gate + GCS injection + in-circuit
-    ///      root closure bind the witnessed values to the execution, so this one comparison
-    ///      pins the program, its entry pc, and the cross-chunk memory closure.
+    ///      convert circuit computes `H(DOMAIN ‖ program_commit ‖ pc_start ‖ image_commit ‖
+    ///      image_tier)` in-circuit from the witnessed identity (program_commit Merkle-hard-bound
+    ///      as the program table's WHIR stacking root); the chunk-1 gate, the image node (which
+    ///      opens the image table under that commitment at that tier) and the root's closure of
+    ///      the global LogUp bind the witnessed values to the execution, so this one comparison
+    ///      pins the program, its entry pc, and the memory the execution started from.
     ///   4. Recompute the PV digest and compare.
     ///
     /// CONTRACT: these checks are part of the proof's meaning; requires `prove_tree` to have
@@ -569,12 +745,12 @@ impl CombineMachine {
         let (proof, vk) = root;
         // (1) Pin the recursion circuit: verify against the honestly keygen'd complete VK whose
         // FULL identity (lean pre_hash AND merged commitment) matches the supplied one, never
-        // the supplied struct itself. NOTE: under shape bucketing every recursion VK shares one
-        // lean pre_hash (the lean preimage deliberately cannot distinguish same-shape programs),
-        // so the pre_hash alone selects nothing — the merged commitment does the work, and there
-        // can be several complete shapes (n=2 and the single-chunk n=1 root). The binding
-        // soundness lives in `engine.verify(honest_root_vk, …)` below: the verifier observes
-        // the HONEST vk's merged commitment, so a proof of any other program diverges.
+        // the supplied struct itself. NOTE: under shape bucketing the recursion VKs of one row
+        // share one lean pre_hash (the lean preimage deliberately cannot distinguish same-shape
+        // programs), so the pre_hash alone selects nothing — the merged commitment does the
+        // work, and there can be several complete shapes (one per ordered pair of child kinds).
+        // The binding soundness lives in `engine.verify(honest_root_vk, …)` below: the verifier
+        // observes the HONEST vk's merged commitment, so a proof of any other program diverges.
         let honest_root_vk = self.complete_entry_for(vk).map(|e| &e.4).ok_or_else(|| {
             eyre::eyre!(
                 "root proof vk matches no honestly keygen'd complete shape on this machine \
@@ -1035,6 +1211,10 @@ impl GpuCombineMachine {
     /// block, and is baked into the program at keygen — so it is part of the shape).
     pub fn prepare_node(&self, children: &[ProofWithVk], is_complete: bool) -> GpuPreparedCombine {
         assert!(!children.is_empty(), "a combine node needs >= 1 child");
+        assert!(
+            !self.vk_verification || self.vk_map.is_some(),
+            "vk_verification machine has no vk map at prove time (call set_vk_map)"
+        );
         let t0 = Instant::now();
         let tuples: Vec<CombineChild> = children
             .iter()
@@ -1472,12 +1652,14 @@ impl GpuCombineMachine {
 }
 
 /// The order half of [`CombineMachine::check_deferred_prefix`], over the classification alone so
-/// it can be tested without a proof to hand.
+/// it can be tested without a proof to hand. `is_deferred` marks every node that sits at chunk
+/// cursor 1: a deferred node, or a node of the global LogUp.
 fn check_deferred_prefix_flags(is_deferred: &[bool]) -> eyre::Result<()> {
     let count = is_deferred.iter().take_while(|d| **d).count();
     if let Some(stray) = is_deferred[count..].iter().position(|d| *d) {
         eyre::bail!(
-            "deferred node at child {} follows a non-deferred one; they go at the head of the tree",
+            "the node at child {} (a deferred node or one of the global LogUp's) follows a \
+             chunk's; such nodes go at the head of the tree",
             count + stray
         );
     }

@@ -44,6 +44,7 @@ fn logup() -> LogUpSecurityParameters {
         max_interaction_count: 1 << 30,
         log_max_message_length: 7,
         pow_bits: 18,
+        challenge_mode: Default::default(),
     }
 }
 

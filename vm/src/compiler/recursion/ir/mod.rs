@@ -3,7 +3,6 @@ mod bits;
 pub mod block;
 mod builder;
 mod collections;
-pub mod compiler;
 mod instructions;
 mod ptr;
 mod symbolic;

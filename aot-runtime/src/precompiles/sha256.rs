@@ -30,7 +30,7 @@ pub fn sha256_compress(core: &mut impl PrecompileMemory, w_ptr: u64, h_ptr: u64)
     // (`vm/src/emulator/riscv/syscalls/precompiles/sha256/compress.rs`) -- the AOT
     // emulator stamps this clk into the per-dword memory metadata that is handed to the
     // prover via `RiscvEmulationState` snapshots, so any disagreement shows up as a
-    // non-zero global memory cumulative sum at a batch boundary.
+    // global LogUp that does not balance at a batch boundary.
     core.read_mem_low32_slot_span_at_clk(w_ptr, &mut w, clk + 1);
     for i in 0..64 {
         let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);

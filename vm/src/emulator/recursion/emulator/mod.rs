@@ -17,15 +17,11 @@ use crate::{
     chips::chips::recursion_memory::MemEvent,
     compiler::recursion::{ir::Block, program::RecursionProgram},
     emulator::{record::RecordBehavior, recursion::emulator::memory::MemVecMap},
-    machine::septic::{SepticCurve, SepticExtension},
 };
 use backtrace::Backtrace as Trace;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_field::{
-    BasedVectorSpace, ExtensionField, Field, InjectiveMonomial, PrimeCharacteristicRing,
-    PrimeField32,
-};
+use p3_field::{ExtensionField, Field, InjectiveMonomial, PrimeCharacteristicRing, PrimeField32};
 use p3_poseidon2::{ExternalLayer, InternalLayer, Poseidon2};
 use p3_symmetric::Permutation;
 use p3_util::reverse_bits_len;
@@ -47,8 +43,7 @@ use thiserror::Error;
 pub use crate::emulator::recursion::record::*;
 use crate::{
     compiler::recursion::instruction::{
-        FieldEltType, HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
-        PrintInstr,
+        FieldEltType, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction, PrintInstr,
     },
     primitives::consts::{
         DIGEST_BLOCKS, DIGEST_SIZE, EMULATOR_POSEIDON2_LEN, EXTENSION_DEGREE,
@@ -1003,51 +998,6 @@ where
                     .push(CommitPublicValuesEvent {
                         public_values: self.record.public_values,
                     });
-            }
-
-            Instruction::HintAddCurve(instr) => {
-                let HintAddCurveInstr {
-                    output_x_addrs_mults,
-                    output_y_addrs_mults,
-                    input1_x_addrs,
-                    input1_y_addrs,
-                    input2_x_addrs,
-                    input2_y_addrs,
-                } = *instr;
-                let input1_x = SepticExtension::<F>::from_basis_coefficients_fn(|i| {
-                    self.memory.mr(input1_x_addrs[i]).val[0]
-                });
-                let input1_y = SepticExtension::<F>::from_basis_coefficients_fn(|i| {
-                    self.memory.mr(input1_y_addrs[i]).val[0]
-                });
-                let input2_x = SepticExtension::<F>::from_basis_coefficients_fn(|i| {
-                    self.memory.mr(input2_x_addrs[i]).val[0]
-                });
-                let input2_y = SepticExtension::<F>::from_basis_coefficients_fn(|i| {
-                    self.memory.mr(input2_y_addrs[i]).val[0]
-                });
-                let point1 = SepticCurve {
-                    x: input1_x,
-                    y: input1_y,
-                };
-                let point2 = SepticCurve {
-                    x: input2_x,
-                    y: input2_y,
-                };
-                let output = point1.add_incomplete(point2);
-
-                for (val, (addr, mult)) in output.x.0.into_iter().zip(output_x_addrs_mults) {
-                    self.memory.mw(addr, Block::from(val), mult);
-                    self.record.mem_var_events.push(MemEvent {
-                        inner: Block::from(val),
-                    });
-                }
-                for (val, (addr, mult)) in output.y.0.into_iter().zip(output_y_addrs_mults) {
-                    self.memory.mw(addr, Block::from(val), mult);
-                    self.record.mem_var_events.push(MemEvent {
-                        inner: Block::from(val),
-                    });
-                }
             }
 
             Instruction::Print(PrintInstr {

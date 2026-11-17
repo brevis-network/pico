@@ -292,22 +292,42 @@ func checkCircuitAgainstManifest() error {
 }
 
 // KoalaBearVerify checks a proof file against a verifying key, as the exported contract does: the
-// proof, its commitment and proof of knowledge, and the two public inputs the file carries.
+// proof, its commitment and proof of knowledge, and the two public inputs computed from INPUTS_PATH
+// (`-inputs`, the inputs.json `cargo pico prove --evm` writes: the program vkey and the committed
+// public values). The proof file's own copy of the public inputs is never trusted; one that differs
+// from the computed inputs is refused.
 func KoalaBearVerify() error {
-	vk := new(groth16_bn254.VerifyingKey)
-	if err := utils.ReadVerifyingKey(os.Getenv("VK_PATH"), vk); err != nil {
-		return fmt.Errorf("failed to read the verifying key: %v", err)
+	return VerifyProofFile(os.Getenv("VK_PATH"), os.Getenv("PROOF_PATH"), os.Getenv("INPUTS_PATH"))
+}
+
+// VerifyProofFile is KoalaBearVerify over explicit paths.
+func VerifyProofFile(vkPath, proofPath, inputsPath string) error {
+	if inputsPath == "" {
+		return fmt.Errorf("verify needs -inputs, the inputs.json that names the program vkey and " +
+			"the public values: the public inputs are computed from them, never read from the proof")
 	}
-	data, err := os.ReadFile(os.Getenv("PROOF_PATH"))
-	if err != nil {
-		return fmt.Errorf("failed to read the proof: %v", err)
-	}
-	proof, inputs, err := utils.ParseAggOnChainProof(string(data))
+	in, err := utils.ReadVerifyInputs(inputsPath)
 	if err != nil {
 		return err
 	}
-	if len(inputs) != 2 {
-		return fmt.Errorf("the wrap circuit has two public inputs, and the proof file carries %d", len(inputs))
+	inputs, err := utils.WrapPublicInputs(in)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(proofPath)
+	if err != nil {
+		return fmt.Errorf("failed to read the proof: %v", err)
+	}
+	proof, carried, err := utils.ParseAggOnChainProof(string(data))
+	if err != nil {
+		return err
+	}
+	if err := utils.CheckProofInputs(carried, inputs); err != nil {
+		return err
+	}
+	vk := new(groth16_bn254.VerifyingKey)
+	if err := utils.ReadVerifyingKey(vkPath, vk); err != nil {
+		return fmt.Errorf("failed to read the verifying key: %v", err)
 	}
 	if err := groth16_bn254.Verify(proof, vk, inputs, backend.WithVerifierHashToFieldFunction(sha3.NewLegacyKeccak256())); err != nil {
 		return err

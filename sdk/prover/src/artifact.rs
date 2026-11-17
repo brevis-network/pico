@@ -41,11 +41,13 @@ use bincode::Options as _;
 use pico_mle_core::{
     codec::{Decode, Encode},
     keygen::compute_vk_pre_hash,
+    p3_field::{PrimeCharacteristicRing, PrimeField32},
     proof::CODEC_VERSION,
 };
 use pico_vm::mle::machine::{
     convert::ProofWithVk,
-    riscv::{RiscvProof, RISCV_APP_PREP_AIR_IDS},
+    global_logup::GlobalLogUpProof,
+    riscv::{Kb, RiscvProof, RISCV_APP_PREP_AIR_IDS},
 };
 use serde::{Deserialize, Serialize};
 
@@ -59,8 +61,9 @@ use crate::{
 
 const MAGIC: &[u8; 4] = b"PICO";
 
-/// The container's own version, independent of the proof codec's. 3: the `Compress` payload.
-pub const FORMAT_VERSION: u32 = 3;
+/// The container's own version, independent of the proof codec's. 4: the `Riscv` payload carries
+/// the global LogUp's proofs.
+pub const FORMAT_VERSION: u32 = 4;
 
 /// Fixed prefix: magic, container version, proof-codec version, the stored key's lean pre-hash.
 const HEADER_LEN: usize = 4 + 4 + 4 + 32;
@@ -70,9 +73,23 @@ const HEADER_LEN: usize = 4 + 4 + 4 + 32;
 /// exactly as the value it points to.
 #[derive(Serialize, Deserialize)]
 enum StoredPayload<K> {
-    Riscv { vk: K, chunk_proofs: Vec<Vec<u8>> },
-    Combine { vk: K, proof: Vec<u8> },
-    Compress { vk: K, proof: Vec<u8> },
+    Riscv {
+        vk: K,
+        chunk_proofs: Vec<Vec<u8>>,
+        /// The global LogUp: the challenges' proof-of-work witness, the image group proof and
+        /// the chunk group proofs.
+        pow_witness: u32,
+        image_proof: Vec<u8>,
+        group_proofs: Vec<Vec<u8>>,
+    },
+    Combine {
+        vk: K,
+        proof: Vec<u8>,
+    },
+    Compress {
+        vk: K,
+        proof: Vec<u8>,
+    },
 }
 
 impl<K> StoredPayload<K> {
@@ -97,7 +114,7 @@ struct Body<K, B> {
 }
 
 pub(crate) enum LoadedPayload {
-    Riscv(RiscvProof),
+    Riscv(Box<RiscvProof>),
     Combine(Box<ProofWithVk>),
     Compress(Box<ProofWithVk>),
 }
@@ -224,13 +241,27 @@ impl ProofArtifact {
             payload,
         } = body;
         let payload = match payload {
-            StoredPayload::Riscv { vk, chunk_proofs } => LoadedPayload::Riscv(RiscvProof {
+            StoredPayload::Riscv {
+                vk,
+                chunk_proofs,
+                pow_witness,
+                image_proof,
+                group_proofs,
+            } => LoadedPayload::Riscv(Box::new(RiscvProof {
                 vk: std::sync::Arc::new(vk),
                 chunk_proofs: chunk_proofs
                     .iter()
                     .map(|p| decode(p))
                     .collect::<Result<_, _>>()?,
-            }),
+                global: GlobalLogUpProof {
+                    pow_witness: Kb::from_u32(pow_witness),
+                    image_proof: decode(&image_proof)?,
+                    group_proofs: group_proofs
+                        .iter()
+                        .map(|p| decode(p))
+                        .collect::<Result<_, _>>()?,
+                },
+            })),
             StoredPayload::Combine { vk, proof } => {
                 LoadedPayload::Combine(Box::new((decode(&proof)?, std::sync::Arc::new(vk))))
             }
@@ -270,6 +301,14 @@ fn to_bytes(proof: &Proof) -> Result<Vec<u8>, ProveError> {
             vk: &*bundle.vk,
             chunk_proofs: bundle
                 .chunk_proofs
+                .iter()
+                .map(encode_one)
+                .collect::<Result<_, _>>()?,
+            pow_witness: bundle.global.pow_witness.as_canonical_u32(),
+            image_proof: encode_one(&bundle.global.image_proof)?,
+            group_proofs: bundle
+                .global
+                .group_proofs
                 .iter()
                 .map(encode_one)
                 .collect::<Result<_, _>>()?,

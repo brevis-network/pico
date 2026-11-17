@@ -33,7 +33,7 @@ use crate::{
     },
     machine::{
         estimator::{CycleEstimator, EventSizeCapture},
-        field::{same_field, FieldSpecificPoseidon2Config},
+        field::FieldSpecificPoseidon2Config,
         report::EmulationReport,
     },
     primitives::consts::CHUNK_CLK_START,
@@ -41,7 +41,6 @@ use crate::{
 use alloc::sync::Arc;
 use hashbrown::HashMap;
 use p3_field::PrimeField32;
-use p3_koala_bear::KoalaBear;
 use parking_lot::Mutex as ParkingMutex;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -427,9 +426,6 @@ pub struct RiscvEmulator {
     /// emulate_instruction, emulate_instruction_simple
     emu_fn: EmuFn,
 
-    /// keep track of the field name
-    field: &'static str,
-
     /// The pc the current record started at: the program's start, the pc a replay was recovered
     /// at, or the pc of the last cut. The cut owes it to the record's public values, which do not
     /// depend on the record holding its CPU events.
@@ -670,11 +666,6 @@ impl RiscvEmulator {
             defer_only,
             log_syscalls,
             emu_fn: RiscvEmulator::emulate_instruction,
-            field: if same_field::<F, KoalaBear>() {
-                "KoalaBear"
-            } else {
-                panic!("Unsupported field type");
-            },
             chunk_start_pc,
             code,
         };
@@ -949,7 +940,7 @@ impl RiscvEmulator {
         // to the cycle estimator
         let mut real_callback = |record| {
             if let Some(ref mut estimators) = &mut estimators {
-                estimators.push(EventSizeCapture::snapshot(&record, self.field).estimate());
+                estimators.push(EventSizeCapture::snapshot(&record).estimate());
             }
             record_callback(record)
         };
@@ -1074,7 +1065,7 @@ impl RiscvEmulator {
         // to the cycle estimator
         let mut real_callback = |record| {
             if let Some(ref mut estimators) = &mut estimators {
-                estimators.push(EventSizeCapture::snapshot(&record, self.field).estimate());
+                estimators.push(EventSizeCapture::snapshot(&record).estimate());
             }
             record_callback(record)
         };
@@ -3947,7 +3938,7 @@ mod tests {
         // initial state, so finalize only.
         emulator.state.memory.insert(0x110, rec(0x42, 1, 12));
         // 0x118 / 0x120: image words (the bulk load leaves the record at (chunk 0, timestamp 0)
-        // until the program touches it). Their initial state is sent by the image digest, so
+        // until the program touches it). Their initial state is sent by the image table, so
         // finalize only -- whether the word stayed at its image value (even zero) or was
         // overwritten.
         emulator.state.memory.insert(0x118, rec(0, 0, 0));

@@ -35,12 +35,9 @@ use pico_mle_core::{
 };
 use pico_vm::{
     chips::chips::riscv_cpu::event::CpuEvent,
-    compiler::{
-        program::ProgramBehavior,
-        riscv::{
-            compiler::{Compiler, SourceType},
-            program::Program,
-        },
+    compiler::riscv::{
+        compiler::{Compiler, SourceType},
+        program::Program,
     },
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
@@ -51,14 +48,10 @@ use pico_vm::{
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::logger::setup_logger,
     mle::machine::{
-        air::GCS_DIGEST_LEN,
         deferred::DeferredMachine,
         exe::RiscvVmVk,
         recursion::{recursion_public_values, Kb},
-        riscv::{
-            self, air_id, build_ctx, ctx_to_engine, mle_riscv_air_refs, Engine,
-            RISCV_APP_PREP_AIR_IDS,
-        },
+        riscv::{self, air_id, build_ctx, mle_riscv_air_refs, Engine, RISCV_APP_PREP_AIR_IDS},
     },
     primitives::consts::{DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
 };
@@ -150,6 +143,8 @@ struct Riscv {
     d_pk: pico_mle_core::prover::DeviceMultiStarkProvingKey<riscv::Pb>,
     vk: Arc<pico_mle_core::keygen::types::MultiStarkVerifyingKey<riscv::Sc>>,
     vm_vk: RiscvVmVk,
+    /// The Global tables of the chunks [`Self::prove`] proved last, for the second phase.
+    tables: std::cell::RefCell<Vec<pico_vm::mle::machine::global_logup::ChunkTable>>,
 }
 
 impl Riscv {
@@ -157,7 +152,11 @@ impl Riscv {
         let engine: Engine =
             StarkEngine::new(riscv_params_with_128_bits_security(LOG_STACKED_HEIGHT));
         let airs = mle_riscv_air_refs(Arc::clone(program), false);
-        let (pk, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
+        let (pk, vk) = engine.keygen_with_app_prep_and_required(
+            &airs,
+            RISCV_APP_PREP_AIR_IDS,
+            pico_vm::mle::machine::riscv::RISCV_REQUIRED_AIR_IDS,
+        );
         let d_pk = engine.device().transport_pk_to_device(&pk);
         let vm_vk = RiscvVmVk::from_program_and_vk(program, &vk);
         Self {
@@ -165,6 +164,7 @@ impl Riscv {
             d_pk,
             vk: Arc::new(vk),
             vm_vk,
+            tables: Default::default(),
         }
     }
 
@@ -178,6 +178,8 @@ impl Riscv {
         forged: [Kb; DIGEST_SIZE],
     ) -> Vec<pico_mle_core::protocol::proof::Proof<riscv::Sc>> {
         let chips = RiscvChipType::<Kb>::all_chips();
+        let mut tables = self.tables.borrow_mut();
+        tables.clear();
         records
             .iter()
             .enumerate()
@@ -186,16 +188,18 @@ impl Riscv {
                 if i >= from {
                     for (air, air_ctx) in ctx.per_trace.iter_mut() {
                         let base = match *air {
-                            air_id::CPU | air_id::ECALL | air_id::MEM_INIT | air_id::MEM_FINAL => 0,
-                            air_id::GLOBAL => GCS_DIGEST_LEN,
+                            air_id::CPU
+                            | air_id::ECALL
+                            | air_id::MEM_INIT
+                            | air_id::MEM_FINAL
+                            | air_id::GLOBAL => 0,
                             _ => continue,
                         };
                         let at = base + DEFERRED_OFFSET;
                         air_ctx.public_values[at..at + DIGEST_SIZE].copy_from_slice(&forged);
                     }
                 }
-                self.engine
-                    .prove(&self.d_pk, ctx_to_engine(ctx))
+                riscv::prove_host_ctx(&self.engine, &self.d_pk, ctx, &mut tables)
                     .expect("riscv prove")
             })
             .collect()
@@ -205,20 +209,31 @@ impl Riscv {
 impl Riscv {
     /// Whether the riscv layer accepts the chunk proofs: a doctored copy has to get past it for
     /// the recursion's rejection to mean anything.
+    /// The chunk proofs with the second phase over the tables they were proved with.
+    fn bundle(
+        &self,
+        program: &Arc<Program>,
+        proofs: &[pico_mle_core::protocol::proof::Proof<riscv::Sc>],
+    ) -> riscv::RiscvProof {
+        riscv::RiscvProof {
+            vk: Arc::clone(&self.vk),
+            chunk_proofs: proofs.to_vec(),
+            global: riscv::prove_global_logup(program, &self.vk, &self.tables.borrow())
+                .expect("global LogUp"),
+        }
+    }
+
     fn verifies(
         &self,
         program: &Arc<Program>,
         proofs: &[pico_mle_core::protocol::proof::Proof<riscv::Sc>],
     ) -> bool {
-        let bundle = riscv::RiscvProof {
-            vk: Arc::clone(&self.vk),
-            chunk_proofs: proofs.to_vec(),
-        };
+        let bundle = self.bundle(program, proofs);
         riscv::verify_riscv(
             &bundle,
             bundle.vk.pre_hash,
             &[(air_id::PROGRAM, riscv::riscv_program_commit(&bundle.vk))],
-            program.initial_global_cumulative_sum(),
+            &riscv::ProgramIdentity::new(program, &bundle.vk.inner.params).expect("the image fits"),
         )
         .is_ok()
     }
@@ -227,12 +242,14 @@ impl Riscv {
 /// Build the tree, catching a panic as a failure; `Ok` carries the root's deferred digest.
 fn tree(
     riscv: &Riscv,
+    program: &Arc<Program>,
     proofs: &[pico_mle_core::protocol::proof::Proof<riscv::Sc>],
     chain: [Kb; DIGEST_SIZE],
     prefix: &[pico_vm::mle::machine::convert::ProofWithVk],
 ) -> Result<[Kb; DIGEST_SIZE], String> {
     let root = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        build_tree(&riscv.vk, &riscv.vm_vk, proofs, chain, prefix).map_err(|e| format!("{e}"))
+        build_tree(&riscv.bundle(program, proofs), &riscv.vm_vk, chain, prefix)
+            .map_err(|e| format!("{e}"))
     }))
     .unwrap_or_else(|p| {
         Err(p
@@ -279,10 +296,10 @@ fn main() {
 
     // A real deferred chain to forge with: one node over fib's own honest root.
     let honest = emulate(&program, n, 1 << 22);
+    let honest_proofs = riscv.prove(&honest, usize::MAX, [Kb::ZERO; DIGEST_SIZE]);
     let sub_root = build_tree(
-        &riscv.vk,
+        &riscv.bundle(&program, &honest_proofs),
         &riscv.vm_vk,
-        &riscv.prove(&honest, usize::MAX, [Kb::ZERO; DIGEST_SIZE]),
         [Kb::ZERO; DIGEST_SIZE],
         &[],
     )
@@ -311,7 +328,7 @@ fn main() {
         .expect("the halt-only chunk");
     let proofs = riscv.prove(&records, halt_chunk, chain_end);
     let riscv_ok = riscv.verifies(&program, &proofs);
-    let outcome = tree(&riscv, &proofs, chain_end, &nodes);
+    let outcome = tree(&riscv, &program, &proofs, chain_end, &nodes);
     let ok = riscv_ok
         && match (&outcome, patched) {
             (Err(e), true) => e.contains("root combine proof failed STARK verify"),
@@ -331,6 +348,7 @@ fn main() {
     }
     let honest_cut = tree(
         &riscv,
+        &program,
         &riscv.prove(&records, usize::MAX, [Kb::ZERO; DIGEST_SIZE]),
         [Kb::ZERO; DIGEST_SIZE],
         &[],
@@ -358,7 +376,7 @@ fn main() {
     info!("partial-run: chunk size {cs}, {} records", records.len());
     let proofs = riscv.prove(&records, usize::MAX, [Kb::ZERO; DIGEST_SIZE]);
     let riscv_ok = riscv.verifies(&program, &proofs);
-    let outcome = tree(&riscv, &proofs, [Kb::ZERO; DIGEST_SIZE], &[]);
+    let outcome = tree(&riscv, &program, &proofs, [Kb::ZERO; DIGEST_SIZE], &[]);
     let ok = riscv_ok
         && match (&outcome, patched) {
             (Err(e), true) => e.contains("root combine proof failed STARK verify"),
@@ -418,7 +436,7 @@ fn main() {
             let Some(&cs) = cut.first() else { continue };
             let records = emulate(&program, n, cs);
             let proofs = riscv.prove(&records, usize::MAX, [Kb::ZERO; DIGEST_SIZE]);
-            let outcome = tree(&riscv, &proofs, [Kb::ZERO; DIGEST_SIZE], &[]);
+            let outcome = tree(&riscv, &program, &proofs, [Kb::ZERO; DIGEST_SIZE], &[]);
             let ok = matches!(outcome, Ok(d) if d == [Kb::ZERO; DIGEST_SIZE]);
             let detail = format!("{label}: {} records at chunk size {cs}", records.len());
             if !report("guarded-proof", ok, &detail) {

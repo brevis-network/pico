@@ -11,6 +11,5 @@ pub mod lookup;
 #[cfg(feature = "cuda")]
 pub mod prover;
 pub mod report;
-pub mod septic;
 pub mod utils;
 pub mod witness;

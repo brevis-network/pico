@@ -155,6 +155,7 @@ mod tests {
             commit_tail_overrun: 0,
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
+            global_event_cap: usize::MAX,
         };
         emu
     }

@@ -24,9 +24,7 @@ use crate::{
         unpack_block::UnpackBlockChip,
     },
     compiler::recursion::{
-        instruction::{
-            HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
-        },
+        instruction::{HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction},
         program::RecursionProgram,
         types::ExpReverseBitsInstr,
     },
@@ -605,14 +603,6 @@ impl<F> AddAssign<&Instruction<F>> for RecursionEventCount {
                 output_addrs_mults,
                 input_addr: _, // No receive interaction for the hint operation
             }) => self.mem_var_events += output_addrs_mults.len(),
-            Instruction::HintAddCurve(instr) => {
-                let HintAddCurveInstr {
-                    output_x_addrs_mults,
-                    output_y_addrs_mults,
-                    ..
-                } = &**instr;
-                self.mem_var_events += output_x_addrs_mults.len() + output_y_addrs_mults.len();
-            }
             Instruction::CommitPublicValues(_) => {}
             Instruction::Print(_) => {}
             Instruction::BatchFRI(instr) => {

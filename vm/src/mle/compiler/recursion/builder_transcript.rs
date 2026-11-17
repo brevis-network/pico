@@ -3,7 +3,7 @@
 
 use super::*;
 
-impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
+impl<F: PrimeField32 + TwoAdicField> Builder<F> {
     /// Reset the Fiat-Shamir sponge to its zero state (for verifying N independent proofs).
     pub(super) fn reset_sponge(&mut self) {
         self.sponge = [self.addr_zero; WIDTH];
@@ -102,6 +102,15 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             self.absorb_f(a);
         }
         ef_addr
+    }
+
+    /// [`Self::observe_ef_for_chip`], also returning the element's coefficient addresses.
+    pub(super) fn observe_ef_full_for_chip(&mut self) -> (u32, [u32; EXTENSION_DEGREE]) {
+        let (ef_addr, f_addrs) = self.hint_ef_full();
+        for a in f_addrs {
+            self.absorb_f(a);
+        }
+        (ef_addr, f_addrs)
     }
 
     /// Observe 8 F constant addresses (Digest from VK, already in memory as Mem(Write)).

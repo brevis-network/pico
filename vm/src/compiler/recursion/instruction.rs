@@ -54,7 +54,6 @@ instruction_kinds!(
     ExpReverseBitsLen,
     HintBits,
     BatchFRI,
-    HintAddCurve,
     Print,
     HintExt2Felts,
     CommitPublicValues,
@@ -93,7 +92,6 @@ impl<F> Instruction<F> {
             | Instruction::ExpReverseBitsLen(_)
             | Instruction::HintBits(_)
             | Instruction::BatchFRI(_)
-            | Instruction::HintAddCurve(_)
             | Instruction::Print(_)
             | Instruction::HintExt2Felts(_)
             | Instruction::CommitPublicValues(_)
@@ -125,7 +123,6 @@ pub enum Instruction<F> {
     ExpReverseBitsLen(ExpReverseBitsInstr<F>),
     HintBits(HintBitsInstr<F>),
     BatchFRI(Box<BatchFRIInstr<F>>),
-    HintAddCurve(Box<HintAddCurveInstr<F>>),
     Print(PrintInstr<F>),
     HintExt2Felts(HintExt2FeltsInstr<F>),
     CommitPublicValues(Box<CommitPublicValuesInstr<F>>),
@@ -145,16 +142,6 @@ pub enum Instruction<F> {
     UnpackBlock(Box<UnpackBlockInstr<F>>),
     Poseidon2Packed(Box<Poseidon2PackedInstr<F>>),
     ExpBitsLen(Box<ExpBitsLenInstr<F>>),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct HintAddCurveInstr<F> {
-    pub output_x_addrs_mults: Vec<(Address<F>, F)>,
-    pub output_y_addrs_mults: Vec<(Address<F>, F)>,
-    pub input1_x_addrs: Vec<Address<F>>,
-    pub input1_y_addrs: Vec<Address<F>>,
-    pub input2_x_addrs: Vec<Address<F>>,
-    pub input2_y_addrs: Vec<Address<F>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -471,21 +471,47 @@ where
     // GKR has no univariate skip, hence a zero stride threshold for this layout.
     let interactions_layout = StackedLayout::new(0, log_skip + n_logup, stacking_dims).unwrap();
 
-    // Proof-of-work before the LogUp challenges are drawn (soundness boost for their sampling).
+    // The LogUp challenges, obtained the way the key's mode says (as `LogupChallenges::obtain`
+    // does for the CPU backends). Internal: proof-of-work, then two samples. External (the
+    // global LogUp's group proofs): the caller's pair is absorbed, nothing ground or sampled,
+    // and the GKR root's numerator is sent instead of asserted zero.
     let step_prof2 = std::env::var("STEP_PROF").is_ok();
-    let t_grind = std::time::Instant::now();
-    let pow_witness = transcript
-        .grind_gpu(mpk.params.logup.pow_bits)
-        .map_err(LogupZerocheckError::Grind)?;
-    if step_prof2 {
-        let _ = crate::runtime::stream::current_stream_sync();
-        tracing::info!(target: "bench", "[stepprof] logup_grind={}us", t_grind.elapsed().as_micros());
-    }
-    let alpha_logup = transcript.sample_ext();
-    let beta_logup = transcript.sample_ext();
+    let external_mode =
+        mpk.params.logup.challenge_mode == mle_core::interaction::LogUpChallengeMode::External;
+    let (pow_witness, alpha_logup, beta_logup) =
+        match (external_mode, ctx.external_logup_challenges) {
+            (false, None) => {
+                let t_grind = std::time::Instant::now();
+                let pow_witness = transcript
+                    .grind_gpu(mpk.params.logup.pow_bits)
+                    .map_err(LogupZerocheckError::Grind)?;
+                if step_prof2 {
+                    let _ = crate::runtime::stream::current_stream_sync();
+                    tracing::info!(
+                        target: "bench",
+                        "[stepprof] logup_grind={}us",
+                        t_grind.elapsed().as_micros()
+                    );
+                }
+                (
+                    pow_witness,
+                    transcript.sample_ext(),
+                    transcript.sample_ext(),
+                )
+            }
+            (true, Some([alpha, beta])) => {
+                transcript.observe_ext(alpha);
+                transcript.observe_ext(beta);
+                (FK::Val::ZERO, alpha, beta)
+            }
+            _ => return Err(LogupZerocheckError::LogUpChallengeModeMismatch),
+        };
     debug!(%alpha_logup, %beta_logup);
 
     let has_interactions = !interactions_layout.sorted_cols.is_empty();
+    if external_mode && !has_interactions {
+        return Err(LogupZerocheckError::ExternalModeWithoutInteractions);
+    }
     let t_pn = std::time::Instant::now();
     let mut zc_prover = LogupZerocheckGpu::<FK, HS>::new(
         mpk,
@@ -637,7 +663,7 @@ where
                 plan,
             },
             alpha,
-            true,
+            !external_mode,
             &mut zc_prover.mem,
         )?,
         None => fractional_sumcheck_gpu::<FK, HS::SC, _>(
@@ -645,7 +671,7 @@ where
             inputs.leaves,
             gkr_lens,
             alpha,
-            true,
+            !external_mode,
             &mut zc_prover.mem,
         )?,
     };
@@ -883,6 +909,7 @@ where
     };
     let gkr_out = GkrProof {
         logup_pow_witness: pow_witness,
+        p0_claim: external_mode.then_some(frac_out.fractional_sum.0),
         q0_claim: frac_out.fractional_sum.1,
         claims_per_layer: frac_out.claims_per_layer,
         sumcheck_polys: frac_out.sumcheck_polys,

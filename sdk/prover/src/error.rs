@@ -55,6 +55,16 @@ pub enum ProveError {
     #[error(transparent)]
     CatchAllShape(#[from] pico_vm::mle::machine::riscv::CatchAllShape),
 
+    /// The run's chunks hold more cross-chunk events (memory carried between chunks, syscalls
+    /// handed to precompile chunks) than one proof's global LogUp may count, in its units. No
+    /// prover can prove such a run; the GPU pipeline reports it as the chunk that crosses the
+    /// limit is prepared.
+    #[error(
+        "the run's chunks hold too many cross-chunk events for one proof: their real-row count \
+         for the global LogUp reached {count}, and a run may reach {max}"
+    )]
+    TooManyGlobalRows { count: u64, max: u64 },
+
     /// [`crate::ProverBuilder::aot`] was given the bootstrap stub, which has no compiled code.
     #[cfg(feature = "aot")]
     #[error(
@@ -123,8 +133,8 @@ pub enum ProveError {
     Proving { phase: Phase, message: String },
 
     /// A proof did not verify, or its public values fail a check this crate makes on them: a
-    /// readable output digest, copies of it that agree, a global cumulative sum and an exit code on
-    /// every chunk, a wrap witness that matches the proof. Whether it was produced by this run or
+    /// readable output digest, copies of it that agree, an exit code on every chunk, a wrap
+    /// witness that matches the proof. Whether it was produced by this run or
     /// loaded by [`crate::Prover::verify_artifact`].
     #[error("{phase:?}: the proof does not verify: {message}")]
     Verification { phase: Phase, message: String },
@@ -278,7 +288,7 @@ pub enum ProveError {
     #[error("only a Combine root exports as a v3 envelope; this proof stops at {phase:?}")]
     NotARootProof { phase: Phase },
 
-    /// [`crate::Proof::export_compress_v4`] on a proof that does not stop at [`Phase::Compress`].
+    /// [`crate::Proof::export_compress_v5`] on a proof that does not stop at [`Phase::Compress`].
     #[error("only a Compress proof exports as a compress envelope; this proof stops at {phase:?}")]
     NotACompressProof { phase: Phase },
 
@@ -374,6 +384,10 @@ impl ProveError {
             }
             EmbedError::Guest(GuestFailure::Panicked(message)) => Self::EmulationAborted(message),
             EmbedError::Guest(GuestFailure::CatchAllShape(e)) => Self::CatchAllShape(e),
+            EmbedError::Guest(GuestFailure::TooManyGlobalRows(e)) => Self::TooManyGlobalRows {
+                count: e.count,
+                max: e.max,
+            },
             other => Self::Gpu(other.to_string()),
         }
     }

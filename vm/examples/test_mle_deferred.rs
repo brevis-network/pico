@@ -6,7 +6,8 @@
 //!
 //!   1. it proves and verifies under the honestly keygen'd VK;
 //!   2. every public value but `digest` matches the contract the aggregation tree will rely on
-//!      (chunk cursors at 1, no execution chunk, neutral GCS, the MAIN program's exe identity and
+//!      (chunk cursors at 1, no execution chunk, the global LogUp passing through, the MAIN
+//!      program's exe identity and
 //!      entry pc, `flag_complete == 0` so it can never pose as a root). `digest` is left to the
 //!      parent that consumes the node, which recomputes it;
 //!   3. **the chain step it computed in-circuit equals the host's `hash_deferred_proof`** — the
@@ -86,17 +87,10 @@ fn main() {
         false,
     )
     .expect("riscv prove failed");
-    let (riscv_vk, riscv_proofs) = bundle.into_parts();
-    let riscv_vm_vk = RiscvVmVk::from_program_and_vk(&program, &riscv_vk);
+    let riscv_vm_vk = RiscvVmVk::from_program_and_vk(&program, &bundle.vk);
     // No deferred nodes and no chain value: an ordinary tree, which is what a sub-proof is.
-    let sub_root = build_tree(
-        &riscv_vk,
-        &riscv_vm_vk,
-        &riscv_proofs,
-        [Kb::ZERO; DIGEST_SIZE],
-        &[],
-    )
-    .expect("sub-proof tree failed");
+    let sub_root = build_tree(&bundle, &riscv_vm_vk, [Kb::ZERO; DIGEST_SIZE], &[])
+        .expect("sub-proof tree failed");
     info!("sub-proof: complete root proved + verified ✓");
 
     // ── One deferred node over it ───────────────────────────────────────────────────────────
@@ -183,24 +177,19 @@ fn main() {
             "riscv_vk_digest[{j}]"
         );
     }
-    // The GCS fold is `Σ d_i − (n−1)·zero`, so contributing exactly `zero` leaves the tree's sum
-    // untouched.
-    for j in 0..7 {
+    // Transparent in the global LogUp: the chain passes through, the fraction is `(0, 1)`, and
+    // the node counts no rows.
+    for j in 0..DIGEST_SIZE {
         assert_eq!(
-            pvs[col.global_cumulative_sum.0.x.0[j]],
-            Kb::from_u32(
-                <Kb as pico_vm::machine::septic::FieldSepticCurve>::CURVE_CUMULATIVE_SUM_START_X[j]
-            ),
-            "gcs.x[{j}]"
-        );
-        assert_eq!(
-            pvs[col.global_cumulative_sum.0.y.0[j]],
-            Kb::from_u32(
-                <Kb as pico_vm::machine::septic::FieldSepticCurve>::CURVE_CUMULATIVE_SUM_START_Y[j]
-            ),
-            "gcs.y[{j}]"
+            pvs[col.global_chain_start[j]], pvs[col.global_chain_end[j]],
+            "global chain[{j}]"
         );
     }
+    for (j, &slot) in col.global_sum.iter().enumerate() {
+        let expected = if j == 5 { Kb::ONE } else { Kb::ZERO };
+        assert_eq!(pvs[slot], expected, "global_sum[{j}]");
+    }
+    assert_eq!(pvs[col.global_row_count], Kb::ZERO, "global_row_count");
 
     // ── The chain step: in-circuit vs the guest's own hash ───────────────────────────────────
     // The node starts the chain at zero (it is the first step) and ends at

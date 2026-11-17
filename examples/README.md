@@ -87,19 +87,22 @@ The prover checks the guest's three committed values (both header hashes, then t
 verdict) against the same verification run on the host: first on an emulation, then on the proof.
 
 **It needs a large machine.** It proves at the prover's defaults, and on a 124-core, 920 GB server
-the run of 19.1 million cycles takes 2 min 28 s at a 206 GB peak. It does not fit a laptop.
+the run of 19.1 million cycles takes 2 min 27 s at a 116 GB peak. It does not fit a laptop.
 
 A smaller machine can trade proving time for memory through `Prover::builder`. Measured on the same
 server with proving limited to 10 threads (`RAYON_NUM_THREADS=10`):
 
 | options | chunks | peak memory | wall clock |
 |---|---|---|---|
-| the defaults: `log_stacked_height` 23, `concurrency` 4 | 3 | 199 GB | 6 min 42 s |
-| `log_stacked_height(21)`, `concurrency(1)` | 10 | 33 GB | 8 min 50 s |
-| `log_stacked_height(20)`, `concurrency(1)` | 19 | 26 GB | 10 min 45 s |
+| the defaults: `log_stacked_height` 23, `concurrency` 4 | 3 | 129 GB | 6 min 37 s |
+| `log_stacked_height(21)`, `concurrency(1)` | 10 | 20 GB | 9 min 30 s |
+| `log_stacked_height(20)`, `concurrency(1)` | 19 | 14 GB | 12 min 16 s |
 
-A lower stacked height gives more, smaller chunks. Two chunks at a time at height 20 took as long
-and peaked at 33 GB. None of these fits in 24 GB.
+A lower stacked height gives more, smaller chunks, and `concurrency` bounds the recursion proofs
+that follow the chunks as well as the chunks, so at 1 the run proves one proof at a time
+throughout (the convert programs' keys, one per distinct chunk shape, are generated
+together). Two chunks at a time at height 20 took 11 min 19 s and peaked at 28 GB. The last
+two rows of the table stay under 24 GB.
 
 Every figure in this section was taken with serial emulation (`ProverBuilder::serial_emulation`);
 the default snapshot pipeline has not been measured on tendermint. It sets up an emulator memory
@@ -122,7 +125,7 @@ then proves the aggregator over those two claims, a deferred node over each root
 root over the nodes and the aggregator's chunks. It verifies that root, checks that it closes over
 the guest's claims folded on the host, and checks the committed outputs against the inputs.
 `RUST_LOG=info` shows each step; without it only the summary prints. On a 124-core server the run
-takes about a minute at a 6 GB peak.
+takes about three minutes at a 14 GB peak.
 
 It runs in dev mode (no whitelist) and verifies only in the process that proved: a combine root
 verifies in another process only in whitelist mode, so this example writes no proof file.

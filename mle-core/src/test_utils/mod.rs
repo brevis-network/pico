@@ -471,7 +471,7 @@ impl<SC: StarkProtocolConfig> TestFixture<SC> for SelfInteractionFixture {
             })
             .enumerate()
             .collect_vec();
-        ProvingContext { per_trace }
+        ProvingContext::new(per_trace)
     }
 }
 
@@ -550,7 +550,7 @@ impl<SC: StarkProtocolConfig> TestFixture<SC> for MixtureFixture<SC> {
             .flat_map(|fx| fx.generate_air_proving_ctxs())
             .enumerate()
             .collect_vec();
-        ProvingContext { per_trace }
+        ProvingContext::new(per_trace)
     }
 }
 
@@ -594,6 +594,7 @@ pub fn test_system_params_small_with_poly_len(
             max_interaction_count: 1 << 30,
             log_max_message_length: 7,
             pow_bits: 2,
+            challenge_mode: Default::default(),
         },
         max_constraint_degree,
     }

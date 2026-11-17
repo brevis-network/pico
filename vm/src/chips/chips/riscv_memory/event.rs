@@ -232,7 +232,7 @@ pub struct MemoryLocalEvent {
 /// A fresh entry declares its own initial state on the MemoryLocal AIR (`has_initial = 0`, with
 /// `initial_value` pinned to zero there) instead of receiving it from the Global bus, and the
 /// emulator raises no MemoryInitialize event for its address. Every other entry -- registers,
-/// image words (their initial state is sent by the vk's image digest), words whose initial value
+/// image words (their initial state is sent by the program's image table), words whose initial value
 /// a hint wrote (nonzero, so a MemoryInitialize row still carries it), and entries whose
 /// interval starts in an earlier chunk -- keeps `has_initial = 1` and the Global receive.
 ///
