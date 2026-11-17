@@ -88,12 +88,35 @@ where
         MultiStarkProvingKey<Self::SC>,
         MultiStarkVerifyingKey<Self::SC>,
     ) {
+        self.keygen_with_app_prep_reusing(airs, app_prep_air_ids, &vec![None; airs.len()], None)
+    }
+
+    /// [`Self::keygen_with_app_prep`] reusing work from an earlier keygen of the same AIRs under
+    /// the same config: `reuse[i]`, when `Some`, is AIR `i`'s committed preprocessed table (taken
+    /// from that keygen's key), and `memo` holds earlier pre-hashes. The keys are the ones a fresh
+    /// keygen makes; only the generation and commit of the reused tables and a repeated pre-hash
+    /// are skipped.
+    fn keygen_with_app_prep_reusing(
+        &self,
+        airs: &[AirRef<Self::SC>],
+        app_prep_air_ids: &[usize],
+        reuse: &[Option<crate::keygen::CommittedPrep<Self::SC>>],
+        memo: Option<crate::keygen::PreHashMemo<Self::SC>>,
+    ) -> (
+        MultiStarkProvingKey<Self::SC>,
+        MultiStarkVerifyingKey<Self::SC>,
+    ) {
+        assert_eq!(airs.len(), reuse.len(), "one reuse entry per AIR");
         let mut keygen_builder = MultiStarkKeygenBuilder::new(self.config().clone());
-        // Measurement (log-only): add_air runs per-AIR preprocessed trace generation +
-        // stacked_commit; generate_pk runs per-AIR symbolic DAG + bus checks.
+        if let Some(memo) = memo {
+            keygen_builder = keygen_builder.with_pre_hash_memo(memo);
+        }
         let t_add = std::time::Instant::now();
-        for air in airs {
-            keygen_builder.add_air(air.clone());
+        for (air, prep) in airs.iter().zip(reuse) {
+            match prep {
+                Some(prep) => keygen_builder.add_air_with_prep(air.clone(), prep.clone()),
+                None => keygen_builder.add_air(air.clone()),
+            };
         }
         for &air_id in app_prep_air_ids {
             keygen_builder.mark_app_preprocessed(air_id);
@@ -103,7 +126,8 @@ where
         let t_gen = std::time::Instant::now();
         let pk = keygen_builder.generate_pk().unwrap();
         tracing::info!(
-            "mle_keygen_detail: add_airs_ms = {add_airs_ms} (prep gen+commit), generate_pk_ms = {} (DAG+checks)",
+            "mle_keygen_detail: add_airs_ms = {add_airs_ms} (prep gen+commit, {} reused), generate_pk_ms = {} (DAG+checks)",
+            reuse.iter().filter(|p| p.is_some()).count(),
             t_gen.elapsed().as_millis()
         );
         let vk = pk.get_vk();

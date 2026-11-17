@@ -64,6 +64,35 @@ impl<SC: StarkProtocolConfig> PrepStage<SC> {
     }
 }
 
+/// An AIR's committed preprocessed table from an earlier keygen of the same AIR under the same
+/// config, handed back to [`MultiStarkKeygenBuilder::add_air_with_prep`] so it is not generated and
+/// committed again. Take it from that keygen's [`StarkProvingKey`]: `vk.preprocessed_data` and
+/// `preprocessed_data`.
+#[derive(Clone)]
+pub struct CommittedPrep<SC: StarkProtocolConfig> {
+    pub verifier_data: Option<VerifierSinglePreprocessedData<SC::Digest>>,
+    pub prover_data: Option<Arc<StackedPcsData<SC::F, SC::Digest>>>,
+}
+
+impl<SC: StarkProtocolConfig> CommittedPrep<SC> {
+    /// The preprocessed table `pk` was keygen'd with.
+    pub fn of(pk: &StarkProvingKey<SC>) -> Self {
+        Self {
+            verifier_data: pk.vk.preprocessed_data.clone(),
+            prover_data: pk.preprocessed_data.clone(),
+        }
+    }
+}
+
+/// Pre-hashes already computed, by their exact preimage bytes. Hashing the preimage is most of a
+/// pre-hash's cost, and a machine keygen'd again for another program usually has the same one
+/// (the program table's commitment is not in it). Shared by the caller across keygens.
+pub type PreHashMemo<SC> =
+    Arc<std::sync::Mutex<Vec<(Vec<u8>, <SC as StarkProtocolConfig>::Digest)>>>;
+
+/// How many preimages a [`PreHashMemo`] keeps.
+const PRE_HASH_MEMO_ENTRIES: usize = 4;
+
 /// Stateful builder to create multi-stark proving and verifying keys
 /// for system of multiple RAPs with multiple multi-matrix commitments
 pub struct MultiStarkKeygenBuilder<SC: StarkProtocolConfig> {
@@ -83,6 +112,8 @@ pub struct MultiStarkKeygenBuilder<SC: StarkProtocolConfig> {
     /// [`compute_vk_pre_hash`]. Only meaningful in per-air mode (merged mode excludes every
     /// preprocessed commitment value structurally).
     app_preprocessed_air_ids: Vec<usize>,
+    /// Earlier pre-hashes to reuse when the preimage matches byte for byte.
+    pre_hash_memo: Option<PreHashMemo<SC>>,
 }
 
 impl<SC: StarkProtocolConfig> MultiStarkKeygenBuilder<SC> {
@@ -117,7 +148,15 @@ impl<SC: StarkProtocolConfig> MultiStarkKeygenBuilder<SC> {
             merge_preprocessed,
             prep_dims_only,
             app_preprocessed_air_ids: vec![],
+            pre_hash_memo: None,
         }
+    }
+
+    /// Reuse a pre-hash from `memo` when this key's lean preimage equals an earlier one, and add
+    /// this one to it otherwise.
+    pub fn with_pre_hash_memo(mut self, memo: PreHashMemo<SC>) -> Self {
+        self.pre_hash_memo = Some(memo);
+        self
     }
 
     /// Mark `air_id`'s preprocessed commitment as application identity (excluded from the lean
@@ -137,6 +176,24 @@ impl<SC: StarkProtocolConfig> MultiStarkKeygenBuilder<SC> {
     /// Returns `air_id`
     pub fn add_air(&mut self, air: AirRef<SC>) -> usize {
         self.add_air_impl(air, false)
+    }
+
+    /// [`Self::add_air`] with the preprocessed table already committed by an earlier keygen of
+    /// the same AIR under the same config (see [`CommittedPrep`]). Per-air mode only.
+    pub fn add_air_with_prep(&mut self, air: AirRef<SC>, prep: CommittedPrep<SC>) -> usize {
+        assert!(
+            !self.merge_preprocessed,
+            "a reused preprocessed commitment is per-air; merged mode commits all tables together"
+        );
+        self.partitioned_airs.push(AirKeygenBuilder {
+            is_required: false,
+            air,
+            prep: PrepStage::Committed(PrepKeygenData {
+                verifier_data: prep.verifier_data,
+                prover_data: prep.prover_data,
+            }),
+        });
+        self.partitioned_airs.len() - 1
     }
 
     pub fn add_required_air(&mut self, air: AirRef<SC>) -> usize {
@@ -485,7 +542,27 @@ impl<SC: StarkProtocolConfig> MultiStarkKeygenBuilder<SC> {
         // trusted reference must recompute it from `inner` via [`compute_vk_pre_hash`] with the
         // SAME app-marked air ids (the SSOT used here), never trust the bundle's `pre_hash`
         // field — and must pin the excluded identity commitments separately.
-        let vk_pre_hash = compute_vk_pre_hash(&self.config, &pre_vk, &app_prep_air_ids);
+        let vk_pre_hash = match &self.pre_hash_memo {
+            None => compute_vk_pre_hash(&self.config, &pre_vk, &app_prep_air_ids),
+            Some(memo) => {
+                let bytes = lean_vk_preimage_bytes(&pre_vk, &app_prep_air_ids);
+                let known = memo
+                    .lock()
+                    .expect("pre-hash memo poisoned")
+                    .iter()
+                    .find(|(b, _)| *b == bytes)
+                    .map(|(_, d)| *d);
+                known.unwrap_or_else(|| {
+                    let digest = hash_lean_vk_preimage(&self.config, &bytes);
+                    let mut memo = memo.lock().expect("pre-hash memo poisoned");
+                    if memo.len() == PRE_HASH_MEMO_ENTRIES {
+                        memo.remove(0);
+                    }
+                    memo.push((bytes, digest));
+                    digest
+                })
+            }
+        };
         let prehash_ms = t_prehash.elapsed().as_millis();
 
         tracing::info!(
@@ -817,6 +894,15 @@ pub fn compute_vk_pre_hash<SC: StarkProtocolConfig>(
     inner: &MultiStarkVerifyingKeyInner<SC>,
     app_prep_air_indices: &[usize],
 ) -> SC::Digest {
+    hash_lean_vk_preimage(config, &lean_vk_preimage_bytes(inner, app_prep_air_indices))
+}
+
+/// The bytes [`compute_vk_pre_hash`] hashes: cheap to build, so equal bytes can stand in for an
+/// equal pre-hash (see [`PreHashMemo`]).
+fn lean_vk_preimage_bytes<SC: StarkProtocolConfig>(
+    inner: &MultiStarkVerifyingKeyInner<SC>,
+    app_prep_air_indices: &[usize],
+) -> Vec<u8> {
     let merged = inner.merged_preprocessed_commit.is_some();
     let preimage = LeanVkPreimage::<SC> {
         merged_mode: merged,
@@ -845,20 +931,27 @@ pub fn compute_vk_pre_hash<SC: StarkProtocolConfig>(
     // version, and the byte length.
     let vk_bytes = postcard::to_allocvec(&preimage).unwrap();
     tracing::debug!("lean pre-vkey: {} bytes", vk_bytes.len());
-    let versioned_vk_bytes = LEAN_VK_PRE_HASH_DOMAIN
+    LEAN_VK_PRE_HASH_DOMAIN
         .to_le_bytes()
         .into_iter()
         .chain(CODEC_VERSION.to_le_bytes())
         .chain((vk_bytes.len() as u64).to_le_bytes())
-        .chain(vk_bytes);
+        .chain(vk_bytes)
+        .collect()
+}
+
+fn hash_lean_vk_preimage<SC: StarkProtocolConfig>(
+    config: &SC,
+    versioned_vk_bytes: &[u8],
+) -> SC::Digest {
     // The preimage is absorbed one field element PER BYTE, so the permutation count — not the
     // widening below, and not the postcard encoding — is essentially all of this function's cost
     // (measured 96% of it on a 53 670-byte convert preimage). Packing several bytes per element
     // would cut it, but it changes the digest: a VK/wire-format change, not an optimization.
     config.hasher().hash_slice(
         &versioned_vk_bytes
-            .into_iter()
-            .map(SC::F::from_u8)
+            .iter()
+            .map(|&b| SC::F::from_u8(b))
             .collect_vec(),
     )
 }
