@@ -112,9 +112,7 @@ use pico_mle_core::{
     },
     keygen::{compute_vk_pre_hash, types::MultiStarkVerifyingKey, CommittedPrep, PreHashMemo},
     proof::Proof,
-    prover::{
-        AirProvingContext, DeviceDataTransporter, DeviceMultiStarkProvingKey, ProvingContext,
-    },
+    prover::{AirProvingContext, DeviceMultiStarkProvingKey, ProvingContext},
     verifier::VerifierError,
     AirRef, StarkEngine, StarkProtocolConfig,
 };
@@ -2212,7 +2210,15 @@ impl RiscvMachine {
             if cfg!(feature = "cuda") { "gpu" } else { "cpu" },
             &vk,
         )?;
-        let d_pk = engine.device().transport_pk_to_device(&pk);
+        // Only the Program table's preprocessed data depends on the program; the AIRs' GPU
+        // constraint data is shared with every earlier program's key on this card.
+        #[cfg(feature = "cuda")]
+        let d_pk = engine.device().transport_pk_to_device_cached(&pk);
+        #[cfg(not(feature = "cuda"))]
+        let d_pk = pico_mle_core::prover::DeviceDataTransporter::transport_pk_to_device(
+            engine.device(),
+            &pk,
+        );
         // Eagerly nvrtc-compile all JIT kernels here, on the main thread, before the prove worker /
         // emulate-pipeline / rayon threads spawn. Lazy JIT compilation from a prove-worker thread
         // mid-proof deadlocks libnvrtc's internal threading in the heavily-threaded prover; warming

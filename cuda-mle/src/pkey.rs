@@ -405,7 +405,8 @@ fn to_device_or_empty<T>(data: &[T]) -> Result<DeviceBuffer<T>, MemCopyError> {
 /// buffers likewise belong to the device that allocated them.
 type AirDataKey = (u32, u8, u32, String, Vec<u8>);
 
-/// Process-lifetime [`AirDataGpu`] cache, scoped to the merged-preprocessed recursion path.
+/// Process-lifetime [`AirDataGpu`] cache, used by the merged-preprocessed recursion path and by the
+/// riscv key (rebuilt for every new program; only its Program table's preprocessed data differs).
 ///
 /// The recursion machines keygen a fixed 21-chip set once per convert/combine layout, and
 /// `AirDataGpu::new` redoes the same rule scheduling, monomial expansion, JIT source emission and
@@ -422,31 +423,28 @@ static AIR_DATA_CACHE: std::sync::OnceLock<
 > = std::sync::OnceLock::new();
 
 /// Cumulative hits/misses, reported on every `mle_assemble_detail` line. This is the evidence for
-/// the layout-invariance claim above, not a debug counter: hits ≈ 21×(layouts−1) confirms it,
-/// misses growing with layouts refutes it.
+/// the layout-invariance claim above, not a debug counter: misses growing with layouts or
+/// programs refutes it.
 pub static AIR_DATA_HITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 pub static AIR_DATA_MISSES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Entry ceiling. Reached only if the DAGs are not layout-invariant after all, in which case the
-/// cache would otherwise grow one 21-AIR set per layout and leak VRAM; past it we stop inserting
+/// cache would otherwise grow one AIR set per layout and leak VRAM; past it we stop inserting
 /// and behave exactly as before. Override with `MLE_AIR_DATA_CACHE_CAP` (0 disables the cache).
 ///
-/// The steady state is 21 entries PER DEVICE (one recursion chip set, keyed by device), so the
-/// default must cover every card of the biggest host: 8 × 21 = 168, plus margin. Per-card VRAM is
-/// unchanged by a larger cap — a card only ever holds its own 21 sets — and the sentinel purpose
-/// survives: a non-invariant DAG still hits the ceiling and trips the warning below. That warning
-/// used to assert non-invariance as the only cause; a cap below devices × 21 fires it too, and is
-/// the first thing to check.
+/// The steady state per device is one recursion chip set (21) plus one riscv chip set (about 50),
+/// so the default covers every card of an 8-card host with margin. A cap below that fires the
+/// warning below too, and is the first thing to check.
 fn air_data_cache_cap() -> usize {
     std::env::var("MLE_AIR_DATA_CACHE_CAP")
         .ok()
         .and_then(|v| v.trim().parse().ok())
-        .unwrap_or(200)
+        .unwrap_or(1024)
 }
 
-/// Entries `device` holds right now. Reported by the VRAM census: the steady state is one 21-AIR
-/// set per card, so a count that climbs with layouts is the non-invariance the cap above exists to
-/// catch, seen before it reaches the cap.
+/// Entries `device` holds right now. Reported by the VRAM census: the steady state is one
+/// recursion set plus one riscv set per card, so a count that climbs with layouts or programs is
+/// the non-invariance the cap above exists to catch, seen before it reaches the cap.
 pub fn air_data_cache_len(device: u32) -> usize {
     AIR_DATA_CACHE
         .get()
@@ -520,7 +518,7 @@ where
             tracing::warn!(
                 "[air-data-cache] at capacity ({cap}); no longer caching — every further \
                  keygen rebuilds its AirData (~10x the cached cost). Either the cap is below \
-                 devices x 21 (raise MLE_AIR_DATA_CACHE_CAP) or the constraint DAGs are not \
+                 devices x AIRs per card (raise MLE_AIR_DATA_CACHE_CAP) or the constraint DAGs are not \
                  layout-invariant."
             );
         });
