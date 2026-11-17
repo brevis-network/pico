@@ -373,6 +373,36 @@ fn switching_programs_rebuilds_the_machines_without_growing() {
     );
 }
 
+/// Card 0 proves with the riscv keys `build` made: the same program twice, another program with a
+/// failing run in between (its keys still evicted and remade correctly), back to the first, and a
+/// batch `Phase::Riscv` prove on the shared machine before a GPU one. Every proof verifies.
+#[test]
+#[ignore = "needs a GPU"]
+fn the_gpu_run_reuses_the_provers_riscv_keys() {
+    let mut fib = whitelist_prover(FIB_ELF);
+    for _ in 0..2 {
+        let proof = fib.prove(Stdin::from(&N)).expect("fib");
+        assert_is_fib_output(proof.committed().as_bytes(), N);
+    }
+
+    let mut poseidon2 = whitelist_prover(POSEIDON2_ELF);
+    poseidon2
+        .prove(Stdin::new())
+        .expect_err("poseidon2 without its input");
+    let proof = poseidon2
+        .prove(Stdin::from(&POSEIDON2_ROUNDS))
+        .expect("poseidon2 after a failing run");
+    assert_eq!(proof.program_id(), poseidon2.program_id());
+
+    let proof = fib.prove(Stdin::from(&N)).expect("fib again");
+    assert_is_fib_output(proof.committed().as_bytes(), N);
+
+    fib.prove_to(Stdin::from(&N), Phase::Riscv)
+        .expect("a batch riscv prove on the shared machine");
+    let proof = fib.prove(Stdin::from(&N)).expect("fib after a batch prove");
+    assert_is_fib_output(proof.committed().as_bytes(), N);
+}
+
 /// A pipeline failure that is not the guest's poisons the process: the next prove is refused with
 /// a clear error rather than hanging or panicking on the leftover pipeline state. The failure is
 /// `CORRUPT_MEMORY`'s tampered record, which no proof can close. Runs in a child process, since the

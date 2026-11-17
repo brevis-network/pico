@@ -2081,13 +2081,7 @@ impl RiscvMachine {
             log_stacked_height,
             bucket,
         )?;
-        let initial_gcs = if crate::mle::env_flag("SKIP_INITIAL_GCS") {
-            tracing::warn!("SKIP_INITIAL_GCS set: omitting initial GCS (negative test)");
-            None
-        } else {
-            Some(program.initial_global_cumulative_sum())
-        };
-        *machine.initial_gcs.lock().expect("gcs mutex poisoned") = initial_gcs;
+        machine.seed_initial_gcs(&program);
         Ok(machine)
     }
 
@@ -2328,6 +2322,33 @@ impl RiscvMachine {
         let gcs = gcs_from_pvs(&proof.public_values[air_id::GLOBAL]);
         self.gcs_terms.lock().expect("gcs mutex poisoned").push(gcs);
         Ok(proof)
+    }
+
+    /// Seeds the cross-chunk GCS accumulator with `program`'s initial sum, as [`Self::new`] does,
+    /// for a machine built by [`Self::from_airs`] that a streaming run now adopts.
+    pub fn seed_initial_gcs(&self, program: &Program) {
+        let seed = if crate::mle::env_flag("SKIP_INITIAL_GCS") {
+            tracing::warn!("SKIP_INITIAL_GCS set: omitting initial GCS (negative test)");
+            None
+        } else {
+            Some(program.initial_global_cumulative_sum())
+        };
+        *self.initial_gcs.lock().expect("gcs mutex poisoned") = seed;
+    }
+
+    /// Drops the chunk GCS terms a batch [`Self::prove`] left behind; the seed stays. For a machine
+    /// a streaming run may also use, so the batch path's terms never reach its drain.
+    pub fn discard_chunk_gcs_terms(&self) {
+        self.gcs_terms.lock().expect("gcs mutex poisoned").clear();
+    }
+
+    /// Whether chunk GCS terms are waiting for a drain, e.g. from a [`Self::prove`] on this machine.
+    pub fn has_chunk_gcs_terms(&self) -> bool {
+        !self
+            .gcs_terms
+            .lock()
+            .expect("gcs mutex poisoned")
+            .is_empty()
     }
 
     /// Remove the initial-GCS seed this constructor planted. Multi-card runs one machine per

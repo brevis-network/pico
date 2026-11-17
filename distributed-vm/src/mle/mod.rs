@@ -2218,6 +2218,9 @@ struct ResidentKey {
     vk_on: bool,
     log_stacked_height: usize,
     embedded_root: Option<[KoalaBear; 8]>,
+    /// The caller's riscv machine card 0 may adopt, by address: two provers never share one
+    /// resident, so one's batch prove cannot touch the GCS terms of the other's streaming run.
+    adopted_riscv: Option<usize>,
 }
 
 static RESIDENT: std::sync::Mutex<Option<(ResidentKey, Arc<Resident>)>> =
@@ -2461,6 +2464,9 @@ fn run_pipeline(
         vk_on,
         log_stacked_height: cfg.log_stacked_height,
         embedded_root: embedded.map(|e| e.trusted_root),
+        adopted_riscv: embedded
+            .and_then(|e| e.riscv.as_ref())
+            .map(|m| Arc::as_ptr(m) as usize),
     };
     let resident = resident_for(resident_key, |elf| {
         let t_compile = Instant::now();
@@ -2484,8 +2490,24 @@ fn run_pipeline(
                 .unwrap_or_else(|e| panic!("binding the main thread to card {k} failed: {e:?}"));
             #[cfg(not(feature = "cuda"))]
             let _ = k;
-            let machine = RiscvMachine::new(program.clone(), cfg.log_stacked_height, vk_on)
-                .unwrap_or_else(|e| panic!("{e}"));
+            // Card 0 takes the caller's machine when it already holds this program's keys: same
+            // program, height and air set, so keygenning it again only costs time and a second pk on
+            // the card. Not when it would need unseeding, or holds chunk terms from another prove.
+            let adopted = (k == 0 && keeps_initial_gcs_seed())
+                .then(|| embedded.and_then(|e| e.riscv.clone()))
+                .flatten()
+                .filter(|m| !m.has_chunk_gcs_terms());
+            let machine = match adopted {
+                Some(machine) => {
+                    machine.seed_initial_gcs(&program);
+                    info!("MLE keygen: card 0 reuses the caller's riscv keys");
+                    machine
+                }
+                None => Arc::new(
+                    RiscvMachine::new(program.clone(), cfg.log_stacked_height, vk_on)
+                        .unwrap_or_else(|e| panic!("{e}")),
+                ),
+            };
             // Every constructor seeds the program's initial GCS, and the aggregate must count that seed
             // exactly ONCE — globally, not once per process. Single-node: card 0 keeps it. Two-machine:
             // the primary's card 0 keeps it and **the secondary unseeds every one of its cards**, since
@@ -2498,7 +2520,7 @@ fn run_pipeline(
             if k > 0 || !keeps_initial_gcs_seed() {
                 machine.unseed_initial_gcs();
             }
-            provers.push(Arc::new(machine));
+            provers.push(machine);
         }
         // Card 0's machine doubles as the vk source below; keygen is deterministic, so every card
         // holds the same vk (asserted here rather than surfacing later as a verify failure).

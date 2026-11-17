@@ -41,6 +41,9 @@ pub struct EmbeddedProgram {
     /// Interpreters replaying the snapshot thread's snapshots into records. See
     /// [`default_pipeline_workers`](pico_vm::proverchain::riscv::default_pipeline_workers).
     pub emulation_workers: NonZeroUsize,
+    /// The caller's riscv machine for this program, already keygen'd on card 0 at this run's
+    /// height, so the run adopts it instead of keygenning the program again. `None` keygens.
+    pub riscv: Option<Arc<pico_vm::mle::machine::riscv::RiscvMachine>>,
 }
 
 /// The most [`default_event_pool_size`] picks; a larger count is the caller's to ask for.
