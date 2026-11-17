@@ -143,6 +143,7 @@ pub const KNOBS: &[&str] = &[
     "MLE_SHAPE_CROSSCHECK",
     "MLE_TRACE_COMPARE",
     "PICO_GPU_MEM",
+    "PICO_HOST_MEM",
     "SHAPE_PROBE_NATURAL",
     "SKIP_INITIAL_GCS",
     // The CUDA backend: its kernel paths and switches, caches, JIT settings, cross-checks and

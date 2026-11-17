@@ -88,7 +88,12 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
   ignores `RUSTFLAGS`, `CARGO_BUILD_*` / `CARGO_PROFILE_*` / `CARGO_TARGET_*` and config
   `rustflags`; and a dead build's scratch directory is cleared once its key's lock is free.
   `ProverBuilder::disable_pure_aot` turns pure mode off without the missing-program warning.
-- The GPU pipeline's emulation runs at most `MLE_DEFERRED_RECORDS` (512) deferred (precompile and
+- Below 500 GB of host memory, or in a container capped below it, the GPU prove defaults to 2
+  replay workers, 4 history slots, 4 emulator memories and 8 waiting deferred records, so the
+  eth-act standards tests prove within 128 GB. `PICO_HOST_MEM=low|high` overrides the tier.
+- A GPU prove reuses the riscv keys `ProverBuilder::build` made instead of keygenning the program
+  again, about 6 s less per new program.
+- The GPU pipeline's emulation runs at most `MLE_DEFERRED_RECORDS` (512; 8 below 500 GB of host memory) deferred (precompile and
   memory) records ahead of proving them, as the history slots bound it on CPU chunks. A
   precompile-heavy guest used to queue them without limit: BLS12-381 G2 MSM grew past 500 GB of
   host memory. `0` lifts the bound.

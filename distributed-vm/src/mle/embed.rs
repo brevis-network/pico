@@ -15,6 +15,7 @@ use pico_vm::{
         opts::EmulatorOpts,
         riscv::record::{GpuMemoryTier, TierAlreadySet},
     },
+    machine::host_memory,
     mle::machine::vk_map::MleVkMap,
 };
 
@@ -40,6 +41,9 @@ pub struct EmbeddedProgram {
     /// Interpreters replaying the snapshot thread's snapshots into records. See
     /// [`default_pipeline_workers`](pico_vm::proverchain::riscv::default_pipeline_workers).
     pub emulation_workers: NonZeroUsize,
+    /// The caller's riscv machine for this program, already keygen'd on card 0 at this run's
+    /// height, so the run adopts it instead of keygenning the program again. `None` keygens.
+    pub riscv: Option<Arc<pico_vm::mle::machine::riscv::RiscvMachine>>,
 }
 
 /// The most [`default_event_pool_size`] picks; a larger count is the caller's to ask for.
@@ -55,12 +59,15 @@ pub const DEFAULT_PINNED_EVENT_FRACTION: f64 = 0.25;
 /// working set. A count past it is refused up front instead of failing mid-run.
 pub const MAX_PINNED_EVENT_FRACTION: f64 = 0.5;
 
-/// [`EmbeddedProgram::event_pool_size`]'s default: as many slots as fit in
-/// [`DEFAULT_PINNED_EVENT_FRACTION`] of this host's memory, between
-/// [`MIN_DEFAULT_EVENT_POOL_SIZE`] and [`MAX_DEFAULT_EVENT_POOL_SIZE`].
+/// [`EmbeddedProgram::event_pool_size`]'s default: [`host_memory::LOW_MEMORY_EVENT_POOL`] on a
+/// low-memory host, else as many slots as fit in [`DEFAULT_PINNED_EVENT_FRACTION`] of this host's
+/// memory, between [`MIN_DEFAULT_EVENT_POOL_SIZE`] and [`MAX_DEFAULT_EVENT_POOL_SIZE`].
 pub fn default_event_pool_size() -> NonZeroUsize {
+    if host_memory::low_memory_host() {
+        return NonZeroUsize::new(host_memory::LOW_MEMORY_EVENT_POOL).expect("not 0");
+    }
     let slot = pico_vm::emulator::riscv::record_slots::slot_bytes() as f64;
-    let fit = (host_bytes() as f64 * DEFAULT_PINNED_EVENT_FRACTION / slot) as usize;
+    let fit = (host_memory::host_bytes() as f64 * DEFAULT_PINNED_EVENT_FRACTION / slot) as usize;
     NonZeroUsize::new(fit.clamp(
         MIN_DEFAULT_EVENT_POOL_SIZE.get(),
         MAX_DEFAULT_EVENT_POOL_SIZE.get(),
@@ -72,15 +79,6 @@ pub fn default_event_pool_size() -> NonZeroUsize {
 pub fn pinned_event_bytes(pool_size: NonZeroUsize) -> u64 {
     (pool_size.get() as u64)
         .saturating_mul(pico_vm::emulator::riscv::record_slots::slot_bytes() as u64)
-}
-
-/// This host's memory, or its container's limit where there is one.
-fn host_bytes() -> u64 {
-    let mut sys = sysinfo::System::new();
-    sys.refresh_memory();
-    sys.cgroup_limits().map_or(sys.total_memory(), |limits| {
-        limits.total_memory.min(sys.total_memory())
-    })
 }
 
 impl fmt::Debug for EmbeddedProgram {
@@ -271,6 +269,7 @@ pub fn prove(program: EmbeddedProgram, stdin: EmulatorStdin) -> Result<EmbeddedP
     }
     check_pinned_memory(&program)?;
     super::deferred_records_bound().map_err(EmbedError::BadSetting)?;
+    host_memory::host_mem_setting().map_err(EmbedError::BadSetting)?;
     pico_vm::mle::inject::validate().map_err(EmbedError::BadSetting)?;
     let gpus = init_memory_tier()?;
     pico_vm::emulator::riscv::record_slots::try_init_record_slots(program.event_pool_size)
@@ -481,7 +480,7 @@ fn check_pinned_memory(program: &EmbeddedProgram) -> Result<(), EmbedError> {
     if let Some(why) = history_slot_refusal(Ok(Some(program.event_pool_size)), segments) {
         return Err(EmbedError::EventPoolTooSmall(why));
     }
-    let host_bytes = host_bytes();
+    let host_bytes = host_memory::host_bytes();
     let pinned_bytes = pinned_event_bytes(program.event_pool_size);
     if pinned_bytes as f64 > host_bytes as f64 * MAX_PINNED_EVENT_FRACTION {
         return Err(EmbedError::EventPoolTooLarge {

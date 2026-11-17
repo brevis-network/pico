@@ -606,6 +606,7 @@ mod tests {
         "MLE_EVENT_POOL_SIZE",
         "MLE_HISTORY_SLOTS",
         "MLE_DEFERRED_RECORDS",
+        "PICO_HOST_MEM",
         "MLE_PREWARM",
         "MLE_HEAP_PREWARM_GB",
         "MLE_ETHPROOFS_PREWARM",
