@@ -40,7 +40,10 @@ impl CostComponent {
             | air_id::KECCAK_CONTROL
             | air_id::POSEIDON2_PERMUTE
             | air_id::ED_ADD
-            | air_id::ED_DECOMPRESS => Self::Precompile,
+            | air_id::ED_DECOMPRESS
+            | air_id::KECCAK_TABLES
+            | air_id::BLS12381_G2_ADD
+            | air_id::BLS12381_G2_DOUBLE => Self::Precompile,
             _ => Self::Rv64,
         }
     }
