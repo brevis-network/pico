@@ -817,7 +817,16 @@ pub fn max_pipeline_workers() -> usize {
 
 /// Replay workers for a caller that states none: 8, the GPU benchmark script's `NUM_THREADS`, or
 /// one per core on a smaller machine. Past it the snapshot thread, not the replay, bounds the run.
+/// A `cuda` build on a low-memory host takes
+/// [`LOW_MEMORY_REPLAY_WORKERS`](crate::machine::host_memory::LOW_MEMORY_REPLAY_WORKERS): each
+/// worker keeps several GiB resident, and GPU proving, not replay, bounds those runs.
 pub fn default_pipeline_workers() -> NonZeroUsize {
+    #[cfg(feature = "cuda")]
+    if crate::machine::host_memory::low_memory_host() {
+        return NonZeroUsize::new(crate::machine::host_memory::LOW_MEMORY_REPLAY_WORKERS)
+            .expect("not 0")
+            .min(NonZeroUsize::new(max_pipeline_workers()).unwrap_or(NonZeroUsize::MIN));
+    }
     NonZeroUsize::new(max_pipeline_workers().min(8)).unwrap_or(NonZeroUsize::MIN)
 }
 
@@ -2197,7 +2206,12 @@ mod tests {
         in_child(
             "proverchain::riscv::tests::a_pool_built_ahead_of_the_run_is_sized_for_it",
             CHILD_VAR,
-            &[("MEMORY_POOL_EAGER", "0"), ("MEMORY_POOL_LOW_WATER", "0")],
+            &[
+                ("MEMORY_POOL_EAGER", "0"),
+                ("MEMORY_POOL_LOW_WATER", "0"),
+                // The high tier's pool, whatever this host's memory.
+                ("PICO_HOST_MEM", "high"),
+            ],
             Duration::from_secs(60),
             "building the pool hung",
             MARKER,

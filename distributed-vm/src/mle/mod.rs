@@ -51,7 +51,7 @@ use pico_vm::{
         stdin::EmulatorStdin,
     },
     instances::chiptype::riscv_chiptype::RiscvChipType,
-    machine::{septic::SepticDigest, witness::ProvingWitness},
+    machine::{host_memory, septic::SepticDigest, witness::ProvingWitness},
     mle::{
         env_flag,
         machine::{
@@ -262,7 +262,7 @@ struct DeferredGate {
 }
 
 /// `MLE_DEFERRED_RECORDS`: deferred records the emulation may run ahead of proving by; `0` lifts
-/// the bound.
+/// the bound. Unset, a low-memory host takes [`host_memory::LOW_MEMORY_DEFERRED_RECORDS`].
 const DEFAULT_DEFERRED_RECORDS: usize = 512;
 
 /// The `MLE_DEFERRED_RECORDS` bound, `None` for none; an embedded caller checks it up front, where
@@ -273,6 +273,7 @@ pub(crate) fn deferred_records_bound() -> Result<Option<usize>, String> {
             .trim()
             .parse::<usize>()
             .map_err(|_| format!("MLE_DEFERRED_RECORDS={v}: expected a count of records"))?,
+        Err(_) if host_memory::low_memory_host() => host_memory::LOW_MEMORY_DEFERRED_RECORDS,
         Err(_) => DEFAULT_DEFERRED_RECORDS,
     };
     Ok((bound > 0).then_some(bound))
