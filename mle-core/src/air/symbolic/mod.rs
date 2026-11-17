@@ -275,9 +275,9 @@ fn gen_main_trace<F: Field>(
 // | looking   | `LookupType` | `+mult` | 1            |
 // | looked    | `LookupType` | `-mult` | 0            |
 //
-// `LookupType::Global` is a bus like any other type; `GlobalChip` receives it and the
-// per-chunk septic digest is carried in `GlobalChip`'s public values. Its `kind` slot is the one
-// exception: `looking` asserts the sender's kind is a bounded constant (see `lookup.rs`).
+// `LookupType::Global` is a bus like any other type; the Global AIR receives it, and its rows
+// are the chunk's cross-chunk event table. Its `kind` slot is the one exception: `looking`
+// asserts the sender's kind is a compile-time constant (see `lookup.rs`).
 
 impl<F: Field> ScopedBuilder for SymbolicRapBuilder<F> {}
 
@@ -292,10 +292,9 @@ impl<F: Field> LookupBuilder<SymbolicLookup<SymbolicExpression<F>>> for Symbolic
         // A chip that needs per-row multiplicity k > 1 must not use `looking`
         // as-is (split into k boolean interactions, or add an explicit-weight
         // entry point).
-        // The Global chip no longer range-checks its `kind` column: boundedness comes from
-        // every Global-bus SENDER passing a compile-time constant kind < 32, which the multiset
-        // then pins on the receiver. Enforce that statically so a future sender cannot silently
-        // violate it (the FRI path checks the same in `SymbolicConstraintFolder::looking`).
+        // The Global AIR does not constrain its `kind` column: every Global-bus SENDER passes
+        // a compile-time constant kind, which the multiset then pins on the receiver. Enforce
+        // that statically so a future sender cannot silently violate it.
         if message.kind == crate::lookup::LookupType::Global {
             let kind = message
                 .values
@@ -304,7 +303,7 @@ impl<F: Field> LookupBuilder<SymbolicLookup<SymbolicExpression<F>>> for Symbolic
                     SymbolicExpression::Constant(c) => Some(*c),
                     _ => None,
                 });
-            crate::lookup::assert_global_kind_is_bounded_constant(kind, message.values.len());
+            crate::lookup::assert_global_kind_is_constant(kind, message.values.len());
         }
         self.looking_summaries.push(LookupSummary {
             kind: message.kind,

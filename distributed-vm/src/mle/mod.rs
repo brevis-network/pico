@@ -11,7 +11,10 @@
 //!   also runs its aggregation tree — convert proofs are reported into its proof tree, adjacent
 //!   pairs become combine tasks, and the same worker pool proves those nodes;
 //! - each worker proves its chunk via the shared [`RiscvMachine`];
-//! - cross-chunk memory consistency is checked at the end (`Σ gcs + initial == 0`);
+//! - cross-chunk consistency is the global LogUp: each chunk's convert leaf takes its entry into
+//!   the chain over the chunks' Global table commitments ([`GlobalChain`]), and once every chunk's
+//!   table is committed the tree's prefix (the second phase and its nodes) is proved on the
+//!   prover lanes and joined with the chunks at the root;
 //! - `--step combine` then hands the tree's root to the CPU `CombineMachine` for the four-step
 //!   host-side acceptance, so that check lives in exactly one place.
 
@@ -51,7 +54,7 @@ use pico_vm::{
         stdin::EmulatorStdin,
     },
     instances::chiptype::riscv_chiptype::RiscvChipType,
-    machine::{septic::SepticDigest, witness::ProvingWitness},
+    machine::{host_memory, witness::ProvingWitness},
     mle::{
         env_flag,
         machine::{
@@ -80,19 +83,27 @@ use pico_vm::mle::machine::{
 use pico_vm::mle::spans::{self, LaneId, Role, WorkKind};
 
 use crate::common::{
-    gcs_digest::take_remote_digests,
     global_scheduler::GlobalScheduler,
     machine_role::{get_worker_label, set_mle_chunk_assignment_defaults},
     mle_scheduler_singleton::{
         get_mle_scheduler, is_mle_secondary, mle_abort_run, mle_acquire_task_unified_async,
         mle_finalize_emulation, mle_register_chunk, mle_register_chunk_with_cost,
-        mle_report_chunk_terminal, mle_report_gcs_digest, reset_mle_scheduler, MleAcquireResult,
+        mle_report_chunk_terminal, reset_mle_scheduler, MleAcquireResult,
     },
 };
 // The combine-preparer feed names the task type; on CPU builds the dispatcher's combine arm is
 // `unreachable!` and never names it.
 #[cfg(feature = "cuda")]
 use crate::common::global_scheduler::CombineTask;
+// The global LogUp of a block on two machines: its chain and its group nodes cross between them.
+#[cfg(feature = "cuda")]
+use crate::common::{
+    global_logup_exchange::{exchange, ChunkTableReport, Exchange},
+    mle_scheduler_singleton::{
+        mle_await_chunk_tables, mle_report_chunk_table, mle_report_group_node,
+    },
+    scheduler_service::ExchangeError,
+};
 // Reached only from the convert/combine reporting arms, which are GPU-only.
 #[cfg(feature = "cuda")]
 use crate::{
@@ -114,6 +125,967 @@ struct RootRecord {
     /// The root node's ORDERED child layouts — required to register its shape on the CPU
     /// `CombineMachine` before that machine will accept the root (see its `verify` CONTRACT).
     child_layouts: Vec<pico_vm::mle::compiler::recursion::RecursionVkLayout>,
+}
+
+/// The global LogUp's chain over a block's chunks, as the pipeline learns it.
+///
+/// A chunk's convert leaf enters the chain at the value after the chunks before it, a value
+/// over their Global table commitments, which their riscv proofs carry. A riscv lane records a
+/// chunk's commitment once its traces are built, ahead of its proof; a convert preparer waits
+/// here for its chunk's entry; the stage that proves the tree's prefix waits for the whole
+/// chain.
+///
+/// On two machines each traces only the chunks it proves, and the chain is over them all. The
+/// primary's chain also takes the commitments the secondary reports, and its growth is
+/// published for the secondary, whose chain follows it ([`follow_peer_chunks`]).
+#[cfg(feature = "cuda")]
+struct GlobalChain {
+    state: std::sync::Mutex<GlobalChainState>,
+    grew: std::sync::Condvar,
+    /// A two-machine primary's exchange, where the secondary reads the chain's growth.
+    followed: Option<&'static Exchange>,
+}
+
+#[cfg(feature = "cuda")]
+struct GlobalChainState {
+    /// The chain over the block's leading chunks whose commitments are in.
+    chain: pico_vm::mle::machine::global_logup::Chain,
+    /// The commitments the chain has stepped over, in chunk order.
+    commits: Vec<ChainDigest>,
+    /// Commitments that arrived ahead of an earlier chunk's, by 0-based chunk index.
+    ahead: std::collections::BTreeMap<usize, ChainDigest>,
+    /// The block's chunk count, once the emulation is finalized.
+    total: Option<usize>,
+    /// When the block's window opened ([`GlobalChain::start_clock`]).
+    origin: Option<Instant>,
+    /// How far into the block the chain had every chunk's commitment.
+    whole_after: Option<Duration>,
+    /// The convert leaves' waits for their entries: how many waited, in total, and the longest.
+    waits: (usize, Duration, Duration),
+}
+
+#[cfg(feature = "cuda")]
+type ChainDigest = [pico_vm::mle::machine::recursion::Kb; pico_vm::primitives::consts::DIGEST_SIZE];
+
+#[cfg(feature = "cuda")]
+impl GlobalChain {
+    /// `chain` is the block's chain before any chunk (`Chain::new` of the riscv machine);
+    /// `followed`, a two-machine primary's exchange.
+    fn new(
+        chain: pico_vm::mle::machine::global_logup::Chain,
+        followed: Option<&'static Exchange>,
+    ) -> Self {
+        Self {
+            state: std::sync::Mutex::new(GlobalChainState {
+                chain,
+                commits: Vec::new(),
+                ahead: std::collections::BTreeMap::new(),
+                total: None,
+                origin: None,
+                whole_after: None,
+                waits: (0, Duration::ZERO, Duration::ZERO),
+            }),
+            grew: std::sync::Condvar::new(),
+            followed,
+        }
+    }
+
+    /// Record the commitment of chunk `chunk_idx`'s (0-based) Global table.
+    ///
+    /// On two machines a chunk's commitment may be recorded twice, by the lane that traced the
+    /// chunk and as the other machine hands it back; both are the one value.
+    fn record(&self, chunk_idx: usize, commit: ChainDigest) {
+        let mut state = self.state.lock().expect("global LogUp chain poisoned");
+        let known = match state.commits.get(chunk_idx) {
+            Some(known) => Some(*known),
+            None => state.ahead.insert(chunk_idx, commit),
+        };
+        assert!(
+            known.is_none_or(|known| known == commit),
+            "chunk {chunk_idx}'s Global table was recorded under two commitments"
+        );
+        loop {
+            let next = state.commits.len();
+            let Some(commit) = state.ahead.remove(&next) else {
+                break;
+            };
+            state.chain.push(&commit);
+            state.commits.push(commit);
+            if let Some(exchange) = self.followed {
+                exchange.publish_commit(encode_commit(&commit));
+            }
+        }
+        self.grew.notify_all();
+    }
+
+    /// How many of the block's leading chunks the chain has stepped over.
+    fn held(&self) -> usize {
+        self.state
+            .lock()
+            .expect("global LogUp chain poisoned")
+            .commits
+            .len()
+    }
+
+    /// The block's chunk count, once this machine's emulation is finalized.
+    fn total(&self) -> Option<usize> {
+        self.state
+            .lock()
+            .expect("global LogUp chain poisoned")
+            .total
+    }
+
+    /// The commitment a chunk's proof opens its Global table under.
+    fn commit_of(&self, proof: &MleProof) -> Option<ChainDigest> {
+        self.state
+            .lock()
+            .expect("global LogUp chain poisoned")
+            .chain
+            .commit_of(proof)
+    }
+
+    /// The chain value chunk `chunk_idx`'s convert leaf enters at: waits until the chunks
+    /// before it have recorded their commitments.
+    ///
+    /// A run that is being drained (`mle_abort_run`) gets the chain's last value instead: its
+    /// proofs are thrown away.
+    fn before(&self, chunk_idx: usize) -> ChainDigest {
+        let asked = Instant::now();
+        let mut state = self.state.lock().expect("global LogUp chain poisoned");
+        if state.chain.values().len() > chunk_idx {
+            return state.chain.values()[chunk_idx];
+        }
+        while state.chain.values().len() <= chunk_idx {
+            if get_mle_scheduler().is_aborted() {
+                return *state
+                    .chain
+                    .values()
+                    .last()
+                    .expect("the chain has its start");
+            }
+            state = self
+                .grew
+                .wait_timeout(state, Self::ABORT_POLL)
+                .expect("global LogUp chain poisoned")
+                .0;
+        }
+        let waited = asked.elapsed();
+        state.waits.0 += 1;
+        state.waits.1 += waited;
+        state.waits.2 = state.waits.2.max(waited);
+        state.chain.values()[chunk_idx]
+    }
+
+    /// The block's window opens now: the times in [`Self::timing`] count from here.
+    fn start_clock(&self) {
+        self.state
+            .lock()
+            .expect("global LogUp chain poisoned")
+            .origin = Some(Instant::now());
+    }
+
+    /// One line on what the chain cost the block: when it had every commitment, and how long
+    /// convert leaves waited for their entries.
+    fn timing(&self) -> String {
+        let state = self.state.lock().expect("global LogUp chain poisoned");
+        let (waited, total, longest) = state.waits;
+        format!(
+            "the chain had every chunk's commitment {} into the block; {waited} convert \
+             leaf(s) waited for their entries, {:.3}s in total, {:.3}s at most",
+            state
+                .whole_after
+                .map_or("at an unknown time".to_string(), |d| format!(
+                    "{:.3}s",
+                    d.as_secs_f64()
+                )),
+            total.as_secs_f64(),
+            longest.as_secs_f64(),
+        )
+    }
+
+    /// How often a wait looks whether the run was aborted meanwhile.
+    const ABORT_POLL: Duration = Duration::from_millis(200);
+
+    /// The emulation is finalized at `total` chunks.
+    fn set_total(&self, total: usize) {
+        self.state
+            .lock()
+            .expect("global LogUp chain poisoned")
+            .total = Some(total);
+        if let Some(exchange) = self.followed {
+            exchange.publish_chunks(total);
+        }
+        self.grew.notify_all();
+    }
+
+    /// The chain over the whole block, `total + 1` values: waits for the finalize and for every
+    /// chunk's commitment. `None` if the run is aborted first, and for a block of no chunks:
+    /// its chain is whole from the start, over nothing, and it has no second phase to prove.
+    fn whole(&self) -> Option<Vec<ChainDigest>> {
+        let mut state = self.state.lock().expect("global LogUp chain poisoned");
+        loop {
+            if get_mle_scheduler().is_aborted() || state.total == Some(0) {
+                return None;
+            }
+            if state.total == Some(state.chain.values().len() - 1) {
+                state.whole_after = state.origin.map(|origin| origin.elapsed());
+                return Some(state.chain.values().to_vec());
+            }
+            state = self
+                .grew
+                .wait_timeout(state, Self::ABORT_POLL)
+                .expect("global LogUp chain poisoned")
+                .0;
+        }
+    }
+}
+
+#[cfg(all(test, feature = "cuda"))]
+mod global_chain_tests {
+    use super::{decode_commit, ChainDigest, Exchange, GlobalChain};
+    use p3_field::PrimeCharacteristicRing;
+    use pico_vm::mle::machine::{global_logup::Chain, recursion::Kb};
+    use std::time::Duration;
+
+    /// A chain before any chunk. Any parameters do: the tests compare with a `Chain` of the same.
+    fn start() -> Chain {
+        Chain::new(&pico_vm::mle::recursion_params_with_128_bits_security())
+    }
+
+    fn commit(of: u32) -> ChainDigest {
+        std::array::from_fn(|at| Kb::from_u32(of * 16 + at as u32))
+    }
+
+    /// The chain's values over the commitments of chunks `0..chunks`, stepped in order.
+    fn values(chunks: u32) -> Vec<ChainDigest> {
+        let mut chain = start();
+        for chunk in 0..chunks {
+            chain.push(&commit(chunk));
+        }
+        chain.values().to_vec()
+    }
+
+    #[test]
+    fn commitments_step_the_chain_in_chunk_order_however_they_arrive() {
+        let chain = GlobalChain::new(start(), None);
+        chain.record(2, commit(2));
+        chain.record(1, commit(1));
+        assert_eq!(chain.held(), 0);
+        chain.record(0, commit(0));
+        assert_eq!(chain.held(), 3);
+        assert_eq!(chain.total(), None);
+        chain.set_total(3);
+        assert_eq!(chain.total(), Some(3));
+        let expected = values(3);
+        assert_eq!(chain.before(0), expected[0]);
+        assert_eq!(chain.before(2), expected[2]);
+        assert_eq!(chain.whole(), Some(expected));
+    }
+
+    #[test]
+    fn a_commitment_recorded_twice_is_one() {
+        let chain = GlobalChain::new(start(), None);
+        // Ahead of its turn, twice; then in the chain, and once more.
+        chain.record(1, commit(1));
+        chain.record(1, commit(1));
+        chain.record(0, commit(0));
+        chain.record(0, commit(0));
+        chain.record(1, commit(1));
+        chain.set_total(2);
+        assert_eq!(chain.whole(), Some(values(2)));
+    }
+
+    #[test]
+    #[should_panic(expected = "two commitments")]
+    fn two_commitments_for_a_chunk_in_the_chain_are_refused() {
+        let chain = GlobalChain::new(start(), None);
+        chain.record(0, commit(0));
+        chain.record(0, commit(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "two commitments")]
+    fn two_commitments_for_a_chunk_ahead_of_its_turn_are_refused() {
+        let chain = GlobalChain::new(start(), None);
+        chain.record(1, commit(0));
+        chain.record(1, commit(1));
+    }
+
+    #[test]
+    fn a_primarys_chain_is_published_as_it_grows() {
+        let exchange: &'static Exchange = Box::leak(Box::new(Exchange::new()));
+        exchange.open(1);
+        let chain = GlobalChain::new(start(), Some(exchange));
+        let poll = |from| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .build()
+                .expect("a test runtime")
+                .block_on(exchange.await_commits(1, from, Duration::from_millis(20)))
+                .expect("the primary is on the block")
+        };
+        // Chunk 1 arrives first, as the other machine's may: nothing is in order yet.
+        chain.record(1, commit(1));
+        assert!(poll(0).commits.is_empty());
+        chain.record(0, commit(0));
+        let news = poll(0);
+        let published: Vec<ChainDigest> = news
+            .commits
+            .iter()
+            .enumerate()
+            .map(|(chunk, bytes)| decode_commit(chunk, bytes))
+            .collect();
+        assert_eq!(published, vec![commit(0), commit(1)]);
+        assert_eq!(news.chunks, None);
+        chain.set_total(2);
+        assert_eq!(poll(2).chunks, Some(2));
+    }
+}
+
+/// A Global table commitment as the two machines of a block send it to each other.
+#[cfg(feature = "cuda")]
+fn encode_commit(commit: &ChainDigest) -> Vec<u8> {
+    bincode::serialize(commit).expect("a commitment serialises")
+}
+
+/// The commitment of chunk `chunk_idx` as the other machine sent it.
+#[cfg(feature = "cuda")]
+fn decode_commit(chunk_idx: usize, bytes: &[u8]) -> ChainDigest {
+    bincode::deserialize(bytes).unwrap_or_else(|e| {
+        panic!(
+            "the other machine's commitment of chunk {chunk_idx}'s Global table does not \
+             decode: {e}"
+        )
+    })
+}
+
+/// Keeps a two-machine block's chain in step with the chunks the other machine traces, until
+/// the chain is whole, the run is stopped, or `done` is set.
+///
+/// The primary takes the secondary's reports off the exchange: a chunk's share of the real-row
+/// count goes into the block's count, and then its commitment into the chain, so that a whole
+/// chain has a whole count. `over` is told of the share that takes the count past the limit.
+/// The secondary follows the chain the primary publishes, which is over both machines' chunks.
+#[cfg(feature = "cuda")]
+fn follow_peer_chunks(
+    chain: &GlobalChain,
+    count: Option<&GlobalRowCount>,
+    done: &AtomicBool,
+    guest_failed: &AtomicBool,
+    over: impl Fn(TooManyGlobalRows),
+) {
+    let stop = || {
+        done.load(Ordering::SeqCst)
+            || run_stopped(guest_failed)
+            || get_mle_scheduler().is_aborted()
+            || chain.total().is_some_and(|total| chain.held() == total)
+    };
+    if is_mle_secondary() {
+        while !stop() {
+            let from = chain.held();
+            match mle_await_chunk_tables(from) {
+                Ok(news) => {
+                    if let (Some(theirs), Some(ours)) = (news.chunks, chain.total()) {
+                        assert_eq!(
+                            theirs, ours,
+                            "the primary emulated the block to {theirs} chunks, this machine \
+                             to {ours}"
+                        );
+                    }
+                    for (at, commit) in news.commits.iter().enumerate() {
+                        chain.record(from + at, decode_commit(from + at, commit));
+                    }
+                    // The primary's chain is whole and this machine's emulation is not
+                    // finalized yet: its polls are answered at once.
+                    if news.commits.is_empty() && news.chunks.is_some_and(|chunks| from >= chunks) {
+                        thread::sleep(Duration::from_millis(20));
+                    }
+                }
+                Err(ExchangeError::OtherBlock(why)) => {
+                    tracing::error!(
+                        "the primary refused to hand out the block's chain: {why}; this \
+                         block's run is stopped"
+                    );
+                    mle_abort_run();
+                    return;
+                }
+                Err(ExchangeError::Failed(why)) => {
+                    warn!("secondary failed to follow the primary's chain: {why}");
+                    thread::sleep(Duration::from_secs(1));
+                }
+            }
+        }
+    } else {
+        while !stop() {
+            for report in exchange().take_tables(GlobalChain::ABORT_POLL) {
+                let commit = decode_commit(report.chunk_idx, &report.commit);
+                if let Some(Err(too_many)) =
+                    count.map(|count| count.add(report.chunk_idx, report.row_count))
+                {
+                    over(too_many);
+                }
+                chain.record(report.chunk_idx, commit);
+            }
+        }
+    }
+}
+
+/// A chunk's share took the block past the global LogUp's real-row limit: the run ends as it
+/// does on a refused shape. The CLI stops on it; an embedded caller gets the refusal back, in
+/// `slot`, and the run drains.
+#[cfg(feature = "cuda")]
+fn stop_over_global_rows(
+    over: TooManyGlobalRows,
+    embedded_run: bool,
+    slot: &std::sync::Mutex<Option<TooManyGlobalRows>>,
+    guest_failed: &AtomicBool,
+) {
+    if !embedded_run {
+        panic!("{over}");
+    }
+    slot.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert(over);
+    guest_failed.store(true, Ordering::SeqCst);
+    mle_abort_run();
+}
+
+/// A block's real-row count for the global LogUp, added up as its chunks leave the preparers.
+/// A two-machine primary adds the chunks the secondary traces as the secondary reports them
+/// ([`follow_peer_chunks`]); the secondary's own count is over its chunks alone.
+///
+/// The tree's root refuses a block over the limit, so the run stops at the chunk that takes
+/// the count past it, instead of proving on to a root that cannot be proved.
+#[cfg(any(feature = "cuda", test))]
+struct GlobalRowCount {
+    counted: AtomicU64,
+    limit: u64,
+    /// The chunks whose shares are in. A two-machine primary counts a chunk as it prepares it
+    /// and as the secondary reports having traced it: a chunk that reaches it both ways, or
+    /// in a report sent twice, is counted once.
+    chunks: std::sync::Mutex<std::collections::HashSet<usize>>,
+}
+
+#[cfg(any(feature = "cuda", test))]
+impl GlobalRowCount {
+    /// The global LogUp's limit, or the lower one a negative test injects.
+    fn new() -> Self {
+        let limit = pico_vm::mle::machine::global_logup::MAX_COUNT;
+        Self::within(inject::global_row_count_limit().map_or(limit, |injected| injected.min(limit)))
+    }
+
+    fn within(limit: u64) -> Self {
+        Self {
+            counted: AtomicU64::new(0),
+            limit,
+            chunks: Default::default(),
+        }
+    }
+
+    /// Adds the share of chunk `chunk_idx` (`RiscvMachine::chunk_global_row_count`), once.
+    fn add(&self, chunk_idx: usize, share: u64) -> Result<(), TooManyGlobalRows> {
+        let first = self
+            .chunks
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(chunk_idx);
+        if !first {
+            return Ok(());
+        }
+        let count = self.counted.fetch_add(share, Ordering::SeqCst) + share;
+        if count > self.limit {
+            return Err(TooManyGlobalRows {
+                count,
+                max: self.limit,
+            });
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod global_row_count_tests {
+    use super::{GlobalRowCount, TooManyGlobalRows};
+
+    #[test]
+    fn a_block_may_reach_the_limit_and_not_pass_it() {
+        let count = GlobalRowCount::within(10);
+        assert_eq!(count.add(0, 4), Ok(()));
+        assert_eq!(count.add(1, 6), Ok(()));
+        assert_eq!(
+            count.add(2, 1),
+            Err(TooManyGlobalRows { count: 11, max: 10 })
+        );
+    }
+
+    #[test]
+    fn a_chunk_counted_twice_is_counted_once() {
+        let count = GlobalRowCount::within(10);
+        assert_eq!(count.add(3, 6), Ok(()));
+        assert_eq!(count.add(3, 6), Ok(()));
+        assert_eq!(count.add(4, 4), Ok(()));
+        assert_eq!(count.counted.load(std::sync::atomic::Ordering::SeqCst), 10);
+    }
+
+    #[test]
+    fn the_limit_is_the_global_logups_unless_a_test_lowers_it() {
+        assert_eq!(
+            GlobalRowCount::new().limit,
+            pico_vm::mle::machine::global_logup::MAX_COUNT
+        );
+    }
+}
+
+/// A piece of the tree's prefix (a group proof, a node, a step of the nodes' reduction) for a
+/// card's prover lane. The lane runs it between its other items and ahead of any chunk that is
+/// waiting; its thread is bound to its card, and the piece is told which card that is.
+type PrefixPiece = Box<dyn FnOnce(usize) + Send>;
+
+/// Runs a piece of the tree's prefix on the calling lane, unless the run is being drained.
+fn run_prefix_piece(piece: PrefixPiece, card: usize, guest_failed: &AtomicBool) {
+    if run_stopped(guest_failed) {
+        return;
+    }
+    let _b = spans::busy(WorkKind::ProveGlobalLogUp, None);
+    piece(card);
+    // A piece's trace generation sets the lane thread's `MLE_BREAKDOWN` reading; left there, it
+    // would be taken for the next convert or combine proof of the lane.
+    #[cfg(feature = "cuda")]
+    let _ = pico_vm::mle::cuda_mle::breakdown::take();
+}
+
+/// How a piece of the tree's prefix fared: how long it waited for a lane, and how long it ran.
+#[cfg(feature = "cuda")]
+#[derive(Clone, Copy)]
+struct PieceTime {
+    waited: Duration,
+    ran: Duration,
+}
+
+/// One step's pieces in a phrase: each piece's run time, and the longest wait for a lane.
+#[cfg(feature = "cuda")]
+fn piece_times(what: &str, times: &[PieceTime]) -> String {
+    let ran: Vec<String> = times
+        .iter()
+        .map(|time| format!("{:.3}", time.ran.as_secs_f64()))
+        .collect();
+    let waited = times
+        .iter()
+        .map(|time| time.waited)
+        .max()
+        .unwrap_or_default();
+    format!(
+        "{what} ran [{}]s after waiting {:.3}s at most",
+        ran.join(" "),
+        waited.as_secs_f64()
+    )
+}
+
+/// Chunks to a group of the second phase: as many as a group holds, or the smaller count
+/// `MLE_GLOBAL_LOGUP_GROUP_LEN` asks for. Any grouping that covers the chunks in order verifies; the
+/// setting is for measuring what a group's length costs.
+///
+/// A short length on few cards makes many more pieces of the prefix, which the tree's root waits
+/// for: the scheduler's dispatcher gives a run up after 300 s without a task.
+#[cfg(feature = "cuda")]
+fn global_logup_group_len() -> usize {
+    global_logup_group_len_setting().unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// [`global_logup_group_len`], with a bad `MLE_GLOBAL_LOGUP_GROUP_LEN` as an error: an embedded caller checks it up
+/// front, where a bad value poisons nothing.
+#[cfg(feature = "cuda")]
+pub(crate) fn global_logup_group_len_setting() -> Result<usize, String> {
+    let most = pico_vm::mle::machine::global_logup::GROUP_LEN;
+    match std::env::var("MLE_GLOBAL_LOGUP_GROUP_LEN") {
+        Ok(raw) => match raw.trim().parse::<usize>() {
+            Ok(len) if (1..=most).contains(&len) => Ok(len),
+            _ => Err(format!(
+                "MLE_GLOBAL_LOGUP_GROUP_LEN={raw:?} is not a group length from 1 to {most}"
+            )),
+        },
+        Err(_) => Ok(most),
+    }
+}
+
+/// Hands `pieces` to the cards' prover lanes and waits for their results, in the pieces' order,
+/// each with its time. `None` if the run is drained before every piece has run.
+#[cfg(feature = "cuda")]
+fn prefix_on_lanes<T: Send + 'static>(
+    lanes: &crossbeam::channel::Sender<PrefixPiece>,
+    pieces: Vec<Box<dyn FnOnce(usize) -> T + Send>>,
+) -> Option<(Vec<T>, Vec<PieceTime>)> {
+    let (done_tx, done_rx) = crossbeam::channel::unbounded();
+    let mut results: Vec<Option<(T, PieceTime)>> = pieces.iter().map(|_| None).collect();
+    for (at, piece) in pieces.into_iter().enumerate() {
+        let done_tx = done_tx.clone();
+        let handed = Instant::now();
+        lanes
+            .send(Box::new(move |card| {
+                let waited = handed.elapsed();
+                let result = piece(card);
+                let ran = handed.elapsed() - waited;
+                // Nobody is listening only if the stage gave up on a drained run.
+                let _ = done_tx.send((at, (result, PieceTime { waited, ran })));
+            }))
+            .ok()?;
+    }
+    drop(done_tx);
+    for _ in 0..results.len() {
+        let (at, result) = loop {
+            match done_rx.recv_timeout(GlobalChain::ABORT_POLL) {
+                Ok(done) => break done,
+                Err(crossbeam::channel::RecvTimeoutError::Timeout)
+                    if !get_mle_scheduler().is_aborted() => {}
+                // Aborted, or a lane dropped a piece unrun, which it does only in a drained run.
+                Err(_) => return None,
+            }
+        };
+        results[at] = Some(result);
+    }
+    let results: Option<Vec<_>> = results.into_iter().collect();
+    Some(results?.into_iter().unzip())
+}
+
+/// The groups a machine proves over the Global tables it holds: every run of consecutive
+/// chunks, cut at `group_len` chunks. `stamps` are the tables' chunks, ascending; a group is a
+/// range of positions in it.
+///
+/// A machine that proves the whole block holds one run, and its groups are the block in steps
+/// of `group_len`. Of two machines each holds the chunks it proved, in the rounds of the chunk
+/// assignment, and a round is a run: no group needs a table of the other machine, and the two
+/// machines' groups together cover the block in order.
+#[cfg(any(feature = "cuda", test))]
+fn groups_of(stamps: &[u32], group_len: usize) -> Vec<std::ops::Range<usize>> {
+    let mut groups = Vec::new();
+    let mut start = 0;
+    for at in 1..=stamps.len() {
+        let run_ends = at == stamps.len() || stamps[at] != stamps[at - 1] + 1;
+        if run_ends || at - start == group_len {
+            groups.push(start..at);
+            start = at;
+        }
+    }
+    groups
+}
+
+/// Whether `groups` (a group's first chunk, 0-based, to its chunk count) cover a block of
+/// `chunks` chunks in order: `false` while a group is still to come. Groups that overlap are
+/// not a block's.
+#[cfg(any(feature = "cuda", test))]
+fn groups_cover<T>(groups: &std::collections::BTreeMap<usize, (usize, T)>, chunks: usize) -> bool {
+    let mut next = 0;
+    for (&first, &(len, _)) in groups {
+        assert!(
+            first >= next,
+            "the group at chunk {first} overlaps the one before it, which ends at {next}"
+        );
+        if first != next {
+            return false;
+        }
+        next += len;
+    }
+    assert!(
+        next <= chunks,
+        "the groups cover {next} chunks, the block has {chunks}"
+    );
+    next == chunks
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::{groups_cover, groups_of};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn a_whole_block_is_cut_in_steps_of_the_group_length() {
+        let stamps: Vec<u32> = (1..=7).collect();
+        assert_eq!(groups_of(&stamps, 3), vec![0..3, 3..6, 6..7]);
+        assert_eq!(groups_of(&stamps, 7), vec![0..7]);
+        assert_eq!(groups_of(&stamps, 15), vec![0..7]);
+        assert_eq!(groups_of(&[], 15), Vec::<std::ops::Range<usize>>::new());
+    }
+
+    #[test]
+    fn a_machines_rounds_are_groups_of_their_own() {
+        // Rounds of four: the primary holds chunks 1-4 and 9-12, then 17.
+        let stamps = [1, 2, 3, 4, 9, 10, 11, 12, 17];
+        assert_eq!(groups_of(&stamps, 15), vec![0..4, 4..8, 8..9]);
+        // A round longer than a group is cut again.
+        assert_eq!(groups_of(&stamps, 3), vec![0..3, 3..4, 4..7, 7..8, 8..9]);
+    }
+
+    #[test]
+    fn groups_cover_a_block_once_none_is_missing() {
+        let mut groups = BTreeMap::new();
+        groups.insert(0, (4, ()));
+        groups.insert(8, (3, ()));
+        assert!(!groups_cover(&groups, 11));
+        groups.insert(4, (4, ()));
+        assert!(groups_cover(&groups, 11));
+        assert!(groups_cover(&BTreeMap::<usize, (usize, ())>::new(), 0));
+    }
+
+    #[test]
+    #[should_panic(expected = "overlaps")]
+    fn groups_that_overlap_are_refused() {
+        let mut groups = BTreeMap::new();
+        groups.insert(0, (4, ()));
+        groups.insert(3, (4, ()));
+        groups_cover(&groups, 7);
+    }
+}
+
+/// A machine's nodes of a block's second phase, as [`group_nodes_on_lanes`] proved them.
+#[cfg(feature = "cuda")]
+struct GroupNodes {
+    /// The image node, on the machine that leads the tree.
+    image: Option<SchedulerProof>,
+    /// The nodes over this machine's groups: a group's first chunk (0-based) to its chunk count
+    /// and its node.
+    groups: std::collections::BTreeMap<usize, (usize, SchedulerProof)>,
+    /// How long the group proofs took, the challenges' derivation included.
+    second_phase: Duration,
+    /// The steps' pieces and their times, for the log.
+    steps: Vec<String>,
+}
+
+/// A machine's part of a block's second phase as pieces on its cards' prover lanes: the group
+/// proofs over the tables it holds, then their nodes, each step's pieces handed out together.
+/// The machine that leads the tree (`leads`) also proves the image group and its node.
+///
+/// `tables` are the tables this machine holds, by chunk; `group_len` chunks at most go to a
+/// group ([`groups_of`]). When the tables are the whole block's (`whole`), the run stops here
+/// if the sums the group proofs state do not add up to zero. `None` if the run is drained
+/// first.
+#[cfg(feature = "cuda")]
+#[allow(clippy::too_many_arguments)]
+fn group_nodes_on_lanes(
+    lanes: &crossbeam::channel::Sender<PrefixPiece>,
+    provers: &Arc<Vec<Arc<RiscvMachine>>>,
+    nodes: &Arc<
+        Vec<
+            Arc<
+                std::sync::Mutex<pico_vm::mle::machine::global_logup_nodes::GlobalLogUpNodeMachine>,
+            >,
+        >,
+    >,
+    vm_vk: &RiscvVmVk,
+    tables: std::collections::BTreeMap<u32, pico_vm::mle::machine::global_logup::ChunkTable>,
+    chain: &Arc<Vec<ChainDigest>>,
+    group_len: usize,
+    leads: bool,
+    whole: bool,
+    verify: bool,
+) -> Option<GroupNodes> {
+    type Piece<T> = Box<dyn FnOnce(usize) -> T + Send>;
+
+    let t = Instant::now();
+    // The second phase: the image group, then the chunk groups. Every machine of a block
+    // derives the challenges from the chain's root, behind the same proof-of-work witness.
+    let under =
+        provers[0].global_challenges(chain.last().expect("the chain has its initial value"));
+    let mut steps = vec![format!("challenges {:.3}s", t.elapsed().as_secs_f64())];
+    let stamps: Vec<u32> = tables.keys().copied().collect();
+    let groups = groups_of(&stamps, group_len);
+    let tables: Arc<Vec<_>> = Arc::new(tables.into_values().collect());
+    let image = leads.then(|| {
+        let provers = Arc::clone(provers);
+        let image: Piece<MleProof> = Box::new(move |card| {
+            provers[card]
+                .prove_global_logup_image(&under)
+                .unwrap_or_else(|e| panic!("the global LogUp's second phase failed: {e}"))
+        });
+        image
+    });
+    let group_pieces = groups.iter().cloned().map(|group| {
+        let (provers, tables) = (Arc::clone(provers), Arc::clone(&tables));
+        let group: Piece<MleProof> = Box::new(move |card| {
+            provers[card]
+                .prove_global_logup_group(&tables[group], &under)
+                .unwrap_or_else(|e| panic!("the global LogUp's second phase failed: {e}"))
+        });
+        group
+    });
+    let (mut proofs, times) =
+        prefix_on_lanes(lanes, image.into_iter().chain(group_pieces).collect())?;
+    // Only the group proofs read the tables.
+    drop(tables);
+    steps.push(piece_times(
+        if leads {
+            "group proofs (the image group's first)"
+        } else {
+            "group proofs"
+        },
+        &times,
+    ));
+    let group_proofs = proofs.split_off(usize::from(leads));
+    let image_proof = proofs.pop();
+    let second_phase = t.elapsed();
+    assert!(
+        !whole
+            || pico_vm::mle::machine::global_logup::stated_sums_balance(
+                image_proof.iter().chain(&group_proofs)
+            ),
+        "the global LogUp's prefix failed: the global LogUp does not balance: the block's \
+         chunks disagree on a cross-chunk event"
+    );
+
+    // The nodes, in the order they lead the tree: the image node, then the groups' from the
+    // last to the first.
+    // A node piece that panicked on its lane (out of device memory, say) poisons its machine's
+    // lock; the machine holds only the keys of nodes that were keygen'd whole, so a later run
+    // takes it as it is.
+    let pow_witness = under.pow_witness;
+    // `first_chunk` counts from one, as the node's witness does; `None` is the image node.
+    let node = |first_chunk: Option<usize>, proof: MleProof| {
+        let (nodes, vm_vk, chain) = (Arc::clone(nodes), vm_vk.clone(), Arc::clone(chain));
+        let node: Piece<SchedulerProof> = Box::new(move |card| {
+            let mut machine = nodes[card]
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let deferred_digest = Default::default();
+            let node = match first_chunk {
+                None => machine
+                    .image_witness(&vm_vk, &chain, pow_witness, deferred_digest)
+                    .and_then(|witness| machine.prove_image_node(&proof, &witness)),
+                Some(first_chunk) => machine
+                    .group_witness(&vm_vk, &chain, pow_witness, first_chunk, deferred_digest)
+                    .and_then(|witness| machine.prove_group_node(&proof, &witness)),
+            }
+            .unwrap_or_else(|e| panic!("a node of the global LogUp failed: {e:#}"));
+            // Early-failure net only, as for a combine node: a bad group proof shows here, at
+            // its node, and not at whatever takes the node in.
+            if verify {
+                machine.verify(&node).unwrap_or_else(|e| {
+                    panic!("a node of the global LogUp failed self-verify: {e:#}")
+                });
+            }
+            node
+        });
+        node
+    };
+    let firsts: Vec<usize> = groups
+        .iter()
+        .map(|group| stamps[group.start] as usize)
+        .collect();
+    let group_nodes = firsts
+        .iter()
+        .zip(group_proofs)
+        .rev()
+        .map(|(&first, proof)| node(Some(first), proof));
+    let (mut proved, times) = prefix_on_lanes(
+        lanes,
+        image_proof
+            .map(|proof| node(None, proof))
+            .into_iter()
+            .chain(group_nodes)
+            .collect(),
+    )?;
+    steps.push(piece_times(
+        if leads {
+            "nodes (the image node, then the last group's first)"
+        } else {
+            "nodes (the last group's first)"
+        },
+        &times,
+    ));
+    let group_nodes = proved.split_off(usize::from(leads));
+    Some(GroupNodes {
+        image: proved.pop(),
+        groups: groups
+            .iter()
+            .zip(&firsts)
+            .rev()
+            .zip(group_nodes)
+            .map(|((group, &first), node)| (first - 1, (group.len(), node)))
+            .collect(),
+        second_phase,
+        steps,
+    })
+}
+
+/// Reduces the nodes that lead a tree, in their order, to one inner node, as pieces on the
+/// cards' prover lanes: neighbours pair up layer by layer, an odd one out passing through. An
+/// inner node asserts the nodes' continuity and nothing a root does. `None` if the run is
+/// drained first.
+#[cfg(feature = "cuda")]
+fn reduce_on_lanes(
+    lanes: &crossbeam::channel::Sender<PrefixPiece>,
+    combines: &Arc<Vec<Arc<pico_vm::mle::machine::combine::GpuCombineMachine>>>,
+    mut layer: Vec<SchedulerProof>,
+    reduction_nodes: &AtomicUsize,
+    verify: bool,
+    steps: &mut Vec<String>,
+) -> Option<SchedulerProof> {
+    type Piece<T> = Box<dyn FnOnce(usize) -> T + Send>;
+
+    while layer.len() > 1 {
+        let odd = (layer.len() % 2 == 1).then(|| layer.pop().expect("an odd layer has a last"));
+        let mut children = layer.into_iter();
+        let mut pairs: Vec<Piece<SchedulerProof>> = Vec::new();
+        while let Some(left) = children.next() {
+            let pair = [left, children.next().expect("an even layer pairs up")];
+            let combines = Arc::clone(combines);
+            pairs.push(Box::new(move |card| {
+                let prepared = combines[card].prepare_node(&pair, false);
+                let built = combines[card].build_node_ctx(prepared);
+                let node = combines[card]
+                    .prove_built_node(built)
+                    .unwrap_or_else(|e| panic!("reducing the global LogUp's nodes failed: {e:#}"))
+                    .proof;
+                if verify {
+                    combines[card]
+                        .verify_node(&node.1, &node.0)
+                        .unwrap_or_else(|e| {
+                            panic!(
+                                "a node of the global LogUp's reduction failed self-verify: {e:?}"
+                            )
+                        });
+                }
+                node
+            }));
+        }
+        reduction_nodes.fetch_add(pairs.len(), Ordering::SeqCst);
+        let (mut next, times) = prefix_on_lanes(lanes, pairs)?;
+        steps.push(piece_times("a reduction layer", &times));
+        next.extend(odd);
+        layer = next;
+    }
+    layer.pop()
+}
+
+/// The nodes over the secondary's groups, taken off the exchange as they come until, with this
+/// machine's `groups`, they cover the block's `chunks` chunks. Returns how many came, or `None`
+/// if the run is drained first.
+#[cfg(feature = "cuda")]
+fn gather_peer_groups(
+    groups: &mut std::collections::BTreeMap<usize, (usize, SchedulerProof)>,
+    chunks: usize,
+) -> Option<usize> {
+    let mut came = 0;
+    while !groups_cover(groups, chunks) {
+        if get_mle_scheduler().is_aborted() {
+            return None;
+        }
+        for report in exchange().take_nodes(GlobalChain::ABORT_POLL) {
+            let node: SchedulerProof = bincode::deserialize(&report.proof).unwrap_or_else(|e| {
+                panic!(
+                    "the secondary's node over chunks {}..{} does not decode: {e}",
+                    report.first_chunk,
+                    report.first_chunk + report.chunks
+                )
+            });
+            // A report sent again after an answer that was lost: the first one stands.
+            if let std::collections::btree_map::Entry::Vacant(slot) =
+                groups.entry(report.first_chunk)
+            {
+                slot.insert((report.chunks, node));
+                came += 1;
+            }
+        }
+    }
+    Some(came)
 }
 
 /// What the scheduler's proof tree holds: a **convert** proof with its vk.
@@ -183,6 +1155,28 @@ pub enum GuestFailure {
     Panicked(String),
     /// A chunk selects the catch-all whitelist shape, which no card can prove.
     CatchAllShape(pico_vm::mle::machine::riscv::CatchAllShape),
+    /// The block's chunks hold more cross-chunk events than one tree's global LogUp may count.
+    TooManyGlobalRows(TooManyGlobalRows),
+}
+
+/// A block passed the global LogUp's real-row limit (`global_logup::MAX_COUNT`, in its units):
+/// `count` is where the chunk that crossed it left the block's count. The tree's root refuses
+/// such a block, whatever the provers do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TooManyGlobalRows {
+    pub count: u64,
+    pub max: u64,
+}
+
+impl fmt::Display for TooManyGlobalRows {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "the block's chunks hold too many cross-chunk events for one proof: their real-row \
+             count for the global LogUp reached {}, and a block may reach {}",
+            self.count, self.max
+        )
+    }
 }
 
 impl fmt::Display for GuestFailure {
@@ -191,6 +1185,7 @@ impl fmt::Display for GuestFailure {
             Self::Emulation(e) => write!(f, "{e}"),
             Self::Panicked(message) => write!(f, "the emulation panicked: {message}"),
             Self::CatchAllShape(e) => write!(f, "{e}"),
+            Self::TooManyGlobalRows(e) => write!(f, "{e}"),
         }
     }
 }
@@ -218,30 +1213,31 @@ pub struct RootProofExport {
 /// (`shipped_compress_vk`), so no key travels with it -- the reason it is so much smaller than a
 /// root submission.
 pub struct CompressProofExport {
-    /// `mle-core`'s canonical versioned wire format.
+    /// The proof in `mle-core`'s multiproof form, its WHIR Merkle openings deduplicated: the v5
+    /// envelope body (`pico_verifier::envelope::MleCompressProofV5`), the compress proof's one wire
+    /// form.
     pub proof: Vec<u8>,
     /// `RiscvVmVk::digest()`, the exe identity the proof is pinned against.
     pub riscv_vk_digest: String,
 }
 
-/// Whether the caller explicitly asked for MLE two-machine, which is what decides if the
-/// single-node pin below is applied. Opt-in and off by default, so single-node keeps the exact
-/// behaviour it had when the pin was unconditional.
-///
-/// Nothing sets this yet — MLE has no two-machine launch shape — so this is the seam a
-/// two-machine launch would use, not a live switch.
-/// Whether THIS process owns the program's initial GCS seed. Exactly one process in the run may,
-/// and it is the primary (or the single node). See the seeding rule at the constructor loop.
-/// How many other machines owe this one a GCS partial. Derived from the scheduler topology rather
-/// than hardcoded to 1, so a wider topology does not silently close the sum over a subset.
-fn expected_remote_digests() -> usize {
-    if !mle_two_machine_requested() || is_mle_secondary() {
-        return 0;
+/// The compress proof's wire form (the v5 envelope body), checked to rebuild the proof, with its
+/// size against the flat encoding logged.
+#[cfg(feature = "cuda")]
+fn compress_wire_bytes(proof: &ProofWithVk) -> Result<Vec<u8>, String> {
+    let body = pico_verifier::envelope::MleCompressProofV5::from_proof(&proof.0, &proof.1)
+        .map_err(|e| e.to_string())?;
+    if let Ok(flat) = pico_vm::mle::machine::recursion::proof_wire_bytes(&proof.0) {
+        info!(
+            target: "bench",
+            "MLE compress wire: multiproof {} B ({:.2} KiB), flat {} B, {:+.2}%",
+            body.proof.len(),
+            body.proof.len() as f64 / 1024.0,
+            flat.len(),
+            100.0 * (body.proof.len() as f64 / flat.len() as f64 - 1.0),
+        );
     }
-    crate::common::machine_role::get_runtime_mode()
-        .topology()
-        .worker_count()
-        .saturating_sub(1)
+    Ok(body.proof)
 }
 
 /// Whether the run is ending without a root: its guest failed (an embedded run), or a pipeline
@@ -262,7 +1258,7 @@ struct DeferredGate {
 }
 
 /// `MLE_DEFERRED_RECORDS`: deferred records the emulation may run ahead of proving by; `0` lifts
-/// the bound.
+/// the bound. Unset, a low-memory host takes [`host_memory::LOW_MEMORY_DEFERRED_RECORDS`].
 const DEFAULT_DEFERRED_RECORDS: usize = 512;
 
 /// The `MLE_DEFERRED_RECORDS` bound, `None` for none; an embedded caller checks it up front, where
@@ -273,6 +1269,7 @@ pub(crate) fn deferred_records_bound() -> Result<Option<usize>, String> {
             .trim()
             .parse::<usize>()
             .map_err(|_| format!("MLE_DEFERRED_RECORDS={v}: expected a count of records"))?,
+        Err(_) if host_memory::low_memory_host() => host_memory::LOW_MEMORY_DEFERRED_RECORDS,
         Err(_) => DEFAULT_DEFERRED_RECORDS,
     };
     Ok((bound > 0).then_some(bound))
@@ -434,10 +1431,6 @@ fn whitelist_map() -> Arc<MleVkMap> {
     Arc::new(map)
 }
 
-fn keeps_initial_gcs_seed() -> bool {
-    !mle_two_machine_requested() || crate::common::machine_role::get_machine_role().is_primary()
-}
-
 /// Whether this machine must build a `PreparedChunk` for `chunk_idx`.
 ///
 /// Both machines emulate the whole block — the primary because it registers every chunk with the
@@ -460,6 +1453,9 @@ fn prepares_chunk(chunk_idx: usize) -> bool {
         .worker_can_handle_chunk_for_worker(&get_worker_label(), chunk_idx)
 }
 
+/// Whether the caller explicitly asked for MLE two-machine (`two_machine_mle.sh` does), which is
+/// what decides if the single-node pin in [`run_pipeline`] is applied. Opt-in and off by
+/// default, so single-node keeps the exact behaviour it had when the pin was unconditional.
 fn mle_two_machine_requested() -> bool {
     std::env::var("MLE_TWO_MACHINE")
         .map(|v| {
@@ -1110,6 +2106,10 @@ impl ConvertPrebuild {
 /// on a lane that never sends would keep the convert preparers' channel open past the last chunk:
 /// the convert chain could then never drain and the final join would hang.
 struct RiscvLane {
+    /// Where each chunk's Global table commitment is recorded for the chain its convert leaf and
+    /// the tree's prefix need; `None` when no convert follows.
+    #[cfg(feature = "cuda")]
+    global_chain: Option<Arc<GlobalChain>>,
     store: Arc<DashMap<usize, PreparedChunk>>,
     prover: Arc<RiscvMachine>,
     convert_tx: Option<crossbeam::channel::Sender<(usize, MleProof)>>,
@@ -1214,23 +2214,61 @@ impl RiscvLane {
         // prove signature for a path only `MLE_VERIFY=1` takes. Consequence, stated rather than
         // hidden: under `MLE_VERIFY=1` this figure includes the verify it would be used to judge.
         // Benchmarks set `MLE_VERIFY=0`, so no published number is affected.
-        // The hook fires the moment trace-gen has fixed this chunk's committed heights and
-        // before commit starts, so the convert program build overlaps the remaining ~505 ms of
-        // this very prove. `send` on an unbounded channel is the only work done on this thread.
+        // The hook fires the moment trace-gen has fixed this chunk's committed heights and its
+        // Global table's commitment, before the commit of the rest starts. The chain steps over
+        // the commitment then, and the convert program build overlaps the remaining ~505 ms of
+        // this very prove. A chain step and a `send` on an unbounded channel are the only work
+        // done on this thread; a secondary's report to the primary is sent off it.
         #[cfg(feature = "cuda")]
-        // One look at the sender, not two: it can be taken by the pool's shutdown at any moment,
-        // and a `None` here just means this chunk proves without a pre-build, as it did before.
-        let proof = match self.convert_prebuild.as_ref().and_then(|pb| pb.sender()) {
-            Some(tx) => {
-                let hook = move |heights: Vec<Option<usize>>| {
-                    // A full queue cannot happen (unbounded) and a hung-up receiver only means
-                    // the workers are gone; either way a dropped pre-build is a no-op, because
-                    // the convert preparer builds the program itself on a miss.
+        let proof = {
+            // One look at the sender, not two: it can be taken by the pool's shutdown at any
+            // moment, and a `None` here just means this chunk proves without a pre-build.
+            let prebuild = self.convert_prebuild.as_ref().and_then(|pb| pb.sender());
+            let (stamp, prover) = (chunk.record.public_values.chunk, &self.prover);
+            // The chain is over the chunks in the order of their stamps, which the scheduler's
+            // indices follow from zero.
+            assert_eq!(
+                stamp as usize,
+                chunk_idx + 1,
+                "chunk {chunk_idx} of the scheduler is stamped {stamp}"
+            );
+            let global_chain = self.global_chain.as_deref();
+            // A two-machine secondary: the primary's chain is over this chunk too, and its count
+            // of the block's real rows takes this chunk's share.
+            let peer_share = (global_chain.is_some() && is_mle_secondary())
+                .then(|| prover.chunk_global_row_count(&chunk));
+            let traced = std::sync::OnceLock::new();
+            let hook = |heights: Vec<Option<usize>>| {
+                if let Some(global_chain) = global_chain {
+                    let commit = prover
+                        .chunk_table_commit(stamp)
+                        .expect("a traced chunk has its Global table committed");
+                    global_chain.record(chunk_idx, commit);
+                    if let Some(row_count) = peer_share {
+                        mle_report_chunk_table(ChunkTableReport {
+                            chunk_idx,
+                            commit: encode_commit(&commit),
+                            row_count,
+                        });
+                    }
+                    let _ = traced.set(commit);
+                }
+                // A full queue cannot happen (unbounded) and a hung-up receiver only means the
+                // workers are gone; either way a dropped pre-build is a no-op, because the
+                // convert preparer builds the program itself on a miss.
+                if let Some(tx) = &prebuild {
                     let _ = tx.send((chunk_idx, heights));
-                };
-                chunk.prove_hooked(&self.prover, self.verify, Some(&hook))
+                }
+            };
+            let proof = chunk.prove_hooked(&self.prover, self.verify, Some(&hook));
+            if let Some(global_chain) = global_chain {
+                assert_eq!(
+                    global_chain.commit_of(&proof),
+                    traced.get().copied(),
+                    "chunk {chunk_idx}'s proof does not open the Global table its traces committed"
+                );
             }
-            None => chunk.prove(&self.prover, self.verify),
+            proof
         };
         #[cfg(not(feature = "cuda"))]
         let proof = chunk.prove(&self.prover, self.verify);
@@ -1667,6 +2705,8 @@ fn load_reth_input(n: u32) -> Vec<u8> {
 /// running server neither changes nor breaks what it proves.
 fn load_program_elf(cfg: &MleSingleNodeConfig) -> Arc<[u8]> {
     if let Some(embedded) = &cfg.embedded {
+        #[cfg(feature = "aot-emulator")]
+        crate::aot::ensure_generated_from(&embedded.elf, "the embedded ELF");
         return Arc::clone(&embedded.elf);
     }
     static FIB: std::sync::OnceLock<Arc<[u8]>> = std::sync::OnceLock::new();
@@ -1676,7 +2716,10 @@ fn load_program_elf(cfg: &MleSingleNodeConfig) -> Arc<[u8]> {
         "reth" => ("reth", &RETH),
         other => panic!("unsupported --elf {other} (supported: fib | reth)"),
     };
-    Arc::clone(read.get_or_init(|| load_elf(name).into()))
+    let elf = Arc::clone(read.get_or_init(|| load_elf(name).into()));
+    #[cfg(feature = "aot-emulator")]
+    crate::aot::ensure_generated_from(&elf, &format!("{RV64_DIR}/{name}-elf"));
+    elf
 }
 
 /// The stdin for **one** block. This is the only thing a sweep changes between blocks; everything
@@ -2180,6 +3223,12 @@ struct Resident {
     riscv_vm_vk: Option<RiscvVmVk>,
     #[cfg(feature = "cuda")]
     combines: Vec<Arc<pico_vm::mle::machine::combine::GpuCombineMachine>>,
+    /// The provers of the global LogUp's nodes, one per card, with a combine stage; empty
+    /// without. Their keys are made as the blocks need them and kept across blocks.
+    #[cfg(feature = "cuda")]
+    global_logup_nodes: Vec<
+        Arc<std::sync::Mutex<pico_vm::mle::machine::global_logup_nodes::GlobalLogUpNodeMachine>>,
+    >,
     /// The whitelist, in whitelist mode: the root verify reads it after the tree; the apex holds
     /// its own reference.
     #[cfg(feature = "cuda")]
@@ -2212,6 +3261,9 @@ struct ResidentKey {
     vk_on: bool,
     log_stacked_height: usize,
     embedded_root: Option<[KoalaBear; 8]>,
+    /// The caller's riscv machine card 0 may adopt, by address: two provers never share one
+    /// resident, so one's batch prove cannot touch the Global tables of the other's streaming run.
+    adopted_riscv: Option<usize>,
 }
 
 static RESIDENT: std::sync::Mutex<Option<(ResidentKey, Arc<Resident>)>> =
@@ -2253,14 +3305,18 @@ pub(crate) fn drop_pk_keys_added_in(run: u64) -> usize {
             .iter()
             .map(|m| m.drop_keys_added_in(run))
             .chain(resident.combines.iter().map(|m| m.drop_keys_added_in(run)))
+            .chain(resident.global_logup_nodes.iter().map(|m| {
+                m.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .drop_keys_added_in(run)
+            }))
             .sum()
     })
 }
 
 /// The single-node proving pipeline: keygen (+ eager JIT warmup) first on the quiescent main
 /// thread, then an emulate thread streams records to a preparer thread which publishes prepared
-/// chunks to the scheduler; a worker pool proves chunks as they arrive; finally the cross-chunk
-/// GCS is asserted.
+/// chunks to the scheduler; a worker pool proves chunks as they arrive.
 ///
 /// With `with_convert`, the streaming convert stage is spliced in FRI-style: each riscv chunk
 /// proof flows (never batched) into a convert-preparer pool (CPU: layout + keygen-cache + emulate)
@@ -2311,9 +3367,20 @@ fn run_pipeline(
     // block entirely inside the primary's reserved range. See
     // `set_mle_chunk_assignment_defaults` for the values and the trade-off.
     set_mle_chunk_assignment_defaults();
+    // Two machines prove a block to its tree's root. The scheduler completes such a block by its
+    // proof tree; without one it completes by a count of proved chunks, which the secondary's
+    // never enter (`mle_report_chunk_terminal`), and the primary would wait for them until its
+    // dispatcher gives the run up. Refused before either side is brought up: a primary that
+    // served and then stopped would leave its secondary retrying the connection.
+    assert!(
+        with_combine || !mle_two_machine_requested(),
+        "a two-machine run proves a block to its tree's root: `--step combine` or `--step \
+         compress`"
+    );
     // Bring up whichever half of the two-machine shape this process is, before the pipeline starts:
     // the primary must be serving before a secondary can acquire, and the secondary must hold a
-    // client before its first `mle_register_chunk`. A no-op in single-node.
+    // client before its first `mle_register_chunk`. A no-op in single-node, and for the blocks
+    // of a process after its first.
     if mle_two_machine_requested() {
         two_machine::init_mle_two_machine();
     }
@@ -2358,10 +3425,13 @@ fn run_pipeline(
 
     let t_total = Instant::now();
     // Host-side verification of the intermediate proofs: riscv chunks, converts, combine nodes,
-    // and the root when compress follows. The final proof (the root under `--step combine`, the
-    // compress proof under `--step compress`) is accepted either way.
+    // the global LogUp's nodes and their reduction, and the root when compress follows. (A group
+    // proof of the global LogUp is verified by its node.) The final proof (the root under
+    // `--step combine`, the compress proof under `--step compress`) is accepted either way.
     let verify = env_flag("MLE_VERIFY");
-    // Negative-test hook: tamper one cross-chunk pass-through cell so `Σ gcs != 0`.
+    // Negative-test hook: tamper one cross-chunk pass-through cell, so that the chunks' events no
+    // longer balance. With a tree, the prefix stage sees the global LogUp's sums not add up to
+    // zero and stops the run.
     let corrupt_memory = env_flag("CORRUPT_MEMORY");
     // The binaries resolved and logged it at startup; every block of the process reads it back.
     let replay = replay_workers();
@@ -2404,7 +3474,25 @@ fn run_pipeline(
     // the figure is wanted per block.
     crate::common::transfer_stats::reset();
     let scheduler: Arc<GlobalScheduler<SchedulerProof>> = get_mle_scheduler();
+    // On two machines the block has a number: each machine counts the blocks it proves from
+    // one, and both prove the same blocks in the same order. The primary's scheduler service
+    // holds back a request for a block it has not reached and ends one for a block it has
+    // left, and the global LogUp's messages name their block the same way.
+    if mle_two_machine_requested() {
+        static BLOCKS: AtomicU64 = AtomicU64::new(0);
+        let block = BLOCKS.fetch_add(1, Ordering::SeqCst) + 1;
+        scheduler.set_block_num(block);
+        #[cfg(feature = "cuda")]
+        if !is_mle_secondary() {
+            exchange().open(block);
+        }
+    }
     scheduler.set_no_combine(!with_combine);
+    // The tree's root joins the chunks with the global LogUp's nodes, which lead it.
+    #[cfg(feature = "cuda")]
+    if with_combine {
+        crate::common::mle_scheduler_singleton::mle_expect_prefix();
+    }
     // Largest riscv chunk first when chunks queue up, so that the cheap ones are what is left to
     // even out the cards' ends; `MLE_CHUNK_ORDER=fifo` keeps arrival order instead.
     scheduler.set_chunk_order_by_cost(!matches!(
@@ -2455,6 +3543,9 @@ fn run_pipeline(
         vk_on,
         log_stacked_height: cfg.log_stacked_height,
         embedded_root: embedded.map(|e| e.trusted_root),
+        adopted_riscv: embedded
+            .and_then(|e| e.riscv.as_ref())
+            .map(|m| Arc::as_ptr(m) as usize),
     };
     let resident = resident_for(resident_key, |elf| {
         let t_compile = Instant::now();
@@ -2478,21 +3569,24 @@ fn run_pipeline(
                 .unwrap_or_else(|e| panic!("binding the main thread to card {k} failed: {e:?}"));
             #[cfg(not(feature = "cuda"))]
             let _ = k;
-            let machine = RiscvMachine::new(program.clone(), cfg.log_stacked_height, vk_on)
-                .unwrap_or_else(|e| panic!("{e}"));
-            // Every constructor seeds the program's initial GCS, and the aggregate must count that seed
-            // exactly ONCE — globally, not once per process. Single-node: card 0 keeps it. Two-machine:
-            // the primary's card 0 keeps it and **the secondary unseeds every one of its cards**, since
-            // two processes each applying the per-card rule locally would count the seed twice and the
-            // sum could never close.
-            //
-            // This is invisible to every type check, and it fails as a
-            // `cross-chunk global cumulative sum is not zero (memory inconsistency)` panic that reads
-            // exactly like a real memory bug — a packing mismatch once failed exactly this way.
-            if k > 0 || !keeps_initial_gcs_seed() {
-                machine.unseed_initial_gcs();
-            }
-            provers.push(Arc::new(machine));
+            // Card 0 takes the caller's machine when it already holds this program's keys: same
+            // program, height and air set, so keygenning it again only costs time and a second pk on
+            // the card. Not when it holds Global tables from another prove.
+            let adopted = (k == 0)
+                .then(|| embedded.and_then(|e| e.riscv.clone()))
+                .flatten()
+                .filter(|m| !m.has_chunk_tables());
+            let machine = match adopted {
+                Some(machine) => {
+                    info!("MLE keygen: card 0 reuses the caller's riscv keys");
+                    machine
+                }
+                None => Arc::new(
+                    RiscvMachine::new(program.clone(), cfg.log_stacked_height, vk_on)
+                        .unwrap_or_else(|e| panic!("{e}")),
+                ),
+            };
+            provers.push(machine);
         }
         // Card 0's machine doubles as the vk source below; keygen is deterministic, so every card
         // holds the same vk (asserted here rather than surfacing later as a verify failure).
@@ -2601,6 +3695,31 @@ fn run_pipeline(
             Vec::new()
         };
         #[cfg(feature = "cuda")]
+        let global_logup_nodes: Vec<_> = if with_combine {
+            (0..prover_count)
+                .map(|k| {
+                    // A machine's device engine belongs to the card that is current when it
+                    // is made (as the combine machines above).
+                    pico_vm::mle::cuda_mle::runtime::context::set_device(k as i32).unwrap_or_else(
+                        |e| panic!("binding the main thread to card {k} failed: {e:?}"),
+                    );
+                    let mut nodes =
+                        pico_vm::mle::machine::global_logup_nodes::GlobalLogUpNodeMachine::new(
+                            pico_vm::mle::recursion_params_with_128_bits_security(),
+                            &prover.vk().inner.params,
+                            vk_on,
+                        );
+                    if let Some(map) = &vk_map {
+                        nodes.set_vk_root(map.root());
+                    }
+                    nodes.use_device();
+                    Arc::new(std::sync::Mutex::new(nodes))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        #[cfg(feature = "cuda")]
         let apex = match (&vk_map, &riscv_vm_vk) {
             (Some(map), Some(vm_vk)) if with_combine => {
                 let trusted_root = match embedded {
@@ -2645,6 +3764,8 @@ fn run_pipeline(
             #[cfg(feature = "cuda")]
             combines,
             #[cfg(feature = "cuda")]
+            global_logup_nodes,
+            #[cfg(feature = "cuda")]
             vk_map,
             #[cfg(feature = "cuda")]
             apex,
@@ -2675,6 +3796,166 @@ fn run_pipeline(
     let converts = resident.converts.clone();
     #[cfg(feature = "cuda")]
     let riscv_vm_vk = resident.riscv_vm_vk.clone();
+    // The global LogUp's chain over this block's chunks, which every convert leaf and the tree's
+    // prefix take their values from.
+    #[cfg(feature = "cuda")]
+    let global_chain: Option<Arc<GlobalChain>> = (!converts.is_empty()).then(|| {
+        Arc::new(GlobalChain::new(
+            pico_vm::mle::machine::global_logup::Chain::new(&provers[0].vk().inner.params),
+            (mle_two_machine_requested() && !is_mle_secondary()).then(exchange),
+        ))
+    });
+    // The block's real-row count, which the tree's root bounds.
+    #[cfg(feature = "cuda")]
+    let global_row_count = with_combine.then(|| Arc::new(GlobalRowCount::new()));
+    // The pieces of the tree's prefix (group proofs, nodes, reduction steps), which the cards'
+    // prover lanes take ahead of their other work. The lanes serve the queue until its sender
+    // goes: with the prefix stage, or at once in a run without one.
+    let (prefix_pieces_tx, prefix_pieces_rx) = crossbeam::channel::unbounded::<PrefixPiece>();
+    // The tree's prefix: once every chunk's table is committed, the global LogUp's second phase
+    // over the tables, its nodes, and their reduction to the one proof the scheduler joins with
+    // the chunks at the root.
+    // A chunk's table is committed as the chunk is traced, so the second phase starts when the
+    // last chunk's proof does. Committing each table as its record leaves the emulator would
+    // start it earlier, at a GPU task a chunk in the middle of the block; that is not done.
+    // Combine nodes the prefix stage proves on its own, reducing the global LogUp's nodes: they
+    // go through a card's combine machine without being tasks of the tree.
+    #[cfg(feature = "cuda")]
+    let prefix_reduction_nodes = Arc::new(AtomicUsize::new(0));
+    #[cfg(feature = "cuda")]
+    let tree_prefix = match (&global_chain, &riscv_vm_vk) {
+        (Some(global_chain), Some(vm_vk)) if with_combine => {
+            let (global_chain, vm_vk) = (Arc::clone(global_chain), vm_vk.clone());
+            let provers = Arc::new(provers.clone());
+            let nodes = Arc::new(resident.global_logup_nodes.clone());
+            let combines = Arc::new(resident.combines.clone());
+            let reduction_nodes = Arc::clone(&prefix_reduction_nodes);
+            let lanes = prefix_pieces_tx;
+            let group_len = global_logup_group_len();
+            // Of two machines the primary leads the tree: it proves the image node, and reduces
+            // its group nodes with the secondary's into the prefix. One machine does both alone.
+            let (two_machine, leads) = (mle_two_machine_requested(), !is_mle_secondary());
+            let stage = thread::Builder::new()
+                .name("mle-global-logup-prefix".into())
+                .spawn_watched(move || {
+                    let Some(chain) = global_chain.whole() else {
+                        return;
+                    };
+                    let t = Instant::now();
+                    let mut tables = std::collections::BTreeMap::new();
+                    for prover in provers.iter() {
+                        tables.extend(prover.take_chunk_tables());
+                    }
+                    let chunks = chain.len() - 1;
+                    // One machine holds every chunk's table; of two, each those of the chunks
+                    // it proved.
+                    assert!(
+                        if two_machine {
+                            tables
+                                .keys()
+                                .all(|chunk| (1..=chunks as u32).contains(chunk))
+                        } else {
+                            tables.keys().copied().eq(1..=chunks as u32)
+                        },
+                        "the provers kept the Global tables of chunks {:?}, the block has \
+                         1..={chunks}",
+                        tables.keys().collect::<Vec<_>>()
+                    );
+                    let chain = Arc::new(chain);
+                    let Some(own) = group_nodes_on_lanes(
+                        &lanes,
+                        &provers,
+                        &nodes,
+                        &vm_vk,
+                        tables,
+                        &chain,
+                        group_len,
+                        leads,
+                        !two_machine,
+                        verify,
+                    ) else {
+                        return;
+                    };
+                    let mut steps = own.steps;
+                    let mut groups = own.groups;
+                    let own_groups = groups.len();
+                    let Some(image) = own.image else {
+                        // The secondary: its nodes go to the primary, which waits for them.
+                        let t_hand = Instant::now();
+                        for (&first_chunk, (chunks, node)) in &groups {
+                            mle_report_group_node(first_chunk, *chunks, node);
+                        }
+                        info!("MLE global LogUp pieces: {}", steps.join("; "));
+                        info!(
+                            "MLE global LogUp: this machine's {own_groups} group node(s) of the \
+                             block's {chunks} chunk(s) proved in {:.3}s (second phase {:.3}s, \
+                             GPU) and handed to the primary in {:.3}s",
+                            (t_hand - t).as_secs_f64(),
+                            own.second_phase.as_secs_f64(),
+                            t_hand.elapsed().as_secs_f64(),
+                        );
+                        info!("MLE global LogUp: {}", global_chain.timing());
+                        return;
+                    };
+                    if two_machine {
+                        let t_wait = Instant::now();
+                        let Some(came) = gather_peer_groups(&mut groups, chunks) else {
+                            return;
+                        };
+                        steps.push(format!(
+                            "{came} group node(s) of the other machine, the last {:.3}s after \
+                             this machine's",
+                            t_wait.elapsed().as_secs_f64()
+                        ));
+                    }
+                    // The early look at the block's sums again, over the nodes' public values:
+                    // of the other machine's group proofs only the nodes are here. Nothing is
+                    // verified, as for the group proofs.
+                    assert!(
+                        pico_vm::mle::machine::global_logup_nodes::published_sums_balance(
+                            std::iter::once(&image).chain(groups.values().map(|(_, node)| node))
+                        ),
+                        "the global LogUp's prefix failed: the global LogUp does not balance: \
+                         the block's chunks disagree on a cross-chunk event"
+                    );
+                    // The nodes in the order they lead the tree: the image node, then the
+                    // groups' from the last to the first.
+                    let layer = std::iter::once(image)
+                        .chain(groups.into_values().rev().map(|(_, node)| node))
+                        .collect();
+                    let Some(prefix) = reduce_on_lanes(
+                        &lanes,
+                        &combines,
+                        layer,
+                        &reduction_nodes,
+                        verify,
+                        &mut steps,
+                    ) else {
+                        return;
+                    };
+                    info!("MLE global LogUp pieces: {}", steps.join("; "));
+                    info!(
+                        "MLE global LogUp: the tree's prefix proved over {chunks} chunk(s) in \
+                         {:.3}s: second phase {:.3}s ({} group proof(s), GPU), nodes and their \
+                         reduction {:.3}s (GPU)",
+                        t.elapsed().as_secs_f64(),
+                        own.second_phase.as_secs_f64(),
+                        own_groups + 1,
+                        (t.elapsed() - own.second_phase).as_secs_f64(),
+                    );
+                    info!("MLE global LogUp: {}", global_chain.timing());
+                    crate::common::mle_scheduler_singleton::mle_report_prefix(prefix);
+                })
+                .expect("spawn mle-global-logup-prefix");
+            Some(stage)
+        }
+        _ => {
+            drop(prefix_pieces_tx);
+            None
+        }
+    };
+    #[cfg(not(feature = "cuda"))]
+    drop(prefix_pieces_tx);
     #[cfg(feature = "cuda")]
     let combines = resident.combines.clone();
     #[cfg(feature = "cuda")]
@@ -2826,9 +4107,13 @@ fn run_pipeline(
             );
         }
     }
-    // Pipeline scope start — the FRI-`E2E_total`-comparable window (emulate→prove→GCS;
+    // Pipeline scope start — the FRI-`E2E_total`-comparable window (emulate→prove;
     // the compile/keygen/pools setup above this line is excluded). Reported as `e2e=`.
     let t_e2e = Instant::now();
+    #[cfg(feature = "cuda")]
+    if let Some(global_chain) = &global_chain {
+        global_chain.start_clock();
+    }
     // Span recording starts with the window, so the one-time setup above — which no per-chunk change
     // can move — is outside it and stays unrecorded. Every span timestamp is relative to here.
     spans::set_origin(t_e2e);
@@ -2844,7 +4129,38 @@ fn run_pipeline(
     let refused_shape = Arc::new(std::sync::Mutex::new(
         None::<pico_vm::mle::machine::riscv::CatchAllShape>,
     ));
+    // Set by the riscv preparer whose chunk takes the block past the global LogUp's real-row
+    // limit in an embedded run; drains the same way.
+    let over_global_row_count = Arc::new(std::sync::Mutex::new(None::<TooManyGlobalRows>));
     let embedded_run = embedded.is_some();
+    // Two machines: the chunks the other machine traces reach this machine's chain on a thread
+    // of their own, which ends with the chain whole, or at `peer_chunks_done`.
+    #[cfg(feature = "cuda")]
+    let peer_chunks_done = Arc::new(AtomicBool::new(false));
+    #[cfg(feature = "cuda")]
+    let peer_chunks = match &global_chain {
+        Some(global_chain) if mle_two_machine_requested() => {
+            let (global_chain, count) = (Arc::clone(global_chain), global_row_count.clone());
+            let (done, guest_failed) = (Arc::clone(&peer_chunks_done), Arc::clone(&guest_failed));
+            let over = Arc::clone(&over_global_row_count);
+            let peer = thread::Builder::new()
+                .name("mle-global-chain-peer".into())
+                .spawn_watched(move || {
+                    follow_peer_chunks(
+                        &global_chain,
+                        count.as_deref(),
+                        &done,
+                        &guest_failed,
+                        |too_many| {
+                            stop_over_global_rows(too_many, embedded_run, &over, &guest_failed)
+                        },
+                    );
+                })
+                .expect("spawn mle-global-chain-peer");
+            Some(peer)
+        }
+        _ => None,
+    };
     let deferred = Arc::new(DeferredGate::from_env());
     let emulate_handle = {
         let program = program.clone();
@@ -2872,9 +4188,10 @@ fn run_pipeline(
                     if watch::failed() {
                         panic!("emulation stopped: the pipeline failed");
                     }
-                    // A preparer refused a chunk's shape: the run fails whatever comes next.
+                    // A preparer refused a chunk, for its shape or for the block's limit on
+                    // cross-chunk rows: the run fails whatever comes next.
                     if refused.load(Ordering::SeqCst) {
-                        panic!("emulation stopped: a chunk's shape was refused");
+                        panic!("emulation stopped: a preparer refused a chunk");
                     }
                     if corrupt_memory && !corrupted.load(Ordering::Relaxed) {
                         // Tamper the first tamperable record (exactly one).
@@ -2991,6 +4308,9 @@ fn run_pipeline(
             let shaper = Arc::clone(&provers[0]);
             let guest_failed = Arc::clone(&guest_failed);
             let refused_shape = Arc::clone(&refused_shape);
+            #[cfg(feature = "cuda")]
+            let (global_row_count, over_global_row_count) =
+                (global_row_count.clone(), Arc::clone(&over_global_row_count));
             let deferred = Arc::clone(&deferred);
             hs.push(
                 thread::Builder::new()
@@ -3059,6 +4379,21 @@ fn run_pipeline(
                             if run_stopped(&guest_failed) {
                                 continue;
                             }
+                            // The chunk that takes the block past the real-row limit ends the
+                            // run as a refused shape does.
+                            #[cfg(feature = "cuda")]
+                            if let Some(Err(over)) = global_row_count
+                                .as_ref()
+                                .map(|count| count.add(idx, shaper.chunk_global_row_count(&chunk)))
+                            {
+                                stop_over_global_rows(
+                                    over,
+                                    embedded_run,
+                                    &over_global_row_count,
+                                    &guest_failed,
+                                );
+                                continue;
+                            }
                             let cost = chunk.cost;
                             // Stamps need not arrive ascending: the store is a map and
                             // `register_chunk` keeps only a min/max. They must be distinct — an
@@ -3080,6 +4415,8 @@ fn run_pipeline(
                     .expect("spawn mle-riscv-preparer"),
             );
         }
+        #[cfg(feature = "cuda")]
+        let global_chain = global_chain.clone();
         // Aggregator: keeps the downstream join's single (chunk_count, wall) shape across R
         // preparers, and owns finalize_emulation.
         thread::Builder::new()
@@ -3108,6 +4445,10 @@ fn run_pipeline(
                     thread::sleep(delay);
                 }
                 mle_finalize_emulation();
+                #[cfg(feature = "cuda")]
+                if let Some(global_chain) = &global_chain {
+                    global_chain.set_total(total);
+                }
                 (total, wall)
             })
             .expect("spawn mle-riscv-preparer-join")
@@ -3144,6 +4485,8 @@ fn run_pipeline(
         let mut handles = Vec::new();
         for p in 0..num_preparers {
             let machines = converts.clone();
+            let global_chain =
+                Arc::clone(global_chain.as_ref().expect("converts come with the chain"));
             let convert_rx = convert_rx.clone();
             let convert_ready_txs = convert_ready_txs.clone();
             let convert_card_rr = Arc::clone(&convert_card_rr);
@@ -3175,6 +4518,15 @@ fn run_pipeline(
                             // so this thread binds the card it is about to send to. Spreading the
                             // chunks warms the pk on all eight cards rather than four, which
                             // single-node already did by owning every index.
+                            // The leaf enters the global LogUp's chain at the value after
+                            // the chunks before it, known once their tables are committed.
+                            // Waited for before a card is bound or device memory taken, and
+                            // counted as waiting, not as preparing.
+                            let chain_in = {
+                                let _w =
+                                    spans::wait(WorkKind::PrepareConvert, Some(chunk_idx as u32));
+                                global_chain.before(chunk_idx)
+                            };
                             // The chunk's card, claimed by whichever of this thread and the
                             // pre-build asked first. A key warmed under
                             // `MLE_CONVERT_PREBUILD_PK` is on that card; if the pre-build has not
@@ -3190,7 +4542,7 @@ fn run_pipeline(
                                     panic!("binding preparer to card {card} failed: {e:?}")
                                 });
                             inject::at(inject::Stage::Convert);
-                            let prepared = machines[card].prepare_one(&riscv_proof);
+                            let prepared = machines[card].prepare_one(&riscv_proof, chain_in);
                             info!("[mle-convert-preparer-{p}] chunk {chunk_idx} prepared");
                             // Built here, off the prover lane, so the prover never queues behind
                             // a ~10 ms build.
@@ -3498,6 +4850,8 @@ fn run_pipeline(
         let riscv_lane = || RiscvLane {
             store: Arc::clone(&store),
             prover: Arc::clone(&provers[k]),
+            #[cfg(feature = "cuda")]
+            global_chain: global_chain.clone(),
             convert_tx: convert_tx.clone(),
             prove_nanos: Arc::clone(&prove_nanos),
             prove_count: Arc::clone(&prove_count),
@@ -3549,6 +4903,8 @@ fn run_pipeline(
             // the process-wide panic hook prints the real cause and exits first.
             let ready_src = convert_ready_rxs[k].clone();
             let combine_src = combine_ready_rxs[k].clone();
+            let prefix_src = prefix_pieces_rx.clone();
+            let prefix_failed = Arc::clone(&guest_failed);
             // Role-labelled for the same reason as `dispatch_id` above.
             let worker_id = format!("{}-mle-prover-{k}", get_worker_label());
             workers.push(
@@ -3563,14 +4919,22 @@ fn run_pipeline(
                         // own card is exactly what splitting the lanes was for.
                         let mut ready = crossbeam::channel::never();
                         let mut combine_ready = crossbeam::channel::never();
+                        let mut prefix_pieces = prefix_src;
                         let mut items_open = true;
                         let mut ready_open = false;
                         let mut combine_ready_open = false;
-                        while items_open || ready_open || combine_ready_open {
+                        let mut prefix_open = true;
+                        while items_open || ready_open || combine_ready_open || prefix_open {
                             // Nothing pushes to this slot, so it can only be idle for want of
                             // input, never blocked on capacity. Each arm's own `Busy` span splits
                             // this one.
                             let _i = spans::idle(WorkKind::Unattributed);
+                            // A piece of the tree's prefix goes ahead of whatever else waits, a
+                            // chunk included: `select!` would toss a coin between them.
+                            if let Ok(piece) = prefix_pieces.try_recv() {
+                                run_prefix_piece(piece, k, &prefix_failed);
+                                continue;
+                            }
                             // Recursion only while no chunk is waiting. `select!` picks at random
                             // among ready arms, and when the feed drains there are still up to
                             // `prover_count` chunks on the lane -- the head of the tail's critical
@@ -3596,6 +4960,13 @@ fn run_pipeline(
                                 )
                             };
                             crossbeam::channel::select! {
+                                recv(prefix_pieces) -> m => match m {
+                                    Ok(piece) => run_prefix_piece(piece, k, &prefix_failed),
+                                    Err(_) => {
+                                        prefix_open = false;
+                                        prefix_pieces = crossbeam::channel::never();
+                                    }
+                                },
                                 recv(items) -> m => match m {
                                     // `items` and the handles travel together: the arm below
                                     // detaches the one as it drops the other, so a chunk cannot
@@ -3665,6 +5036,7 @@ fn run_pipeline(
         let rec = Arc::clone(&card_rec);
         let convert_ready_rx = convert_ready_rxs[k].clone();
         let combine_ready_rx = combine_ready_rxs[k].clone();
+        let prefix_failed = Arc::clone(&guest_failed);
         // The recursion lane by default; under `MLE_RECURSION_LANE=0` this is the card's ONLY
         // prover lane, and then it is the one that gets the riscv handles and the queue, making
         // its `select!` the pre-split three-armed loop exactly. One conditional for all of it, so
@@ -3674,9 +5046,10 @@ fn run_pipeline(
         // receiver: a live receiver parked on a lane that never takes from it stops the
         // dispatcher's `send` from ever erroring, so if the riscv-serving lanes died it would
         // block on a full queue and the final join would hang.
-        let (mut riscv, rec_items, role, worker_id, spawn_err) = if rec_lane {
+        let (mut riscv, rec_items, rec_prefix, role, worker_id, spawn_err) = if rec_lane {
             (
                 None,
+                crossbeam::channel::never(),
                 crossbeam::channel::never(),
                 Role::ProveRecursion,
                 format!("{}-mle-prover-rec-{k}", get_worker_label()),
@@ -3686,6 +5059,7 @@ fn run_pipeline(
             (
                 Some(riscv_lane()),
                 items_rx.clone(),
+                prefix_pieces_rx.clone(),
                 Role::Prove,
                 format!("{}-mle-prover-{k}", get_worker_label()),
                 "spawn mle-prover",
@@ -3706,6 +5080,7 @@ fn run_pipeline(
                 .spawn_watched(move || {
                     bind_prover_lane(k, role);
                     let mut items = rec_items;
+                    let mut prefix_pieces = rec_prefix;
                     let mut ready = convert_ready_rx;
                     let mut combine_ready = combine_ready_rx;
                     // Live only when this thread is the one serving riscv; otherwise `items` never
@@ -3714,11 +5089,24 @@ fn run_pipeline(
                     let mut items_open = riscv.is_some();
                     let mut ready_open = true;
                     let mut combine_ready_open = true;
-                    while items_open || ready_open || combine_ready_open {
+                    // The prefix's pieces go to the lane that serves riscv, like the chunks.
+                    let mut prefix_open = riscv.is_some();
+                    while items_open || ready_open || combine_ready_open || prefix_open {
                         // Nothing pushes to this slot, so it can only be idle for want of input,
                         // never blocked on capacity. Each arm's own `Busy` span splits this one.
                         let _i = spans::idle(WorkKind::Unattributed);
+                        if let Ok(piece) = prefix_pieces.try_recv() {
+                            run_prefix_piece(piece, k, &prefix_failed);
+                            continue;
+                        }
                         crossbeam::channel::select! {
+                            recv(prefix_pieces) -> m => match m {
+                                Ok(piece) => run_prefix_piece(piece, k, &prefix_failed),
+                                Err(_) => {
+                                    prefix_open = false;
+                                    prefix_pieces = crossbeam::channel::never();
+                                }
+                            },
                             recv(items) -> m => match m {
                                 Ok(ProverItem::Riscv { chunk_idx }) => riscv
                                     .as_ref()
@@ -3774,6 +5162,8 @@ fn run_pipeline(
     // the dispatcher's blocking `send` waits forever on a full queue instead of erroring out. The
     // dispatcher is joined first, so that turns an all-lanes-dead panic into a silent hang.
     drop(items_rx);
+    // And for the prefix's pieces: with every lane gone, the prefix stage's `send` errors.
+    drop(prefix_pieces_rx);
     drop(convert_tx);
     drop(convert_ready_rxs);
     // Same for the combine chain: the dispatcher holds the live task sender (it drops it on
@@ -3805,6 +5195,13 @@ fn run_pipeline(
         .unwrap_or_else(|e| e.into_inner())
         .take()
         .map(GuestFailure::CatchAllShape)
+        .or_else(|| {
+            over_global_row_count
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+                .map(GuestFailure::TooManyGlobalRows)
+        })
         .or(guest_failure);
     vram_probe("after_preparer", iteration.unwrap_or(0), prover_count);
     info!(
@@ -3838,6 +5235,10 @@ fn run_pipeline(
     // chunks, so return without joining the workers — process exit reaps them.
     if chunk_count == 0 && !stopped(&guest_failure) {
         info!("MLE single-node: no chunks emulated; nothing to prove");
+        // The lanes and the prefix stage are still there: stop them, as a drained run does. The
+        // stage itself takes a chain over no chunk for a block without a second phase
+        // (`GlobalChain::whole`), whether or not it sees the abort first.
+        crate::common::mle_scheduler_singleton::mle_abort_run();
         // The cycle count is real -- the emulator did run -- but there is no root. A caller that
         // has to report this block upstream must report it as unproved, and `root: None` is what
         // says so; handing back a default outcome here would also claim zero cycles.
@@ -3848,10 +5249,11 @@ fn run_pipeline(
         };
     }
 
-    // A single chunk cannot form a combine tree: `ProofTree` only pairs ADJACENT proofs, so a lone
-    // proof never pairs, the tree never collapses, and the workers would poll forever — silently,
-    // because the sync `acquire_task` returns `WaitForMore` rather than registering a waiter, so
-    // there is no timeout to trip. Guard explicitly.
+    // A single chunk: `ProofTree` only pairs ADJACENT proofs, so a lone proof never pairs. With
+    // the global LogUp's prefix the scheduler does give a lone chunk a root (the prefix joined
+    // with it), but no run has been taken through that path, and without the guard a tree that
+    // never collapsed would leave the workers polling forever — silently, because the sync
+    // `acquire_task` returns `WaitForMore` rather than registering a waiter. Guard explicitly.
     //
     // Unreachable in practice: memory init/finalize events are deferred out of every CPU chunk
     // into their own record, so any real program emulates to >= 2 chunks. Kept because the failure
@@ -3870,61 +5272,19 @@ fn run_pipeline(
     // workers drains riscv, convert and combine alike.
     let prove_wall = t_prove.elapsed();
 
-    // Cross-chunk memory consistency: each machine accumulates only its own chunks' terms, and
-    // only the sum over ALL of them closes to zero — across cards, and under two-machine across
-    // processes too. So the secondary ships its partial and the primary closes the sum.
-    //
-    // Summing partial sums is sound rather than merely convenient: `SepticDigest`'s `Sum` folds
-    // each element as `(x - Z)` and adds a single `Z` back at the end, so
-    // `sum([sum(a), sum(b)]) == sum(a ++ b)`. It is NOT plain addition — there is no `Add` impl —
-    // which is why this collects into one iterator and sums once instead of accumulating pairwise.
-    if !stopped(&guest_failure) {
-        let local = RiscvMachine::drain_cross_chunk_gcs_over(provers.iter().map(|p| p.as_ref()));
-        if is_mle_secondary() {
-            let bytes =
-                bincode::serialize(&local).expect("serialising a septic digest cannot fail");
-            info!(
-                "secondary reporting its partial GCS digest ({} bytes)",
-                bytes.len()
-            );
-            mle_report_gcs_digest(&get_worker_label(), bytes);
-        } else {
-            // Wait for the other machine(s) before reducing. The primary reaches this point as soon
-            // as its own half is done, which is typically BEFORE the secondary has finished proving
-            // and sent its partial — closing the sum then reduces over half the run and reports a
-            // memory inconsistency that is not one.
-            let expected = expected_remote_digests();
-            if !crate::common::gcs_digest::wait_for_remote_digests(
-                expected,
-                Duration::from_secs(600),
-            ) {
-                panic!(
-                    "timed out waiting for {expected} remote GCS digest(s); got {}. The sum cannot \
-                     be closed without them, and closing it anyway would report a memory \
-                     inconsistency that is really a missing report.",
-                    crate::common::gcs_digest::remote_digest_count()
-                );
-            }
-            let remote = take_remote_digests();
-            let n_remote = remote.len();
-            let mut parts = Vec::with_capacity(n_remote + 1);
-            parts.push(local);
-            for r in remote {
-                parts.push(bincode::deserialize(&r.digest).unwrap_or_else(|e| {
-                    panic!(
-                        "partial GCS digest from {} did not deserialise: {e}",
-                        r.worker_id
-                    )
-                }));
-            }
-            let total: SepticDigest<KoalaBear> = parts.into_iter().sum();
-            assert!(
-                total.is_zero(),
-                "cross-chunk global cumulative sum is not zero (memory inconsistency); \
-                 reduced this machine plus {n_remote} remote partial(s)"
-            );
-            info!("cross-chunk global cumulative sum == 0 ✓ ({n_remote} remote partial(s))");
-        }
+    // The prefix stage took the chunks' Global tables for the second phase. Without a tree (no
+    // combine step) nothing proves it, and the tables are dropped here.
+    #[cfg(feature = "cuda")]
+    if let Some(stage) = tree_prefix {
+        join(stage, "global LogUp prefix stage");
+    }
+    #[cfg(feature = "cuda")]
+    if let Some(peer) = peer_chunks {
+        peer_chunks_done.store(true, Ordering::SeqCst);
+        join(peer, "global LogUp chain peer thread");
+    }
+    for prover in &provers {
+        prover.discard_chunk_tables();
     }
 
     // The pre-build pool is speculative and unjoined by the channel alone — its `tx` lives in the
@@ -3990,18 +5350,17 @@ fn run_pipeline(
         // total. Asserting equality locally failed on BOTH sides of a run whose tree was in fact
         // complete. The whole-run count is checked where it can be: the scheduler only reports the
         // run complete once its proof tree is (`is_proof_tree_complete`).
+        // The chunks' tree has `chunk_count - 1` nodes, and the root joins it with the prefix.
         if mle_two_machine_requested() {
             assert!(
-                nodes < chunk_count,
-                "combine nodes proved ({nodes}) exceeds the {} a {chunk_count}-chunk tree has",
-                chunk_count - 1
+                nodes <= chunk_count,
+                "combine nodes proved ({nodes}) exceeds the {chunk_count} a {chunk_count}-chunk \
+                 tree has with its root"
             );
         } else {
             assert_eq!(
-                nodes,
-                chunk_count - 1,
-                "combine nodes proved ({nodes}) != chunks - 1 ({})",
-                chunk_count - 1
+                nodes, chunk_count,
+                "combine nodes proved ({nodes}) != chunks - 1 for the chunks' tree, plus the root"
             );
         }
     }
@@ -4016,7 +5375,9 @@ fn run_pipeline(
             let _ = keygen.join();
         }
         store.clear();
-        let _ = RiscvMachine::drain_cross_chunk_gcs_over(provers.iter().map(|p| p.as_ref()));
+        for prover in &provers {
+            prover.discard_chunk_tables();
+        }
         let stage_failure = watch::failure_message().filter(|_| embedded_run);
         match (&guest_failure, &stage_failure) {
             (Some(failure), _) => info!("MLE run drained after the guest failed: {failure}"),
@@ -4075,6 +5436,20 @@ fn run_pipeline(
             .expect("root slot mutex poisoned")
             .take()
             .expect("scheduler reported complete but no final combine node was recorded");
+        // Each convert leaf wrote its chunk's share and the tree added them up, so the root
+        // carries the count the chunks were counted at, the other machine's among them.
+        if let Some(global_row_count) = &global_row_count {
+            let counted = global_row_count.counted.load(Ordering::SeqCst);
+            assert_eq!(
+                pico_vm::mle::machine::global_logup_nodes::global_row_count_of(&root.proof),
+                Some(counted),
+                "the root's real-row count is not the one the block's chunks were counted at"
+            );
+            info!(
+                "MLE global LogUp: the block's real-row count is {counted}; a block may reach {}",
+                global_row_count.limit
+            );
+        }
         let nodes = combine_count.load(Ordering::SeqCst);
         let combine_total = Duration::from_nanos(combine_nanos.load(Ordering::SeqCst));
 
@@ -4155,17 +5530,19 @@ fn run_pipeline(
         // is the expected case, not a miscount. The root is the whole tree's root regardless —
         // that is what its acceptance checks, here or, when it is left to the compress proof, in
         // the compress circuit.
+        // The chunks' tree has `chunk_count - 1` nodes, and the root joins it with the prefix.
         if mle_two_machine_requested() {
             assert!(
-                nodes < chunk_count,
-                "combine nodes proved ({nodes}) exceeds the {} a {chunk_count}-leaf tree has",
-                chunk_count - 1
+                nodes <= chunk_count,
+                "combine nodes proved ({nodes}) exceeds the {chunk_count} a {chunk_count}-leaf \
+                 tree has with its root"
             );
         } else {
             assert_eq!(
                 nodes,
-                chunk_count - 1,
-                "a binary tree over {chunk_count} leaves has {} internal nodes, but {nodes} were proved",
+                chunk_count,
+                "the chunks' tree over {chunk_count} leaves has {} nodes and the root joins it \
+                 with the prefix, but {nodes} were proved",
                 chunk_count - 1
             );
         }
@@ -4175,7 +5552,8 @@ fn run_pipeline(
             "root proved (acceptance left to the compress proof; set MLE_VERIFY=1 to run it here)"
         };
         info!(
-            "MLE combine complete: {nodes} node(s) (n-1 expected for {chunk_count} chunks), \
+            "MLE combine complete: {nodes} node(s) (n expected for {chunk_count} chunks: n-1 and \
+             the root's join with the prefix), \
              {root_note} | sum(combine)={:.3}s | verify={:.3}s",
             combine_total.as_secs_f64(),
             t_verify.elapsed().as_secs_f64(),
@@ -4257,8 +5635,10 @@ fn run_pipeline(
             "[bench] MLE combine shapes: block keygens={blk_keygens} hits={blk_hits} evictions={blk_evictions}"
         );
         assert_eq!(
-            shape_nodes, nodes,
-            "every node either keygens a shape or hits a cached one"
+            shape_nodes,
+            nodes + prefix_reduction_nodes.load(Ordering::SeqCst),
+            "every node, the tree's and the prefix stage's own, either keygens a shape or hits \
+             a cached one"
         );
         // The whole block, not just `verify`: when the root is accepted here, the root shape's CPU
         // keygen inside `register_shape`, the slot take and the two summary lines are on the same
@@ -4299,7 +5679,7 @@ fn run_pipeline(
                 info!("standalone apex verify (compress) ✓");
                 // Exported only here: in whitelist mode, and once both acceptances above have
                 // passed. Without a whitelist nothing outside this process could verify it.
-                match pico_vm::mle::machine::recursion::proof_wire_bytes(&proved.proof.0) {
+                match compress_wire_bytes(&proved.proof) {
                     Ok(bytes) => {
                         compress_export = Some(CompressProofExport {
                             proof: bytes,
@@ -4312,7 +5692,7 @@ fn run_pipeline(
                     // As for the root: a proof that verified must not take the process down
                     // because its export failed; the caller sees `compress: None`.
                     Err(e) => {
-                        tracing::warn!("MLE compress: wire encode failed, not exported: {e:?}")
+                        tracing::warn!("MLE compress: wire encode failed, not exported: {e}")
                     }
                 }
             }
@@ -4342,7 +5722,22 @@ fn run_pipeline(
     } else {
         "proved (per-chunk verify skipped; set MLE_VERIFY=1 to enable)"
     };
-    info!("MLE single-node: all {n} chunk(s) {verified_note}; cross-chunk GCS == 0 ✓");
+    // With a tree the root asserts that the global LogUp's sum is zero, and the root (or the
+    // compress proof over it) was accepted above; without one nothing of this run checks the
+    // chunks against each other, and a two-machine secondary's tree has its root on the
+    // primary. The bench scripts count this line's last clause (`bench-arm.sh`, `sweep-csv.py`).
+    let cross_chunk = if !with_combine || is_mle_secondary() {
+        ""
+    } else if verify || !with_compress || vk_on {
+        "; cross-chunk global LogUp sum == 0 ✓"
+    } else {
+        // Dev mode with a compress stage and `MLE_VERIFY` off: the root was not held to an
+        // honestly keygen'd key (`accept_root`), so the statement rests on the root program
+        // this run built, as verified by the compress proof.
+        "; cross-chunk global LogUp sum == 0 ✓ (asserted by the root this run built, under the \
+         compress proof; MLE_VERIFY=1 holds the root to its key)"
+    };
+    info!("MLE single-node: all {n} chunk(s) {verified_note}{cross_chunk}");
     info!(
         // `e2e` excludes setup and root acceptance; `total` is the whole process. Keep each variable
         // named for the field it prints — the pair these replaced denoted each other's meaning.
@@ -4528,12 +5923,16 @@ fn report_spans(window: Duration, combine_keygen_ms: Option<u128>, iteration: Op
         );
     }
 
-    // Two independent measurements of the combine keygen total: the spans recorded on the combine
-    // preparers, and what the combine machines report for themselves. They should agree; a mismatch
-    // means a missed close or a keygen call site nobody bracketed, and it has no other symptom.
+    // Two independent measurements of the combine keygen total: the keygen spans on the lanes
+    // that ask a combine machine for a key, and what the combine machines report for themselves.
+    // They should agree; a mismatch means a missed close or a keygen call site nobody bracketed,
+    // and it has no other symptom. The lanes are the combine preparers, and the riscv prover
+    // lanes where they reduce the global LogUp's nodes: the only keygen those lanes record as a
+    // keygen span (a node machine's own keys are made there too, inside the node's piece).
     if let Some(reported_ms) = combine_keygen_ms {
-        let from_spans_ms =
-            rep::keygen_us_on(&recorded, spans::Role::CombinePreparer) as f64 / 1000.0;
+        let from_spans_ms = (rep::keygen_us_on(&recorded, spans::Role::CombinePreparer)
+            + rep::keygen_us_on(&recorded, spans::Role::Prove)) as f64
+            / 1000.0;
         // The two clocks start one statement apart, so exact equality is not the claim. 5 % or 10 ms,
         // whichever is larger, is far below any real discrepancy and far above the framing cost.
         let tol = (reported_ms as f64 * 0.05).max(10.0);

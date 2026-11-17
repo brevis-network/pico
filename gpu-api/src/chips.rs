@@ -17,18 +17,6 @@ unsafe extern "C" {
         stream: cudaStream_t,
     ) -> Error;
 
-    pub fn cuda_riscv_poseidon2_generate_main(
-        num_cols: usize,
-        event_size: usize,
-        trace_size: usize,
-        d_events: *const c_void,
-        d_trace: *mut c_void,
-        d_dummy_row: *const c_void,
-        d_round_constants: *const c_void,
-        stream: cudaStream_t,
-        steps: *mut StepEvents,
-    ) -> Error;
-
     pub fn cuda_riscv_program_generate_preprocessed_u64(
         d_instrs: *const c_void,
         num_instrs: usize,
@@ -560,6 +548,8 @@ unsafe extern "C" {
         stream: cudaStream_t,
     ) -> Error;
 
+    /// The Global chip's rows from the chunk's cross-chunk events: `event_size` rows at the top
+    /// of `d_trace` (`trace_size` field elements, row-major, `num_cols` wide), the rest zero.
     pub fn cuda_riscv_global_generate_extra_record_and_main(
         num_cols: usize,
         event_size: usize,
@@ -568,10 +558,6 @@ unsafe extern "C" {
         d_trace: *mut c_void,
         stream: cudaStream_t,
         d_byte_trace: *mut c_void,
-        d_poseidon2_events: *mut c_void,
-        poseidon2_events_start_index: usize,
-        d_round_constants: *const c_void,
-        steps: *mut StepEvents,
     ) -> Error;
 
     pub fn cuda_memory_initialize_finalize_generate_extra_record_and_main_u64(

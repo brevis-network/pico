@@ -100,6 +100,15 @@ impl SoundnessCalculator {
         ]
     }
 
+    /// [`Self::global_logup_bits`] with the field constants of `SC`.
+    pub fn global_logup_bits_for<SC: StarkProtocolConfig>(params: &SystemParams) -> f64 {
+        Self::global_logup_bits(
+            params,
+            base_field_order::<SC>(),
+            challenge_field_bits::<SC>(),
+        )
+    }
+
     /// Provable bits of the verifier defined by `vk`, at the shape bounds [`VkShape::from_vk`]
     /// reads off the key.
     pub fn calculate_from_vk<SC: StarkProtocolConfig>(vk: &MultiStarkVerifyingKey<SC>) -> Self {
@@ -349,8 +358,8 @@ mod tests {
         // (max_constraints_per_air, num_airs, num_trace_columns): assumed bounds and measured shapes
         // (riscv and the recursion machines on KoalaBear^5).
         let shapes = [
-            (5000, 100, 40_000),
-            (2989, 50, 32_057),
+            (5000, 100, 50_000),
+            (4292, 53, 45_193),
             (1000, 50, 2000),
             (170, 21, 1409),
         ];

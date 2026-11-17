@@ -35,6 +35,7 @@ use hashbrown::HashMap;
 use hint::{HintLenSyscall, HintReadSyscall};
 use p3_field::PrimeField32;
 use precompiles::{
+    bls12381_g2::{Bls12381G2AddSyscall, Bls12381G2DoubleSyscall},
     edwards::{add::EdwardsAddAssignSyscall, decompress::EdwardsDecompressSyscall},
     fptower::{fp::FpSyscall, fp2_addsub::Fp2AddSubSyscall, fp2_mul::Fp2MulSyscall},
     keccak256::permute::Keccak256PermuteSyscall,
@@ -241,6 +242,12 @@ where
     syscall_map.insert(
         SyscallCode::BLS12381_DOUBLE,
         Arc::new(WeierstrassDoubleAssignSyscall::<Bls12381>::new()),
+    );
+
+    syscall_map.insert(SyscallCode::BLS12381_G2_ADD, Arc::new(Bls12381G2AddSyscall));
+    syscall_map.insert(
+        SyscallCode::BLS12381_G2_DOUBLE,
+        Arc::new(Bls12381G2DoubleSyscall),
     );
 
     syscall_map.insert(

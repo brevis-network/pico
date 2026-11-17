@@ -9,8 +9,8 @@ use crate::{
     cuda_adaptor::get_global_stream_pool,
     emulator::{record::RecordBehavior, riscv::record::EmulationRecord},
     instances::preparer::{
-        gpu_allocate_and_copy_global_events, gpu_allocate_and_copy_poseidon2_events,
-        gpu_allocate_byte_trace, gpu_finalize_byte_trace, PreallocatedGpuMemory, PreparedGpuEvents,
+        gpu_allocate_and_copy_global_events, gpu_allocate_byte_trace, gpu_finalize_byte_trace,
+        PreallocatedGpuMemory, PreparedGpuEvents,
     },
     machine::chip::{ChipBehavior, GpuChipBehavior, MetaChip},
     mle::spans::device,
@@ -60,7 +60,9 @@ where
         record: &C::Record,
         prepared_gpu_events: &PreparedGpuEvents,
     ) -> Vec<(String, TraceData<'a, SC::Val>)> {
-        // Processing order: Batch 1, Divrem, Add, Sub, Addw, Subw, Lt, Mul, Batch 2, Global, Poseidon2, Batch 3, Precompiles, Ecall, Host-tracegen precompiles, MemoryUnaligned, Byte.
+        // Processing order: Batch 1, Divrem, Add, Sub, Addw, Subw, Lt, Mul, Batch 2, Global, Batch 3,
+        // Precompiles, Ecall, Host-tracegen precompiles, MemoryUnaligned, KeccakTables, the G2
+        // precompiles, Byte.
         // The RISC-V chips read the chunk's execution history, whose upload is enqueued before
         // Batch 1 and not waited for: each chip that reads it makes its own streams wait on the
         // copies it reads (`HistoryReader`), so the CPU chip's slice kernels start as their slices
@@ -84,39 +86,38 @@ where
         // Global event memory is allocated before running Batch 2.
         const BATCH_2_CHIP_INDICES: RangeInclusive<usize> = 10..=14;
 
-        // Global event and Poseidon2 event memories are allocated before running Global chip.
+        // Global event memory is allocated before Batch 2, whose chips write it.
         const GLOBAL_CHIP_INDEX: usize = 15;
         // Global event memory is released after running Global chip.
 
-        const POSEIDON2_CHIP_INDEX: usize = 16;
-        // Poseidon2 event memory is released after running Poseidon2 chip.
-
         // Batch 3: ShiftRight, ShiftLeft, and Bitwise chips.
-        const BATCH_3_CHIP_INDICES: RangeInclusive<usize> = 17..=19;
+        const BATCH_3_CHIP_INDICES: RangeInclusive<usize> = 16..=18;
 
         // All the Precompile chips.
         // Positional in `gpu_generate_extra_record_and_main_chips`: 25 precompile chips incl. the
         // ShaCompress/ShaExtend/Keccak control siblings.
-        const PRECOMPILE_CHIP_INDICES: RangeInclusive<usize> = 20..=44;
+        const PRECOMPILE_CHIP_INDICES: RangeInclusive<usize> = 19..=43;
 
-        const BYTE_CHIP_INDEX: usize = 45;
+        const BYTE_CHIP_INDEX: usize = 44;
 
-        // Ecall chip: appended after Byte in the gpu chip list so the indices above
-        // stay valid. A device kernel over the history's ecall list, so it needs no device event
-        // buffers.
-        const ECALL_CHIP_INDEX: usize = 46;
+        // Ecall chip: after Byte in the gpu chip list. A device kernel over the history's ecall
+        // list, so it needs no device event buffers.
+        const ECALL_CHIP_INDEX: usize = 45;
 
-        // Poseidon2 precompile, Ed25519 add and Ed25519 decompress: host tracegen, appended after
-        // Ecall for the same reason. Each adds its own byte lookups to the device byte table, so
-        // they have to run before it is finalized.
-        const HOST_TRACEGEN_PRECOMPILE_INDICES: RangeInclusive<usize> = 47..=49;
+        // Poseidon2 precompile, Ed25519 add and Ed25519 decompress: host tracegen, after Ecall.
+        // Each adds its own byte lookups to the device byte table, so they have to run before it
+        // is finalized.
+        const HOST_TRACEGEN_PRECOMPILE_INDICES: RangeInclusive<usize> = 46..=48;
 
-        // MemoryUnaligned: host tracegen, appended after them; its byte lookups go to the
+        // MemoryUnaligned: host tracegen, after them; its byte lookups go to the
         // device table the same way, so it runs before the table is finalized too.
-        const MEMORY_UNALIGNED_CHIP_INDEX: usize = 50;
+        const MEMORY_UNALIGNED_CHIP_INDEX: usize = 49;
 
-        // The sliced Keccak tables, appended last: a device kernel, no byte lookups.
-        const KECCAK_TABLES_CHIP_INDEX: usize = 51;
+        // The sliced Keccak tables: a device kernel, no byte lookups.
+        const KECCAK_TABLES_CHIP_INDEX: usize = 50;
+
+        // The BLS12-381 G2 add and double precompiles: host tracegen, appended last.
+        const G2_CHIP_INDICES: RangeInclusive<usize> = 51..=52;
 
         let durations = DashMap::new();
         let mut chip_names_traces = Vec::new();
@@ -261,24 +262,10 @@ where
             snap_after!(chip_index);
         }
 
-        preallocated_gpu_memory.d_poseidon2_events = gpu_allocate_and_copy_poseidon2_events(
-            stream,
-            device_id,
-            &record.poseidon2_events,
-            prepared_gpu_events,
-        )
-        .unwrap();
-        device::wait(stream).unwrap();
-
         // Global chip
         run_chip(GLOBAL_CHIP_INDEX, &mut preallocated_gpu_memory);
         snap_after!(GLOBAL_CHIP_INDEX);
         preallocated_gpu_memory.d_global_events = None;
-
-        // Poseidon2 chip
-        run_chip(POSEIDON2_CHIP_INDEX, &mut preallocated_gpu_memory);
-        snap_after!(POSEIDON2_CHIP_INDEX);
-        preallocated_gpu_memory.d_poseidon2_events = None;
 
         // Batch 3
         for chip_index in BATCH_3_CHIP_INDICES {
@@ -302,6 +289,7 @@ where
         // at a time and each one synchronizes its streams before returning -- keep it that way.
         for chip_index in HOST_TRACEGEN_PRECOMPILE_INDICES
             .chain([MEMORY_UNALIGNED_CHIP_INDEX, KECCAK_TABLES_CHIP_INDEX])
+            .chain(G2_CHIP_INDICES)
         {
             run_chip(chip_index, &mut preallocated_gpu_memory);
             snap_after!(chip_index);

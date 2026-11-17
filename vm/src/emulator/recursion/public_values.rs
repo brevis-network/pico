@@ -1,7 +1,6 @@
 use crate::{
     chips::utils::indices_arr,
     compiler::word::Word,
-    machine::septic::SepticDigest,
     primitives::consts::{
         DIGEST_SIZE, MAX_NUM_PVS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS, WORD_SIZE,
     },
@@ -21,6 +20,10 @@ use std::{
 
 pub const RECURSIVE_PROOF_NUM_PV_ELTS: usize = size_of::<RecursionPublicValues<u8>>();
 
+/// Base-field elements of [`RecursionPublicValues::global_sum`]: the numerator's coefficients, then
+/// the denominator's.
+pub const GLOBAL_SUM_LEN: usize = 10;
+
 const fn make_col_map() -> RecursionPublicValues<usize> {
     let indices_arr = indices_arr::<RECURSION_NUM_PVS>();
     unsafe { transmute::<[usize; RECURSION_NUM_PVS], RecursionPublicValues<usize>>(indices_arr) }
@@ -31,8 +34,7 @@ pub const RECURSION_PUBLIC_VALUES_COL_MAP: RecursionPublicValues<usize> = make_c
 // All the fields before `digest` are hashed to produce the digest.
 pub const NUM_PV_ELMS_TO_HASH: usize = RECURSION_PUBLIC_VALUES_COL_MAP.digest[0];
 
-// `pico_verifier` hard-codes the offsets it reads, since this struct holds a nightly-only septic
-// type; any layout drift must fail the build here.
+// `pico_verifier` hard-codes the offsets it reads; any layout drift must fail the build here.
 const_assert_eq!(
     pico_verifier::public_values::RECURSION_NUM_PVS,
     RECURSION_NUM_PVS
@@ -63,6 +65,17 @@ const _: () = {
         );
         i += 1;
     }
+};
+
+// The global LogUp's fields are among the hashed ones. A proof's own constraints tie only the
+// digest to what its circuit computed; the parent recomputes the digest over the fields the
+// child published, so a child cannot publish a chain value, a sum or a count of its choosing.
+const _: () = {
+    let col = RECURSION_PUBLIC_VALUES_COL_MAP;
+    assert!(col.global_chain_start[DIGEST_SIZE - 1] < NUM_PV_ELMS_TO_HASH);
+    assert!(col.global_chain_end[DIGEST_SIZE - 1] < NUM_PV_ELMS_TO_HASH);
+    assert!(col.global_sum[GLOBAL_SUM_LEN - 1] < NUM_PV_ELMS_TO_HASH);
+    assert!(col.global_row_count < NUM_PV_ELMS_TO_HASH);
 };
 
 // Recursive proof has more public values than core proof, so the max number constant defined in
@@ -125,9 +138,22 @@ pub struct RecursionPublicValues<T> {
     /// The root of the vk merkle tree.
     pub vk_root: [T; DIGEST_SIZE],
 
-    /// Current cumulative sum of lookup bus. Note that for recursive proofs for core proofs, this
-    /// contains the global cumulative sum.
-    pub global_cumulative_sum: SepticDigest<T>,
+    /// The global LogUp's chain over the chunks' Global table commitments, as the subtree's
+    /// left neighbour must end it. A chunk's leaf carries the chain value before the chunk; a
+    /// group or image node carries a wrapped value, which binds the challenges it used.
+    pub global_chain_start: [T; DIGEST_SIZE],
+
+    /// The same chain as the subtree's right neighbour must start it.
+    pub global_chain_end: [T; DIGEST_SIZE],
+
+    /// The global LogUp's fractional sum `(p, q)` over the group proofs in the subtree: two
+    /// extension elements, [`GLOBAL_SUM_LEN`]` / 2` base-field coefficients each. `(0, 1)` for a
+    /// subtree without a group proof.
+    pub global_sum: [T; GLOBAL_SUM_LEN],
+
+    /// An upper bound on the cross-chunk events of the chunks in the subtree, in units of
+    /// `2^10` rows.
+    pub global_row_count: T,
 
     /// Whether the proof completely proves the program execution.
     pub flag_complete: T,
@@ -149,10 +175,9 @@ where
     StandardUniform: Distribution<T>
         + Distribution<[Word<T>; PV_DIGEST_NUM_WORDS]>
         + Distribution<[T; DIGEST_SIZE]>
-        + Distribution<[T; 7]>,
+        + Distribution<[T; GLOBAL_SUM_LEN]>,
 {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> RecursionPublicValues<T> {
-        use crate::machine::septic::{SepticCurve, SepticExtension};
         RecursionPublicValues {
             committed_value_digest: rng.random(),
             deferred_proofs_digest: rng.random(),
@@ -170,10 +195,10 @@ where
             last_finalize_addr_limbs: rng.random(),
             riscv_vk_digest: rng.random(),
             vk_root: rng.random(),
-            global_cumulative_sum: SepticDigest(SepticCurve {
-                x: SepticExtension(rng.random()),
-                y: SepticExtension(rng.random()),
-            }),
+            global_chain_start: rng.random(),
+            global_chain_end: rng.random(),
+            global_sum: rng.random(),
+            global_row_count: rng.random(),
             flag_complete: rng.random(),
             contains_execution_chunk: rng.random(),
             digest: rng.random(),

@@ -46,6 +46,86 @@ use crate::{
     AirDataGpu, GpuDevice, GpuProverConfig, ProverError,
 };
 
+impl GpuDevice {
+    /// [`DeviceDataTransporter::transport_pk_to_device`], with each AIR's constraint data served
+    /// from the process-wide cache (`air_data_gpu_cached`). For keys rebuilt per program whose
+    /// AIRs' constraints are not program-dependent (the riscv machine).
+    pub fn transport_pk_to_device_cached<HS: GpuHashScheme>(
+        &self,
+        mpk: &MultiStarkProvingKey<HS::SC>,
+    ) -> DeviceMultiStarkProvingKey<GenericGpuBackend<HS>> {
+        transport_pk(self, mpk, true)
+    }
+}
+
+fn transport_pk<HS: GpuHashScheme>(
+    device: &GpuDevice,
+    mpk: &MultiStarkProvingKey<HS::SC>,
+    cached: bool,
+) -> DeviceMultiStarkProvingKey<GenericGpuBackend<HS>> {
+    let _span = info_span!("transport_pk_to_device", cached).entered();
+    // GPU transport of a merged preprocessed commitment isn't implemented yet.
+    // Dropping it silently would be unsound, not benign: the prover derives `merged_prep`
+    // from the device key it's handed, while the verifier derives it from the verifying key —
+    // passing `None` would build a proving key that skips the commit against a vk that still
+    // expects it, a transcript divergence with no error at transport time.
+    //
+    // Tested on the commitment, which is merged mode's single source of truth — NOT on
+    // `merged_preprocessed_data`: a key whose commit was deferred to an external committer
+    // (`keygen_merged_preprocessed_deferred_commit`) carries the value with no host PCS data at all,
+    // so testing the data would wave exactly those keys through this guard.
+    assert!(
+        mpk.merged_preprocessed_commit.is_none(),
+        "GPU transport of merged preprocessed traces not implemented"
+    );
+    let per_air = mpk
+        .per_air
+        .iter()
+        .map(|pk| {
+            let preprocessed_data = pk.preprocessed_data.as_ref().map(|d| {
+                transport_and_unstack_single_data_h2d::<HS>(d.as_ref(), &device.prover_config)
+                    .unwrap()
+            });
+            let other_data = if cached {
+                crate::pkey::air_data_gpu_cached(pk, device.id, mpk.params.l_skip as u32)
+                    .unwrap()
+            } else {
+                Arc::new(AirDataGpu::<HS::BaseField>::new(pk).unwrap())
+            };
+            let num_monomials = other_data
+                .zerocheck_monomials
+                .as_ref()
+                .map(|m| m.num_monomials)
+                .unwrap_or(0);
+            // The zerocheck kernels' cost scales with `num_monomials` or `rules_len` depending
+            // on which path a trace takes, and neither is reachable from the VK — so both are
+            // logged here, where they are built.
+            let rules_len = other_data.zerocheck_mle.inner.d_rules.len();
+            debug!(air = %pk.air_name, num_monomials, rules_len, cols = pk.vk.params.width.common_main, deg = pk.vk.max_constraint_degree, "monomial expansion");
+
+            DeviceStarkProvingKey {
+                air_name: pk.air_name.clone(),
+                vk: pk.vk.clone(),
+                preprocessed_data,
+                other_data,
+                symbolic_constraints_cache: std::sync::OnceLock::new(),
+            }
+        })
+        .collect();
+    // Wait for the uploads to land: other threads or streams may read this proving key.
+    current_stream_sync().unwrap();
+
+    DeviceMultiStarkProvingKey::new(
+        per_air,
+        mpk.trace_height_constraints.clone(),
+        mpk.max_constraint_degree,
+        mpk.params.clone(),
+        mpk.vk_pre_hash,
+        // Not yet transported — see the assert above.
+        None,
+    )
+}
+
 impl<HS> DeviceDataTransporter<HS::SC, GenericGpuBackend<HS>> for GpuDevice
 where
     HS: GpuHashScheme,
@@ -54,63 +134,7 @@ where
         &self,
         mpk: &MultiStarkProvingKey<HS::SC>,
     ) -> DeviceMultiStarkProvingKey<GenericGpuBackend<HS>> {
-        let _span = info_span!("transport_pk_to_device").entered();
-        // GPU transport of a merged preprocessed commitment isn't implemented yet.
-        // Dropping it silently would be unsound, not benign: the prover derives `merged_prep`
-        // from the device key it's handed, while the verifier derives it from the verifying key —
-        // passing `None` would build a proving key that skips the commit against a vk that still
-        // expects it, a transcript divergence with no error at transport time.
-        //
-        // Tested on the commitment, which is merged mode's single source of truth — NOT on
-        // `merged_preprocessed_data`: a key whose commit was deferred to an external committer
-        // (`keygen_merged_preprocessed_deferred_commit`) carries the value with no host PCS data at all,
-        // so testing the data would wave exactly those keys through this guard.
-        assert!(
-            mpk.merged_preprocessed_commit.is_none(),
-            "GPU transport of merged preprocessed traces not implemented"
-        );
-        let per_air = mpk
-            .per_air
-            .iter()
-            .map(|pk| {
-                let preprocessed_data = pk.preprocessed_data.as_ref().map(|d| {
-                    transport_and_unstack_single_data_h2d::<HS>(d.as_ref(), &self.prover_config)
-                        .unwrap()
-                });
-                // Uncached: this is the per-AIR (RISC-V) path, whose key is built once per process.
-                let other_data = Arc::new(AirDataGpu::<HS::BaseField>::new(pk).unwrap());
-                let num_monomials = other_data
-                    .zerocheck_monomials
-                    .as_ref()
-                    .map(|m| m.num_monomials)
-                    .unwrap_or(0);
-                // The zerocheck kernels' cost scales with `num_monomials` or `rules_len` depending
-                // on which path a trace takes, and neither is reachable from the VK — so both are
-                // logged here, where they are built.
-                let rules_len = other_data.zerocheck_mle.inner.d_rules.len();
-                debug!(air = %pk.air_name, num_monomials, rules_len, cols = pk.vk.params.width.common_main, deg = pk.vk.max_constraint_degree, "monomial expansion");
-
-                DeviceStarkProvingKey {
-                    air_name: pk.air_name.clone(),
-                    vk: pk.vk.clone(),
-                    preprocessed_data,
-                    other_data,
-                    symbolic_constraints_cache: std::sync::OnceLock::new(),
-                }
-            })
-            .collect();
-        // Wait for the uploads to land: other threads or streams may read this proving key.
-        current_stream_sync().unwrap();
-
-        DeviceMultiStarkProvingKey::new(
-            per_air,
-            mpk.trace_height_constraints.clone(),
-            mpk.max_constraint_degree,
-            mpk.params.clone(),
-            mpk.vk_pre_hash,
-            // Not yet transported — see the assert above.
-            None,
-        )
+        transport_pk(self, mpk, false)
     }
 
     fn transport_matrix_to_device(
@@ -547,9 +571,11 @@ where
     PB: mle_core::prover::ProverBackend<
         Matrix = mle_core::p3_matrix::dense::RowMajorMatrix<HS::BaseField>,
         Val = HS::BaseField,
+        Challenge = HS::ExtField,
     >,
 {
     use mle_core::prover::AirProvingContext as APC;
+    let external_logup_challenges = cpu_ctx.external_logup_challenges;
     let per_trace = cpu_ctx
         .per_trace
         .into_iter()
@@ -574,7 +600,76 @@ where
         })
         .collect::<Result<Vec<_>, MemCopyError>>()?;
     current_stream_sync()?;
-    Ok(ProvingContext { per_trace })
+    Ok(ProvingContext {
+        per_trace,
+        external_logup_challenges,
+    })
+}
+
+/// [`transport_row_major_ctx_to_device`] for a context whose AIRs may carry cached mains, and
+/// which may be in the external LogUp challenge mode.
+///
+/// The host commitment data of a cached main is not carried over. Its trace is uploaded and
+/// committed again on `device`, and the commitment has to be the one the host made: the proof
+/// publishes it, and whoever made the host context may already have handed it on.
+pub fn transport_row_major_ctx_with_cached_to_device<HS, PB>(
+    device: &GpuDevice,
+    cpu_ctx: ProvingContext<PB>,
+) -> Result<ProvingContext<GenericGpuBackend<HS>>, ProverError>
+where
+    HS: GpuHashScheme,
+    HS::MerkleHash: crate::merkle_tree::MerkleTreeConstructor,
+    PB: mle_core::prover::ProverBackend<
+        Matrix = mle_core::p3_matrix::dense::RowMajorMatrix<HS::BaseField>,
+        Val = HS::BaseField,
+        Commitment = HS::Digest,
+        Challenge = HS::ExtField,
+    >,
+{
+    use mle_core::prover::{AirProvingContext as APC, TraceCommitter};
+    let external_logup_challenges = cpu_ctx.external_logup_challenges;
+    let per_trace = cpu_ctx
+        .per_trace
+        .into_iter()
+        .map(|(air_id, air_ctx)| {
+            let cached_mains = air_ctx
+                .cached_mains
+                .iter()
+                .map(|host| {
+                    let trace = transport_matrix_h2d_row_major(&host.trace)?;
+                    let (commitment, data) =
+                        <GpuDevice as TraceCommitter<GenericGpuBackend<HS>>>::commit(
+                            device,
+                            &[&trace],
+                        )?;
+                    assert!(
+                        commitment == host.commitment,
+                        "air {air_id}: the device commits a cached main to another root than                          the host did"
+                    );
+                    Ok(CommittedTraceData {
+                        commitment,
+                        trace,
+                        data: Arc::new(data),
+                    })
+                })
+                .collect::<Result<Vec<_>, ProverError>>()?;
+            let common_main = transport_matrix_h2d_row_major(&air_ctx.common_main)?;
+            Ok((
+                air_id,
+                APC {
+                    cached_mains,
+                    common_main,
+                    public_values: air_ctx.public_values,
+                    real_rows: air_ctx.real_rows,
+                },
+            ))
+        })
+        .collect::<Result<Vec<_>, ProverError>>()?;
+    current_stream_sync().map_err(ProverError::CurrentStreamSync)?;
+    Ok(ProvingContext {
+        per_trace,
+        external_logup_challenges,
+    })
 }
 
 pub fn transport_matrix_d2h_col_major<T>(

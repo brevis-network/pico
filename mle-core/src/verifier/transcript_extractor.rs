@@ -522,6 +522,7 @@ where
     if shapes.num_gkr_rounds == 0 {
         return Ok(GkrProof {
             logup_pow_witness,
+            p0_claim: None,
             q0_claim: SC::EF::ONE,
             claims_per_layer: Vec::new(),
             sumcheck_polys: Vec::new(),
@@ -548,6 +549,7 @@ where
 
     Ok(GkrProof {
         logup_pow_witness,
+        p0_claim: None,
         q0_claim,
         claims_per_layer,
         sumcheck_polys,

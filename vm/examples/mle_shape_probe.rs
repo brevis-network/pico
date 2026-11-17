@@ -94,6 +94,10 @@ fn main() {
         riscv::log_stacked_height_from_env(),
     ));
     let airs = riscv::mle_riscv_air_refs(compiler.compile(), true);
-    let (_, vk) = engine.keygen_with_app_prep(&airs, riscv::RISCV_APP_PREP_AIR_IDS);
+    let (_, vk) = engine.keygen_with_app_prep_and_required(
+        &airs,
+        riscv::RISCV_APP_PREP_AIR_IDS,
+        riscv::RISCV_REQUIRED_AIR_IDS,
+    );
     info!("riscv vk lean pre_hash = {:?}", vk.pre_hash);
 }

@@ -82,9 +82,10 @@
 //! | `RECURSION_EARLY_EXIT_TS` | recursion emulation | **yes, and it breaks proving**: it truncates the recursion run, and a value that does not parse aborts |
 //! | `MLE_WITNESS_HASH`, `MLE_TRANSCRIPT_PROF`, `MLE_WALKER_XCHECK` | recursion witness generation | **yes**, and deliberately |
 //! | `MLE_REC_PARALLEL_CHILDREN`, `MLE_REC_WAVEFRONT` | recursion node interpretation | **yes**, and deliberately |
-//! | `MLE_INJECT_FAILURE` | the GPU pipeline | **yes, and it breaks proving**: a negative-test hook; it fails one prove's stage, or refuses one of its chunks, once per process, or finalizes every run's emulation late |
+//! | `MLE_INJECT_FAILURE` | the GPU pipeline | **yes, and it breaks proving**: a negative-test hook; it fails one prove's stage, or refuses one of its chunks, once per process, or finalizes every run's emulation late, or lowers every run's limit on cross-chunk rows (`global-row-limit`) |
 //! | `N11_TAMPER_PACKED_LANE` | recursion witness generation | **yes, and it breaks proving**: a negative-test hook; `1` corrupts the padding lane of the packed opened-row blocks, so the first recursion proof fails in its prover |
-//! | `MEMORY_POOL_SIZE` | the snapshot pipeline's memory pool | **yes**: the pool holds this many emulator memories. With `ProverBuilder::aot`, or the `cuda` feature's interpreted AOT runtime, a replay worker holds one while it replays: unset, the pool is 16, raised where that is fewer to one per worker plus one per segment of the batch being cut, so every worker replays at once, and a smaller value caps the replay workers running at once. `0`, or fewer than the segments of one batch, is refused by `build` and `execute`, unless they emulate with `ProverBuilder::serial_emulation` |
+//! | `MEMORY_POOL_SIZE` | the snapshot pipeline's memory pool | **yes**: the pool holds this many emulator memories. With `ProverBuilder::aot`, or the `cuda` feature's interpreted AOT runtime, a replay worker holds one while it replays: unset, the pool is 16 (4 in a `cuda` build on a low-memory host, see `PICO_HOST_MEM`), raised where that is fewer to one per worker plus one per segment of the batch being cut, so every worker replays at once, and a smaller value caps the replay workers running at once. `0`, or fewer than the segments of one batch, is refused by `build` and `execute`, unless they emulate with `ProverBuilder::serial_emulation` |
+//! | `PICO_HOST_MEM` | the GPU prove's memory defaults | **yes**: `low` or `high` picks the host-memory tier instead of the detected one (below 500 GB of host or container memory is `low`: 2 replay workers, 4 history slots, 4 emulator memories, 8 waiting deferred records). A variable that sets one of those itself wins; any other value is refused by the GPU prove, up front |
 //! | `MEMORY_POOL_EAGER`, `MEMORY_POOL_LOW_WATER`, `MEMORY_RECYCLER_THREADS` | the snapshot pipeline's memory pool | **yes**: how the pool is filled and recycled. A setting that leaves the pool empty, or `MEMORY_RECYCLER_THREADS=0`, which never returns a memory to it, is refused by `build` and `execute`, unless they emulate with `ProverBuilder::serial_emulation` |
 //! | `MLE_SPLIT_REPLAY`, `MLE_SPLIT_CHUNKS`, `NUM_THREADS`, `PROVER_COUNT` | the AOT snapshot thread | **yes, with the `aot` or `cuda` feature**: whether the replay of the leading chunks is cut into segments, which the workers fold back into one record per chunk. `NUM_THREADS` and `PROVER_COUNT` cut only together, and neither sets the worker count. A cut into more segments than the pool holds is refused by `build` and `execute`, and one into more than the GPU prove's history slots hold by the prove, up front |
 //! | `MLE_RECORD_DIGEST` | the snapshot pipeline's workers and sequencer | as a diagnostic only: `1` logs a digest of every record the pipeline hands on, its public values as stamped |
@@ -224,6 +225,10 @@ pub const ENV_READ_BY_PROVER: &[(&str, &str)] = &[
     (
         "N11_TAMPER_PACKED_LANE",
         "corrupts the recursion witness and breaks proving: a negative-test hook",
+    ),
+    (
+        "PICO_HOST_MEM",
+        "picks the host-memory tier, low or high, which sets the GPU prove's memory defaults",
     ),
     (
         "MEMORY_POOL_SIZE",

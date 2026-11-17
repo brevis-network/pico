@@ -76,8 +76,10 @@ By hand, with the wrap files from `cargo pico prove --phase wrap` (or `test_mle_
   -pk ./data/pk -vk ./data/vk -ccs ./data/ccs -manifest ./data/manifest.json \
   -proof ./data/proof.data
 
-# verify a proof file against the verifying key, as the contract does
-./pico-gnark -cmd verify -vk ./data/vk -proof ./data/proof.data
+# verify a proof file against the verifying key, as the contract does: the two public inputs are
+# computed from inputs.json (the program vkey and the public values `cargo pico prove --evm` writes),
+# and a proof file whose own copy of them differs is refused
+./pico-gnark -cmd verify -vk ./data/vk -proof ./data/proof.data -inputs ./data/inputs.json
 ```
 
 A setup samples its randomness locally: whoever runs it can forge proofs for its keys, so keys from
@@ -128,7 +130,7 @@ function verifyProof(uint256[8] proof, uint256[2] commitments,
 ```
 docker build -f gnark/Dockerfile -t pico-gnark .        # from the repo root
 docker run --rm -v "$PWD/pico_out:/out" pico-gnark -cmd verify \
-  -vk /out/groth16/vk -proof /out/proof.data
+  -vk /out/groth16/vk -proof /out/proof.data -inputs /out/inputs.json
 ```
 
 `pico-gnark` is the entrypoint; `pico-gnark-server` is beside it for `--entrypoint`. Every path is
@@ -144,11 +146,14 @@ files), so one setup and one verifier serve them all.
 
 | | |
 |---|---|
-| R1CS | 7,243,820, 13.6% under 2^23 (3.0, KoalaBear⁴ over the combine root: 7,751,968, 7.6%) |
+| R1CS | 7,256,115, 13.5% under 2^23 (3.0, KoalaBear⁴ over the combine root: 7,751,968, 7.6%) |
 | setup | 3 min 48 s, 15.5 GB peak |
 | prove | 23 s, 11.2 GB peak (3 s of it the Groth16 prover) |
 | pk / ccs / vk | 1.61 GB / 0.64 GB / 560 B |
 | `verifyProof` transaction | about 347,000 gas; 359,000–361,000 for `verifyPicoProof` through `PicoVerifier`, depending on the public values |
+
+The setup and prove rows were measured on the 3.1 circuit, 7,243,820 constraints; this one, with
+the global LogUp's fields in the embed program's public values, has 0.2% more.
 
 An extension multiplication (`MulE`) costs at most nine multiplications, as KoalaBear⁴'s Karatsuba
 did: it evaluates both operands at nine points and interpolates, and takes the pairwise form instead

@@ -609,4 +609,73 @@ mod tests {
         assert_whir_roundtrip(2, 2, 2);
         assert_whir_roundtrip(0, 3, 1);
     }
+
+    /// A global-LogUp group proof made by this backend. It is the backend's only end-to-end
+    /// proof over cached main traces (the riscv driver has none) and its only proof in the
+    /// external LogUp challenge mode. The verifier accepts it and reads off the same fractional
+    /// sum as off the reference backend's proof of the same tables.
+    #[test]
+    fn group_proof_agrees_with_the_reference_backend() {
+        use p3_field::BasedVectorSpace;
+        use pico_mle_core::{
+            config::koala_bear_poseidon2::KoalaBearPoseidon2Config,
+            global_logup::{
+                fixtures::{commit_table, direct_sum, group_proving_ctx, table_rows, to_matrix},
+                group_keygen, group_params,
+            },
+            prover::Prover,
+            verifier::verify_with_external_logup,
+        };
+
+        type Sc = KoalaBearPoseidon2Config;
+        let riscv = test_system_params_small(2, 8, 3);
+        let ef = |seed: u32| EF::from_basis_coefficients_fn(|i| F::from_u32(seed + 7 * i as u32));
+        let (alpha, beta) = (ef(1_000_003), ef(2_000_029));
+        let rows = [
+            table_rows::<F>(1, 6, 40),
+            table_rows::<F>(2, 6, 64),
+            table_rows::<F>(3, 5, 7),
+        ];
+        let riscv_config = Sc::default_from_params(riscv.clone());
+        let tables: Vec<_> = rows
+            .iter()
+            .map(|rows| commit_table(&riscv_config, to_matrix(rows)))
+            .collect();
+
+        fn prove_and_verify<E: StarkEngine<SC = Sc>>(
+            engine: &E,
+            ctx: pico_mle_core::prover::ProvingContext<
+                pico_mle_core::prover::ReferenceColMajorBackend<Sc>,
+            >,
+            (alpha, beta): (EF, EF),
+        ) -> (EF, EF) {
+            let pk = group_keygen(engine.config(), ctx.per_trace.len());
+            let vk = pk.get_vk();
+            let device = engine.device();
+            let proof = engine
+                .prover()
+                .prove(
+                    &device.transport_pk_to_device(&pk),
+                    device.transport_proving_ctx_to_device(&ctx),
+                )
+                .expect("group proof");
+            verify_with_external_logup(
+                engine.config(),
+                &vk,
+                &proof,
+                &mut engine.initial_transcript(),
+                alpha,
+                beta,
+            )
+            .expect("group proof verifies")
+        }
+
+        let ctx = || group_proving_ctx::<Sc>(tables.clone(), alpha, beta);
+        let cpu: KoalaBearPoseidon2CpuEngine = StarkEngine::new(group_params(&riscv));
+        let reference: KoalaBearPoseidon2RefEngine = StarkEngine::new(group_params(&riscv));
+        let (p, q) = prove_and_verify(&cpu, ctx(), (alpha, beta));
+        assert_eq!((p, q), prove_and_verify(&reference, ctx(), (alpha, beta)));
+        let (sum, _) = direct_sum(&rows, alpha, beta);
+        assert_eq!(p, sum * q);
+    }
 }

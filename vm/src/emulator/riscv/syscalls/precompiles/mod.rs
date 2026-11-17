@@ -1,3 +1,4 @@
+pub mod bls12381_g2;
 pub mod ec;
 pub mod edwards;
 pub mod fptower;
@@ -92,6 +93,10 @@ pub enum PrecompileEvent {
     Uint256Mul(Uint256MulEvent),
     /// Poseidon2 Permute precompile event
     Poseidon2Permute(Poseidon2PermuteEvent),
+    /// Bls12-381 G2 add precompile event.
+    Bls12381G2Add(EllipticCurveAddEvent),
+    /// Bls12-381 G2 double precompile event.
+    Bls12381G2Double(EllipticCurveDoubleEvent),
 }
 
 /// Trait to retrieve all the local memory events from a vec of precompile events.
@@ -125,13 +130,15 @@ impl PrecompileLocalMemory for Vec<(SyscallEvent, PrecompileEvent)> {
                 | PrecompileEvent::Secp256r1Add(e)
                 | PrecompileEvent::EdAdd(e)
                 | PrecompileEvent::Bn254Add(e)
-                | PrecompileEvent::Bls12381Add(e) => {
+                | PrecompileEvent::Bls12381Add(e)
+                | PrecompileEvent::Bls12381G2Add(e) => {
                     iterators.push(e.local_mem_access.iter());
                 }
                 PrecompileEvent::Secp256k1Double(e)
                 | PrecompileEvent::Secp256r1Double(e)
                 | PrecompileEvent::Bn254Double(e)
-                | PrecompileEvent::Bls12381Double(e) => {
+                | PrecompileEvent::Bls12381Double(e)
+                | PrecompileEvent::Bls12381G2Double(e) => {
                     iterators.push(e.local_mem_access.iter());
                 }
                 PrecompileEvent::Secp256k1Decompress(e)
@@ -193,8 +200,8 @@ impl PrecompileEvents {
     /// `events` is a `HashMap` with a randomly-seeded hasher, so its iteration order differs from
     /// run to run. A merged catch-all record holds several syscalls at once, so any consumer that
     /// flattened the map directly would let that order reach the trace rows, and the commitment
-    /// with them — proofs would stop being reproducible across machines. (Lookup balance and the
-    /// global cumulative sum are order-invariant, so this would pass verification.) Flatten
+    /// with them — proofs would stop being reproducible across machines. (Lookup balance, within a
+    /// chunk and across chunks, is order-invariant, so this would pass verification.) Flatten
     /// through here instead of iterating `events`.
     pub fn sorted_groups(&self) -> Vec<(&SyscallCode, &Vec<(SyscallEvent, PrecompileEvent)>)> {
         let mut groups: Vec<_> = self.events.iter().filter(|(_, v)| !v.is_empty()).collect();

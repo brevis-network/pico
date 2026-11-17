@@ -34,9 +34,7 @@ pub(crate) fn eval_poseidon2<
 
 /// Evaluates the permutation rounds on an initial `state` (external linear layer, then the three
 /// round groups), returning the output state. Used by the full-width `Poseidon2ValueCols`
-/// (`eval_poseidon2`); the riscv rate-8 layout has its own round driver
-/// (`riscv_poseidon2::constraints::eval_poseidon2_rounds_riscv`, built from the per-round helpers
-/// below) because its last full round commits only the looked-up lanes.
+/// (`eval_poseidon2`).
 pub(crate) fn eval_poseidon2_rounds<
     F: Field,
     CB: ChipBuilder<F>,

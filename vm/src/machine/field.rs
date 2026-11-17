@@ -1,7 +1,5 @@
 use crate::{
-    chips::gadgets::poseidon2::{
-        constants::RoundConstants, linear_layers::KoalaBearRiscvLinearLayers,
-    },
+    chips::gadgets::poseidon2::constants::RoundConstants,
     configs::config::Poseidon2Config,
     primitives::consts::{KoalaBearConfig, PERMUTATION_WIDTH},
 };
@@ -40,28 +38,21 @@ impl<F: Field> FieldBehavior for F {
 /// The field's width-16 Poseidon2 instance, as seen from every side: the host permutation
 /// (`permutation`), the round constants the AIR gadget and the GPU trace-gen consume
 /// (`round_constants`), and the linear layers / round structure the gadget is generic over. Every
-/// riscv-stage use of Poseidon2 -- the riscv Poseidon2 chip, the Poseidon2 precompile, the Global
-/// chip's hash-to-curve, the deferred-proof digest -- resolves to this one instance, and it is
-/// Plonky3 0.5.4's default for the field (`default_*_poseidon2_16`, the `*_POSEIDON2_RC_16_*`
-/// round constants), the same permutation the MLE transcript and Merkle hasher use.
+/// riscv-stage use of Poseidon2 -- the Poseidon2 precompile, the deferred-proof digest -- resolves
+/// to this one instance, and it is Plonky3 0.5.4's default for the field
+/// (`default_*_poseidon2_16`, the `*_POSEIDON2_RC_16_*` round constants), the same permutation
+/// the MLE transcript and Merkle hasher use.
 pub trait FieldSpecificPoseidon2Config: Field {
     type Poseidon2Config: Poseidon2Config;
     type LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>;
-    /// The linear layers the riscv Poseidon2 chip is generic over: the same maps as
-    /// `LinearLayers`, written in the form its constraints are cheapest in
-    /// (`chips::gadgets::poseidon2::linear_layers`). The recursion chips and the Poseidon2
-    /// precompile use `LinearLayers`.
-    type RiscvLinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>;
     type Perm: Permutation<[Self; PERMUTATION_WIDTH]> + Clone + Send + Sync;
     fn permutation() -> Self::Perm;
     fn round_constants() -> RoundConstants<Self, Self::Poseidon2Config>;
-    fn riscv_poseidon2_name() -> &'static str;
 }
 
 impl FieldSpecificPoseidon2Config for KoalaBear {
     type Poseidon2Config = KoalaBearConfig;
     type LinearLayers = GenericPoseidon2LinearLayersKoalaBear;
-    type RiscvLinearLayers = KoalaBearRiscvLinearLayers;
     type Perm = Poseidon2KoalaBear<PERMUTATION_WIDTH>;
     fn permutation() -> Self::Perm {
         default_koalabear_poseidon2_16()
@@ -72,9 +63,6 @@ impl FieldSpecificPoseidon2Config for KoalaBear {
             partial_round_constants: Array::from(KOALABEAR_POSEIDON2_RC_16_INTERNAL),
             ending_full_round_constants: Array::from(KOALABEAR_POSEIDON2_RC_16_EXTERNAL_FINAL),
         }
-    }
-    fn riscv_poseidon2_name() -> &'static str {
-        "RiscvKoalaBearPoseidon2"
     }
 }
 

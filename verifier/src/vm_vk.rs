@@ -1,19 +1,54 @@
 //! The exe identity as plain limbs, and its `riscv_vk_digest`.
 //!
-//! `pico-vm`'s `RiscvVmVk` holds the initial global cumulative sum as a septic curve point, a type
-//! that needs nightly; [`VmVk`] holds the same 25 field elements flat, and owns the digest that
-//! `RiscvVmVk::digest` delegates to.
+//! [`VmVk`] holds the 20 field elements that identify a guest program at one operating point:
+//! the program-table commitment, the entry pc, and the commitment and height tier of the
+//! program's memory image table. It owns the digest `pico-vm`'s `RiscvVmVk::digest` delegates to.
 
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 
 use crate::{hash::sponge_hash, Kb, VerifyError};
 
-/// Domain separator for `riscv_vk_digest` (distinguishes this sponge from the PV-digest sponge,
-/// which absorbs no domain tag). Arbitrary fixed constant below the KoalaBear modulus.
-pub const RISCV_VK_DIGEST_DOMAIN: u32 = 0x5256_766B; // "RVvk"
+/// Domain separator for `riscv_vk_digest`, `"RVv2"` (distinguishes this sponge from the PV-digest
+/// sponge, which absorbs no domain tag). Version 2: the preimage carries the memory image's
+/// commitment and tier where version 1 (`"RVvk"`) carried the initial cumulative sum.
+pub const RISCV_VK_DIGEST_DOMAIN: u32 = 0x5256_7632;
 
-/// Field elements in a [`VmVk`]: program commit (8), entry pc (3), initial GCS x (7) and y (7).
-pub const VM_VK_LEN: usize = 25;
+// Every digest of the global LogUp leads its preimage with a tag of its own, one field element,
+// and so do this crate's digests: no two families share one. The keygen's two digests take
+// their preimage a byte an element, so theirs starts with an element below 256, which none of
+// the others is; their words are listed to keep the names apart as well.
+const _: () = {
+    use pico_mle_core::{
+        global_logup::{TAG_CHALLENGE, TAG_IV, TAG_LEAF, TAG_PARAMS, TAG_TOP, TAG_WRAP},
+        keygen::{CONSTRAINT_DIGEST_DOMAIN, LEAN_VK_PRE_HASH_DOMAIN},
+    };
+    let tags = [
+        RISCV_VK_DIGEST_DOMAIN,
+        crate::whitelist::VK_MAP_LEAF_DOMAIN,
+        LEAN_VK_PRE_HASH_DOMAIN,
+        CONSTRAINT_DIGEST_DOMAIN,
+        TAG_IV,
+        TAG_LEAF,
+        TAG_WRAP,
+        TAG_TOP,
+        TAG_CHALLENGE,
+        TAG_PARAMS,
+    ];
+    let mut i = 0;
+    while i < tags.len() {
+        assert!(tags[i] > 255, "a domain tag is a byte");
+        let mut j = i + 1;
+        while j < tags.len() {
+            assert!(tags[i] != tags[j], "two domain tags are equal");
+            j += 1;
+        }
+        i += 1;
+    }
+};
+
+/// Field elements in a [`VmVk`]: program commit (8), entry pc (3), image commitment (8), image
+/// tier (1).
+pub const VM_VK_LEN: usize = 20;
 
 /// The VM-layer RISC-V verifying key: the application identity folded into `riscv_vk_digest`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,14 +57,18 @@ pub struct VmVk {
     pub program_commit: [Kb; 8],
     /// Guest entry pc, 48-bit split into 3 limbs.
     pub pc_start: [Kb; 3],
-    /// Initial global cumulative sum, x coordinate (septic extension limbs).
-    pub initial_gcs_x: [Kb; 7],
-    /// Initial global cumulative sum, y coordinate.
-    pub initial_gcs_y: [Kb; 7],
+    /// Commitment of the program's memory image table.
+    pub image_commit: [Kb; 8],
+    /// The height tier the image table is committed at: log2 of its rows.
+    ///
+    /// Part of the identity, not only the commitment: one commitment can be read as a table of
+    /// another tier, and the tier in the digest is what pins a program to its own.
+    pub image_log_height: Kb,
 }
 
 impl VmVk {
-    /// The 26 preimage elements, `[DOMAIN, program_commit, pc_start, gcs.x, gcs.y]`, matching the
+    /// The 21 preimage elements,
+    /// `[DOMAIN, program_commit, pc_start, image_commit, image_log_height]`, matching the
     /// in-circuit hash input.
     pub fn digest_preimage(&self) -> Vec<Kb> {
         let mut elems = Vec::with_capacity(1 + VM_VK_LEN);
@@ -55,13 +94,13 @@ impl VmVk {
         out
     }
 
-    /// The 25 limbs in preimage order, without the domain tag.
+    /// The 20 limbs in preimage order, without the domain tag.
     pub fn limbs(&self) -> [Kb; VM_VK_LEN] {
         let mut out = [Kb::ZERO; VM_VK_LEN];
         out[..8].copy_from_slice(&self.program_commit);
         out[8..11].copy_from_slice(&self.pc_start);
-        out[11..18].copy_from_slice(&self.initial_gcs_x);
-        out[18..].copy_from_slice(&self.initial_gcs_y);
+        out[11..19].copy_from_slice(&self.image_commit);
+        out[19] = self.image_log_height;
         out
     }
 
@@ -70,8 +109,8 @@ impl VmVk {
         Self {
             program_commit: std::array::from_fn(|i| e[i]),
             pc_start: std::array::from_fn(|i| e[8 + i]),
-            initial_gcs_x: std::array::from_fn(|i| e[11 + i]),
-            initial_gcs_y: std::array::from_fn(|i| e[18 + i]),
+            image_commit: std::array::from_fn(|i| e[11 + i]),
+            image_log_height: e[19],
         }
     }
 
@@ -103,22 +142,22 @@ mod tests {
         VmVk {
             program_commit: std::array::from_fn(|i| Kb::from_u32(100 + i as u32)),
             pc_start: [Kb::from_u32(7), Kb::from_u32(0), Kb::from_u32(0)],
-            initial_gcs_x: std::array::from_fn(|i| Kb::from_u32(200 + i as u32)),
-            initial_gcs_y: std::array::from_fn(|i| Kb::from_u32(300 + i as u32)),
+            image_commit: std::array::from_fn(|i| Kb::from_u32(200 + i as u32)),
+            image_log_height: Kb::from_u32(19),
         }
     }
 
-    /// The preimage is exactly the 26 elements in the documented order.
+    /// The preimage is exactly the 21 elements in the documented order.
     #[test]
-    fn preimage_shape_is_26_ordered_elements() {
+    fn preimage_shape_is_21_ordered_elements() {
         let vk = sample_vk();
         let p = vk.digest_preimage();
-        assert_eq!(p.len(), 26);
+        assert_eq!(p.len(), 21);
         assert_eq!(p[0], Kb::from_u32(RISCV_VK_DIGEST_DOMAIN));
         assert_eq!(&p[1..9], &vk.program_commit[..]);
         assert_eq!(&p[9..12], &vk.pc_start[..]);
-        assert_eq!(&p[12..19], &vk.initial_gcs_x[..]);
-        assert_eq!(&p[19..26], &vk.initial_gcs_y[..]);
+        assert_eq!(&p[12..20], &vk.image_commit[..]);
+        assert_eq!(p[20], vk.image_log_height);
     }
 
     /// `digest()` matches an independent inline reference sponge (pins the exact construction that
@@ -129,7 +168,7 @@ mod tests {
         let elems = vk.digest_preimage();
         let perm = default_koalabear_poseidon2_16();
         let mut state = [Kb::ZERO; 16];
-        // 26 = 3*8 + 2 → three in-loop permutes + one trailing permute for the 2-element tail.
+        // 21 = 2*8 + 5 → two in-loop permutes + one trailing permute for the 5-element tail.
         let mut i = 0;
         while i < elems.len() {
             let end = (i + 8).min(elems.len());
@@ -143,7 +182,8 @@ mod tests {
         assert_eq!(vk.digest(), expect);
     }
 
-    /// Every field is bound: perturbing any one changes the digest.
+    /// Every field is bound: perturbing any one changes the digest. The image's tier is one of
+    /// them, apart from its commitment.
     #[test]
     fn digest_is_sensitive_to_every_field() {
         let base = sample_vk().digest();
@@ -157,21 +197,21 @@ mod tests {
         assert_ne!(v.digest(), base, "pc_start not bound");
 
         let mut v = sample_vk();
-        v.initial_gcs_x[0] += Kb::ONE;
-        assert_ne!(v.digest(), base, "initial_gcs.x not bound");
+        v.image_commit[7] += Kb::ONE;
+        assert_ne!(v.digest(), base, "image_commit not bound");
 
         let mut v = sample_vk();
-        v.initial_gcs_y[6] += Kb::ONE;
-        assert_ne!(v.digest(), base, "initial_gcs.y not bound");
+        v.image_log_height += Kb::ONE;
+        assert_ne!(v.digest(), base, "image_log_height not bound");
     }
 
-    /// The 25 limbs survive the u32 round trip in preimage order; any other length is refused.
+    /// The 20 limbs survive the u32 round trip in preimage order; any other length is refused.
     #[test]
     fn u32s_round_trip() {
-        let limbs: Vec<u32> = (1..=25).collect();
+        let limbs: Vec<u32> = (1..=20).collect();
         let vk = VmVk::from_u32s(&limbs).unwrap();
         assert_eq!(vk.to_u32s(), limbs);
         assert_eq!(&vk.digest_preimage()[1..], &vk.limbs()[..]);
-        assert!(VmVk::from_u32s(&limbs[..24]).is_err());
+        assert!(VmVk::from_u32s(&limbs[..19]).is_err());
     }
 }

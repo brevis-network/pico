@@ -46,7 +46,6 @@ pub struct StartIndices {
     pub memory_local_extra_global_start_index: usize,
     pub syscall_riscv_extra_global_lookup_start_index: usize,
     pub syscall_precompile_extra_global_lookup_start_index: usize,
-    pub global_extra_poseidon2_start_index: usize,
 }
 
 /// Precompile event counts organized by category
@@ -73,6 +72,8 @@ struct PrecompileCounts {
     bn254_double: usize,
     bls381_add: usize,
     bls381_double: usize,
+    bls381_g2_add: usize,
+    bls381_g2_double: usize,
     bls381_decompress: usize,
 
     // Field operations
@@ -112,6 +113,8 @@ struct PrecompileLocalMemCounts {
     bn254_double: usize,
     bls381_add: usize,
     bls381_double: usize,
+    bls381_g2_add: usize,
+    bls381_g2_double: usize,
     bls381_decompress: usize,
 
     // Field operations
@@ -164,7 +167,6 @@ pub struct EventCounter {
     // System events
     pub num_syscall_events: usize,
     pub num_precompile_syscall_events: usize,
-    pub num_poseidon2_events: usize,
     pub num_global_lookup_events: usize,
     pub num_memory_read_writes: usize,
     /// The misaligned loads and stores: the `MemoryUnaligned` chip's rows, which the host
@@ -199,6 +201,8 @@ impl EventCounter {
             SyscallCode::BN254_DOUBLE => self.precompile_counts.bn254_double,
             SyscallCode::BLS12381_ADD => self.precompile_counts.bls381_add,
             SyscallCode::BLS12381_DOUBLE => self.precompile_counts.bls381_double,
+            SyscallCode::BLS12381_G2_ADD => self.precompile_counts.bls381_g2_add,
+            SyscallCode::BLS12381_G2_DOUBLE => self.precompile_counts.bls381_g2_double,
             SyscallCode::BLS12381_DECOMPRESS => self.precompile_counts.bls381_decompress,
             SyscallCode::BN254_FP_ADD => self.precompile_counts.fp_bn254,
             SyscallCode::BLS12381_FP_ADD => self.precompile_counts.fp_bls381,
@@ -237,6 +241,8 @@ impl EventCounter {
             SyscallCode::BN254_DOUBLE => self.precompile_local_mem_counts.bn254_double,
             SyscallCode::BLS12381_ADD => self.precompile_local_mem_counts.bls381_add,
             SyscallCode::BLS12381_DOUBLE => self.precompile_local_mem_counts.bls381_double,
+            SyscallCode::BLS12381_G2_ADD => self.precompile_local_mem_counts.bls381_g2_add,
+            SyscallCode::BLS12381_G2_DOUBLE => self.precompile_local_mem_counts.bls381_g2_double,
             SyscallCode::BLS12381_DECOMPRESS => self.precompile_local_mem_counts.bls381_decompress,
             SyscallCode::BN254_FP_ADD => self.precompile_local_mem_counts.fp_bn254,
             SyscallCode::BLS12381_FP_ADD => self.precompile_local_mem_counts.fp_bls381,
@@ -274,6 +280,8 @@ impl EventCounter {
             + counts.bn254_double
             + counts.bls381_add
             + counts.bls381_double
+            + counts.bls381_g2_add
+            + counts.bls381_g2_double
             + counts.bls381_decompress
             + counts.fp_bn254
             + counts.fp_bls381
@@ -305,6 +313,8 @@ const SUPPORTED_PRECOMPILE_CODES: &[SyscallCode] = &[
     SyscallCode::BLS12381_ADD,
     SyscallCode::BLS12381_DOUBLE,
     SyscallCode::BLS12381_DECOMPRESS,
+    SyscallCode::BLS12381_G2_ADD,
+    SyscallCode::BLS12381_G2_DOUBLE,
     SyscallCode::BN254_FP_ADD,
     SyscallCode::BLS12381_FP_ADD,
     SyscallCode::SECP256K1_FP_ADD,
@@ -412,6 +422,14 @@ fn count_all_precompile_events(
                 precompile_counts.bls381_double = event_count;
                 local_mem_counts.bls381_double = local_mem_count;
             }
+            SyscallCode::BLS12381_G2_ADD => {
+                precompile_counts.bls381_g2_add = event_count;
+                local_mem_counts.bls381_g2_add = local_mem_count;
+            }
+            SyscallCode::BLS12381_G2_DOUBLE => {
+                precompile_counts.bls381_g2_double = event_count;
+                local_mem_counts.bls381_g2_double = local_mem_count;
+            }
             SyscallCode::BLS12381_DECOMPRESS => {
                 precompile_counts.bls381_decompress = event_count;
                 local_mem_counts.bls381_decompress = local_mem_count;
@@ -482,7 +500,6 @@ impl Traced<'_> {
     fn count<F: PrimeField32>(&self, record: &EmulationRecord, counter: &mut EventCounter) {
         self.count_alu_rows(counter);
         counter.num_global_lookup_events = record.global_lookup_events.len();
-        counter.num_poseidon2_events = record.poseidon2_events.len();
 
         self.count_cpu_extras(counter);
 
@@ -531,7 +548,6 @@ impl Traced<'_> {
             + counter.num_syscall_events;
 
         self.count_bitwise_and_shifts(counter);
-        counter.start_indices.global_extra_poseidon2_start_index = counter.num_poseidon2_events;
         GlobalChip::<F>::count_extra_records(record, counter);
     }
 
@@ -643,11 +659,6 @@ impl EventCounter {
                 "global lookup",
                 self.num_global_lookup_events,
                 record.global_lookup_events.len(),
-            ),
-            (
-                "Poseidon2",
-                self.num_poseidon2_events,
-                record.poseidon2_events.len(),
             ),
         ] {
             assert_eq!(

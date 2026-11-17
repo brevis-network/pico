@@ -13,7 +13,6 @@ use crate::{
             riscv_memory::event::{
                 MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryRecordEnum,
             },
-            riscv_poseidon2::{columns::RISCV_NUM_POSEIDON2_COLS, Poseidon2Event},
         },
         gadgets::curves::{
             weierstrass::{bls381::Bls381BaseField, bn254::Bn254BaseField, Bn254, Secp256k1},
@@ -44,7 +43,8 @@ use crate::{
     },
     instances::compiler::shapes::riscv_shape::RiscvPadShape,
     iter::{PicoBridge, PicoIterator},
-    primitives::consts::{KoalaBearConfig, LOCAL_MEMORY_DATAPAR, RISCV_POSEIDON2_DATAPAR},
+    mle::machine::shape::MLE_GLOBAL_LOG_HEIGHT,
+    primitives::consts::LOCAL_MEMORY_DATAPAR,
 };
 #[cfg(feature = "cuda")]
 use crate::{
@@ -98,7 +98,7 @@ pub(crate) fn deferred_tail_merge() -> bool {
 /// it off (A/B and rollback). With the gate off every record is handed to the prover exactly as
 /// split produced it.
 ///
-/// The merge changes the MemoryLocal / GcsBind / Poseidon2 heights of precompile records, so a
+/// The merge changes the MemoryLocal height of precompile records, so a
 /// production VK whitelist built before it (or with it off) has to be rebuilt with the same gate
 /// setting; the CI setting (`VK_VERIFICATION=false`) is unaffected.
 pub(crate) fn precompile_local_mem_merge_enabled() -> bool {
@@ -117,8 +117,8 @@ pub(crate) fn precompile_local_mem_merge_enabled() -> bool {
 const TAIL_TARGET_CELLS: u64 = 1_575_461_400;
 
 /// Packing budget of a deferred-memory record in *padded* cells: each chip pads its rows to
-/// a power of two before stacking, so a memory block costs `mem_tail_padded_cost` (Global plus
-/// Poseidon2 area). Calibrated between two measured anchors on a 32 GB card (RTX 5090, MLE
+/// a power of two before stacking, so a memory block costs `mem_tail_padded_cost` (the Global
+/// table). Calibrated between two measured anchors on a 32 GB card (RTX 5090, MLE
 /// prover, streaming RS commit): a 2.14e9-cell tail record proved and verified repeatedly, a
 /// 2.52e9-cell one OOM'd (6.4 GB DeviceBuffer allocation while proving). 2.25e9 keeps ~5%
 /// above the proven point and ~11% below the failing one. The legacy split
@@ -202,22 +202,14 @@ pub(crate) fn tail_rows_and_width(syscall_code: SyscallCode) -> Option<(u64, u64
     Some((rows, width as u64))
 }
 
-/// Packing cost of a deferred memory block in *padded* cells: one Global row per
-/// init/finalize event (padded pow2) plus the Poseidon2 area (one permutation per global
-/// event, DATAPAR permutations per row at DATAPAR× width, rows padded pow2). Counting each
-/// block's padding separately UNDERSTATES a record that mixes full buckets with a small
-/// remainder (pow2 of the parts < pow2 of the sum, up to ~2×); today the
-/// TAIL_MERGE_MAX_MEM_EVENTS hard cap bounds the real padded height regardless, so the
-/// accounting slack is masked. The old `events / DEFERRED_MEMORY_BUCKET`
-/// yardstick badly understated memory items, which is why the fused reth-171 tail OOM'd
-/// at a nominally modest budget.
-fn mem_tail_padded_cost(events: u64) -> u64 {
-    // `+ 1`: the Global trace always carries one trailing padding row.
-    let global = (events + 1).next_power_of_two() * NUM_GLOBAL_COLS as u64;
-    let poseidon2_rows = events.div_ceil(RISCV_POSEIDON2_DATAPAR as u64);
-    let poseidon2 =
-        poseidon2_rows.next_power_of_two() * RISCV_NUM_POSEIDON2_COLS::<KoalaBearConfig> as u64;
-    global + poseidon2
+/// Packing cost of a deferred memory block in *padded* cells: the Global table, which has one
+/// fixed height per record whatever its event count (`MLE_GLOBAL_LOG_HEIGHT` at the production
+/// stacked height, less under it). Every block is charged the whole table, though a record
+/// carries one: the sum over a record's blocks never falls under the record's table, and the
+/// TAIL_MERGE_MAX_MEM_EVENTS hard cap closes a record after a handful of blocks, far inside the
+/// budget.
+fn mem_tail_padded_cost(_events: u64) -> u64 {
+    (NUM_GLOBAL_COLS as u64) << MLE_GLOBAL_LOG_HEIGHT
 }
 
 /// Per-record budget on estimated logup-GKR leaves (memory records).
@@ -259,12 +251,10 @@ const TAIL_GKR_FALLBACK_INTERACTIONS: u64 = 2048;
 /// activates alongside the precompile chips. Counted from the AIR eval code — one
 /// `looking_*`/`looked_*` call = one interaction instance, loops multiplied out; counts
 /// are structural per row, independent of multiplicities. Sources (current tree):
-///   - Global 10/row: 1 looked Global (riscv_global/constraints.rs:46) + 1 looking
-///     Poseidon2 (gadgets/global_interaction.rs) + 6 byte-bus range instances
-///     (global_interaction.rs:131-240) + the U16Range and BitRange(9) limbs of `message[1]`
-///     (riscv_global/constraints.rs:87). Six in the gadget, not eight: the `kind < 32`
-///     LTU is gone (every sender passes a compile-time constant, so the multiset already pins
-///     the receiver's column) and two U8 checks share one instance.
+///   - Global 6/row: 1 looked Global + 5 byte-bus range instances, the 16-bit and 8-bit limbs
+///     of `message[0]`, the U16Range and BitRange(9) limbs of `message[1]`, and `message[7]`
+///     (riscv_global/constraints.rs). The table has `2^MLE_GLOBAL_LOG_HEIGHT` rows in every
+///     record, so the chip enters as the constant `TAIL_GKR_GLOBAL_LEAVES`.
 ///   - MemoryInit/Finalize 14/row: 10 × U16 (initialize_finalize/constraints.rs:43-45) +
 ///     1 U16 for the top of memory + 1 U8 pair + 1 looking Global + 1 U16 inside
 ///     LtWordU16Gadget (gadgets/lt_word_u16.rs:190).
@@ -272,17 +262,15 @@ const TAIL_GKR_FALLBACK_INTERACTIONS: u64 = 2048;
 ///     Global, two Memory-bus, the gated chunk-gap U16, the two limbs of the in-chunk clk-gap
 ///     check, two u8 pairs and two u16 limbs of the initial value) × LOCAL_MEMORY_DATAPAR(4)
 ///     slots/row.
-///   - Poseidon2 4/row: 1 looked (riscv_poseidon2/constraints.rs:79) ×
-///     RISCV_POSEIDON2_DATAPAR(4) slots/row.
 ///   - Syscall 4/row: U8(syscall_id) + U16(arg1[0]) (syscall/constraints.rs:27,29) +
 ///     looked/looking syscall (:51/:85) + looking Global (:62/:96).
 ///   - Byte 10/row × 2^17 fixed rows (byte/constraints.rs:33-63, byte/traces.rs:29).
 ///   - Program 2/row (riscv_program/constraints.rs): the instruction a Cpu row fetches, and the
 ///     code's range a store row checks against, × pow2(instruction count) rows.
-const TAIL_GKR_GLOBAL_INTERACTIONS: u64 = 10;
+const TAIL_GKR_GLOBAL_INTERACTIONS: u64 = 6;
+const TAIL_GKR_GLOBAL_LEAVES: u64 = TAIL_GKR_GLOBAL_INTERACTIONS << MLE_GLOBAL_LOG_HEIGHT;
 const TAIL_GKR_INIT_FIN_INTERACTIONS: u64 = 14;
 const TAIL_GKR_MEMORY_LOCAL_INTERACTIONS: u64 = 11 * LOCAL_MEMORY_DATAPAR as u64;
-const TAIL_GKR_POSEIDON2_INTERACTIONS: u64 = RISCV_POSEIDON2_DATAPAR as u64;
 const TAIL_GKR_SYSCALL_INTERACTIONS: u64 = 4;
 const TAIL_GKR_BYTE_LEAVES: u64 = 10 * (1 << 17);
 const TAIL_GKR_PROGRAM_INTERACTIONS: u64 = 2;
@@ -331,6 +319,8 @@ const TAIL_GKR_PROGRAM_INTERACTIONS: u64 = 2;
 ///     fp2 mul = 22·WCP + 6·(L+W) + 8 ⇒ 754 / 1130 (precompiles/fptower/*.rs).
 ///   - UINT256_MUL 240 = 231 + 3×2 + 3, 231 = 33·WFE + (L+W=95) + 4
 ///     (precompiles/uint256/constraints.rs).
+///   - BLS12381 G2 add and double (precompiles/bls12381_g2): above the catch-all, so both need
+///     an entry; the test below pins the numbers.
 ///
 /// `interaction_counts_match_their_airs` below asserts all of this against real keygen —
 /// it is the arbiter, not this comment.
@@ -347,22 +337,20 @@ fn tail_gkr_interactions(syscall_code: SyscallCode) -> Option<u64> {
         SyscallCode::BLS12381_FP_ADD => 287,
         SyscallCode::BLS12381_FP2_MUL => 1130,
         SyscallCode::UINT256_MUL => 240,
+        SyscallCode::BLS12381_G2_ADD => 4670,
+        SyscallCode::BLS12381_G2_DOUBLE => 4966,
         _ => return None,
     })
 }
 
 /// Running GKR-leaf account of the tail record being packed. Per-syscall main
 /// chips are unique per record, so their pow2 padding is exact per item; the
-/// record-shared chips (Global/Poseidon2/MemoryLocal/InitFin/Syscall) are re-padded
-/// from running event totals on every probe, exactly like tracegen will size them:
-///   - 1 local-memory event → 2 global events (`riscv_memory/local/traces.rs`),
-///   - 1 memory init/finalize event → 1 global event (initialize_finalize/traces.rs:247),
-///   - 1 syscall (= precompile) event → 1 global event (syscall/traces.rs:140),
-///   - 1 global event → 1 Poseidon2 permutation (`riscv_global/traces.rs`).
+/// record-shared chips (MemoryLocal/InitFin/Syscall) are re-padded
+/// from running event totals on every probe, exactly like tracegen will size them.
 ///
-/// Byte and Program are height-invariant per record and enter as `base_leaves`
-/// (both are always active in a deferred record: byte/traces.rs:92,
-/// riscv_program/traces.rs:191).
+/// Byte, Program and Global are height-invariant per record and enter as `base_leaves`
+/// (all three are always active in a deferred record: byte/traces.rs:92,
+/// riscv_program/traces.rs:191, and the Global table at its fixed height).
 #[derive(Clone, Copy)]
 struct TailGkrLeavesAccount {
     base_leaves: u64,
@@ -377,6 +365,7 @@ impl TailGkrLeavesAccount {
     fn new(program_instructions: u64) -> Self {
         Self {
             base_leaves: TAIL_GKR_BYTE_LEAVES
+                + TAIL_GKR_GLOBAL_LEAVES
                 + TAIL_GKR_PROGRAM_INTERACTIONS * Self::lift(program_instructions),
             precompile_leaves: 0,
             local_mem_events: 0,
@@ -416,17 +405,6 @@ impl TailGkrLeavesAccount {
     }
 
     fn total_leaves(&self) -> u64 {
-        // `2 * local_mem_events` over-counts (a fresh entry raises one Global event, not two);
-        // the estimate stays on the conservative side of the line.
-        let global_rows = 2 * self.local_mem_events
-            + self.init_events
-            + self.finalize_events
-            + self.precompile_events;
-        // `+ 1`: the Global trace always carries one trailing padding row (as in
-        // `mem_tail_padded_cost`), so a power-of-two event count lifts to the next power.
-        let global = TAIL_GKR_GLOBAL_INTERACTIONS * Self::lift(global_rows + 1);
-        let poseidon2 = TAIL_GKR_POSEIDON2_INTERACTIONS
-            * Self::lift(global_rows.div_ceil(RISCV_POSEIDON2_DATAPAR as u64));
         let memory_local = TAIL_GKR_MEMORY_LOCAL_INTERACTIONS
             * Self::lift(self.local_mem_events.div_ceil(LOCAL_MEMORY_DATAPAR as u64));
         let init_fin = TAIL_GKR_INIT_FIN_INTERACTIONS
@@ -434,8 +412,6 @@ impl TailGkrLeavesAccount {
         let syscall = TAIL_GKR_SYSCALL_INTERACTIONS * Self::lift(self.precompile_events);
         self.base_leaves
             .saturating_add(self.precompile_leaves)
-            .saturating_add(global)
-            .saturating_add(poseidon2)
             .saturating_add(memory_local)
             .saturating_add(init_fin)
             .saturating_add(syscall)
@@ -453,26 +429,21 @@ pub const THRESHOLD_2POW20: usize = 1 << 20;
 
 /// pow2-aware packing of the deferred memory-init/finalize chunk.
 ///
-/// The Global chip's height for a deferred (memory) record is
-/// `memory_initialize_events.len() + memory_finalize_events.len()` (one global
-/// interaction event per init and per finalize event; see the Initialize/Finalize
-/// trace event counter) **plus one trailing padding row** that the accumulation
-/// constraints require (`riscv_global/traces.rs`), padded up to the next power of two;
-/// the Poseidon2 chip follows (~1 perm per global event).
+/// A deferred (memory) record has one cross-chunk event per initialize and per finalize
+/// event, and its MemoryInitialize and MemoryFinalize traces pad to the next power of two.
 ///
 /// A bucket large enough for every init/finalize event (about 67M) packs them all
-/// into a single deferred record, so e.g. reth-188's 2.55M global events
-/// pad to 2^22 = 4,194,304 rows (wasting ~1.65M rows on Global + the matching
-/// Poseidon2 rows). Bucketing each of the (separately address-sorted) finalize and
-/// init streams into fixed-size buckets makes a "full" bucket pad-free, and only the
-/// trailing record pads (e.g. 2.55M finalize -> [two full buckets] + [~452K -> 2^19]).
+/// into a single deferred record, so e.g. reth-188's 2.55M finalize events would pad
+/// to 2^22 = 4,194,304 rows (wasting ~1.65M rows). Bucketing each of the (separately
+/// address-sorted) finalize and init streams into fixed-size buckets makes a "full" bucket
+/// pad-free, and only the trailing record pads (e.g. 2.55M finalize -> [two full buckets] +
+/// [~452K -> 2^19]).
 ///
-/// The size is one under 2^20 because of that padding row: with 2^20-event buckets four
-/// full buckets would be exactly 2^22 events, which the cap check in `split` refuses (the
-/// row would push the Global trace to 2^23), so four buckets could not share a record. At
-/// 2^20 - 1 four full buckets are 2^22 - 4 events (Global exactly 2^22, the volume the
-/// tail-merge caps were proven at), and the init/finalize traces still pad to the same
-/// 2^20 they did before.
+/// Four full buckets share a record: 2^22 - 4 events, within the cap check in `split` and
+/// the 2^22 rows of the Global table, with the init/finalize traces padding to 2^20.
+///
+/// The size is one under 2^20, which leaves four of the table's 2^22 rows unused in a full
+/// record; a bucket of 2^20 would fit as well.
 ///
 /// Address chaining across records is unchanged: init and finalize are still
 /// consumed in sorted order as contiguous slices, and each record's
@@ -728,8 +699,6 @@ pub struct EmulationRecord {
     /// A trace of the precompile events.
     pub precompile_events: PrecompileEvents,
     /// A trace of all the global interaction events.
-    pub poseidon2_events: Vec<Poseidon2Event>,
-    /// A trace of all the global interaction events.
     pub global_lookup_events: Vec<GlobalInteractionEvent>,
     /// The shape of the proof.
     pub shape: Option<RiscvPadShape>,
@@ -975,16 +944,25 @@ impl EmulationRecord {
                 });
                 phases.add(SplitPhase::Sort, t_sort);
 
-                // 3. Split by threshold
+                // 3. Split into blocks: `threshold` calls each, or fewer where the cross-chunk
+                // events of more would not fit the Global table.
                 let t_records = phases.mark();
                 let mut committed_iter = committed.into_iter();
                 loop {
-                    // Check if we have enough for a full chunk
-                    if ExactSizeIterator::len(&committed_iter) < threshold {
+                    let remaining = committed_iter.as_slice();
+                    let block = precompile_block_len(
+                        remaining
+                            .iter()
+                            .map(|(_, event)| precompile_local_mem(event).len()),
+                        threshold,
+                        1 << MLE_GLOBAL_LOG_HEIGHT,
+                    );
+                    // Fewer calls than a block and none after them: the remainder.
+                    if block < threshold && block == remaining.len() {
                         break;
                     }
 
-                    let chunk: Vec<_> = committed_iter.by_ref().take(threshold).collect();
+                    let chunk: Vec<_> = committed_iter.by_ref().take(block).collect();
                     let mut rec = EmulationRecord::new(program.clone());
                     rec.is_cpu_chunk = false;
                     rec.precompile_events.insert(*syscall_code, chunk);
@@ -1069,7 +1047,8 @@ impl EmulationRecord {
         // enumerates: a single precompile chip with its companion chips, or the memory family.
         // (A record mixing k kinds would need a shape per combination of k independent heights;
         // with the 17 kinds that leave remainders that is far beyond any enumerable set.) A
-        // remainder is smaller than a full block of its kind, so it needs no budget of its own.
+        // remainder is smaller than a full block of its kind and, like a block, fits the Global
+        // table (`precompile_block_len`), so it needs no budget of its own.
         //
         // Determinism: remainders are taken in ascending syscall_code order, and each
         // remainder's events are already (chunk, clk)-sorted above.
@@ -1107,9 +1086,8 @@ impl EmulationRecord {
             // MemoryLocal entry declares its initial state and gets no MemoryInitialize event
             // (`riscv_memory/event.rs`) -- is bucketed the same way and
             // appended to the last record, opening records of its own when it would not fit
-            // (`deferred_memory_blocks`). Bucketing keeps the deferred Global chip at exactly a
-            // power of two; a block costs mem_tail_padded_cost (pow2-padded Global + Poseidon2
-            // area). Address chaining is preserved: each stream is consumed as contiguous
+            // (`deferred_memory_blocks`). A block costs mem_tail_padded_cost (the Global
+            // table). Address chaining is preserved: each stream is consumed as contiguous
             // sorted slices in order, and each record carrying memory sets previous_*/last_*
             // limbs (previous_* on its first block). A record without MemoryInitialize keeps
             // `previous_init == last_init`, the frozen cursor the recursion checks for a chunk
@@ -1147,14 +1125,11 @@ impl EmulationRecord {
                         .add_memory(mem_init_chunk.len() as u64, mem_finalize_chunk.len() as u64);
                     if occupied
                         && (acc.saturating_add(cost) > budget
-                            // `>=`: keep every tail chunk strictly below the cap. The Global
-                            // chip (one row per memory event here) pads to a power of two and
-                            // needs at least one padding row (its last row must be non-real), so
-                            // exactly 2^22 events would double the trace in natural mode and
-                            // overflow the fixed 2^22 bucket in bucket mode. Buckets are sized
-                            // one under 2^20 (DEFERRED_MEMORY_BUCKET) so four buckets stay at
-                            // 2^22 - 4 and fit; this guard then closes on the fifth, and on the
-                            // init block when it would reach the cap.
+                            // `>=`: keep every tail chunk strictly below the cap, which is
+                            // also the height of the Global table (one row per memory event
+                            // here). Buckets are sized one under 2^20 (DEFERRED_MEMORY_BUCKET)
+                            // so four buckets stay at 2^22 - 4 and fit; this guard then closes
+                            // on the fifth, and on the init block when it would reach the cap.
                             || current_mem_events + block_events >= TAIL_MERGE_MAX_MEM_EVENTS
                             || leaves_probe.total_leaves() > TAIL_MERGE_MAX_GKR_LEAVES)
                     {
@@ -1278,6 +1253,30 @@ impl EmulationRecord {
     }
 }
 
+/// How many of the calls ahead make the next precompile block: `threshold`, or fewer when the
+/// cross-chunk events of more would overflow a Global table of `global_event_cap` rows.
+///
+/// `local_mem_entries` gives each call's local memory entries, in order. A call raises one
+/// syscall event and at most two events per entry (the merge of a block's entries only removes
+/// some), so `calls + 2 * entries` never undercounts the block's table rows.
+fn precompile_block_len(
+    local_mem_entries: impl Iterator<Item = usize>,
+    threshold: usize,
+    global_event_cap: usize,
+) -> usize {
+    let mut global_events = 0usize;
+    let mut calls = 0;
+    for entries in local_mem_entries.take(threshold) {
+        global_events += 1 + 2 * entries;
+        // A block has at least one call; no single call comes near the cap.
+        if global_events > global_event_cap && calls > 0 {
+            break;
+        }
+        calls += 1;
+    }
+    calls
+}
+
 /// The local-memory entries one precompile event carries: the per-event view of
 /// [`PrecompileLocalMemory`], which only flattens a whole group and so loses which syscall an
 /// entry belongs to.
@@ -1291,11 +1290,13 @@ fn precompile_local_mem(event: &PrecompileEvent) -> &[MemoryLocalEvent] {
         | PrecompileEvent::Secp256k1Add(e)
         | PrecompileEvent::Secp256r1Add(e)
         | PrecompileEvent::Bn254Add(e)
-        | PrecompileEvent::Bls12381Add(e) => &e.local_mem_access,
+        | PrecompileEvent::Bls12381Add(e)
+        | PrecompileEvent::Bls12381G2Add(e) => &e.local_mem_access,
         PrecompileEvent::Secp256k1Double(e)
         | PrecompileEvent::Secp256r1Double(e)
         | PrecompileEvent::Bn254Double(e)
-        | PrecompileEvent::Bls12381Double(e) => &e.local_mem_access,
+        | PrecompileEvent::Bls12381Double(e)
+        | PrecompileEvent::Bls12381G2Double(e) => &e.local_mem_access,
         PrecompileEvent::Secp256k1Decompress(e)
         | PrecompileEvent::Secp256r1Decompress(e)
         | PrecompileEvent::K256Decompress(e)
@@ -1324,11 +1325,13 @@ fn precompile_local_mem_mut(event: &mut PrecompileEvent) -> &mut Vec<MemoryLocal
         | PrecompileEvent::Secp256k1Add(e)
         | PrecompileEvent::Secp256r1Add(e)
         | PrecompileEvent::Bn254Add(e)
-        | PrecompileEvent::Bls12381Add(e) => &mut e.local_mem_access,
+        | PrecompileEvent::Bls12381Add(e)
+        | PrecompileEvent::Bls12381G2Add(e) => &mut e.local_mem_access,
         PrecompileEvent::Secp256k1Double(e)
         | PrecompileEvent::Secp256r1Double(e)
         | PrecompileEvent::Bn254Double(e)
-        | PrecompileEvent::Bls12381Double(e) => &mut e.local_mem_access,
+        | PrecompileEvent::Bls12381Double(e)
+        | PrecompileEvent::Bls12381G2Double(e) => &mut e.local_mem_access,
         PrecompileEvent::Secp256k1Decompress(e)
         | PrecompileEvent::Secp256r1Decompress(e)
         | PrecompileEvent::K256Decompress(e)
@@ -1474,11 +1477,6 @@ impl RecordBehavior for EmulationRecord {
         ] {
             stats.insert(name.to_string(), AluOps::recorded(self, stream).len());
         }
-        stats.insert(
-            "RISCV Poseidon2 Events".to_string(),
-            self.poseidon2_events.len(),
-        );
-
         /*
         Memory-related
          */
@@ -1530,7 +1528,6 @@ impl RecordBehavior for EmulationRecord {
                 *self.byte_lookups.entry(*event).or_insert(0) += mult;
             }
         }
-        self.poseidon2_events.append(&mut extra.poseidon2_events);
         self.global_lookup_events
             .append(&mut extra.global_lookup_events);
         // The later history's rows move into this one's tables; its slot goes back as it drops.
@@ -1708,8 +1705,7 @@ mod tail_merge_constants {
         tail_gkr_interactions, tail_rows_and_width, KECCAK_SLOT_ROWS, TAIL_GKR_BYTE_LEAVES,
         TAIL_GKR_FALLBACK_INTERACTIONS, TAIL_GKR_GLOBAL_INTERACTIONS,
         TAIL_GKR_INIT_FIN_INTERACTIONS, TAIL_GKR_MEMORY_LOCAL_INTERACTIONS,
-        TAIL_GKR_POSEIDON2_INTERACTIONS, TAIL_GKR_PROGRAM_INTERACTIONS,
-        TAIL_GKR_SYSCALL_INTERACTIONS,
+        TAIL_GKR_PROGRAM_INTERACTIONS, TAIL_GKR_SYSCALL_INTERACTIONS,
     };
     use crate::{
         compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program},
@@ -1737,7 +1733,11 @@ mod tail_merge_constants {
             0x1000_0000,
         ));
         let airs = mle_riscv_air_refs(program, false);
-        let (pk, _) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
+        let (pk, _) = engine.keygen_with_app_prep_and_required(
+            &airs,
+            RISCV_APP_PREP_AIR_IDS,
+            crate::mle::machine::riscv::RISCV_REQUIRED_AIR_IDS,
+        );
 
         // `air_name` carries the chip's generic parameters, so a prefix plus (for the curve chips)
         // a parameter fragment identifies one AIR exactly. Requiring a unique match is deliberate:
@@ -1762,14 +1762,9 @@ mod tail_merge_constants {
         // Record-shared chips multiply into *every* deferred record, so an error here is systemic
         // rather than confined to one syscall.
         assert_eq!(
-            measured("GcsBindAir", None),
+            measured("GlobalAir", None),
             TAIL_GKR_GLOBAL_INTERACTIONS,
             "TAIL_GKR_GLOBAL_INTERACTIONS is stale"
-        );
-        assert_eq!(
-            measured("Poseidon2ChipP3", None),
-            TAIL_GKR_POSEIDON2_INTERACTIONS,
-            "TAIL_GKR_POSEIDON2_INTERACTIONS is stale"
         );
         assert_eq!(
             measured("MemoryLocalChip", None),
@@ -1802,20 +1797,6 @@ mod tail_merge_constants {
             );
         }
 
-        // The catch-all bounds every AIR not in the table below, so it has to sit above the
-        // widest one in the machine -- under-counting there is what lets a record cross the
-        // 2^28-leaf line undetected.
-        let widest = pk
-            .per_air
-            .iter()
-            .map(|a| a.vk.num_interactions() as u64)
-            .max()
-            .expect("keygen produced no AIRs");
-        assert!(
-            widest <= TAIL_GKR_FALLBACK_INTERACTIONS,
-            "TAIL_GKR_FALLBACK_INTERACTIONS={TAIL_GKR_FALLBACK_INTERACTIONS} under-counts the \
-             widest AIR ({widest})"
-        );
         // The byte table's per-row count is the largest single term in `base_leaves`, and the
         // Program table's is the multiplier on the instruction count. Both were hand-copied.
         assert_eq!(
@@ -1880,7 +1861,32 @@ mod tail_merge_constants {
                 Some("Bls381BaseField"),
             ),
             (SyscallCode::UINT256_MUL, "Uint256MulChip", None),
+            (SyscallCode::BLS12381_G2_ADD, "Bls12381G2AddChip", None),
+            (
+                SyscallCode::BLS12381_G2_DOUBLE,
+                "Bls12381G2DoubleChip",
+                None,
+            ),
         ];
+        // The catch-all bounds every AIR not in the table above, so it has to sit above the
+        // widest of them -- under-counting there is what lets a record cross the 2^28-leaf line
+        // undetected. An AIR in the table is held to its own constant below.
+        let widest = pk
+            .per_air
+            .iter()
+            .filter(|a| {
+                !table.iter().any(|&(_, prefix, param)| {
+                    a.air_name.starts_with(prefix) && param.is_none_or(|p| a.air_name.contains(p))
+                })
+            })
+            .map(|a| a.vk.num_interactions() as u64)
+            .max()
+            .expect("keygen produced no AIRs");
+        assert!(
+            widest <= TAIL_GKR_FALLBACK_INTERACTIONS,
+            "TAIL_GKR_FALLBACK_INTERACTIONS={TAIL_GKR_FALLBACK_INTERACTIONS} under-counts the \
+             widest AIR outside the table ({widest})"
+        );
         // Collect every mismatch rather than tripping on the first: the constants move as a
         // group when a shared gadget changes, and one-at-a-time bisecting hides the pattern.
         let mut stale = Vec::new();
@@ -1931,6 +1937,30 @@ mod tail_merge_constants {
 #[cfg(test)]
 mod tail_merge_cap_tests {
     use super::*;
+
+    /// A precompile block is `threshold` calls unless their cross-chunk events would overflow the
+    /// Global table: then it stops at the last call that still fits. Calls left over are the
+    /// remainder only when they are fewer than a block and nothing follows them.
+    #[test]
+    fn a_precompile_block_fits_the_global_table() {
+        // 16 entries a call: 33 events each.
+        let calls = |n: usize| std::iter::repeat_n(16usize, n);
+        // The table has room: the block is the call threshold.
+        assert_eq!(precompile_block_len(calls(10), 4, 1 << 22), 4);
+        // Fewer calls than a block are all taken (the caller treats them as the remainder).
+        assert_eq!(precompile_block_len(calls(3), 4, 1 << 22), 3);
+        assert_eq!(precompile_block_len(calls(0), 4, 1 << 22), 0);
+        // A table of 100 rows holds three calls (99 events), not four (132).
+        assert_eq!(precompile_block_len(calls(10), 4, 100), 3);
+        assert_eq!(precompile_block_len(calls(10), 4, 99), 3);
+        assert_eq!(precompile_block_len(calls(10), 4, 98), 2);
+        // The kinds that touch 16 dwords a call reach a 2^22 table before a 2^17-call block.
+        let block = precompile_block_len(calls(1 << 17), 1 << 17, 1 << 22);
+        assert_eq!(block, (1 << 22) / 33);
+        assert!(block * 33 <= 1 << 22 && (block + 1) * 33 > 1 << 22);
+        // A block always has a call, even one no table could hold.
+        assert_eq!(precompile_block_len(calls(5), 4, 10), 1);
+    }
 
     /// Finalize buckets first (the last one short), then the init stream in buckets.
     #[test]

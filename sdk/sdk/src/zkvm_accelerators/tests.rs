@@ -5,7 +5,10 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use serde_json::Value;
 
-use super::*;
+use super::{
+    hash::{KECCAK_RATE, RATE_LANES},
+    *,
+};
 
 fn unhex(s: &str) -> Vec<u8> {
     hex::decode(s).unwrap()
@@ -52,41 +55,67 @@ fn hashes() {
     );
 }
 
+/// Keccak-256 by the book, on the host's permutation.
+fn keccak_reference(data: &[u8]) -> [u8; 32] {
+    let mut padded = data.to_vec();
+    padded.push(0x01);
+    while !padded.len().is_multiple_of(KECCAK_RATE) {
+        padded.push(0);
+    }
+    *padded.last_mut().unwrap() ^= 0x80;
+    let mut state = [0u64; 25];
+    for block in padded.chunks(KECCAK_RATE) {
+        for (lane, b) in state.iter_mut().zip(block.chunks(8)) {
+            *lane ^= u64::from_le_bytes(b.try_into().unwrap());
+        }
+        keccak::f1600(&mut state);
+    }
+    let mut want = [0u8; 32];
+    for (w, lane) in want.chunks_mut(8).zip(state) {
+        w.copy_from_slice(&lane.to_le_bytes());
+    }
+    want
+}
+
+/// The misaligned absorb's word joins, at every offset, against the block's bytes read directly.
+#[test]
+fn keccak_absorb_shifted_matches_bytes() {
+    let words: Vec<u64> = (0..=RATE_LANES as u64)
+        .map(|i| i.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x0123_4567)
+        .collect();
+    let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+    for offset in 1..8 {
+        let mut got = [0u64; 25];
+        super::hash::absorb_shifted(&mut got, offset, |i| words[i]);
+        let mut want = [0u64; 25];
+        for (lane, b) in want
+            .iter_mut()
+            .zip(bytes[offset..offset + KECCAK_RATE].chunks(8))
+        {
+            *lane = u64::from_le_bytes(b.try_into().unwrap());
+        }
+        assert_eq!(got, want, "offset {offset}");
+    }
+}
+
 /// Every length across the block boundaries, from every start address within a word.
 #[test]
 fn hashes_any_length_and_alignment() {
     use sha2::Digest as _;
-    let buf: Vec<u8> = (0..400u32).map(|i| (i * 7 + 3) as u8).collect();
+    let buf: Vec<u8> = (0..1100u32).map(|i| (i * 7 + 3) as u8).collect();
     for start in 0..8 {
-        for len in
-            (0..=300).filter(|l| l % 17 < 3 || (130..=140).contains(l) || (54..=66).contains(l))
+        for len in (0..=300)
+            .filter(|l| l % 17 < 3 || (130..=140).contains(l) || (54..=66).contains(l))
+            .chain([1000])
         {
             let data = &buf[start..start + len];
             assert_eq!(
                 hash(zkvm_sha256, data),
                 <[u8; 32]>::from(sha2::Sha256::digest(data))
             );
-            let mut want = [0u8; 32];
-            let mut state = [0u64; 25];
-            // Keccak-256 by the book, on the host's permutation.
-            let mut padded = data.to_vec();
-            padded.push(0x01);
-            while !padded.len().is_multiple_of(136) {
-                padded.push(0);
-            }
-            *padded.last_mut().unwrap() ^= 0x80;
-            for block in padded.chunks(136) {
-                for (lane, b) in state.iter_mut().zip(block.chunks(8)) {
-                    *lane ^= u64::from_le_bytes(b.try_into().unwrap());
-                }
-                keccak::f1600(&mut state);
-            }
-            for (w, lane) in want.chunks_mut(8).zip(state) {
-                w.copy_from_slice(&lane.to_le_bytes());
-            }
             assert_eq!(
                 hash(zkvm_keccak256, data),
-                want,
+                keccak_reference(data),
                 "keccak len {len} start {start}"
             );
         }

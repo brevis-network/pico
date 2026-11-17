@@ -1,6 +1,6 @@
 //! Recursion verifier-circuit lowering.
 //!
-//! The shared `Builder` circuit-construction vocabulary (IR / transcript / septic-field / MLE
+//! The shared `Builder` circuit-construction vocabulary (IR / transcript / global LogUp / MLE
 //! evaluators, split across the `builder_*` submodules) plus the per-proof `verify_one` core that
 //! lowers "verify a child STARK proof" into a recursion DSL program. This machinery is
 //! recursion-phase-generic — any layer that verifies a child proof lowers through it. `Convert`
@@ -60,10 +60,10 @@ pub(super) use crate::{
         },
         riscv::public_values::PublicValues as RiscvPublicValues,
     },
-    machine::septic::FieldSepticCurve,
     mle::machine::{
-        air::GCS_DIGEST_LEN,
         exe::RISCV_VK_DIGEST_DOMAIN,
+        global_logup::GLOBAL_SENDERS,
+        riscv::air_id,
         vk_map::{MLE_VK_MERKLE_DEPTH, VK_MAP_LEAF_DOMAIN},
     },
     primitives::consts::{
@@ -73,7 +73,7 @@ pub(super) use crate::{
 };
 // Don't also import `WIDTH` from this module: it collides with the recursion-IR `WIDTH` imported
 // above, a distinct constant equal to 16 only by coincidence.
-pub(super) use pico_mle_core::config::koala_bear_poseidon2::RATE;
+pub(super) use pico_mle_core::{config::koala_bear_poseidon2::RATE, global_logup};
 /// Packed blocks the sponge rate occupies.
 pub(super) const RATE_BLOCKS: usize = RATE / PACK_LANES;
 const _: () = assert!(
@@ -89,11 +89,12 @@ const _: () = assert!(
     "compress_poseidon2 permutes exactly two digests"
 );
 
-mod builder_field;
+mod builder_global_logup;
 mod builder_ir;
 mod builder_mle;
 mod builder_transcript;
 mod lowering;
+mod lowering_global_logup;
 
 /// Compute the Lagrange basis denominator inverse for interpolation at integer nodes {0,..,n-1}.
 /// Returns `1 / prod_{j≠i}(i-j)` in the prime field `F`.
@@ -247,6 +248,11 @@ pub struct RecursionVkLayout {
     /// Actual n_logup from the proof being verified (or worst-case when no proof is available).
     pub n_logup: usize,
     pub logup_pow_bits: usize,
+    /// The child's key is in the external LogUp challenge mode (the global LogUp's group
+    /// machines): the verifier absorbs challenges the caller hands in instead of grinding and
+    /// sampling them, and the proof's fractional sum is a claim handed back, not zero.
+    #[serde(default)]
+    pub external_logup: bool,
     pub mu_pow_bits: usize,
     pub folding_pow_bits: usize,
     pub query_phase_pow_bits: usize,
@@ -278,6 +284,10 @@ pub struct ConvertProgramInput {
     pub vk_verification: bool,
 }
 
+/// A fractional sum `(p, q)` of the global LogUp in a circuit: the addresses of each element's
+/// base-field coefficients.
+type GlobalSum = ([u32; EXTENSION_DEGREE], [u32; EXTENSION_DEGREE]);
+
 /// Addresses of a proof's public values returned by `Builder::verify_one`.
 struct ProofPvAddrs {
     /// Flat array of RECURSION_NUM_PVS memory addresses for the proof's public values.
@@ -289,24 +299,24 @@ struct ProofPvAddrs {
     /// folds it into the `riscv_vk_digest` exe-identity digest, which the apex pins against the
     /// trusted `RiscvVmVk::digest()`. `None` for recursion children / no app table.
     app_prep_commit: Option<[u32; 8]>,
-    /// Witnessed lean vk pre-hash (the transcript seed). Half of the child's whitelist
-    /// identity: leaf = H(LEAF_DOMAIN ‖ vk_pre_hash ‖ merged_commit).
+    /// The lean vk pre-hash (the transcript seed). Half of the child's whitelist identity:
+    /// leaf = H(LEAF_DOMAIN ‖ vk_pre_hash ‖ merged_commit). Constants of the program for an
+    /// external-mode child and, in whitelist mode, for a recursion child (the pre-hash of the
+    /// row the slot reads); witnessed otherwise.
     vk_pre_hash: [u32; 8],
     /// Witnessed merged-preprocessed commitment (recursion children; the other identity half).
     /// `None` for per-air (RISC-V) children.
     merged_commit: Option<[u32; 8]>,
-    /// A RISCV child's Global-air GCS public values (septic x[0..7] then y[7..14]); `None`
-    /// for recursion children (their GCS already sits inside `pv` at recursion offsets).
-    gcs_pv: Option<[u32; GCS_DIGEST_LEN]>,
-    /// A RISCV child's riscv `PublicValues` copy, read from the Global air's pv tail (the
-    /// Global air is present in EVERY chunk, so this is always available for RISCV children).
-    /// `None` for recursion children.
-    riscv_pv: Option<Vec<u32>>,
     /// Per-AIR public-value addresses (empty vec for airs whose pvs were not captured).
-    /// Used by the RISCV→recursion PV translation to TIE the Global carrier copy to each
+    /// A RISCV child's Global air carries the riscv `PublicValues` copy the convert layer
+    /// translates (the Global air is in EVERY chunk); the translation TIES that carrier to each
     /// present constrained pv air (Cpu / Ecall / MemInit / MemFinal) — see the carrier binding in
-    /// `build_verify_n_program_multi`.
+    /// `translate_riscv_child_pvs`.
     per_air_pv: Vec<Vec<u32>>,
+    /// Per-AIR cached-main commitments, in the AIR's partition order: hinted, absorbed, and
+    /// bound to the proof's round-0 stacking root by `verify_one`. A RISCV child's Global air
+    /// has one, the chunk's cross-chunk event table.
+    cached_commits: Vec<Vec<[u32; 8]>>,
 }
 
 // ─── Public circuit types ─────────────────────────────────────────────────────

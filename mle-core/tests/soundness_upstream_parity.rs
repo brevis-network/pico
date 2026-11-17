@@ -50,6 +50,7 @@ fn reference_log_up_params(log2_pcs_list_size: f64) -> LogUpSecurityParameters {
         max_interaction_count,
         log_max_message_length,
         pow_bits,
+        challenge_mode: Default::default(),
     }
 }
 

@@ -9,7 +9,7 @@ use super::{items, out, ZkvmStatus, ZKVM_EOK};
 use crate::riscv_ecalls::{syscall_keccak_permute, syscall_sha256_compress, syscall_sha256_extend};
 
 /// Keccak-256's rate, in bytes.
-const KECCAK_RATE: usize = 136;
+pub(super) const KECCAK_RATE: usize = 136;
 
 /// `zkvm_status zkvm_keccak256(const uint8_t* data, size_t len, zkvm_keccak256_hash* output)`.
 ///
@@ -76,24 +76,86 @@ pub(super) fn keccak256(data: &[u8]) -> [u8; 32] {
         keccak_permute(&mut state);
     }
     // pad10*1 with Keccak's domain byte 0x01, in one final block.
-    let mut last = [0u8; KECCAK_RATE];
-    last[..tail.len()].copy_from_slice(tail);
-    last[tail.len()] ^= 0x01;
-    last[KECCAK_RATE - 1] ^= 0x80;
-    absorb(&mut state, &last);
+    let mut last = Aligned8([0u8; KECCAK_RATE]);
+    last.0[..tail.len()].copy_from_slice(tail);
+    last.0[tail.len()] ^= 0x01;
+    last.0[KECCAK_RATE - 1] ^= 0x80;
+    absorb(&mut state, &last.0);
     keccak_permute(&mut state);
 
-    let mut digest = [0u8; 32];
-    for (bytes, lane) in digest.as_chunks_mut::<8>().0.iter_mut().zip(state) {
-        bytes.copy_from_slice(&lane.to_le_bytes());
+    let mut digest = Aligned8([0u8; 32]);
+    // SAFETY: `Aligned8` is 8-aligned and 32 bytes are 4 lanes.
+    let words = unsafe { &mut *digest.0.as_mut_ptr().cast::<[u64; 4]>() };
+    for (word, lane) in words.iter_mut().zip(state) {
+        *word = lane.to_le();
     }
-    digest
+    digest.0
 }
 
+/// Bytes on an 8-byte boundary, so they can be read and written as words.
+#[repr(C, align(8))]
+struct Aligned8<const N: usize>([u8; N]);
+
+/// Lanes in one rate-sized block.
+pub(super) const RATE_LANES: usize = KECCAK_RATE / 8;
+
 /// XORs one rate-sized block into the state's first 17 lanes.
+///
+/// Lanes are read as words: byte-wise joins blow up the shift and bitwise tables, and a
+/// misaligned load needs the unaligned-memory chip, which no shape has room for.
 fn absorb(state: &mut [u64; 25], block: &[u8; KECCAK_RATE]) {
+    let offset = block.as_ptr().addr() % 8;
+    if offset == 0 {
+        // SAFETY: the block is 8-aligned and 136 bytes are 17 lanes.
+        let words = unsafe { &*block.as_ptr().cast::<[u64; RATE_LANES]>() };
+        for (lane, word) in state.iter_mut().zip(words) {
+            *lane ^= u64::from_le(*word);
+        }
+    } else {
+        absorb_misaligned(state, block, offset);
+    }
+}
+
+#[cfg(target_os = "zkvm")]
+fn absorb_misaligned(state: &mut [u64; 25], block: &[u8; KECCAK_RATE], offset: usize) {
+    let base = block.as_ptr().wrapping_sub(offset).cast::<u64>();
+    // The 18 aligned words that cover the block. The first and last also hold bytes outside
+    // it, so the loads are asm rather than reads through the reference.
+    absorb_shifted(state, offset, |i| {
+        let word: u64;
+        // SAFETY: an aligned load that may read bytes outside the block's allocation. Guest
+        // memory is flat and its regions are 8-aligned, so a word holding a byte of the block
+        // is mapped.
+        unsafe {
+            core::arch::asm!(
+                "ld {w}, 0({p})",
+                w = out(reg) word,
+                p = in(reg) base.wrapping_add(i),
+                options(pure, readonly, nostack),
+            );
+        }
+        word
+    });
+}
+
+#[cfg(not(target_os = "zkvm"))]
+fn absorb_misaligned(state: &mut [u64; 25], block: &[u8; KECCAK_RATE], _offset: usize) {
     for (lane, bytes) in state.iter_mut().zip(block.as_chunks::<8>().0) {
         *lane ^= u64::from_le_bytes(*bytes);
+    }
+}
+
+/// XORs into each lane the 8 bytes that start `offset` (1..8) bytes into aligned word `i`,
+/// joined from words `i` and `i + 1` with one shift each.
+#[cfg_attr(not(any(target_os = "zkvm", test)), allow(dead_code))]
+pub(super) fn absorb_shifted(state: &mut [u64; 25], offset: usize, word: impl Fn(usize) -> u64) {
+    debug_assert!((1..8).contains(&offset), "offset {offset}");
+    let right = 8 * offset as u32;
+    let mut low = u64::from_le(word(0));
+    for (i, lane) in state.iter_mut().take(RATE_LANES).enumerate() {
+        let high = u64::from_le(word(i + 1));
+        *lane ^= (low >> right) | (high << (64 - right));
+        low = high;
     }
 }
 

@@ -56,9 +56,10 @@ therefore admitted before the chunk-1 leaf or beside another node, and nowhere e
 rather than a root proof that does not verify.
 
 The node is otherwise transparent to everything the tree chains: no execution chunk, memory cursors
-closed, `exit_code` zero, the neutral GCS point, `flag_complete` zero so it can never pose as a
-root. Two of its fields are free witnesses — the main program's `riscv_vk_digest` and entry pc —
-and continuity pins both against the execution leaves.
+closed, `exit_code` zero, the global LogUp passing through, `flag_complete` zero so it can never pose as a
+root. Three of its fields are free witnesses — the main program's `riscv_vk_digest`, its entry pc
+and the value of the global LogUp's chain it passes from its left neighbour to its right — and
+continuity pins all three against its neighbours.
 
 One consequence worth knowing before touching the continuity links: with a node leading the tree,
 the root's `start_chunk == 1` and `previous_*_addr == 0` read that node's baked constants rather
@@ -97,13 +98,19 @@ publishes the main program's identity and entry pc, and continuity is what pins 
 ```rust
 let (nodes, digest) = deferred.prove_chain(&sub_proofs)?;  // one node per sub-proof, in order
 convert.set_final_deferred_digest(digest);                 // every leaf carries this
-let mut children = nodes;                                  // nodes FIRST
-children.extend(convert.prove_with_vks(&riscv_proofs)?);
+// The global LogUp's nodes lead the tree (the image node, then the group nodes), carrying the
+// deferred chain at its start, zero; the deferred nodes follow, then the leaves.
+let mut children = prove_global_logup_nodes(&riscv_proof, &vm_vk, [Kb::ZERO; DIGEST_SIZE])?;
+children.extend(nodes);
+children.extend(convert.prove_with_vks(&riscv_proof.chunk_proofs)?);
 let root = combine.prove_tree(children)?;
 ```
 
+A tree without the global LogUp's nodes does not close: its root's chain closure fails
+([docs/soundness/README.md](soundness/README.md)).
+
 The `vk_digest` a guest passes to `verify_pico_proof` is the sub-program's **MLE exe identity** —
-`RiscvVmVk::digest()`, i.e. `H(DOMAIN ‖ program_commit ‖ pc_start ‖ initial_gcs)`. The removed FRI
+`RiscvVmVk::digest()`, i.e. `H(DOMAIN ‖ program_commit ‖ pc_start ‖ image_commit ‖ image_tier)`. The removed FRI
 stack hashed a verifying key instead, so a caller porting from it is passing the wrong value. The
 `pv_digest` is the SHA-256 the sub-program committed, which is what its root carries in
 `committed_value_digest`.
@@ -147,7 +154,7 @@ the host and runs on the CPU build only.
 | | |
 |---|---|
 | `test_mle_deferred` (CI) | proves one node over a real root; checks its public values and that its in-circuit chain step equals `hash_deferred_proof` |
-| `test_mle_deferred_chain` (by hand) | over fib: a baseline that must prove, plus two cases that must fail at the root — one isolating `end_reconstruct == deferred_proofs_digest`; over the aggregator guest (`perf/bench_data/rv64/aggregator-elf`), claiming fib's root twice: a tree with both nodes must prove, the same leaves carrying no chain must fail, a tree with only the first node must be refused by combine's host-side seam check and, with that check off, fail at the root, while the aggregator claiming fib's root once, one node ahead of its leaves, must prove; a node over the proved two-node tree's root, whose own deferred digest is not zero, must fail to verify, while the same node keygen'd without the zero-digest requirement must prove |
+| `test_mle_deferred_chain` (by hand) | over fib: a baseline that must prove, plus two cases that must fail at the root — one isolating `end_reconstruct == deferred_proofs_digest`; over the aggregator guest (`perf/bench_data/rv64/aggregator-elf`), claiming fib's root twice: a tree with both nodes must prove, the same leaves carrying no chain must fail, a tree with only the first node must be refused by combine's host-side seam check and, with that check off, fail at the root, while the aggregator claiming fib's root once, one node ahead of its leaves, must prove; a node over the proved two-node tree's root, whose own deferred digest is not zero, must fail to verify, while the same node keygen'd without the zero-digest requirement must prove; with the global LogUp: a node passing a forged value through its chain must be refused by combine's host-side check and, with that check off, fail at the root, a node publishing `(0, 0)` as its fraction must fail at the root, a node handed something that is not a complete root (leaves under a top node that is not a root, or an image node) must fail to verify, and a tree with its deferred node between the image node and the group nodes must prove |
 | `test_mle_deferred_split` (by hand) | a halt-only chunk carrying a forged digest behind real nodes, and a cut inside the commit run, must both fail; with the commit-tail hold, the run stays whole across a sweep of chunk sizes and a representative run proves |
 | `test_mle_deferred_whitelist` (by hand) | under the whitelist (the shipped artifact via `MLE_VK_MAP`/`MLE_VK_ROOT`, or a self-map): the aggregator tree with two nodes must prove and pass the apex; refused when the sub-proof is unlisted, proved under another root or not complete, when the node's Merkle path is forged or its own VK unlisted, and when the apex pins another root |
 | `test_carrier_tie` (CI) | the tie the chain rests on: a carrier that disagrees with Ecall's copy is rejected |

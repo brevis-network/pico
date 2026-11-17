@@ -75,6 +75,8 @@ const fn build_extra_cycles_table() -> [u32; 256] {
     table[0x30] = 0x01; // SECP256R1_ADD
     table[0x31] = 0x00; // SECP256R1_DOUBLE
     table[0x32] = 0x00; // SECP256R1_DECOMPRESS
+    table[0x33] = 0x01; // BLS12381_G2_ADD
+    table[0x34] = 0x00; // BLS12381_G2_DOUBLE
     table
 }
 
@@ -629,6 +631,14 @@ pub(crate) fn dispatch_precompile(
         }
         id if id == SyscallCode::BLS12381_DOUBLE as u32 => {
             precompiles::ec::bls12381_double_optimized(mem, arg1);
+            Ok(true)
+        }
+        id if id == SyscallCode::BLS12381_G2_ADD as u32 => {
+            precompiles::ec::bls12381_g2_add(mem, arg1, arg2);
+            Ok(true)
+        }
+        id if id == SyscallCode::BLS12381_G2_DOUBLE as u32 => {
+            precompiles::ec::bls12381_g2_double(mem, arg1);
             Ok(true)
         }
         id if id == SyscallCode::BLS12381_DECOMPRESS as u32 => {

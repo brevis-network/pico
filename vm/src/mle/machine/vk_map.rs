@@ -12,8 +12,9 @@
 //! The tree has a FIXED depth ([`MLE_VK_MERKLE_DEPTH`], baked into the membership circuit);
 //! unused leaves are zero digests (nothing proves under a zero-commitment key). The whitelist
 //! contents are a per-config artifact: one convert VK per RISC-V shape the whitelist admits
-//! (`shape::mle_riscv_shapes`), the combine node VKs, the deferred node VK, then the compress
-//! node VK (one: in whitelist mode every complete root has the one combine-tier layout, so the
+//! (`shape::mle_riscv_shapes`), the combine node VKs, the global LogUp's node VKs (a group node
+//! per group size, an image node per image tier), the deferred node VK, then the compress node
+//! VK (one: in whitelist mode every complete root has the one combine-tier layout, so the
 //! compress node has one key), in that leaf order.
 
 use std::collections::HashMap;
@@ -37,6 +38,7 @@ use std::{
 };
 
 use super::{
+    global_logup::assert_global_bus,
     recursion::{
         extract_recursion_vk_layout_from_heights, pad_convert_program,
         recursion_air_refs_with_preprocessed, Engine,
@@ -155,7 +157,11 @@ pub fn whitelist_riscv_vk(
     ));
     let airs = super::riscv::mle_riscv_air_refs(program, true);
     let vk = engine
-        .keygen_with_app_prep(&airs, super::riscv::RISCV_APP_PREP_AIR_IDS)
+        .keygen_with_app_prep_and_required(
+            &airs,
+            super::riscv::RISCV_APP_PREP_AIR_IDS,
+            super::riscv::RISCV_REQUIRED_AIR_IDS,
+        )
         .1;
     admit_production_vk("riscv", "cpu", &vk)?;
     Ok(vk)
@@ -181,6 +187,9 @@ pub fn whitelist_convert_vk(
     label: &str,
     shape: &[(String, usize)],
 ) -> Result<MultiStarkVerifyingKey<Sc>, UnderBudgetError> {
+    // The convert program counts a chunk's cross-chunk events from the audited sender table and
+    // the layout's heights; the key it verifies under must have exactly that bus.
+    assert_global_bus(&riscv_vk.inner);
     let mut program = ConvertVerifierCircuit::build_verify_program(&ConvertProgramInput {
         vk: synthesized_convert_layout(riscv_vk, shape),
         vk_verification: true,
@@ -280,18 +289,20 @@ pub fn pinned_root_from_env() -> Option<[Kb; 8]> {
 }
 
 /// What the whitelist holds, as the root file says it: one leaf per riscv shape, the combine
-/// node shapes, the deferred node and the compress node.
+/// node shapes, the global LogUp's nodes (a group node per group size, an image node per image
+/// tier), the deferred node and the compress node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VkMapLeafCounts {
     pub convert: usize,
     pub combine: usize,
+    pub global_logup_nodes: usize,
     pub deferred: usize,
     pub compress: usize,
 }
 
 impl VkMapLeafCounts {
     pub fn total(&self) -> usize {
-        self.convert + self.combine + self.deferred + self.compress
+        self.convert + self.combine + self.global_logup_nodes + self.deferred + self.compress
     }
 }
 
@@ -317,10 +328,11 @@ pub fn root_file_text(
     let lines = [
         format!(
             "# MLE whitelist artifact {bin_name}: {} convert VKs (one per riscv shape) + {} combine \
-             node VKs + {} deferred node VK + {} compress node VK = {} leaves in a \
-             depth-{MLE_VK_MERKLE_DEPTH} Merkle tree,",
+             node VKs + {} global LogUp node VKs + {} deferred node VK + {} compress node VK = {} \
+             leaves in a depth-{MLE_VK_MERKLE_DEPTH} Merkle tree,",
             leaves.convert,
             leaves.combine,
+            leaves.global_logup_nodes,
             leaves.deferred,
             leaves.compress,
             leaves.total()
@@ -714,7 +726,7 @@ mod tests {
             compiler::riscv::compiler::{Compiler, SourceType},
             mle::machine::{
                 combine::CombineMachine, compress::CompressMachine, deferred::DeferredMachine,
-                exe::RiscvVmVk,
+                exe::RiscvVmVk, global_logup_nodes::GlobalLogUpNodeMachine,
             },
         };
         use pico_mle_core::config::{
@@ -722,14 +734,38 @@ mod tests {
         };
         let shapes = super::super::shape::mle_riscv_shapes();
         let nodes = CombineMachine::standard_node_count();
+        const FIB_ELF: &[u8] = include_bytes!("../../compiler/test_elf/fib-elf");
+        let program = Compiler::new(SourceType::RISCV, FIB_ELF)
+            .expect("fib elf")
+            .compile();
+        let riscv_vk = whitelist_riscv_vk(program.clone()).expect("riscv keygen");
+        // The global LogUp's nodes: every key of the operating point, in the builder's order,
+        // right after the combine leaves.
+        let global_logup_nodes = GlobalLogUpNodeMachine::new(
+            recursion_params_with_128_bits_security(),
+            &riscv_vk.inner.params,
+            true,
+        )
+        .preregister()
+        .expect("global LogUp node keygen");
         assert_eq!(
             map.entries.len(),
-            shapes.len() + nodes + 2,
-            "leaf count: {} riscv shapes + {nodes} combine node shapes + 1 deferred node + 1 \
-             compress node",
-            shapes.len()
+            shapes.len() + nodes + global_logup_nodes.len() + 2,
+            "leaf count: {} riscv shapes + {nodes} combine node shapes + {} global LogUp nodes + \
+             1 deferred node + 1 compress node",
+            shapes.len(),
+            global_logup_nodes.len()
         );
-        let _ = map.root().map(|f| f.as_canonical_u32());
+        for (i, vk) in global_logup_nodes.iter().enumerate() {
+            assert_eq!(
+                map.find(&vk_identity(vk)),
+                Some(shapes.len() + nodes + i),
+                "the global LogUp's node key {i} (the group nodes by group size, then the image \
+                 nodes by tier) is not at its whitelist leaf: the node programs, the group \
+                 machines or the nodes' rows changed since the artifact was built; rebuild it \
+                 with `cargo run --release -p pico-vm --example mle_build_vk_map`"
+            );
+        }
 
         // The digest covers the shape config; it does not cover the riscv AIRs, the params or the
         // recursion compiler, whose changes move keys without moving the digest. An AIR's change
@@ -738,11 +774,6 @@ mod tests {
         // precompile kind, plus the combine node the preregistration bootstraps from. Each key
         // this binary derives must be a member; a stale artifact fails here rather than at a
         // prover's first whitelist lookup. One keygen per probe, seconds each in release.
-        const FIB_ELF: &[u8] = include_bytes!("../../compiler/test_elf/fib-elf");
-        let program = Compiler::new(SourceType::RISCV, FIB_ELF)
-            .expect("fib elf")
-            .compile();
-        let riscv_vk = whitelist_riscv_vk(program.clone()).expect("riscv keygen");
         // The soundness manifest records the identities an apex verifier is built from; they must
         // be this tree's. Checked first: it costs no keygen, so a stale manifest is reported
         // before the probes below spend theirs.
@@ -791,11 +822,17 @@ mod tests {
                 (None, _) => label.to_string(),
             }
         };
+        // The core catch-all too: the one shape whose share of the real-row bound is capped by
+        // the table's own height, so a change to that cap moves its key and no other.
         let mut seen = std::collections::BTreeSet::new();
         let probes: Vec<&(String, Vec<(String, usize)>)> = shapes
             .iter()
-            .filter(|(label, _)| seen.insert(family(label)))
+            .filter(|(label, _)| seen.insert(family(label)) || label == "core:catch-all")
             .collect();
+        assert!(
+            probes.iter().any(|(label, _)| label == "core:catch-all"),
+            "the core catch-all is a whitelist shape"
+        );
         assert!(
             probes.len() >= 3,
             "a core, a memory and a precompile probe at least"
@@ -819,6 +856,50 @@ mod tests {
             true,
         );
         let first_convert = first_convert.as_ref().expect("a convert VK");
+        // A parent in whitelist mode bakes each child's lean pre-hash, the same for every key of
+        // a row, and the layouts it is read from are synthesized from one key at the row's
+        // heights. What that gives has to be what the row's keys have: the manifest records
+        // those off keygen'd keys.
+        let recorded_pre_hash = |machine: &str, role: &str| -> Vec<u32> {
+            let row = manifest["keys"]
+                .as_array()
+                .expect("the manifest's keys")
+                .iter()
+                .find(|row| {
+                    row["machine"] == machine
+                        && row["mode"] == "whitelist"
+                        && row["role"].as_str().is_some_and(|r| r.starts_with(role))
+                })
+                .unwrap_or_else(|| {
+                    panic!("the soundness manifest records no {machine} key; {regenerate}")
+                });
+            limbs(&row["vk_pre_hash"])
+        };
+        let rows = super::super::shape::MLE_RECURSION_CONVERT_LADDER.len();
+        let child_rows = (0..rows)
+            .map(|r| {
+                (
+                    RecursionTier::Convert(r),
+                    "convert",
+                    format!("ladder row {r} "),
+                )
+            })
+            .chain([
+                (RecursionTier::GroupNode, "group_node", String::new()),
+                (RecursionTier::Combine, "combine", String::new()),
+            ]);
+        for (tier, machine, role) in child_rows {
+            let at_row = extract_recursion_vk_layout_from_heights(
+                first_convert,
+                Some(&recursion_tier_log_heights(tier)),
+            );
+            assert_eq!(
+                at_row.vk_pre_hash.to_vec(),
+                recorded_pre_hash(machine, &role),
+                "{tier:?}: the pre-hash computed for the row's heights is not the one the \
+                 soundness manifest records for a key of that row; {regenerate}"
+            );
+        }
         let node = combine
             .bootstrap_node_vk(first_convert)
             .expect("combine keygen");
@@ -828,6 +909,25 @@ mod tests {
              the combine tier changed since the artifact was built; rebuild it \
              with `cargo run --release -p pico-vm --example mle_build_vk_map`"
         );
+        // Two more of the standard nodes, each at its leaf: a node with a group node for a
+        // child, and a complete root. The bootstrap node is neither.
+        let kinds = super::super::shape::MLE_RECURSION_CONVERT_LADDER.len() + 2;
+        let (group, tier) = (kinds - 2, kinds - 1);
+        for (name, left, right, complete) in [
+            ("the node over [C0, G]", 0, group, false),
+            ("the root over [B, B]", tier, tier, true),
+        ] {
+            let (position, node) = combine
+                .standard_node_vk(first_convert, left, right, complete)
+                .expect("combine keygen");
+            assert_eq!(
+                map.find(&vk_identity(&node)),
+                Some(shapes.len() + position),
+                "{name} is not at its whitelist leaf: the recursion compiler, the root's \
+                 assertions or a tier table changed since the artifact was built; rebuild it \
+                 with `cargo run --release -p pico-vm --example mle_build_vk_map`"
+            );
+        }
         let mut deferred = DeferredMachine::new(
             recursion_params_with_128_bits_security(),
             vm_vk.clone(),
@@ -856,6 +956,14 @@ mod tests {
             "the compress node VK is not the whitelist's last leaf: the compress program, the \
              compress preset or the combine tier changed since the artifact was built; rebuild it \
              with `cargo run --release -p pico-vm --example mle_build_vk_map`"
+        );
+        // The compress row likewise, against the compress key itself.
+        assert_eq!(
+            crate::mle::machine::recursion::compress_proof_layout(&node)
+                .vk_pre_hash
+                .to_vec(),
+            node.pre_hash.map(|f| f.as_canonical_u32()).to_vec(),
+            "the pre-hash computed for the compress row's heights is not the compress key's"
         );
         // A compress envelope carries no key: verifiers take the one shipped beside the root.
         assert!(
@@ -978,6 +1086,7 @@ mod tests {
             VkMapLeafCounts {
                 convert: 1,
                 combine: 1,
+                global_logup_nodes: 0,
                 deferred: 0,
                 compress: 0,
             },

@@ -56,6 +56,7 @@ pico-verifier = { workspace = true, features = ["codec"] }
 pico-vm = { workspace = true, features = ["stage-ledger"] }
 pico-aot-runtime = { workspace = true, optional = true }
 pico-aot-dispatch = { path = "../aot-generated", optional = true }
+sha2 = { workspace = true, optional = true }
 prost-types.workspace = true
 prost.workspace = true
 rand.workspace = true
@@ -82,7 +83,7 @@ cuda = ["pico-vm/cuda", "dep:cudart"]
 tcmalloc = ["pico-vm/tcmalloc"]
 jemalloc = ["pico-vm/jemalloc"]
 bigint-rug = ["pico-vm/bigint-rug", "pico-aot-dispatch?/bigint-rug"]
-aot-emulator = ["pico-vm/aot-emulator", "dep:pico-aot-dispatch", "dep:pico-aot-runtime"]
+aot-emulator = ["pico-vm/aot-emulator", "dep:pico-aot-dispatch", "dep:pico-aot-runtime", "dep:sha2"]
 mmap-memory = ["pico-vm/mmap-memory", "pico-aot-dispatch?/mmap-memory"]
 s3-storage = ["object_store"]
 local_test = []

@@ -63,9 +63,6 @@ impl PrepRowCounts {
                 Instruction::Hint(i) => c.memory_var += i.output_addrs_mults.len(),
                 Instruction::HintBits(i) => c.memory_var += i.output_addrs_mults.len(),
                 Instruction::HintExt2Felts(i) => c.memory_var += i.output_addrs_mults.len(),
-                Instruction::HintAddCurve(i) => {
-                    c.memory_var += i.output_x_addrs_mults.len() + i.output_y_addrs_mults.len();
-                }
                 Instruction::BaseAlu(_) => c.base_alu += 1,
                 Instruction::ExtAlu(_) => c.ext_alu += 1,
                 Instruction::Select(_) => c.select += 1,

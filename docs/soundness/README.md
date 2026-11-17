@@ -8,6 +8,9 @@ Release 3.1 brought the riscv and the recursion machines to that target, added t
 compress key as a leaf. `README.md`
 and `docs/support-matrix.md` state the same target; the release notes of earlier releases state
 theirs (100 bits for 3.0).
+Consistency across the chunks of a block (memory carried from one chunk to the next, syscalls
+handed to precompile chunks) is a LogUp argument over the whole block, the global LogUp, and is
+scored here with the rest.
 This document says what that number is, where its inputs come from, what the wired presets
 currently score, and which assumptions the number rests on.
 
@@ -23,6 +26,7 @@ largest per-round error, i.e. the minimum over rounds and components. The calcul
 | Component | Round(s) charged |
 |---|---|
 | LogUp | The α/β challenges of the LogUp argument (Schwartz–Zippel over all messages, minus the list-size penalty), plus the grinding bits, with the sampling bias of `sample_bits` accounted for |
+| Global LogUp | The α/β challenges of a block's LogUp argument over its cross-chunk events: one round per block, shared by the block's group proofs and charged as a proof's own LogUp round is (see below) |
 | LogUp-GKR sumcheck | One degree-3 sumcheck round per hypercube variable and GKR layer, plus one event for the last layer's challenges, which are coordinates of the ZeroCheck input point (`4/|F|` per round) |
 | GKR batching | The λ / μ challenges that batch numerator and denominator claims across layers; a layer's closing μ and the next layer's λ are sampled with nothing observed between them, so they are charged as one round (`2/|F|`) |
 | ZeroCheck sumcheck | The univariate-skip round (degree `(d+1)(2^l_skip − 1)`) and the multilinear rounds (degree `d + 1`) |
@@ -37,6 +41,34 @@ test `worst_case_depth_is_zero` in `mle-core/src/config/soundness/vk.rs` checks 
 component). Where the verifier's polynomial degree is lower than what the calculator charges (WHIR
 folding sumcheck: quadratic, charged as cubic; stacked-reduction batching over `c` columns: degree
 `2c − 1`, charged as `2c`), the calculator is conservative.
+
+**The global LogUp.** Each chunk's proof commits the chunk's table of cross-chunk events on its
+own, as a cached main trace of the Global AIR at a fixed height; the program's memory image is a
+committed table too. A chain hashes the tables' commitments in chunk order, and the block's
+challenges `(α, β)` are drawn from the chain's last value, the program's identity and a digest of
+the operating point, behind 18 bits of proof of work. Group proofs then re-open the tables under
+those challenges, at most 15 tables to a proof, and each hands back the fractional sum of its
+rows. The recursion tree adds the sums up, and its root accepts only a zero numerator over a
+non-zero denominator.
+
+A group proof runs the riscv preset in the external challenge mode: it absorbs `(α, β)` instead of
+drawing them, so it has no LogUp round of its own, and the calculator scores it without one. The
+round is charged once per block (`SoundnessCalculator::global_logup_bits`), by the bound of a
+proof's own LogUp round, on three conditions the system enforces:
+
+- **The challenges come after the tables.** The chain's last value fixes every commitment, and a
+  commitment fixes its table: the first WHIR round of the riscv preset stays within the
+  unique-decoding radius (asserted at keygen of the group machines), so the chunk proof and the
+  group proof that open one commitment read the same table.
+- **The block's sum has no more terms than the bound allows.** The root bounds the real rows of
+  each direction below `p`, by a count the tree carries up in units of 1024 rows (at most
+  2,076,672 units a block).
+- **The tree holds the chain, the challenges and the tables together.** One image node derives
+  the challenges from the chain value it is told and opens the image table; each group node
+  covers a run of chunks; the root asserts that the chain closes over every chunk exactly once.
+
+The first and the third rest on the collision resistance of the transcript hash, as the chain
+of proofs does (section 4).
 
 **The WHIR terms against the verifier's transcript** (`mle-core/src/verifier/whir.rs`). Each WHIR
 term charges one challenge, and each challenge is sampled only after the message it must bind is
@@ -64,11 +96,12 @@ same values from the verifying key:
 | Machine | Preset | Stacked height |
 |---|---|---|
 | riscv | `riscv_params_with_128_bits_security(h)` | `h` = `MLE_LOG_STACKED_HEIGHT` (default and maximum 23) |
-| convert, combine, root verification | `recursion_params_with_128_bits_security()` | 21 |
+| group proofs of the global LogUp | the riscv preset in the external challenge mode (`global_logup::group_params`) | the riscv machine's |
+| convert, the global LogUp's image and group nodes, combine, root verification | `recursion_params_with_128_bits_security()` | 21 |
 | compress | `compress_params_with_128_bits_security()` | fills the two-adic domain exactly (20) |
 | embed | `embed_params_with_128_bits_security()` | fills the two-adic domain exactly (20) |
 
-These are the presets the soundness calculator scores, and all four are release presets, the ones
+These are the presets the soundness calculator scores, and all are release presets, the ones
 the production claim covers; any parameter set outside this list carries no production claim,
 whatever it scores.
 
@@ -101,13 +134,15 @@ bias included.
 constraints per AIR, maximum interactions per AIR, total trace columns (preprocessed + cached mains
 + common main), and the stacked height as the bound on every trace height. All but the interaction
 count enter the score; it is recorded so the preset's documented bound on it can be checked. Every
-keygen of the riscv, convert, combine, deferred, compress and embed machines logs one line (target
+keygen of the riscv, convert, combine, deferred, compress and embed machines, and of the global
+LogUp's group machines (`group`, the largest group's key) and nodes (`image_node`, `group_node`), logs
+one line (target
 `mle_soundness`, level `info`, message `keygen soundness`) with `machine`, `backend`, the `VkShape`
 fields, `vk_pre_hash` and `bits`, for example:
 
 ```text
-INFO keygen soundness machine="riscv" backend="cpu" num_airs=50 max_constraints_per_air=2989
-  max_interactions_per_air=1843 num_trace_columns=32057 log_stacked_height=23 vk_pre_hash=[...]
+INFO keygen soundness machine="riscv" backend="cpu" num_airs=53 max_constraints_per_air=4292
+  max_interactions_per_air=4966 num_trace_columns=45193 log_stacked_height=23 vk_pre_hash=[...]
   bits=128.32
 ```
 
@@ -127,18 +162,24 @@ cargo run --release -p pico-vm --example mle_soundness_manifest
 ```
 
 The generator keygens two sets of keys. With the whitelist off it proves fib-10 through the combine
-root and on to the compress proof, so the recursion keys are the ones such a run produces, with
+root and on to the compress proof, the tree led by the global LogUp's image node and group node,
+so the recursion keys are the ones such a run produces, with
 embed keygen'd over the compress proof; with the whitelist on it keygens, without proving, the riscv
-key, one convert key per convert ladder row, every standard combine node, the deferred and compress
+key, one convert key per convert ladder row, the global LogUp's image node per image tier and
+group node per group size, every standard combine node, the deferred and compress
 nodes over the combine-tier child (the one root layout of whitelist mode), and the embed node over
 the compress proof's layout (`compress_proof_layout`, the compress row's heights). Per key it writes
-the `VkShape`, the params, the key's identity and every component of section 1; the header records
+the `VkShape`, the params, the key's identity and every component of section 1. The group
+machines, which depend on the riscv operating point alone, get one row per group size, without a
+LogUp component: the round they leave out is the block's, written once in the header
+(`global_logup`) with the inputs it is scored from. The header also records
 the commit it ran at, the shipped whitelist's root, the whitelist-mode riscv key's pre-hash, and the
 Groth16 test keys in `contracts/test/dev`: their wrap circuit's hash and size and the whitelist root
 it was set up under. It is written by the default degree bound only.
 
 The tests then score each preset at the bounds its doc comment assumes and at every key in the
-manifest, the riscv preset at every stacked height it admits (11 to 23); pin every component at
+manifest, the riscv preset and the group machines at every stacked height the riscv preset admits
+(11 to 23); hold the global LogUp's round to what the calculator gives; pin every component at
 the assumed bounds to the hundredth, and every component of a manifest key to the value the
 manifest records; check that each measured shape stays within the assumed bounds; and check that
 the manifest still matches the presets and the calculator, that it was generated from a clean
@@ -166,13 +207,13 @@ cargo test -p pico-mle-core --test soundness_upstream_parity -- --nocapture
 ```
 
 The manifest also records, per machine, the shapes a whitelist-mode proof takes at that layer
-(`proof_shapes`), over each riscv shape, each convert ladder row, each combine node, the deferred
-node, and compress and embed at their rows: `shapes` counts the distinct proof shapes; `max` holds
+(`proof_shapes`), over each riscv shape, each convert ladder row, the global LogUp's image and
+group nodes, each combine node, the deferred node, and compress and embed at their rows: `shapes` counts the distinct proof shapes; `max` holds
 each per-proof shape input at its largest (present AIRs, constraints and interactions of a present
 AIR, present columns, tallest trace, stacked width), where a key's `shape` counts every AIR of the
 key; and `largest` holds the shape and wire size of the largest proof. A whitelist-mode proof's
 trace heights are its shape's, so `ProofShape::from_heights` (`mle-core/src/protocol/proof_size.rs`)
-gives its size without proving: 299,179 bytes for compress and 239,319 for embed. In CI,
+gives its size without proving: 299,231 bytes for compress and 239,371 for embed. In CI,
 `test_mle_e2e` (dev mode, through compress) holds every proof it makes against the size its shape
 gives, as the wrap test does its embed proof, and the artifact test holds the recorded compress and
 embed shapes against this binary's keys. A whitelist-mode run of `test_mle_e2e` and the ignored
@@ -181,8 +222,10 @@ by hand. These records are for EF's soundcalc to score Pico's soundness and proo
 
 ## 3. Results
 
-Measured shapes: riscv 50 AIRs, per-AIR maxima of 2989 constraints and 1843 interactions, 32057
-columns; convert, combine, deferred, compress and embed share 21 recursion AIRs, per-AIR maxima of
+Measured shapes: riscv 53 AIRs, per-AIR maxima of 4292 constraints and 4966 interactions, 45193
+columns; a group machine one AIR per table (1 to 15), each without constraints and with one
+interaction, 11 columns a table; convert, the global LogUp's nodes, combine, deferred, compress and
+embed share 21 recursion AIRs, per-AIR maxima of
 170 constraints and 34 interactions, 1409 columns, compress and embed at their own stacked height
 (over `KoalaBear^4`
 the recursion AIRs had 148 constraints and 1277 columns: the chips that store extension values grew
@@ -201,11 +244,13 @@ same AIR set and preset and score the same. The shipped whitelist artifact
 
 | Machine / preset | LogUp | GKR sumcheck | GKR batching | ZeroCheck | Constraint batching | Stacked reduction | WHIR | **Total** |
 |---|---|---|---|---|---|---|---|---|
-| riscv (h = 23), measured | 133.95 | 152.94 | 153.94 | 149.04 | 143.38 | 138.98 | 128.32 | **128.32** |
-| convert / combine / deferred, measured (dev set) | 133.95 | 152.94 | 153.94 | 148.71 | 147.29 | 143.48 | 128.39 | **128.39** |
+| riscv (h = 23), measured | 133.95 | 152.94 | 153.94 | 149.04 | 142.86 | 138.48 | 128.32 | **128.32** |
+| group proof, 1 to 15 tables (h = 23), measured | the block's | 152.94 | 153.94 | 149.04 | 149.86 to 149.48 | 150.04 to 146.58 | 128.32 | **128.32** |
+| the global LogUp's round, once per block | 133.95 | | | | | | | **133.95** |
+| convert / the global LogUp's nodes / combine / deferred, measured (dev set) | 133.95 | 152.94 | 153.94 | 148.71 | 147.29 | 143.48 | 128.39 | **128.39** |
 | compress (m = 2), measured (dev set) | 130.63 | 152.94 | 153.94 | 145.39 | 143.98 | 140.16 | 128.05 | **128.05** |
 | embed (m = 2), measured (dev set) | 130.63 | 152.94 | 153.94 | 145.39 | 143.98 | 140.16 | 128.05 | **128.05** |
-| riscv preset (h = 23), assumed bounds | 133.95 | 152.94 | 153.94 | 149.04 | 142.65 | 138.66 | 128.32 | **128.32** |
+| riscv preset (h = 23), assumed bounds | 133.95 | 152.94 | 153.94 | 149.04 | 142.65 | 138.33 | 128.32 | **128.32** |
 | recursion preset, assumed bounds | 133.95 | 152.94 | 153.94 | 148.71 | 144.93 | 142.98 | 128.39 | **128.39** |
 | compress and embed presets (m = 2), assumed bounds | 130.63 | 152.94 | 153.94 | 145.39 | 141.61 | 139.66 | 128.05 | **128.05** |
 
@@ -213,11 +258,11 @@ WHIR sub-terms (riscv / recursion): query 128.32 / 128.39, proximity gaps 136.94
 sumcheck 158.36 / 157.36, fold 136.94 / 136.94, out-of-domain 136.94 / 138.94, γ batching
 146.91 / 147.61, shift 128.32 / 128.39, μ batching 134.94 / 133.94. Query counts: riscv
 [261, 119, 110, 109], recursion [160, 114, 109], compress and embed [65, 34, 24]. The compress
-proof, the one handed out, is 292.17 KiB (stacked width 20 + 5 = 25) in whitelist mode, where the
+proof, the one handed out, is 292.22 KiB (stacked width 20 + 5 = 25) in whitelist mode, where the
 compress tier row is the program's natural heights over the combine-tier root layout (measured on
 fib-10 and reth 18884864 and 24600825). In dev mode it follows the root and is at most that:
-292.17 KiB on the reth blocks, 271.76 KiB (stacked width 20) on fib-10. The embed proof over it is
-233.71 KiB (stacked width 11), measured on fib-10 in both modes and on reth 18884864 in whitelist
+292.22 KiB on the reth blocks, 271.81 KiB (stacked width 20) on fib-10. The embed proof over it is
+233.76 KiB (stacked width 11), measured on fib-10 in both modes and on reth 18884864 in whitelist
 mode.
 
 The binding term is the WHIR query phase, which depends only on the protocol parameters.
@@ -227,7 +272,8 @@ the derivation alone does not guarantee the target: the tests are the guard. The
 bits for riscv, 0.39 bits for the recursion machines and 0.05 bits for compress and embed (one query
 fewer in the recursion preset's first WHIR round would give 127.81). Every other component is at
 least 5.9 bits above the target for riscv and recursion and 2.6 bits for compress and embed (their
-LogUp terms, 133.95 and 130.63), and the circuit-shape inputs only enter those other components: for
+LogUp terms, 133.95 and 130.63; the global LogUp's round is 133.95 at every riscv height, the
+bound of a riscv proof's own LogUp round), and the circuit-shape inputs only enter those other components: for
 riscv and recursion the across-AIR batching term `3|T| − 1` allows about 2^25 AIRs and the
 stacked-reduction batching term `2c` just under 2^26 columns before the total drops below 128 (the
 list size of compress and embed, 3.3 bits, lowers both thresholds by that much).
@@ -236,21 +282,23 @@ list size of compress and embed, 3.3 bits, lowers both thresholds by that much).
 
 **Enforced at keygen or by the verifier** (so a proof that violates them is rejected): trace heights
 ≤ the stacked height, total stacked width ≤ `w_stack`, constraint degree ≤ 4, LogUp message length +
-1 ≤ 128, lifted interaction count < `p`, and the query counts and grinding bits of the key. Keygen
-of every production phase (riscv, convert, combine, deferred, compress, embed) and the whitelist
+1 ≤ 128, lifted interaction count < `p`, and the query counts and grinding bits of the key; and
+for a block, fewer than `p` real rows of cross-chunk events in each direction, which the root of
+the recursion tree bounds. Keygen
+of every production phase (riscv with the global LogUp's group machines, convert, the global
+LogUp's nodes, combine, deferred, compress, embed) and the whitelist
 builder score each key as section 1 does and refuse one below 128 bits; the weak parameters of the
 test utilities are keygen'd outside that check.
 
 **Assumed, not enforced**: the circuit-shape bounds in the preset doc comments (riscv preset:
-≤ 100 AIRs, ≤ 5000 constraints and ≤ 2000 interactions per AIR, ≤ 40 000 columns; recursion
+≤ 100 AIRs, ≤ 5000 constraints and ≤ 6000 interactions per AIR, ≤ 50 000 columns; recursion
 preset: ≤ 50, ≤ 1000, ≤ 100, ≤ 2000). `tests/soundness.rs` checks the measured shapes against them, and the `mle_soundness`
 keygen log line shows the live values and score of every key a run produces.
 
 **Model and scope**: the transcript hash, Poseidon2 over KoalaBear (width 16, rate 8, with the
 round constants Plonky3 0.5 generated for KoalaBear — `default_koalabear_poseidon2_16`, re-exported
-by `mle-core/src/config/koala_bear_poseidon2.rs`; the riscv stage -- its Poseidon2 chip, the Global
-chip's hash-to-curve and the Poseidon2 syscall -- runs that same instance through
-`FieldSpecificPoseidon2Config`), is treated as a random oracle, its 8-element
+by `mle-core/src/config/koala_bear_poseidon2.rs`; the riscv stage's Poseidon2 syscall runs that
+same instance through `FieldSpecificPoseidon2Config`), is treated as a random oracle, its 8-element
 digest as collision resistant, and grinding cost is counted in Poseidon2 permutations; every number
 here is conditional on that instance being sound. The embed proof's commitments and transcript run
 over a second instance, Poseidon2 over BN254 (width 3, a one-element digest;
@@ -274,10 +322,21 @@ number of proofs drops out, since a longer chain costs calls already counted in 
 obligation is checked by the tests here: the first is argued from the circuits' code, the second
 is an assumption.
 
-At the release presets of section 2 every key scores at least 128 bits per proof: riscv 128.32
-(measured), the recursion machines (convert, combine, deferred) 128.39, and compress and embed
+At the release presets of section 2 every key scores at least 128 bits per proof: riscv and the
+group proofs 128.32 (measured), the recursion machines (convert, the global LogUp's nodes, combine,
+deferred) 128.39, and compress and embed
 128.05 (measured at the dev-set shapes; the whitelist-set keys score the same), per section 3 and the
-manifest.
+manifest. The global LogUp's round, which belongs to no single proof, scores 133.95.
+
+The global LogUp's challenges meet the first obligation as a proof's own do: their preimage
+starts with a tag of its own and holds the digest of the operating point, the program's
+identity and the chain's last value, which fix every table the challenges are applied to; a group
+proof's transcript starts with its key and absorbs the challenges before anything of its own.
+That the chain fixes the tables, and that the tree's nodes all speak of one chain and one pair of
+challenges, costs a collision of the transcript hash to break. The digest is 8 KoalaBear
+elements, about 248 bits, so collisions are found after about `2^124` calls: the collision
+resistance assumed above is at that level, below the per-round figure, and it is counted apart
+from it.
 
 The convert, combine and deferred circuits absorb, at the transcript positions the host verifier
 uses, the presence flag of each child AIR that may be absent and the trace height of each present
@@ -290,10 +349,13 @@ deferred and compress keys are accepted, and with them those constants.
 The compress circuit absorbs the root it re-proves, and the embed circuit the compress proof,
 the way the combine circuits absorb their children, on the same argument from the circuit
 code. Granting both obligations, a prover making `Q` calls to the transcript hashes gets a false
-proof accepted anywhere in the chain — riscv, convert, combine or deferred up to the combine root,
-then compress, then embed — with probability at most `Q · 2^-128.05`: at the release presets every
-proof in the chain scores at least 128 bits, the weakest being compress and embed (riscv scores
-128.32, the recursion machines 128.39, at their measured dev-set shapes). This bounds the soundness
+proof accepted anywhere in the chain — riscv, the group proofs and the global LogUp's round,
+convert, the global LogUp's nodes, combine or deferred up to the combine root,
+then compress, then embed — with probability at most `Q · 2^-128.05`, plus the chance of a hash
+collision among those calls: at the release presets every
+proof in the chain scores at least 128 bits, the weakest being compress and embed (riscv and the
+group proofs score 128.32, the recursion machines 128.39, at their measured dev-set shapes, and
+the global LogUp's round 133.95). This bounds the soundness
 of the proofs, not whether each circuit states what it is meant to, and it does not cover the
 on-chain tail below.
 

@@ -29,6 +29,7 @@ pub struct GpuProverConfig {
     /// Keep the stacked trace matrix after commit instead of re-stacking it later.
     pub cache_stacked_matrix: bool,
     /// Keep the RS codeword matrix in the Merkle tree instead of re-deriving it for openings.
+    /// Only the monolithic commit honours it (`RS_STREAM_BLOCKS=0`, or `cache_stacked_matrix`).
     pub cache_rs_code_matrix: bool,
     /// Run the zerocheck/logup prover in its memory-saving mode.
     pub zerocheck_save_memory: bool,

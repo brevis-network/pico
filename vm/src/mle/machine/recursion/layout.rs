@@ -12,7 +12,8 @@ use crate::mle::compiler::recursion::{
 };
 use pico_mle_core::{
     air::symbolic::{symbolic_variable::Entry, SymbolicConstraintsDag, SymbolicExpressionNode},
-    keygen::types::MultiStarkVerifyingKey,
+    interaction::LogUpChallengeMode,
+    keygen::{compute_vk_pre_hash_at_heights, types::MultiStarkVerifyingKey},
     protocol::{
         proof::Proof,
         stacking::{lifted_log_height, present_gkr_shape, stacking_sort_key, StackedLayout},
@@ -143,6 +144,7 @@ pub fn recursion_vk_layouts_equal(a: &RecursionVkLayout, b: &RecursionVkLayout) 
         && a.l_skip == b.l_skip
         && a.stacking_widths == b.stacking_widths
         && a.vk_pre_hash == b.vk_pre_hash
+        && a.external_logup == b.external_logup
         && a.per_air.len() == b.per_air.len()
         && a.per_air
             .iter()
@@ -170,7 +172,8 @@ pub fn extract_recursion_vk_layout(
             })
             .collect()
     });
-    extract_recursion_vk_layout_from_heights(vk, heights.as_deref())
+    // A proof's key is the key: its own pre-hash, whatever the heights.
+    layout_with_pre_hash(vk, heights.as_deref(), digest_to_u32s(&vk.pre_hash))
 }
 
 /// The layout of a whitelist-mode compress proof under `compress_vk`, without proving one: the
@@ -227,9 +230,40 @@ pub fn recursion_tier_log_heights(tier: RecursionTier) -> Vec<Option<usize>> {
 /// buckets, heights are a deterministic function of the presence pattern, so
 /// `(vk, presence pattern)` fully determines the layout a real proof of that pattern would
 /// yield (validated against real proofs by the builder).
+///
+/// With heights given, the layout's pre-hash is the one a key at these heights has. For a
+/// merged-preprocessed (recursion) key that is a function of the heights and not of the program
+/// ([`compute_vk_pre_hash_at_heights`]), so a layout synthesized from a key of another row
+/// carries the row's own pre-hash, not that key's: in whitelist mode a parent bakes it, and a
+/// child's key has to be one of that row. Without heights (the worst-case layout), and for a
+/// key that is not merged-preprocessed, it is `vk`'s own.
 pub fn extract_recursion_vk_layout_from_heights(
     vk: &MultiStarkVerifyingKey<Sc>,
     heights: Option<&[Option<usize>]>,
+) -> RecursionVkLayout {
+    let vk_pre_hash = match heights {
+        Some(heights) if vk.inner.merged_preprocessed_commit.is_some() => {
+            let log_heights: Vec<usize> = heights
+                .iter()
+                .map(|h| h.expect("a merged-preprocessed machine has every AIR present"))
+                .collect();
+            let config = Sc::default_from_params(vk.inner.params.clone());
+            digest_to_u32s(&compute_vk_pre_hash_at_heights(
+                &config,
+                &vk.inner,
+                &log_heights,
+            ))
+        }
+        _ => digest_to_u32s(&vk.pre_hash),
+    };
+    layout_with_pre_hash(vk, heights, vk_pre_hash)
+}
+
+/// [`extract_recursion_vk_layout_from_heights`] with the pre-hash given.
+fn layout_with_pre_hash(
+    vk: &MultiStarkVerifyingKey<Sc>,
+    heights: Option<&[Option<usize>]>,
+    vk_pre_hash: [u32; 8],
 ) -> RecursionVkLayout {
     // Merged-preprocessed vks (recursion machines): the single multi-matrix prep commitment
     // becomes a layout-level constant (observed once, stacking commit 1); per-air
@@ -541,7 +575,7 @@ pub fn extract_recursion_vk_layout_from_heights(
         .collect();
 
     RecursionVkLayout {
-        vk_pre_hash: digest_to_u32s(&vk.pre_hash),
+        vk_pre_hash,
         merged_preprocessed_commit,
         l_skip,
         n_stack,
@@ -549,6 +583,7 @@ pub fn extract_recursion_vk_layout_from_heights(
         max_constraint_degree: params.max_constraint_degree,
         n_logup,
         logup_pow_bits: params.logup.pow_bits,
+        external_logup: params.logup.challenge_mode == LogUpChallengeMode::External,
         mu_pow_bits: whir.mu_pow_bits,
         folding_pow_bits: whir.folding_pow_bits,
         query_phase_pow_bits: whir.query_phase_pow_bits,

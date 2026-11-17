@@ -44,11 +44,14 @@ _TL = _load_timeline_module()
 # Mirrors `WorkKind::touches_gpu` in vm/src/mle/spans/record.rs. Nothing checks that the two agree,
 # so a kind that changes sides there has to change here too — but a kind that is *added* there is
 # caught, because the shared parser rejects a work name it does not know.
-GPU_WORK = {"keygen", "prove-riscv", "prove-convert", "prove-combine"}
+GPU_WORK = {"keygen", "prove-riscv", "prove-convert", "prove-combine", "prove-global-logup"}
 
 # Reported on their own as well as in the total, because this is the breakdown a reader compares
-# against the prover's own per-role lines.
-BREAKDOWN = ("prove-riscv", "prove-convert", "prove-combine", "keygen")
+# against the prover's own per-role lines. `prove-global-logup` is every piece of a block's global
+# LogUp: the group proofs, their nodes, and the nodes' reduction; a prover from before it records
+# none, and its figure is zero.
+PROVE_KINDS = ("prove-riscv", "prove-convert", "prove-combine", "prove-global-logup")
+BREAKDOWN = PROVE_KINDS + ("keygen",)
 
 _ITER_RX = re.compile(r"\.iter(\d+)$")
 
@@ -79,9 +82,9 @@ def metrics(path: str) -> dict:
     m = _ITER_RX.search(path)
     # Two totals, because two readings of "GPU work" are both in use and they differ by the keygen:
     # `gpu_work` is everything `WorkKind::touches_gpu` covers, which is what the prover itself calls
-    # GPU work and what the gate reads; `prove_total` is the three proving kinds alone, the figure
+    # GPU work and what the gate reads; `prove_total` is the proving kinds alone, the figure
     # earlier reports quote. Both are emitted so the two can be reconciled by hand.
-    prove_total = sum(per_work[k] for k in ("prove-riscv", "prove-convert", "prove-combine"))
+    prove_total = sum(per_work[k] for k in PROVE_KINDS)
     # Seconds, because that is the unit every other field in the bench record already uses and a
     # report mixing the two would be wrong in a way that still renders. `span_e2e` is named apart
     # from the record's own `e2e`: the log's figure stays, and having both is what makes the CSV

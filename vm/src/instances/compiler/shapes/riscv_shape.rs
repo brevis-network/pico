@@ -32,7 +32,7 @@ use crate::{
     emulator::riscv::{record::EmulationRecord, syscalls::SyscallCode},
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::chip::ChipBehavior,
-    primitives::consts::{LOCAL_MEMORY_DATAPAR, RISCV_POSEIDON2_DATAPAR},
+    primitives::consts::LOCAL_MEMORY_DATAPAR,
 };
 use p3_field::PrimeField32;
 use p3_util::log2_ceil_usize;
@@ -219,6 +219,8 @@ pub(crate) fn precompile_syscall_code(chip_name: &str) -> SyscallCode {
         "Bls12381AddAssign" => SyscallCode::BLS12381_ADD,
         "Bls12381Decompress" => SyscallCode::BLS12381_DECOMPRESS,
         "Bls12381DoubleAssign" => SyscallCode::BLS12381_DOUBLE,
+        "Bls12381G2AddAssign" => SyscallCode::BLS12381_G2_ADD,
+        "Bls12381G2DoubleAssign" => SyscallCode::BLS12381_G2_DOUBLE,
         "Bls381Fp2AddSub" => SyscallCode::BLS12381_FP2_ADD,
         "Bls381Fp2Mul" => SyscallCode::BLS12381_FP2_MUL,
         "Bls381FpOp" => SyscallCode::BLS12381_FP_ADD,
@@ -248,31 +250,6 @@ pub(crate) fn precompile_syscall_code(chip_name: &str) -> SyscallCode {
             unreachable!("precompile {} not supported yet", chip_name);
         }
     }
-}
-
-fn filter_shapes<F: FieldSpecificPoseidon2Config>(
-    shapes: impl Iterator<Item = ProofShape>,
-) -> impl Iterator<Item = ProofShape> {
-    shapes.filter(|shape| {
-        // Extract the names and heights for Global and Poseidon2Riscv
-        let global_height = shape
-            .chip_information
-            .iter()
-            .find(|(name, _)| *name == "Global")
-            .map(|(_, height)| *height);
-
-        let poseidon2_height = shape
-            .chip_information
-            .iter()
-            .find(|(name, _)| name == <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name())
-            .map(|(_, height)| *height);
-
-        match (global_height, poseidon2_height) {
-            (Some(global), Some(poseidon2)) if global == poseidon2 + 2 => true,
-            (None, None) => true,
-            _ => false,
-        }
-    })
 }
 
 fn add_none_if_missing(shapes: &mut [RiscvShapeSpec]) {
@@ -319,9 +296,6 @@ fn add_none_if_missing(shapes: &mut [RiscvShapeSpec]) {
         if !shape.global_height.contains(&None) {
             shape.global_height.insert(0, None);
         }
-        if !shape.riscv_poseidon2_height.contains(&None) {
-            shape.riscv_poseidon2_height.insert(0, None);
-        }
     }
 }
 
@@ -351,7 +325,6 @@ struct RiscvShapeSpec {
     memory_read_write_height: Vec<Option<usize>>,
     memory_local_height: Vec<Option<usize>>,
     syscall_riscv_height: Vec<Option<usize>>,
-    riscv_poseidon2_height: Vec<Option<usize>>,
     global_height: Vec<Option<usize>>,
 }
 
@@ -462,19 +435,9 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                             .ilog2() as usize)
                             .clamp(4, 23),
                     ),
-                    // `+ 1`: the Global trace always ends with one padding row (its accumulation
-                    // constraints require it); Poseidon2 follows so the log-height gap stays 2.
                     (
                         RiscvChipType::<F>::Global(GlobalChip::default()).name(),
-                        ((num_global_events + 1).next_power_of_two().ilog2() as usize).clamp(4, 23),
-                    ),
-                    (
-                        <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
-                        ((num_global_events + 1)
-                            .div_ceil(RISCV_POSEIDON2_DATAPAR)
-                            .next_power_of_two()
-                            .ilog2() as usize)
-                            .clamp(4, 21),
+                        (num_global_events.next_power_of_two().ilog2() as usize).clamp(4, 23),
                     ),
                 ];
 
@@ -570,7 +533,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 });
 
         included_shapes
-            .chain(filter_shapes::<F>(
+            .chain(
                 self.allowed_log_heights
                     .iter()
                     .flat_map(move |allowed_log_heights| {
@@ -583,9 +546,9 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                             log_heights
                         })
                     }),
-            ))
-            .chain(filter_shapes::<F>(
-                Self::generate_all_shapes_from_allowed_log_heights(memory_heights),
+            )
+            .chain(Self::generate_all_shapes_from_allowed_log_heights(
+                memory_heights,
             ))
             .chain(precompile_shapes)
     }
@@ -627,7 +590,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(11)],
                 memory_read_write_height: vec![Some(14)],
                 global_height: vec![Some(12)],
-                riscv_poseidon2_height: vec![Some(10)],
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(19)],
@@ -645,7 +607,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(19)],
                 memory_read_write_height: vec![Some(18)],
                 global_height: vec![Some(19)],
-                riscv_poseidon2_height: vec![Some(17)],
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(20)],
@@ -663,7 +624,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(12)],
                 memory_read_write_height: vec![Some(19)],
                 global_height: vec![Some(18)],
-                riscv_poseidon2_height: vec![Some(16)],
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(20)],
@@ -681,7 +641,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(15)],
                 memory_read_write_height: vec![Some(20)],
                 global_height: vec![Some(19)],
-                riscv_poseidon2_height: vec![Some(17)],
             },
             // maximal riscv shape for CHUNK_SIZE=2^20
             RiscvShapeSpec {
@@ -700,7 +659,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(20)],
                 memory_read_write_height: vec![Some(20)],
                 global_height: vec![Some(20)],
-                riscv_poseidon2_height: vec![Some(18)],
             },
             // maximal riscv shape for CHUNK_SIZE=2^21
             RiscvShapeSpec {
@@ -719,7 +677,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(21)],
                 memory_read_write_height: vec![Some(21)],
                 global_height: vec![Some(21)],
-                riscv_poseidon2_height: vec![Some(19)],
             },
             // fibonacci
             RiscvShapeSpec {
@@ -738,7 +695,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(11)],
                 memory_read_write_height: vec![Some(12)],
                 global_height: vec![Some(10)],
-                riscv_poseidon2_height: vec![Some(8)],
             },
             // reth
             RiscvShapeSpec {
@@ -757,7 +713,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(16)],
                 memory_read_write_height: vec![Some(21)],
                 global_height: vec![Some(19)],
-                riscv_poseidon2_height: vec![Some(17)],
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
@@ -775,7 +730,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(12)],
                 memory_read_write_height: vec![Some(21)],
                 global_height: vec![Some(20)],
-                riscv_poseidon2_height: vec![Some(18)],
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
@@ -793,7 +747,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(12)],
                 memory_read_write_height: vec![Some(21)],
                 global_height: vec![Some(20)],
-                riscv_poseidon2_height: vec![Some(18)],
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
@@ -811,7 +764,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(12)],
                 memory_read_write_height: vec![Some(21)],
                 global_height: vec![Some(21)],
-                riscv_poseidon2_height: vec![Some(19)],
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
@@ -829,7 +781,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(13)],
                 memory_read_write_height: vec![Some(22)],
                 global_height: vec![Some(21)],
-                riscv_poseidon2_height: vec![Some(19)],
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
@@ -847,7 +798,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(13), Some(17)],
                 memory_read_write_height: vec![Some(22)],
                 global_height: vec![Some(21)],
-                riscv_poseidon2_height: vec![Some(19)],
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(21), Some(22)],
@@ -865,7 +815,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(11)],
                 memory_read_write_height: vec![Some(21)],
                 global_height: vec![Some(19), Some(21)],
-                riscv_poseidon2_height: vec![Some(17), Some(19)],
             },
             // tendermint
             RiscvShapeSpec {
@@ -884,7 +833,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(9)],
                 memory_read_write_height: vec![Some(20)],
                 global_height: vec![Some(17)],
-                riscv_poseidon2_height: vec![Some(15)],
             },
             // coprocessor integration
             RiscvShapeSpec {
@@ -903,7 +851,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(11)],
                 memory_read_write_height: vec![Some(22)],
                 global_height: vec![Some(21), Some(22)],
-                riscv_poseidon2_height: vec![Some(19), Some(20)],
             },
             // maximal riscv shape (22 divide by DATAPAR)
             RiscvShapeSpec {
@@ -922,7 +869,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 divrem_height: vec![Some(22)],
                 memory_read_write_height: vec![Some(22)],
                 global_height: vec![Some(23)],
-                riscv_poseidon2_height: vec![Some(21)],
             },
         ];
 
@@ -991,10 +937,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                     RiscvChipType::<F>::Global(GlobalChip::default()).name(),
                     spec.global_height,
                 ),
-                (
-                    <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
-                    spec.riscv_poseidon2_height,
-                ),
             ]);
             allowed_log_heights.push(short_allowed_log_heights);
         }
@@ -1044,18 +986,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                     Some(21),
                     Some(22),
                     Some(23),
-                ],
-            ),
-            (
-                <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
-                vec![
-                    None,
-                    Some(9),
-                    Some(15),
-                    Some(18),
-                    Some(19),
-                    Some(20),
-                    Some(21),
                 ],
             ),
         ]);
@@ -1113,7 +1043,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 divrem_height: vec![Some(22)],
                 memory_read_write_height: vec![Some(22)],
                 global_height: vec![Some(23)],
-                riscv_poseidon2_height: vec![Some(21)],
             },
         ];
 
@@ -1182,10 +1111,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                     RiscvChipType::<F>::Global(GlobalChip::default()).name(),
                     spec.global_height,
                 ),
-                (
-                    <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
-                    spec.riscv_poseidon2_height,
-                ),
             ]);
             allowed_log_heights.push(short_allowed_log_heights);
         }
@@ -1208,10 +1133,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
             (
                 RiscvChipType::<F>::Global(GlobalChip::default()).name(),
                 vec![None, Some(23)],
-            ),
-            (
-                <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
-                vec![None, Some(21)],
             ),
         ]);
 
@@ -1267,7 +1188,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 divrem_height: vec![Some(12)],
                 memory_read_write_height: vec![Some(19)],
                 global_height: vec![Some(18)],
-                riscv_poseidon2_height: vec![Some(16)],
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(20)],
@@ -1285,7 +1205,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 divrem_height: vec![Some(15)],
                 memory_read_write_height: vec![Some(20)],
                 global_height: vec![Some(19)],
-                riscv_poseidon2_height: vec![Some(17)],
             },
             // maximal riscv shape for CHUNK_SIZE=2^20
             RiscvShapeSpec {
@@ -1304,7 +1223,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 divrem_height: vec![Some(20)],
                 memory_read_write_height: vec![Some(20)],
                 global_height: vec![Some(20)],
-                riscv_poseidon2_height: vec![Some(18)],
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(21)],
@@ -1322,7 +1240,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 divrem_height: vec![Some(16)],
                 memory_read_write_height: vec![Some(21)],
                 global_height: vec![Some(19)],
-                riscv_poseidon2_height: vec![Some(17)],
             },
             // maximal riscv shape for CHUNK_SIZE=2^21
             RiscvShapeSpec {
@@ -1341,7 +1258,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 divrem_height: vec![Some(21)],
                 memory_read_write_height: vec![Some(21)],
                 global_height: vec![Some(21)],
-                riscv_poseidon2_height: vec![Some(19)],
             },
             // mode
             RiscvShapeSpec {
@@ -1360,7 +1276,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 divrem_height: vec![Some(12)],
                 memory_read_write_height: vec![Some(21)],
                 global_height: vec![Some(20)],
-                riscv_poseidon2_height: vec![Some(18)],
             },
             // third mode (between first and second)
             RiscvShapeSpec {
@@ -1379,7 +1294,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 divrem_height: vec![Some(12)],
                 memory_read_write_height: vec![Some(21)],
                 global_height: vec![Some(20)],
-                riscv_poseidon2_height: vec![Some(18)],
             },
             // second mode (large than mode case)
             RiscvShapeSpec {
@@ -1398,7 +1312,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 divrem_height: vec![Some(12)],
                 memory_read_write_height: vec![Some(21)],
                 global_height: vec![Some(21)],
-                riscv_poseidon2_height: vec![Some(19)],
             },
             // maximal
             RiscvShapeSpec {
@@ -1417,11 +1330,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 divrem_height: vec![Some(13)],
                 memory_read_write_height: vec![Some(22)],
                 global_height: vec![Some(21)],
-                riscv_poseidon2_height: vec![Some(19)],
             },
             // maximal (subblock + aggregator)
-            // for riscv_poseidon2_height, subblock only touches 19 when Cpu=21, while agg touches 19 when Cpu=22
-            // if riscv_poseidon2_height=20, the following shape will exceed gpu memory 32G
             // if divrem_height=19, gpu OOM when program_height>=19
             // if divrem_height=18, aggregator 23266355 OOM (manually program chip height 20), unknown reason
             RiscvShapeSpec {
@@ -1440,7 +1350,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 divrem_height: vec![Some(13), Some(17)],
                 memory_read_write_height: vec![Some(22)],
                 global_height: vec![Some(21)],
-                riscv_poseidon2_height: vec![Some(19)],
             },
         ];
 
@@ -1509,10 +1418,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                     RiscvChipType::<F>::Global(GlobalChip::default()).name(),
                     spec.global_height,
                 ),
-                (
-                    <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
-                    spec.riscv_poseidon2_height,
-                ),
             ]);
             allowed_log_heights.push(short_allowed_log_heights);
         }
@@ -1562,18 +1467,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                     Some(21),
                     Some(22),
                     Some(23),
-                ],
-            ),
-            (
-                <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
-                vec![
-                    None,
-                    Some(9),
-                    Some(15),
-                    Some(18),
-                    Some(19),
-                    Some(20),
-                    Some(21),
                 ],
             ),
         ]);

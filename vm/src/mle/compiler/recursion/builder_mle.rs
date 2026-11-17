@@ -3,7 +3,7 @@
 
 use super::*;
 
-impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
+impl<F: PrimeField32 + TwoAdicField> Builder<F> {
     /// One degree-2 sumcheck round via the LagrangeEvalD2 precompile chip.
     /// Reads the running `claim`, the prover evaluations s(1)=`s1`, s(2)=`s2`, and the
     /// challenge `r`; returns the addr of next_claim = p(r), where p is the unique

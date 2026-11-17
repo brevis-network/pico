@@ -9,6 +9,7 @@ use crate::{
     protocol::stacking::{lifted_log_height, stacking_sort_key},
     verifier::{
         batch_constraints::{verify_zerocheck_and_logup_inner, BatchConstraintError},
+        fractional_sumcheck_gkr::GkrVerificationError,
         proof_shape::{verify_proof_shape, ProofShapeError},
         stacked_reduction::{verify_stacked_reduction_inner, StackedReductionError},
         whir::{verify_whir_opening_inner, WhirVerificationError},
@@ -69,6 +70,9 @@ pub enum VerifierError<EF: core::fmt::Debug + core::fmt::Display + PartialEq + E
     WhirError(#[from] WhirVerificationError<EF>),
 }
 
+/// An unreduced fraction `(p, q)`: the root of a LogUp GKR tree.
+pub type Fraction<EF> = (EF, EF);
+
 /// Why a transcript-only walk could not be performed.
 ///
 /// Deliberately NOT a verdict type: [`replay_transcript`] returning `Ok(())` says nothing about
@@ -87,6 +91,11 @@ pub enum TranscriptReplayError {
     #[error("Proof shape verification failed: {0}")]
     ProofShapeError(#[from] ProofShapeError),
 
+    /// The key, the entry point and the proof are not all of one LogUp challenge mode. The mode
+    /// decides what the transcript absorbs, so there is no walk to perform.
+    #[error("LogUp challenge mode mismatch: {0}")]
+    LogUpModeMismatch(String),
+
     /// A GKR layer, sumcheck-poly or sub-round count disagreeing with the round count `n_logup`
     /// fixes (`GkrVerificationError::is_shape_error`). These run on both passes — the walk indexes
     /// the slices they size — and `verify_proof_shape` already rejects them, so reaching one means
@@ -102,12 +111,23 @@ pub enum TranscriptReplayError {
     UnexpectedCheck(String),
 }
 
-/// Proof that a transcript-only walk ran to completion. Deliberately carries nothing: it exists so
-/// that [`replay_transcript`]'s success value cannot be confused with [`verify`]'s acceptance at
-/// the type level. There is no verdict to read out of it — the result of the walk is the final
-/// transcript state, held by the caller's own transcript.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TranscriptWalk(());
+/// Proof that a transcript-only walk ran to completion. It exists so that [`replay_transcript`]'s
+/// success value cannot be confused with [`verify`]'s acceptance at the type level. There is no
+/// verdict to read out of it — the result of the walk is the final transcript state, held by the
+/// caller's own transcript, and the WHIR query indices the walk sampled
+/// ([`TranscriptWalk::whir_query_indices`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TranscriptWalk {
+    whir_query_indices: Vec<Vec<usize>>,
+}
+
+impl TranscriptWalk {
+    /// The WHIR query indices the walk sampled: outer index = WHIR round, inner = query. They are
+    /// the indices [`verify`] samples for the same proof, and say nothing about its validity.
+    pub fn whir_query_indices(&self) -> &[Vec<usize>] {
+        &self.whir_query_indices
+    }
+}
 
 pub mod batch_constraints;
 pub mod evaluator;
@@ -118,6 +138,9 @@ pub mod stacked_reduction;
 mod transcript_extractor;
 pub mod whir;
 
+/// Verify a proof under a key in the internal LogUp challenge mode: the proof draws its own
+/// `(alpha, beta)` and its LogUp sum is zero. A key in external mode is refused; use
+/// [`verify_with_external_logup`].
 pub fn verify<SC: StarkProtocolConfig, TS: FiatShamirTranscript<SC>>(
     config: &SC,
     mvk: &MultiStarkVerifyingKey<SC>,
@@ -127,7 +150,57 @@ pub fn verify<SC: StarkProtocolConfig, TS: FiatShamirTranscript<SC>>(
 where
     SC::EF: p3_field::TwoAdicField,
 {
-    verify_inner(config, mvk, proof, transcript, Pass::Verify)
+    verify_inner(
+        config,
+        mvk,
+        proof,
+        transcript,
+        None,
+        Pass::Verify,
+        &mut Vec::new(),
+    )
+    .map(|_root| ())
+}
+
+/// Verify a proof under a key in the external LogUp challenge mode
+/// ([`LogUpChallengeMode::External`](crate::interaction::LogUpChallengeMode)): the proof absorbs
+/// the caller's `(alpha, beta)` and its LogUp sum is not asserted zero.
+///
+/// Returns the proof's fractional sum as the unreduced pair `(p, q)`: over the rows of every
+/// interaction, `p / q = sum of multiplicity / (alpha + fingerprint_beta(message))`, with `q`
+/// the product of all the denominators (padding leaves contribute a factor `alpha`). The
+/// caller adds the pairs of the proofs that share `(alpha, beta)` as fractions and decides what
+/// the total must be; this function accepts any sum. A key in internal mode is refused.
+///
+/// What is left to the caller, and held by neither the key nor this function:
+/// - **The heights.** A key does not fix the heights of its tables: each is the one the proof
+///   states (`trace_vdata[j].log_height`), and the prover states it knowing `(alpha, beta)`.
+///   The cells of a commitment can read as a table of another height, with other rows, so the
+///   caller compares every stated height with the height the commitment was made at.
+/// - **The challenges.** `(alpha, beta)` are drawn after every commitment the proofs under
+///   them open has been fixed, and each of those proofs is verified under the same pair.
+/// - **The denominator.** A pair with `q = 0` is not refused here: whoever decides the total
+///   refuses a zero denominator.
+pub fn verify_with_external_logup<SC: StarkProtocolConfig, TS: FiatShamirTranscript<SC>>(
+    config: &SC,
+    mvk: &MultiStarkVerifyingKey<SC>,
+    proof: &Proof<SC>,
+    transcript: &mut TS,
+    alpha: SC::EF,
+    beta: SC::EF,
+) -> Result<Fraction<SC::EF>, VerifierError<SC::EF>>
+where
+    SC::EF: p3_field::TwoAdicField,
+{
+    verify_inner(
+        config,
+        mvk,
+        proof,
+        transcript,
+        Some([alpha, beta]),
+        Pass::Verify,
+        &mut Vec::new(),
+    )
 }
 
 /// Drive `proof`'s Fiat-Shamir transcript through exactly the observe/sample sequence [`verify`]
@@ -147,27 +220,84 @@ pub fn replay_transcript<SC: StarkProtocolConfig, TS: FiatShamirTranscript<SC>>(
 where
     SC::EF: p3_field::TwoAdicField,
 {
-    verify_inner(config, mvk, proof, transcript, Pass::TranscriptOnly)
-        .map(|()| TranscriptWalk(()))
-        .map_err(|err| match err {
-            VerifierError::SystemParamsMismatch => TranscriptReplayError::SystemParamsMismatch,
-            VerifierError::EmptyTraces => TranscriptReplayError::EmptyTraces,
-            VerifierError::EmptyOpeningPoint => TranscriptReplayError::EmptyOpeningPoint,
-            VerifierError::ProofShapeError(err) => TranscriptReplayError::ProofShapeError(err),
-            VerifierError::BatchConstraintError(BatchConstraintError::GkrVerificationFailed(
-                gkr,
-            )) if gkr.is_shape_error() => TranscriptReplayError::GkrShapeError(gkr.to_string()),
-            other => TranscriptReplayError::UnexpectedCheck(other.to_string()),
-        })
+    replay_transcript_inner(config, mvk, proof, transcript, None)
 }
 
+/// [`replay_transcript`] for a key in the external LogUp challenge mode, under the caller's
+/// `(alpha, beta)`; the transcript counterpart of [`verify_with_external_logup`].
+pub fn replay_transcript_with_external_logup<
+    SC: StarkProtocolConfig,
+    TS: FiatShamirTranscript<SC>,
+>(
+    config: &SC,
+    mvk: &MultiStarkVerifyingKey<SC>,
+    proof: &Proof<SC>,
+    transcript: &mut TS,
+    alpha: SC::EF,
+    beta: SC::EF,
+) -> Result<TranscriptWalk, TranscriptReplayError>
+where
+    SC::EF: p3_field::TwoAdicField,
+{
+    replay_transcript_inner(config, mvk, proof, transcript, Some([alpha, beta]))
+}
+
+fn replay_transcript_inner<SC: StarkProtocolConfig, TS: FiatShamirTranscript<SC>>(
+    config: &SC,
+    mvk: &MultiStarkVerifyingKey<SC>,
+    proof: &Proof<SC>,
+    transcript: &mut TS,
+    external_logup: Option<[SC::EF; 2]>,
+) -> Result<TranscriptWalk, TranscriptReplayError>
+where
+    SC::EF: p3_field::TwoAdicField,
+{
+    let mut whir_query_indices = Vec::new();
+    verify_inner(
+        config,
+        mvk,
+        proof,
+        transcript,
+        external_logup,
+        Pass::TranscriptOnly,
+        &mut whir_query_indices,
+    )
+    .map(|_root| TranscriptWalk { whir_query_indices })
+    .map_err(|err| match err {
+        VerifierError::SystemParamsMismatch => TranscriptReplayError::SystemParamsMismatch,
+        VerifierError::EmptyTraces => TranscriptReplayError::EmptyTraces,
+        VerifierError::EmptyOpeningPoint => TranscriptReplayError::EmptyOpeningPoint,
+        VerifierError::ProofShapeError(err) => TranscriptReplayError::ProofShapeError(err),
+        VerifierError::BatchConstraintError(BatchConstraintError::GkrVerificationFailed(gkr))
+            if gkr.is_shape_error() =>
+        {
+            TranscriptReplayError::GkrShapeError(gkr.to_string())
+        }
+        VerifierError::BatchConstraintError(
+            err @ (BatchConstraintError::LogUpChallengeModeMismatch
+            | BatchConstraintError::LogUpProofModeMismatch
+            | BatchConstraintError::ExternalModeWithoutInteractions
+            | BatchConstraintError::GkrVerificationFailed(
+                GkrVerificationError::RootNumeratorModeMismatch,
+            )),
+        ) => TranscriptReplayError::LogUpModeMismatch(err.to_string()),
+        other => TranscriptReplayError::UnexpectedCheck(other.to_string()),
+    })
+}
+
+/// The one body behind [`verify`], [`verify_with_external_logup`] and the transcript replays.
+/// `external_logup` is the caller's `(alpha, beta)` for an external-mode key and `None` for an
+/// internal-mode one. Returns the GKR root fraction `(p0, q0)`, whose numerator is zero in
+/// internal mode.
 fn verify_inner<SC: StarkProtocolConfig, TS: FiatShamirTranscript<SC>>(
     config: &SC,
     mvk: &MultiStarkVerifyingKey<SC>,
     proof: &Proof<SC>,
     transcript: &mut TS,
+    external_logup: Option<[SC::EF; 2]>,
     pass: Pass,
-) -> Result<(), VerifierError<SC::EF>>
+    whir_query_indices: &mut Vec<Vec<usize>>,
+) -> Result<Fraction<SC::EF>, VerifierError<SC::EF>>
 where
     SC::EF: p3_field::TwoAdicField,
 {
@@ -300,7 +430,7 @@ where
         .iter()
         .map(|&air_id| trace_vdata[air_id].as_ref().unwrap().log_height as isize - l_skip as isize)
         .collect();
-    let r = verify_zerocheck_and_logup_inner::<SC, TS>(
+    let (r, logup_root) = verify_zerocheck_and_logup_inner::<SC, TS>(
         transcript,
         mvk,
         public_values,
@@ -309,6 +439,7 @@ where
         &trace_id_to_air_id,
         &n_per_trace,
         &omega_skip_pows,
+        external_logup,
         pass,
     )?;
 
@@ -392,9 +523,10 @@ where
         &commits,
         &u_cube,
         pass,
+        whir_query_indices,
     )?;
 
-    Ok(())
+    Ok(logup_root)
 }
 
 #[cfg(test)]
@@ -574,10 +706,11 @@ mod tests {
         // The first observed value is the vk pre-hash, so the fingerprint (not the count) also
         // moves whenever the pre-hash preimage definition changes (`compute_vk_pre_hash`).
         // Over KoalaBear^5 every extension observation is five felts, and the vk pre-hash is a
-        // function of the field and of `CODEC_VERSION` (v5 since the move to KoalaBear^5). The
-        // stream holds 133 extension values and 42 base felts: 42 + 133 · 5 = 707 observations (42
-        // + 133 · 4 = 574 over KoalaBear^4).
-        const GOLDEN: (usize, u64) = (707, 17_761_216_587_174_366_289);
+        // function of the field, of `CODEC_VERSION` and of the params (v6 put the LogUp challenge
+        // mode into them; the schedule of an internal-mode proof did not move, so the count is
+        // v5's). The stream holds 133 extension values and 42 base felts: 42 + 133 · 5 = 707
+        // observations (42 + 133 · 4 = 574 over KoalaBear^4).
+        const GOLDEN: (usize, u64) = (707, 3_409_822_419_764_868_354);
         assert_eq!(
             transcript_signature(&verifier_log),
             GOLDEN,
@@ -706,6 +839,79 @@ mod tests {
             replay_log.values(),
             "transcript-only pass diverged on the observed/sampled values"
         );
+    }
+
+    /// Each PoW witness is rejected by its own check, with its own error. A witness that fails its
+    /// grind changes every later challenge too, so "some error" would still come back with the PoW
+    /// check deleted; the exact variant pins the check itself (ZisK proofman #655: a credited PoW
+    /// must be one the verifier enforces). The bits here are small (LogUp 2, μ 3,
+    /// folding 2, query 1), so a changed witness can pass its grind by chance: each case tries
+    /// changed witnesses until one fails it, and every one of them must be refused.
+    #[test]
+    fn a_bad_pow_witness_is_refused_by_its_own_check() {
+        use super::{whir::WhirVerificationError as W, VerifierError as V};
+        use crate::verifier::batch_constraints::BatchConstraintError as B;
+
+        let params = test_system_params_small(2, 5, 3);
+        assert!(
+            params.logup.pow_bits > 0
+                && params.whir.mu_pow_bits > 0
+                && params.whir.folding_pow_bits > 0
+                && params.whir.query_phase_pow_bits > 0,
+            "every PoW must be on for this test to mean anything"
+        );
+        let engine = RefEngine::new(params);
+        let (pk, vk) = InteractionsFixture11.keygen(&engine);
+        let proof = InteractionsFixture11.prove(&engine, &pk);
+        verify(
+            engine.config(),
+            &vk,
+            &proof,
+            &mut engine.initial_transcript(),
+        )
+        .expect("the honest proof verifies");
+
+        type Tamper = fn(&mut Proof<KoalaBearPoseidon2Config>, F);
+        type Is = fn(&V<EF>) -> bool;
+        let cases: [(&str, Tamper, Is); 4] = [
+            (
+                "logup",
+                |p, d| p.gkr_proof.logup_pow_witness += d,
+                |e| matches!(e, V::BatchConstraintError(B::InvalidLogupPowWitness)),
+            ),
+            (
+                "mu",
+                |p, d| p.whir_proof.mu_pow_witness += d,
+                |e| matches!(e, V::WhirError(W::MuPoWInvalid)),
+            ),
+            (
+                "folding",
+                |p, d| p.whir_proof.folding_pow_witnesses[0] += d,
+                |e| matches!(e, V::WhirError(W::FoldingPoWInvalid)),
+            ),
+            (
+                "query",
+                |p, d| p.whir_proof.query_phase_pow_witnesses[0] += d,
+                |e| matches!(e, V::WhirError(W::QueryPhasePoWInvalid)),
+            ),
+        ];
+        for (name, tamper, is_own_check) in cases {
+            let mut refused_by_own_check = false;
+            for k in 1..=64u32 {
+                let mut bad = proof.clone();
+                tamper(&mut bad, F::from_u32(k));
+                let err = verify(engine.config(), &vk, &bad, &mut engine.initial_transcript())
+                    .expect_err(&format!("{name}: a changed PoW witness was accepted"));
+                if is_own_check(&err) {
+                    refused_by_own_check = true;
+                    break;
+                }
+            }
+            assert!(
+                refused_by_own_check,
+                "{name}: no changed witness was refused by the {name} PoW check"
+            );
+        }
     }
 
     /// `params.logup.pow_bits` and all three WHIR pow_bits are non-zero here, so `check_witness`

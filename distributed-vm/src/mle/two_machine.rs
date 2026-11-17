@@ -25,13 +25,20 @@ fn env_port(key: &str, default: u16) -> u16 {
 
 /// Start whichever half of the two-machine shape this process is, and block until it is usable.
 ///
-/// Called before the pipeline runs. A no-op unless two-machine was explicitly requested, so the
-/// single-node path does not gain a runtime, a port, or a failure mode.
+/// Called before each block's pipeline runs, only when two-machine was explicitly requested, so
+/// the single-node path does not gain a runtime, a port, or a failure mode. The half is brought
+/// up at the first block and serves every block of the process: the calls after the first
+/// return at once.
 ///
 /// The runtime is intentionally leaked: MLE's pipeline threads are plain OS threads that
 /// `block_on` this handle from arbitrary points, and the scheduler server must outlive every one of
 /// them. Dropping it at the end of a scope would take the server down mid-run.
 pub fn init_mle_two_machine() {
+    static BROUGHT_UP: std::sync::Once = std::sync::Once::new();
+    BROUGHT_UP.call_once(bring_up);
+}
+
+fn bring_up() {
     let role = get_machine_role();
     // Worker threads are CAPPED, and the cap is the point.
     //

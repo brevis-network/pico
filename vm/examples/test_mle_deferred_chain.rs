@@ -1,7 +1,7 @@
 //! The reconstruct chain is no longer vacuous: what a convert leaf carries through it is now a
 //! witnessed value the root closes around, not a hardwired zero.
 //!
-//! Ten cases, two guests, all in this process. Over fib, which defers nothing:
+//! Fifteen cases, two guests, all in this process. Over fib, which defers nothing:
 //!
 //!   * `baseline` — an honest tree (the guest committed no deferred proof, so the chain's value is
 //!     zero). MUST prove and verify. This is the harness's detection-power check: if the baseline
@@ -12,9 +12,7 @@
 //!   * `unclosed-chain` — two real deferred nodes at the head of the tree, with the leaves carrying
 //!     the value the chain ends on. MUST FAIL, and this one ISOLATES the right-hand closure: the
 //!     first node starts at zero so the left end holds, continuity holds, and what cannot hold is
-//!     `end_reconstruct == deferred_proofs_digest` — this guest committed zero. It is also the one
-//!     tree node whose BOTH children are deferred, the only place the GCS fold adds and subtracts
-//!     the neutral point around itself.
+//!     `end_reconstruct == deferred_proofs_digest` — this guest committed zero.
 //!
 //! Over the aggregator guest (`perf/bench_data/rv64/aggregator-elf`, built from
 //! `examples/aggregator/app`), handed fib's exe identity and committed bytes, so its own
@@ -22,8 +20,7 @@
 //!
 //!   * `happy` — two deferred nodes over fib's root (the guest claims it twice) ahead of the
 //!     aggregator's leaves. MUST prove and verify, with the root's `deferred_proofs_digest` equal
-//!     to the chain the nodes built. The tree node joining the two is the one place the GCS fold
-//!     pairs the neutral point with itself, here in a tree that has to verify.
+//!     to the chain the nodes built.
 //!   * `missing-node` — the same leaves carrying a zero chain value, no node: a caller that forgot
 //!     the chain. MUST FAIL at the root, and isolates `end_reconstruct == deferred_proofs_digest`
 //!     — the left end holds, the guest committed a digest nothing backs.
@@ -38,20 +35,42 @@
 //!     of as many leaves as `seam` has, starting where it ends. MUST prove and verify, so the tree
 //!     `seam` builds, whose first node pairs a deferred node with a convert leaf as no other case
 //!     does, is not what `seam` fails on.
+//!   * `global-chain-host`, `global-chain` — `one-node`'s tree with its node passing a forged value
+//!     through the global LogUp's chain, which a deferred node only carries from its left
+//!     neighbour to its right. The node itself proves. MUST FAIL: first before proving, on
+//!     combine's host-side check of that chain; then, with the check switched off, at the root,
+//!     on the continuity between the node and its neighbours, which meet it with the chain's
+//!     initial value.
+//!   * `zero-denominator` — `one-node`'s tree with its node built from a program that publishes
+//!     `(0, 0)` as its own fraction of the global LogUp, where an honest node has `(0, 1)`. The
+//!     node proves, and every link holds. MUST FAIL at the root, and isolates the assertion
+//!     that the sum's denominator has an inverse: summed in, the node takes the tree's
+//!     fraction to `(0, 0)`, whose numerator is the zero the root asks for.
+//!   * `chunks-as-sub-proof`, `node-as-sub-proof` — a deferred node handed something that is not
+//!     a complete root: fib's convert leaves reduced to a top node that is not a root, which
+//!     covers the whole execution with no global LogUp behind it; and fib's image node, which
+//!     covers none of it. MUST FAIL at the node's verify, both: the node asserts its sub-proof
+//!     complete and runs a root's assertions on it again. (The host refuses a sub-proof that
+//!     ends at chunk cursor 1, an empty execution, before proving; that refusal is switched off
+//!     here so that the circuit's is what the image node meets.)
+//!   * `interleaved` — `one-node`'s tree with its deferred node between the image node and the
+//!     group nodes instead of after them: the node carries the wrapped chain value the image
+//!     node ends on, and the group nodes after it the deferred chain's value past it. MUST
+//!     prove and verify: a deferred node and the global LogUp's nodes lead the tree in any
+//!     order their two chains allow.
 //!   * `nested` — `happy`'s root handed to a deferred node as its sub-proof: a complete, honest
 //!     root whose own `deferred_proofs_digest` is not zero. MUST FAIL the node's verify.
 //!   * `nested-control` — the same node over the same sub-proof, keygen'd without the requirement
 //!     that the sub-proof's digest is zero. MUST prove and verify, so that requirement is the one
 //!     `nested` fails on.
 //!
-//! Every failure but `seam-host`'s surfaces as a proof failing to VERIFY, not as proving
-//! panicking: the recursion interpreter runs an unsatisfiable assertion out into the trace, and the
-//! constraint system is what rejects it. The verify error names no constraint, so `seam` and
-//! `nested`, the cases built over tree shapes no other case proves, each carry a control that
-//! proves the same shape honestly.
+//! Every failure but `seam-host`'s and `global-chain-host`'s surfaces as a
+//! proof failing to VERIFY, not as proving panicking: the recursion interpreter runs an
+//! unsatisfiable assertion out into the trace, and the constraint system is what rejects it. The
+//! verify error names no constraint, so `seam` and `nested`, the cases built over tree shapes no
+//! other case proves, each carry a control that proves the same shape honestly.
 //!
-//! Not covered: a sub-proof that is not complete. Where the chunk cut lands in the commit run is
-//! `test_mle_deferred_split`'s.
+//! Where the chunk cut lands in the commit run is `test_mle_deferred_split`'s.
 //!
 //! Run by hand, as `test_cvd_forgery` is: a harness whose cases are mostly expected to fail is
 //! read for its per-case verdicts, not for a green tick. The regression CI needs — that an honest
@@ -76,6 +95,7 @@ use pico_vm::{
         convert::{ConvertMachine, ProofWithVk},
         deferred::DeferredMachine,
         exe::RiscvVmVk,
+        global_logup_nodes::prove_global_logup_nodes,
         recursion::{recursion_public_values, Kb},
         riscv,
     },
@@ -91,6 +111,8 @@ const ROOT_REJECTED: &str = "root combine proof failed STARK verify";
 const NODE_REJECTED: &str = "deferred node failed STARK verify";
 /// How combine's host-side check refuses leaves that do not start where the nodes end.
 const SEAM_REFUSED: &str = "the leaves do not start the deferred chain where the nodes end it";
+/// How combine's host-side check refuses children the global LogUp's chain does not run through.
+const GLOBAL_CHAIN_REFUSED: &str = "the global LogUp's chain breaks between children";
 
 #[path = "common/tree.rs"]
 mod tree;
@@ -102,6 +124,8 @@ const LOG_STACKED_HEIGHT: usize = 23;
 
 fn main() {
     setup_logger();
+    // A sub-proof that ends at chunk cursor 1 is refused by the circuit here, not by the host.
+    pico_vm::mle::machine::recursion::let_empty_executions_reach_the_circuit_for_testing();
     // The GPU riscv prover allocates from the shared pool; a CPU build has none to set up.
     #[cfg(feature = "cuda")]
     riscv::init_mle_gpu_pool(riscv::MLE_GPU_DEVICE);
@@ -129,20 +153,13 @@ fn main() {
         false,
     )
     .expect("riscv prove failed");
-    let (riscv_vk, riscv_proofs) = bundle.into_parts();
-    let vm_vk = RiscvVmVk::from_program_and_vk(&program, &riscv_vk);
-    info!("RISCV: {} chunk proof(s) ✓", riscv_proofs.len());
+    let vm_vk = RiscvVmVk::from_program_and_vk(&program, &bundle.vk);
+    info!("RISCV: {} chunk proof(s) ✓", bundle.chunk_proofs.len());
 
     // The baseline doubles as the sub-proof the deferred node verifies, so the honest tree is
     // built once rather than twice.
     let (baseline_ok, baseline) = run_case("baseline", true, ROOT_REJECTED, || {
-        build_tree(
-            &riscv_vk,
-            &vm_vk,
-            &riscv_proofs,
-            [Kb::ZERO; DIGEST_SIZE],
-            &[],
-        )
+        build_tree(&bundle, &vm_vk, [Kb::ZERO; DIGEST_SIZE], &[])
     });
     assert!(
         baseline_ok,
@@ -155,10 +172,7 @@ fn main() {
         vm_vk.clone(),
         false,
     );
-    // Two nodes over the same sub-proof: the chain takes two steps, and the tree gets a node whose
-    // BOTH children are deferred — the one pairing where the GCS fold adds and subtracts the
-    // neutral point around itself, so a degenerate chord would surface here as a host-side
-    // inverse-of-zero rather than as the root verify failure the case expects.
+    // Two nodes over the same sub-proof: the chain takes two steps.
     let (nodes, chain_end) = deferred
         .prove_chain(&[sub_root.clone(), sub_root.clone()])
         .expect("deferred prove_chain failed");
@@ -172,7 +186,7 @@ fn main() {
         ("unclosed-chain", chain_end, &nodes[..]),
     ] {
         let (matched, _) = run_case(name, false, ROOT_REJECTED, || {
-            build_tree(&riscv_vk, &vm_vk, &riscv_proofs, deferred_digest, prefix)
+            build_tree(&bundle, &vm_vk, deferred_digest, prefix)
         });
         if !matched {
             failures += 1;
@@ -200,16 +214,18 @@ fn main() {
         &agg_stdin.finalize(),
         emulate::opts_from_env_chunk_size(1 << 23),
     );
-    let (agg_riscv_vk, agg_proofs) = riscv::prove_riscv(
+    let agg_bundle = riscv::prove_riscv(
         Arc::clone(&agg_program),
         &agg_emulated.records,
         LOG_STACKED_HEIGHT,
         false,
     )
-    .expect("aggregator riscv prove failed")
-    .into_parts();
-    let agg_vm_vk = RiscvVmVk::from_program_and_vk(&agg_program, &agg_riscv_vk);
-    info!("aggregator: {} chunk proof(s) ✓", agg_proofs.len());
+    .expect("aggregator riscv prove failed");
+    let agg_vm_vk = RiscvVmVk::from_program_and_vk(&agg_program, &agg_bundle.vk);
+    info!(
+        "aggregator: {} chunk proof(s) ✓",
+        agg_bundle.chunk_proofs.len()
+    );
 
     // The node publishes the MAIN program's identity, so it is keyed to the aggregator.
     let mut agg_deferred = DeferredMachine::new(
@@ -227,7 +243,7 @@ fn main() {
         ("missing-node", false, [Kb::ZERO; DIGEST_SIZE], &[][..]),
     ] {
         let (matched, root) = run_case(name, must_prove, ROOT_REJECTED, || {
-            build_tree(&agg_riscv_vk, &agg_vm_vk, &agg_proofs, chain, prefix)
+            build_tree(&agg_bundle, &agg_vm_vk, chain, prefix)
         });
         // A tree that closes carries the guest's digest, and it is the chain the nodes built.
         let closes_on_chain = root.as_ref().is_none_or(|root| {
@@ -260,15 +276,17 @@ fn main() {
     // `build_tree`, with combine's host-side seam check optionally switched off.
     let seam_tree = |check_seam: bool| -> eyre::Result<ProofWithVk> {
         let mut convert = ConvertMachine::new(
-            agg_riscv_vk.clone(),
+            Arc::clone(&agg_bundle.vk),
             agg_vm_vk.clone(),
-            &agg_proofs,
+            &agg_bundle.chunk_proofs,
             recursion_params_with_128_bits_security(),
             false,
         )?;
         convert.set_final_deferred_digest(agg_chain_end);
-        let mut children = agg_nodes[..1].to_vec();
-        children.extend(convert.prove_with_vks(&agg_proofs)?);
+        let mut children =
+            prove_global_logup_nodes(&agg_bundle, &agg_vm_vk, [Kb::ZERO; DIGEST_SIZE])?;
+        children.extend_from_slice(&agg_nodes[..1]);
+        children.extend(convert.prove_with_vks(&agg_bundle.chunk_proofs)?);
         let mut combine = CombineMachine::new(
             recursion_params_with_128_bits_security(),
             agg_vm_vk.clone(),
@@ -302,20 +320,19 @@ fn main() {
         &one_stdin.finalize(),
         emulate::opts_from_env_chunk_size(1 << 23),
     );
-    let (one_riscv_vk, one_proofs) = riscv::prove_riscv(
+    let one_bundle = riscv::prove_riscv(
         Arc::clone(&agg_program),
         &one_emulated.records,
         LOG_STACKED_HEIGHT,
         false,
     )
-    .expect("one-claim aggregator riscv prove failed")
-    .into_parts();
+    .expect("one-claim aggregator riscv prove failed");
     assert_eq!(
-        one_proofs.len(),
-        agg_proofs.len(),
+        one_bundle.chunk_proofs.len(),
+        agg_bundle.chunk_proofs.len(),
         "one-node: as many leaves as `seam`, or its tree is shaped differently"
     );
-    let one_vm_vk = RiscvVmVk::from_program_and_vk(&agg_program, &one_riscv_vk);
+    let one_vm_vk = RiscvVmVk::from_program_and_vk(&agg_program, &one_bundle.vk);
     let mut one_deferred = DeferredMachine::new(
         recursion_params_with_128_bits_security(),
         one_vm_vk.clone(),
@@ -325,16 +342,154 @@ fn main() {
         .prove_chain(std::slice::from_ref(&sub_root))
         .expect("one-claim deferred prove_chain failed");
     let (matched, _) = run_case("one-node", true, ROOT_REJECTED, || {
-        build_tree(
-            &one_riscv_vk,
-            &one_vm_vk,
-            &one_proofs,
-            one_chain_end,
-            &one_nodes,
-        )
+        build_tree(&one_bundle, &one_vm_vk, one_chain_end, &one_nodes)
     });
     if !matched {
         failures += 1;
+    }
+
+    // `one-node`'s tree with the deferred node moved up between the image node and the group
+    // nodes. The two chains decide what each node carries: the deferred node passes on the
+    // wrapped value the image node ends the global LogUp's chain with, and the group nodes,
+    // now after it, pass on the deferred chain's value past it, which the leaves start from.
+    let (matched, _) = run_case("interleaved", true, ROOT_REJECTED, || {
+        let image =
+            prove_global_logup_nodes(&one_bundle, &one_vm_vk, [Kb::ZERO; DIGEST_SIZE])?.remove(0);
+        let image_pvs =
+            recursion_public_values(&image.0.public_values).expect("the image node's pvs");
+        let image_end: [Kb; DIGEST_SIZE] =
+            std::array::from_fn(|j| image_pvs[col.global_chain_end[j]]);
+        let mut between = DeferredMachine::new(
+            recursion_params_with_128_bits_security(),
+            one_vm_vk.clone(),
+            false,
+        );
+        between.set_global_chain_for_testing(image_end);
+        let (nodes, chain_end) = between.prove_chain(std::slice::from_ref(&sub_root))?;
+        between.verify(&nodes[0])?;
+        let groups = prove_global_logup_nodes(&one_bundle, &one_vm_vk, chain_end)?.split_off(1);
+        let mut convert = ConvertMachine::new(
+            Arc::clone(&one_bundle.vk),
+            one_vm_vk.clone(),
+            &one_bundle.chunk_proofs,
+            recursion_params_with_128_bits_security(),
+            false,
+        )?;
+        convert.set_final_deferred_digest(chain_end);
+        let mut children = vec![image];
+        children.extend(nodes);
+        children.extend(groups);
+        children.extend(convert.prove_with_vks(&one_bundle.chunk_proofs)?);
+        let mut combine = CombineMachine::new(
+            recursion_params_with_128_bits_security(),
+            one_vm_vk.clone(),
+            false,
+        );
+        let root = combine.prove_tree(children)?;
+        combine.verify(&root)?;
+        Ok(root)
+    });
+    if !matched {
+        failures += 1;
+    }
+
+    // The global LogUp's chain through a deferred node: `one-node`'s tree, the node passing a
+    // value of its own through. Its neighbours, the first group's node and chunk 1's leaf, both
+    // meet it with the chain's initial value.
+    let global_chain_tree = |host_checks: bool| -> eyre::Result<ProofWithVk> {
+        let mut forging = DeferredMachine::new(
+            recursion_params_with_128_bits_security(),
+            one_vm_vk.clone(),
+            false,
+        );
+        forging.set_global_chain_for_testing([Kb::from_u32(7); DIGEST_SIZE]);
+        let (nodes, chain_end) = forging.prove_chain(std::slice::from_ref(&sub_root))?;
+        forging.verify(&nodes[0])?;
+        let mut convert = ConvertMachine::new(
+            Arc::clone(&one_bundle.vk),
+            one_vm_vk.clone(),
+            &one_bundle.chunk_proofs,
+            recursion_params_with_128_bits_security(),
+            false,
+        )?;
+        convert.set_final_deferred_digest(chain_end);
+        let mut children =
+            prove_global_logup_nodes(&one_bundle, &one_vm_vk, [Kb::ZERO; DIGEST_SIZE])?;
+        children.extend(nodes);
+        children.extend(convert.prove_with_vks(&one_bundle.chunk_proofs)?);
+        let mut combine = CombineMachine::new(
+            recursion_params_with_128_bits_security(),
+            one_vm_vk.clone(),
+            false,
+        );
+        if !host_checks {
+            combine.skip_prefix_checks_for_testing();
+        }
+        let root = combine.prove_tree(children)?;
+        combine.verify(&root)?;
+        Ok(root)
+    };
+    for (name, host_checks, failure) in [
+        ("global-chain-host", true, GLOBAL_CHAIN_REFUSED),
+        ("global-chain", false, ROOT_REJECTED),
+    ] {
+        let (matched, _) = run_case(name, false, failure, || global_chain_tree(host_checks));
+        if !matched {
+            failures += 1;
+        }
+    }
+
+    // A node whose own fraction of the global LogUp is (0, 0), in `one-node`'s tree.
+    let (matched, _) = run_case("zero-denominator", false, ROOT_REJECTED, || {
+        let mut zeroing = DeferredMachine::new(
+            recursion_params_with_128_bits_security(),
+            one_vm_vk.clone(),
+            false,
+        );
+        zeroing.zero_denominator_for_testing();
+        let (nodes, chain_end) = zeroing.prove_chain(std::slice::from_ref(&sub_root))?;
+        zeroing.verify(&nodes[0])?;
+        build_tree(&one_bundle, &one_vm_vk, chain_end, &nodes)
+    });
+    if !matched {
+        failures += 1;
+    }
+
+    // A sub-proof that is not a complete root: fib's leaves under a top node that is not a root,
+    // and fib's image node.
+    for (name, chunks) in [("chunks-as-sub-proof", true), ("node-as-sub-proof", false)] {
+        let (matched, _) = run_case(name, false, NODE_REJECTED, || {
+            let sub_proof = if chunks {
+                let leaves = ConvertMachine::new(
+                    Arc::clone(&bundle.vk),
+                    vm_vk.clone(),
+                    &bundle.chunk_proofs,
+                    recursion_params_with_128_bits_security(),
+                    false,
+                )?
+                .prove_with_vks(&bundle.chunk_proofs)?;
+                let mut combine = CombineMachine::new(
+                    recursion_params_with_128_bits_security(),
+                    vm_vk.clone(),
+                    false,
+                );
+                combine.skip_prefix_checks_for_testing();
+                combine.prove_partial_tree(leaves)?
+            } else {
+                prove_global_logup_nodes(&bundle, &vm_vk, [Kb::ZERO; DIGEST_SIZE])?.remove(0)
+            };
+            let mut machine = DeferredMachine::new(
+                recursion_params_with_128_bits_security(),
+                agg_vm_vk.clone(),
+                false,
+            );
+            let (nodes, _) = machine.prove_chain(std::slice::from_ref(&sub_proof))?;
+            machine.verify(&nodes[0])?;
+            Ok(nodes[0].clone())
+        });
+        if !matched {
+            failures += 1;
+        }
     }
 
     // Nested: a sub-proof that defers. `happy`'s root verified as a complete root, so every

@@ -1,7 +1,8 @@
 //! Offline whitelist builder: one convert VK per RISC-V shape the whitelist admits, plus the
-//! combine node VKs (every ordered child pair over the convert rows and the combine tier), the
-//! deferred node VK and the compress node VK, into the per-config vk-map artifact
-//! (`mle_vk_map_kb.bin`, root included).
+//! combine node VKs (every ordered child pair over the convert rows, the group nodes' row and
+//! the combine tier), the global LogUp's node VKs (a group node per group size, an image node
+//! per image tier), the deferred node VK and the compress node VK, into the per-config vk-map
+//! artifact (`mle_vk_map_kb.bin`, root included).
 //!
 //! No proving is needed for enumeration: under the shape config a proof's layout is a function
 //! of its shape alone, so each shape's convert layout is synthesized from the riscv vk and the
@@ -12,16 +13,23 @@
 //! and checkpointed by shape
 //! CONTENT (the sorted `name:height` list), so a stopped build resumes and a ladder edit that
 //! moves every index still reuses what was already keygen'd. Leaves are laid out in
-//! `mle_riscv_shapes()` order, then the combine VKs, then the deferred one, then the compress one.
+//! `mle_riscv_shapes()` order, then the combine VKs, then the global LogUp's nodes (group nodes,
+//! image nodes), then the deferred one, then the compress one.
 //!
-//! Self-validation, two layers:
+//! Self-validation, three layers:
 //!   (a) `MLE_VK_MAP_RETH_BLOCKS=<id,id,...>`: emulate those reth blocks and check that the shape
 //!       the prover would select for EVERY chunk is an exact member of the enumeration --
 //!       emulation only, so it covers each real chunk of the corpus in minutes;
 //!   (b) `MLE_VK_MAP_PROVE_BLOCK=<id>` (or, unset, fib-10): prove the chunks and check that each
 //!       real proof's layout equals the layout synthesized for its selected shape, and that the
 //!       convert VKs a real `ConvertMachine` keygens are map members -- the lookup the combine
-//!       witness performs.
+//!       witness performs;
+//!   (c) on the same proofs: the whole tree under the artifact just written, from the global
+//!       LogUp's nodes to the complete root, a deferred node over that root and the compress
+//!       proof, each proved by machines of its own; the apex over the artifact accepts the root
+//!       and the compress proof, and the deferred and compress keys the real proofs gave are
+//!       the leaves written for them (the compress key also the one in `mle_compress_vk.bin`)
+//!       -- the node keys a real tree needs are the ones pre-registered.
 //!
 //! Exit code: 0 when the build and every validation passed; 3 when the artifact was written but
 //! a validation failed (the artifact is kept; each failure is logged as VALIDATION FAILED); a
@@ -40,7 +48,8 @@
 //!   MLE_VK_MAP_RETH_BLOCKS self-check (a): reth block ids to emulate, comma separated
 //!   MLE_VK_MAP_PROVE_BLOCK self-check (b): a reth block to prove instead of fib-10
 //!   MLE_LOG_STACKED_HEIGHT leave unset: the artifact is keyed to the height the prover ships
-//!                          with
+//!                          with, and the config digest does not carry it (a warning is logged
+//!                          at another height)
 //!
 //! Usage:
 //!   cargo run --release -p pico-vm --example mle_build_vk_map
@@ -73,7 +82,7 @@ use std::{
     time::Instant,
 };
 
-use p3_field::PrimeField32;
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use pico_mle_core::{
     config::{compress_params_with_128_bits_security, recursion_params_with_128_bits_security},
     keygen::types::MultiStarkVerifyingKey,
@@ -91,11 +100,13 @@ use pico_vm::{
     mle::{
         compiler::recursion::RecursionVkLayout,
         machine::{
+            apex::MleApexVerifier,
             combine::CombineMachine,
             compress::CompressMachine,
             convert::ConvertMachine,
             deferred::DeferredMachine,
             exe::RiscvVmVk,
+            global_logup_nodes::GlobalLogUpNodeMachine,
             recursion::{
                 extract_recursion_vk_layout, extract_recursion_vk_layout_from_heights,
                 recursion_vk_layouts_equal, Engine,
@@ -103,7 +114,7 @@ use pico_vm::{
             riscv,
             shape::{
                 mle_natural_heights, mle_riscv_shapes, select_riscv_shape,
-                MLE_RECURSION_COMBINE_LOG_HEIGHTS, MLE_RECURSION_CONVERT_LADDER,
+                MLE_RECURSION_COMBINE_LOG_HEIGHTS,
             },
             vk_map::{
                 checkpoint_line, parse_checkpoint_line, root_file_text, shape_content_key,
@@ -112,6 +123,7 @@ use pico_vm::{
             },
         },
     },
+    primitives::consts::DIGEST_SIZE,
 };
 use tracing::info;
 
@@ -220,6 +232,14 @@ fn main() {
         .map(|v| v.parse().expect("MLE_VK_MAP_LIMIT"));
     let reth_dir = env("MLE_VK_MAP_RETH_DIR", "./perf/bench_data/rv64");
     let chips = RiscvChipType::<riscv::Kb>::all_chips();
+    if riscv::log_stacked_height_from_env() != riscv::DEFAULT_LOG_STACKED_HEIGHT {
+        tracing::warn!(
+            "MLE_LOG_STACKED_HEIGHT is {}, not the {} the prover ships with: this artifact is \
+             for that height only, and its config digest is the shipped one's",
+            riscv::log_stacked_height_from_env(),
+            riscv::DEFAULT_LOG_STACKED_HEIGHT
+        );
+    }
 
     // One riscv vk serves every shape: under the shape config its layout-relevant content (DAGs,
     // params, geometry, byte-table commit) is app-independent; the app-varying program commit is
@@ -330,7 +350,7 @@ fn main() {
         .map(|k| *done.get(k).expect("every shape keygen'd"))
         .collect();
 
-    // ── Combine VKs: the 36 node shapes, each through CombineMachine's own tier check ──
+    // ── Combine VKs: the standard node shapes, each through CombineMachine's own tier check ──
     // Any convert vk bootstraps the per-row C child layouts; the B layout comes from the
     // [C_last, C_last] node.
     let leaf_engine: Engine = StarkEngine::new(recursion_params_with_128_bits_security());
@@ -346,6 +366,15 @@ fn main() {
         .preregister_standard_shapes(&convert_vk0)
         .unwrap_or_else(|e| panic!("{e}"));
     identities.extend(combine_vks.iter().map(|v| vk_identity(v)));
+    // ── The global LogUp's node VKs: a group node per group size, an image node per tier ──
+    let global_logup_node_vks = GlobalLogUpNodeMachine::new(
+        recursion_params_with_128_bits_security(),
+        &riscv_vk.inner.params,
+        true,
+    )
+    .preregister()
+    .unwrap_or_else(|e| panic!("{e}"));
+    identities.extend(global_logup_node_vks.iter().map(|v| vk_identity(v)));
     // ── The deferred node VK: one, over the combine-tier child every sub-proof root is ──
     let mut deferred = DeferredMachine::new(
         recursion_params_with_128_bits_security(),
@@ -376,11 +405,9 @@ fn main() {
                 )
             })
             .collect();
-        // `preregister_standard_shapes` order: the non-root pairs, the root pairs, the
-        // single-child roots; the roots are the last `kinds² + kinds`.
-        let kinds = MLE_RECURSION_CONVERT_LADDER.len() + 1;
-        let roots = &combine_vks[kinds * kinds..];
-        assert_eq!(roots.len(), kinds * kinds + kinds);
+        // `preregister_standard_shapes` order: the non-root pairs, then the root pairs.
+        let roots = &combine_vks[CombineMachine::standard_node_count() / 2..];
+        assert_eq!(roots.len(), CombineMachine::standard_node_count() / 2);
         let layouts: Vec<RecursionVkLayout> = roots
             .iter()
             .map(|vk| extract_recursion_vk_layout_from_heights(vk, Some(&b_heights)))
@@ -411,6 +438,7 @@ fn main() {
     let leaves = VkMapLeafCounts {
         convert: shapes.len(),
         combine: combine_vks.len(),
+        global_logup_nodes: global_logup_node_vks.len(),
         deferred: 1,
         compress: 1,
     };
@@ -420,9 +448,10 @@ fn main() {
         "the leaves pushed and the counts the root file names disagree"
     );
     info!(
-        "leaves: {} convert + {} combine + {} deferred + {} compress = {}",
+        "leaves: {} convert + {} combine + {} global LogUp + {} deferred + {} compress = {}",
         leaves.convert,
         leaves.combine,
+        leaves.global_logup_nodes,
         leaves.deferred,
         leaves.compress,
         leaves.total()
@@ -558,7 +587,7 @@ fn main() {
         let real_vm_vk = RiscvVmVk::from_program_and_vk(&program, &bundle.vk);
         let real_convert = ConvertMachine::new(
             bundle.vk.clone(),
-            real_vm_vk,
+            real_vm_vk.clone(),
             &bundle.chunk_proofs,
             recursion_params_with_128_bits_security(),
             true,
@@ -576,9 +605,111 @@ fn main() {
             bundle.chunk_proofs.len(),
             real_convert.pks.len()
         );
+
+        // ── (c) the whole tree under the artifact, to the compress proof ──
+        // The artifact as a prover loads it, and machines of its own: the global LogUp's nodes,
+        // the leaves, the combine nodes up to the complete root, a deferred node over the root,
+        // then compress, each proved and accepted. A parent takes each child's key from the
+        // artifact and checks its membership in circuit, so a node key this build pre-registered
+        // from synthesized layouts that is not the one real proofs need is refused here, and not
+        // in a prover's first run. The outermost keys have no parent in this run: the apex over
+        // the artifact stands in for it, and the deferred and compress keys are held against
+        // the leaves and the file written for them.
+        let map = Arc::new(
+            MleVkMap::try_load_bin(&out).unwrap_or_else(|e| panic!("reload `{out}`: {e}")),
+        );
+        let mut real_convert = real_convert;
+        real_convert
+            .set_vk_root(map.root())
+            .expect("the artifact's root");
+        let mut global_logup_nodes = GlobalLogUpNodeMachine::new(
+            recursion_params_with_128_bits_security(),
+            &bundle.vk.inner.params,
+            true,
+        );
+        global_logup_nodes.set_vk_root(map.root());
+        let mut children = global_logup_nodes
+            .prove(
+                &real_vm_vk,
+                &bundle.chunk_proofs,
+                &bundle.global,
+                [riscv::Kb::ZERO; DIGEST_SIZE],
+            )
+            .expect("the global LogUp's nodes");
+        children.extend(
+            real_convert
+                .prove_with_vks(&bundle.chunk_proofs)
+                .expect("the convert leaves"),
+        );
+        let mut combine = CombineMachine::new(
+            recursion_params_with_128_bits_security(),
+            real_vm_vk.clone(),
+            true,
+        );
+        combine.set_vk_map(map.clone());
+        let root = combine.prove_tree(children).expect("the tree");
+        combine
+            .verify(&root)
+            .unwrap_or_else(|e| panic!("VALIDATION FAILED: {label}: the root is refused: {e:#}"));
+        let apex = MleApexVerifier::new(
+            recursion_params_with_128_bits_security(),
+            compress_params_with_128_bits_security(),
+            map.clone(),
+            real_vm_vk.clone(),
+            map.root(),
+        );
+        apex.verify(&root).unwrap_or_else(|e| {
+            panic!("VALIDATION FAILED: {label}: the apex refuses the root: {e:#}")
+        });
+        let mut real_deferred = DeferredMachine::new(
+            recursion_params_with_128_bits_security(),
+            real_vm_vk.clone(),
+            true,
+        );
+        real_deferred.set_vk_map(map.clone());
+        let (nodes, _) = real_deferred
+            .prove_chain(std::slice::from_ref(&root))
+            .expect("a deferred node over the root");
+        real_deferred.verify(&nodes[0]).unwrap_or_else(|e| {
+            panic!("VALIDATION FAILED: {label}: the deferred node is refused: {e:#}")
+        });
+        let deferred_id = vk_identity(&nodes[0].1);
+        assert!(
+            deferred_id == vk_identity(&deferred_vk) && map.find(&deferred_id).is_some(),
+            "VALIDATION FAILED: {label}: the deferred node over a real root has another key than \
+             the whitelist's deferred leaf"
+        );
+        let mut compress =
+            CompressMachine::new(compress_params_with_128_bits_security(), real_vm_vk, true);
+        compress.set_vk_map(map.clone());
+        let compressed = compress.prove(root).expect("compress");
+        compress.verify(&compressed).unwrap_or_else(|e| {
+            panic!("VALIDATION FAILED: {label}: the compress proof is refused: {e:#}")
+        });
+        apex.verify_compress(&compressed).unwrap_or_else(|e| {
+            panic!("VALIDATION FAILED: {label}: the apex refuses the compress proof: {e:#}")
+        });
+        let compress_id = vk_identity(&compressed.1);
+        assert!(
+            compress_id == vk_identity(&compress_vk) && map.find(&compress_id).is_some(),
+            "VALIDATION FAILED: {label}: the compress proof of a real root has another key than \
+             the whitelist's compress leaf"
+        );
+        assert!(
+            fs::read(&compress_vk_out)
+                .unwrap_or_else(|e| panic!("reload `{compress_vk_out}`: {e}"))
+                == bincode::serialize(compressed.1.as_ref()).expect("compress vk encode"),
+            "VALIDATION FAILED: {label}: the compress proof of a real root has another key than \
+             the one written to `{compress_vk_out}`"
+        );
+        info!(
+            "(c) ✓ {label}: the tree proves under the artifact to a complete root, a deferred \
+             node over it and a compress proof; the apex accepts the root and the compress \
+             proof; the deferred and compress keys are the leaves and the file written for them"
+        );
     }));
     if outcome.is_err() {
-        failed.push(format!("(b) {label}: see the panic above"));
+        failed.push(format!("(b) / (c) {label}: see the panic above"));
     }
 
     if !failed.is_empty() {

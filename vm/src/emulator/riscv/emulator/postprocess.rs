@@ -154,8 +154,8 @@ pub fn postprocess(state: FinalState<'_>, chunk_record: &mut EmulationRecord) {
 
         // Which events a main-memory word gets, in this order:
         //
-        // 1. Image word: finalize only. Its initial state is sent by the vk's image digest
-        //    (`compiler/riscv/program.rs`), for every image word -- including the ones the
+        // 1. Image word: finalize only. Its initial state is sent by the program's image table
+        //    (`mle/machine/global_logup.rs`), for every image word -- including the ones the
         //    program never touched, whose record is still `(0, 0, image value)` (bulk-load
         //    marks them accessed), so their finalize event is what balances the digest.
         // 2. Outside the image, record still at `(chunk 0, timestamp 0)`: no event at all.

@@ -1,5 +1,8 @@
 use crate::{
-    chips::precompiles::poseidon2::FieldSpecificPrecompilePoseidon2Chip,
+    chips::precompiles::{
+        bls12381_g2::{add::Bls12381G2AddChip, double::Bls12381G2DoubleChip},
+        poseidon2::FieldSpecificPrecompilePoseidon2Chip,
+    },
     compiler::riscv::opcode::Opcode,
 };
 use hashbrown::HashSet;
@@ -28,7 +31,6 @@ use crate::{
                 read_write::MemoryReadWriteChip,
                 unaligned::MemoryUnalignedChip,
             },
-            riscv_poseidon2::FieldSpecificPoseidon2Chip,
             riscv_program::ProgramChip,
             syscall::SyscallChip,
         },
@@ -74,8 +76,7 @@ use crate::{
     },
     primitives::consts::{
         ADD_DATAPAR, BITWISE_DATAPAR, DIVREM_DATAPAR, LOCAL_MEMORY_DATAPAR, LT_DATAPAR,
-        MEMORY_RW_DATAPAR, MUL_DATAPAR, RISCV_POSEIDON2_DATAPAR, SLL_DATAPAR, SR_DATAPAR,
-        SUB_DATAPAR,
+        MEMORY_RW_DATAPAR, MUL_DATAPAR, SLL_DATAPAR, SR_DATAPAR, SUB_DATAPAR,
     },
 };
 
@@ -120,6 +121,8 @@ define_chip_type!(
         (WsDoubleBls381, WsDoubleBls381),
         (WsDoubleSecp256k1, WsDoubleSecp256k1),
         (WsDoubleSecp256r1, WsDoubleSecp256r1),
+        (Bls381G2Add, Bls12381G2AddChip),
+        (Bls381G2Double, Bls12381G2DoubleChip),
         (ShaExtend, ShaExtendChip),
         (ShaExtendControl, ShaExtendControlChip),
         (MemoryInitialize, MemoryInitializeFinalizeChip),
@@ -151,7 +154,6 @@ define_chip_type!(
         (SyscallRiscv, SyscallChip),
         (SyscallPrecompile, SyscallChip),
         (Global, GlobalChip),
-        (Poseidon2, FieldSpecificPoseidon2Chip),
         (KeccakTab, KeccakTables),
         (Byte, ByteChip)
     ]
@@ -193,10 +195,10 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             //
             // The matching syscalls are registered in `emulator/riscv/syscalls/mod.rs`.
             //
-            // The MLE air table carries both (air ids 48 and 49, after the poseidon2 precompile
-            // at 47). Every convert program absorbs one presence flag per optional air, so each
-            // new air changes every convert VK; the three came in together so that one rebuild
-            // of the convert VK whitelist covers all of them.
+            // The MLE air table carries both (`air_id::ED_ADD` and `air_id::ED_DECOMPRESS`,
+            // after the poseidon2 precompile at `air_id::POSEIDON2_PERMUTE`). Every convert
+            // program absorbs one presence flag per optional air, so each new air changes every
+            // convert VK.
             Self::Ed25519Add(Default::default()),
             Self::Ed25519Decompress(Default::default()),
             Self::WsBn254Add(Default::default()),
@@ -210,6 +212,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::WsDoubleBls381(Default::default()),
             Self::WsDoubleSecp256k1(Default::default()),
             Self::WsDoubleSecp256r1(Default::default()),
+            Self::Bls381G2Add(Default::default()),
+            Self::Bls381G2Double(Default::default()),
             Self::ShaExtend(Default::default()),
             Self::ShaExtendControl(Default::default()),
             Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
@@ -218,8 +222,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::MemoryFinalize(MemoryInitializeFinalizeChip::new(MemoryChipType::Finalize)),
             Self::MemoryLocal(Default::default()),
             Self::MemoryReadWrite(Default::default()),
-            // The misaligned loads and stores: air id 50, appended after the Ed25519
-            // pair, so no existing id moves; like them it changes every convert VK.
+            // The misaligned loads and stores: `air_id::MEM_UNALIGNED`, after the Ed25519
+            // pair; like them it changes every convert VK.
             Self::MemoryUnaligned(Default::default()),
             Self::DivRem(Default::default()),
             Self::Mul(Default::default()),
@@ -253,7 +257,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::SyscallPrecompile(SyscallChip::precompile()),
             Self::Global(Default::default()),
             Self::Byte(Default::default()),
-            Self::Poseidon2(Default::default()),
             Self::KeccakTab(Default::default()),
         ]
     }
@@ -289,8 +292,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::SyscallPrecompile(SyscallChip::precompile()),
             // Global
             Self::Global(Default::default()),
-            // Poseidon2
-            Self::Poseidon2(Default::default()),
             // Batch 3
             Self::SR(Default::default()),
             Self::SLL(Default::default()),
@@ -323,9 +324,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::U256Mul(Default::default()),
             // Byte
             Self::Byte(Default::default()),
-            // Ecall: appended after Byte so the orchestrator's hard-coded batch indices
-            // (0..=45) stay valid; a device kernel over the history, see
-            // EcallChip::gpu_generate_extra_record_and_main.
+            // Ecall: after Byte, behind the batches the orchestrator addresses by position; a
+            // device kernel over the history, see EcallChip::gpu_generate_extra_record_and_main.
             Self::Ecall(Default::default()),
             // The precompiles whose traces are generated on the host (their device kernels
             // predate the RV64 layouts): appended after Ecall for the same reason Ecall is.
@@ -336,8 +336,12 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             // last for the same reason.
             Self::MemoryUnaligned(Default::default()),
             // The sliced Keccak tables: a device kernel counts the record's permutations;
-            // no byte lookups. Appended last for the same reason.
+            // no byte lookups. Appended after them for the same reason.
             Self::KeccakTab(Default::default()),
+            // The BLS12-381 G2 precompiles: host tracegen, appended last so the orchestrator's
+            // indices above stay put.
+            Self::Bls381G2Add(Default::default()),
+            Self::Bls381G2Double(Default::default()),
         ]
         .map(MetaChip::<F, RiscvChipType<F>>::new)
         .into()
@@ -429,16 +433,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
                 Self::MemoryUnaligned(Default::default()).name(),
                 unaligned_len(record),
             ),
-            // `+ 1`: the Global trace always ends with one padding row (its accumulation
-            // constraints require it); Poseidon2 follows so the log-height gap stays 2.
-            (
-                Self::Global(Default::default()).name(),
-                num_global_events + 1,
-            ),
-            (
-                <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
-                (num_global_events + 1).div_ceil(RISCV_POSEIDON2_DATAPAR),
-            ),
+            // One row per cross-chunk event.
+            (Self::Global(Default::default()).name(), num_global_events),
             (Self::SyscallRiscv(SyscallChip::riscv()).name(), syscalls),
         ]
     }
@@ -455,22 +451,10 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
                 Self::MemoryFinalize(MemoryInitializeFinalizeChip::new(Finalize)).name(),
                 record.memory_finalize_events.len(),
             ),
+            // One row per cross-chunk event: each memory event raises one.
             (
                 Self::Global(GlobalChip::default()).name(),
-                num_global_events + 1,
-            ),
-            (
-                <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
-                // Must be div_ceil, matching the trace side.
-                //
-                // `RiscvPoseidon2Chip::generate_main` computes its height as
-                // `events.len().div_ceil(RISCV_POSEIDON2_DATAPAR)`
-                // (`chips/chips/riscv_poseidon2/traces.rs:49`). Plain division truncates, so
-                // whenever `num_global_events` is not a multiple of the datapar width this
-                // under-reported the height by one row and the generated trace did not fit the
-                // shape. Every sibling entry in this list already uses `div_ceil`; this was the
-                // only one left.
-                (num_global_events + 1).div_ceil(RISCV_POSEIDON2_DATAPAR),
+                num_global_events,
             ),
         ]
     }
@@ -517,7 +501,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::MemoryUnaligned(Default::default()),
             Self::Global(Default::default()),
             Self::SyscallRiscv(SyscallChip::riscv()),
-            Self::Poseidon2(Default::default()),
         ]
         .map(MetaChip::new)
         .into()
@@ -545,7 +528,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::MemoryReadWrite(Default::default()),
             Self::Global(Default::default()),
             Self::SyscallRiscv(SyscallChip::riscv()),
-            Self::Poseidon2(Default::default()),
             Self::Program(Default::default()),
             Self::Byte(Default::default()),
             Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
@@ -585,6 +567,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::WsDoubleBls381(Default::default()),
             Self::WsDoubleSecp256k1(Default::default()),
             Self::WsDoubleSecp256r1(Default::default()),
+            Self::Bls381G2Add(Default::default()),
+            Self::Bls381G2Double(Default::default()),
             Self::ShaExtendControl(Default::default()),
             Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
                 MemoryChipType::Initialize,
@@ -617,7 +601,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::SyscallPrecompile(SyscallChip::precompile()),
             Self::Global(Default::default()),
             Self::Byte(Default::default()),
-            Self::Poseidon2(Default::default()),
         ]
         .into()
     }

@@ -808,7 +808,7 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.8.0"
-source = "git+https://github.com/brevis-network/bls12_381?rev=79fbbface08629528c9ef6e326d98e38901c39bf#79fbbface08629528c9ef6e326d98e38901c39bf"
+source = "git+https://github.com/brevis-network/bls12_381?rev=7cc32a581a69b044e2d02ae8b7c71937ba552837#7cc32a581a69b044e2d02ae8b7c71937ba552837"
 dependencies = [
  "cfg-if",
  "digest 0.10.7",
@@ -1753,6 +1753,7 @@ dependencies = [
  "rand 0.10.2",
  "reqwest",
  "serde",
+ "sha2",
  "strum",
  "strum_macros",
  "sysinfo",
@@ -3961,7 +3962,7 @@ dependencies = [
 [[package]]
 name = "pico-gpu"
 version = "0.1.11"
-source = "git+https://github.com/brevis-network/pico-gpu.git?rev=9665f1079cd33367b3561176d9b2a56df679a9f5#9665f1079cd33367b3561176d9b2a56df679a9f5"
+source = "git+https://github.com/brevis-network/pico-gpu.git?rev=0234a58afb7642e6e78a85c27ff6d7b991a86269#0234a58afb7642e6e78a85c27ff6d7b991a86269"
 
 [[package]]
 name = "pico-gpu-api"

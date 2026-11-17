@@ -71,12 +71,11 @@ use crate::{
         },
         riscv::public_values::PublicValues as RiscvPublicValues,
     },
-    machine::septic::{SepticCurve, SepticDigest, SepticExtension},
     mle::{
         compiler::recursion::{ConvertProgramInput, ConvertVerifierCircuit, RecursionVkLayout},
         machine::{
-            air::GCS_DIGEST_LEN,
             exe::RiscvVmVk,
+            riscv::air_id,
             vk_map::{vk_identity, MleVkMap},
         },
     },
@@ -89,9 +88,13 @@ use pico_mle_core::{
     config::koala_bear_poseidon2::{
         default_koalabear_poseidon2_16, DuplexSponge, KoalaBearPoseidon2Config, EF,
     },
+    global_logup,
     keygen::types::MultiStarkVerifyingKey,
     protocol::proof::Proof,
-    verifier::{replay_transcript, verify},
+    verifier::{
+        replay_transcript, replay_transcript_with_external_logup, verify,
+        verify_with_external_logup,
+    },
     FiatShamirTranscript, StarkProtocolConfig,
 };
 
@@ -216,27 +219,74 @@ const _: () = assert!(
     "a Block holds exactly the coefficients of one EF element"
 );
 
-/// Host replay of one in-circuit `curve_add_septic`: push its hint block —
-/// `p3 = p1 + p2` (x then y, 7 limbs each) followed by `inv(p2.x − p1.x)` (7 limbs, the F7
-/// inverse proving dx ≠ 0) — and return `p3`. The GCS fold in combine nodes and the initial-GCS
-/// injection in convert leaves both replay their addition sequences through this.
-fn push_curve_add(
+/// The global LogUp's fields of a recursion public-value vector: the fractional sum `(p, q)`
+/// and the real-row count.
+pub(crate) fn global_sum_and_row_count(pvs: &[Kb]) -> ((EF, EF), Kb) {
+    let col = RECURSION_PUBLIC_VALUES_COL_MAP;
+    let coeffs = |at: usize| -> EF {
+        let coeffs: [Kb; EXTENSION_DEGREE] = std::array::from_fn(|j| pvs[col.global_sum[at + j]]);
+        EF::from_basis_coefficients_slice(&coeffs).expect("five coefficients make an element")
+    };
+    (
+        (coeffs(0), coeffs(EXTENSION_DEGREE)),
+        pvs[col.global_row_count],
+    )
+}
+
+/// Tests only: whether a tree that ends at chunk cursor 1 (an empty execution) is let through
+/// to the circuit. See [`let_empty_executions_reach_the_circuit_for_testing`].
+static EMPTY_EXECUTIONS_REACH_THE_CIRCUIT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Tests only, for the process: witness generation stops, with a sentence, on a complete root
+/// or a deferred child whose chunk cursor ends at 1, an execution of no chunk, before anything
+/// is proved. After this call it hints a zero where the circuit asks for the inverse of
+/// `next_chunk − 1` instead, which no circuit accepts, so that a negative test sees the circuit
+/// refuse such a tree and not the host.
+#[doc(hidden)]
+pub fn let_empty_executions_reach_the_circuit_for_testing() {
+    EMPTY_EXECUTIONS_REACH_THE_CIRCUIT.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The hint a completeness block takes for `next_chunk != 1`: the inverse of `next_chunk − 1`.
+/// `what` names the node in the refusal of an empty execution.
+fn inverse_past_cursor_one(next_chunk: Kb, what: &str) -> Kb {
+    let diff = next_chunk - Kb::ONE;
+    if diff == Kb::ZERO
+        && EMPTY_EXECUTIONS_REACH_THE_CIRCUIT.load(std::sync::atomic::Ordering::Relaxed)
+    {
+        return Kb::ZERO;
+    }
+    assert!(
+        diff != Kb::ZERO,
+        "{what} with next_chunk == 1 (empty execution)"
+    );
+    diff.inverse()
+}
+
+/// The hints of the global LogUp's part of a completeness block (the circuit's
+/// `assert_global_logup_closed`), for a node whose public values carry the sum `(_, q)` and the count
+/// `count`: the inverse of `q` ([`EXTENSION_DEGREE`] elements), then the 21 bits of
+/// `max_count − count`, low bit first.
+///
+/// `max_count` is the limit the program was built with: `MAX_COUNT`, or a test's lower one.
+///
+/// A zero `q` or a count over the limit has no valid hints; zeros are pushed and the circuit
+/// refuses them.
+fn push_global_logup_closure_hints(
     stream: &mut VecDeque<Block<Kb>>,
-    p1: &SepticCurve<Kb>,
-    p2: &SepticCurve<Kb>,
-) -> SepticCurve<Kb> {
-    let p3 = p1.add_incomplete(*p2);
-    for j in 0..7 {
-        stream.push_back(kb_to_block(p3.x.0[j]));
+    q: EF,
+    count: Kb,
+    max_count: u64,
+) {
+    let q_inv = q.try_inverse().unwrap_or(EF::ZERO);
+    for &coeff in q_inv.as_basis_coefficients_slice() {
+        stream.push_back(kb_to_block(coeff));
     }
-    for j in 0..7 {
-        stream.push_back(kb_to_block(p3.y.0[j]));
+    let slack = max_count.saturating_sub(count.as_canonical_u32() as u64);
+    for i in 0..21 {
+        stream.push_back(kb_to_block(Kb::from_u32(((slack >> i) & 1) as u32)));
     }
-    let inv_dx = (p2.x - p1.x).inv();
-    for j in 0..7 {
-        stream.push_back(kb_to_block(inv_dx.0[j]));
-    }
-    p3
 }
 
 /// FNV-1a-64 over every limb of every block, in stream order. Order-sensitive by construction:
@@ -351,7 +401,18 @@ fn derive_whir_query_indices(
     // The check-free pass drives the transcript. The full verify's verdict is discarded either
     // way — only the sponge's final state is read — so the two paths differ solely in the
     // algebraic work performed alongside the walk; `walker_xcheck` holds them to the same indices.
-    derive_whir_query_indices_with(riscv_vk, proof, vk_layout, true)
+    derive_whir_query_indices_with(riscv_vk, proof, vk_layout, true, None)
+}
+
+/// [`derive_whir_query_indices`] for a child in the external LogUp challenge mode, a group
+/// proof of the global LogUp, under the challenges it was proved with.
+fn derive_whir_query_indices_external(
+    vk: &MultiStarkVerifyingKey<Sc>,
+    proof: &Proof<Sc>,
+    vk_layout: &RecursionVkLayout,
+    challenges: (EF, EF),
+) -> Vec<Vec<usize>> {
+    derive_whir_query_indices_with(vk, proof, vk_layout, true, Some(challenges))
 }
 
 /// `MLE_WALKER_XCHECK`: assert the transcript-only walk and the full verify derive the same query
@@ -367,12 +428,13 @@ fn walker_xcheck(
     riscv_vk: &MultiStarkVerifyingKey<Sc>,
     proof: &Proof<Sc>,
     vk_layout: &RecursionVkLayout,
+    external: Option<(EF, EF)>,
 ) {
     if !*flags::WALKER_XCHECK {
         return;
     }
-    let verified = derive_whir_query_indices_with(riscv_vk, proof, vk_layout, false);
-    let walked = derive_whir_query_indices_with(riscv_vk, proof, vk_layout, true);
+    let verified = derive_whir_query_indices_with(riscv_vk, proof, vk_layout, false, external);
+    let walked = derive_whir_query_indices_with(riscv_vk, proof, vk_layout, true, external);
     assert_eq!(
         verified, walked,
         "MLE_WALKER_XCHECK: the transcript-only walk derived different query indices than the \
@@ -396,24 +458,53 @@ fn walker_xcheck(
 /// defect first surfaces at the recursion circuit's in-circuit `assert_f_eq`, which is far harder
 /// to localise. `MLE_VERIFY=1` (read in `distributed-vm`) restores a host-side verify of every
 /// chunk proof and is the compensating check when one is wanted.
+///
+/// `external` carries the LogUp challenges of a child in the external challenge mode, which
+/// absorbs them where an internal-mode child grinds and samples its own.
 fn derive_whir_query_indices_with(
     riscv_vk: &MultiStarkVerifyingKey<Sc>,
     proof: &Proof<Sc>,
     vk_layout: &RecursionVkLayout,
     walker: bool,
+    external: Option<(EF, EF)>,
 ) -> Vec<Vec<usize>> {
+    assert_eq!(
+        external.is_some(),
+        vk_layout.external_logup,
+        "the child's LogUp challenge mode and the replay's entry point disagree"
+    );
     let params = &riscv_vk.inner.params;
     let config = KoalaBearPoseidon2Config::default_from_params(params.clone());
 
     let profile = *flags::TRANSCRIPT_PROF;
     let mut extractor = QueryExtractor::new(profile);
     let t_verify = std::time::Instant::now();
-    if walker {
-        replay_transcript(&config, riscv_vk, proof, &mut extractor)
+    match (walker, external) {
+        (true, None) => {
+            replay_transcript(&config, riscv_vk, proof, &mut extractor)
+                .expect("transcript replay: the walk must complete to derive query indices");
+        }
+        (false, None) => {
+            verify(&config, riscv_vk, proof, &mut extractor)
+                .expect("transcript replay: proof must be valid to derive query indices");
+        }
+        (true, Some((alpha, beta))) => {
+            replay_transcript_with_external_logup(
+                &config,
+                riscv_vk,
+                proof,
+                &mut extractor,
+                alpha,
+                beta,
+            )
             .expect("transcript replay: the walk must complete to derive query indices");
-    } else {
-        verify(&config, riscv_vk, proof, &mut extractor)
-            .expect("transcript replay: proof must be valid to derive query indices");
+        }
+        (false, Some((alpha, beta))) => {
+            // The sum is the caller's to read from the proof; here only the walk matters.
+            let _sum =
+                verify_with_external_logup(&config, riscv_vk, proof, &mut extractor, alpha, beta)
+                    .expect("transcript replay: proof must be valid to derive query indices");
+        }
     }
     let verify_us = t_verify.elapsed().as_micros();
     if profile {
@@ -460,7 +551,9 @@ fn derive_whir_query_indices_with(
     let query_phase_pow_bits = params.whir.query_phase_pow_bits;
 
     let mut pos = 0usize;
-    if logup_pow_bits > 0 {
+    // An external-mode child grinds nothing for its LogUp challenges, whatever the bit count
+    // its parameters carry.
+    if logup_pow_bits > 0 && external.is_none() {
         pos += 1;
     }
     if mu_pow_bits > 0 {
@@ -516,12 +609,17 @@ fn derive_whir_query_indices_with(
 ///
 /// `query_indices[r][q]` must hold the Fiat-Shamir-derived query index for WHIR round `r`,
 /// query `q`.  Compute it with `derive_whir_query_indices` before calling this function.
+///
+/// `pre_hash_baked`: the program verifies this child with its vk pre-hash a baked constant
+/// (`verify_one_of_row`: a recursion child of a parent in whitelist mode), so the stream does
+/// not carry it. An external-mode child's is baked whatever this says.
 fn push_proof_to_witness_stream(
     witness_stream: &mut VecDeque<Block<Kb>>,
     vk: &RecursionVkLayout,
     riscv_vk: &MultiStarkVerifyingKey<Sc>,
     proof: &Proof<Sc>,
     query_indices: &[Vec<usize>],
+    pre_hash_baked: bool,
 ) {
     let params = &riscv_vk.inner.params;
     let per_air_vk = &riscv_vk.inner.per_air;
@@ -533,10 +631,12 @@ fn push_proof_to_witness_stream(
     let merged_prep = vk.merged_preprocessed_commit.is_some();
 
     // ── Phase 1: VK hash + common_main_commit ───────────────────────────────
-    // The vk pre-hash travels on the witness stream (the program pins the child identity via
-    // its baked commitments/layout; the hinted pre-hash is Fiat-Shamir-bound to it). Push the
-    // ACTUAL vk's pre_hash, not `vk.vk_pre_hash` from the layout parameter.
-    {
+    // Where the program reads the vk pre-hash from the stream, push the ACTUAL vk's pre_hash,
+    // not `vk.vk_pre_hash` from the layout parameter. Where it bakes it (an external-mode child;
+    // a recursion child in whitelist mode), it is not on the stream: a child whose key hashes
+    // to something else than the baked value then fails in the circuit, at its transcript or at
+    // its whitelist leaf.
+    if !vk.external_logup && !pre_hash_baked {
         let vk_pre_hash = digest_to_u32s(&riscv_vk.pre_hash);
         for &h in &vk_pre_hash {
             witness_stream.push_back(kb_to_block(Kb::from_u32(h)));
@@ -617,13 +717,21 @@ fn push_proof_to_witness_stream(
     // ── Phase 3: GKR ────────────────────────────────────────────────────────
     let gkr = &proof.gkr_proof;
 
-    // check_witness(logup_pow_bits): observe pow_witness if bits > 0.
-    if vk.logup_pow_bits > 0 {
+    // check_witness(logup_pow_bits): observe pow_witness if bits > 0. An external-mode child
+    // grinds nothing: its challenges are the caller's.
+    if vk.logup_pow_bits > 0 && !vk.external_logup {
         witness_stream.push_back(kb_to_block(gkr.logup_pow_witness));
     }
 
     let total_gkr_rounds = vk.l_skip + vk.n_logup;
     if vk.n_logup > 0 {
+        // An external-mode proof's numerator claim (1 EF block), ahead of q0_claim.
+        if vk.external_logup {
+            let p0_claim = gkr
+                .p0_claim
+                .expect("an external-mode proof carries its numerator claim");
+            witness_stream.push_back(ef_to_block(p0_claim));
+        }
         // q0_claim (1 EF block)
         witness_stream.push_back(ef_to_block(gkr.q0_claim));
 
@@ -1298,12 +1406,14 @@ pub fn setup_for_convert(
     };
     let program = Arc::new(ConvertVerifierCircuit::build_verify_program(&input));
     // No deferred proofs in this helper's world, so the chain value every leaf passes through is
-    // zero — which is also what the root's closure forces when no deferred node is present.
+    // zero — which is also what the root's closure forces when no deferred node is present. The
+    // one proof is taken as chunk 1: the global LogUp's chain enters it at its initial value.
     setup_for_convert_with_program(
         riscv_vk,
         riscv_vm_vk,
         proof,
         program,
+        global_logup::chain_iv(),
         [Kb::ZERO; DIGEST_SIZE],
         None,
     )
@@ -1314,11 +1424,15 @@ pub fn setup_for_convert(
 /// `deferred_digest` is the chain value this leaf passes through — the digest the tree's deferred
 /// nodes end on, or zero when there are none. Every leaf in one tree must be given the same one:
 /// cross-child continuity asserts it, so a mismatch makes the tree unprovable.
+/// `global_chain_in` is the global LogUp's chain over the Global table commitments of the chunks
+/// before this one (`pico_mle_core::global_logup::chain_iv` before chunk 1); the leaf's own step
+/// is computed in the circuit from the commitment the proof opens.
 pub fn setup_for_convert_with_program(
     riscv_vk: &MultiStarkVerifyingKey<Sc>,
     riscv_vm_vk: &RiscvVmVk,
     proof: &Proof<Sc>,
     program: Arc<RecursionProgram<Kb>>,
+    global_chain_in: [Kb; DIGEST_SIZE],
     deferred_digest: [Kb; DIGEST_SIZE],
     vk_root: Option<[Kb; DIGEST_SIZE]>,
 ) -> (Arc<RecursionProgram<Kb>>, RecursionRecord<Kb>) {
@@ -1330,7 +1444,7 @@ pub fn setup_for_convert_with_program(
     let extract_us = t_extract.elapsed().as_micros();
     // Before `t_witness`/`t_derive` below: the cross-check's own derives must not land in the
     // numbers those brackets produce (module header, rule 2).
-    walker_xcheck(riscv_vk, proof, &vk_layout);
+    walker_xcheck(riscv_vk, proof, &vk_layout, None);
     // The recursion runtime drives the same Poseidon2 the MLE engine used to produce the
     // RISCV proof (default KoalaBear constants), so the emulated Fiat-Shamir matches.
     let perm = default_koalabear_poseidon2_16();
@@ -1347,15 +1461,18 @@ pub fn setup_for_convert_with_program(
         riscv_vk,
         proof,
         &query_indices,
+        // A RISC-V child's pre-hash is a witness in either mode.
+        false,
     );
-    // The Global-air public values (present in EVERY chunk): [gcs (14) ‖ riscv PublicValues].
-    let global_pv = proof
-        .public_values
-        .iter()
-        .find(|p| p.len() == GCS_DIGEST_LEN + MAX_NUM_PVS)
-        .expect("RISCV proof carries no Global-air public values");
-    let riscv: &RiscvPublicValues<Word<Kb>, Kb> =
-        global_pv[GCS_DIGEST_LEN..GCS_DIGEST_LEN + RISCV_NUM_PVS].borrow();
+    // The Global air's public values (present in EVERY chunk): the riscv PublicValues copy.
+    // Taken by air id: MemInit and MemFinal carry as many.
+    let global_pv = &proof.public_values[air_id::GLOBAL];
+    assert_eq!(
+        global_pv.len(),
+        MAX_NUM_PVS,
+        "RISCV proof carries no Global-air public values"
+    );
+    let riscv: &RiscvPublicValues<Word<Kb>, Kb> = global_pv[..RISCV_NUM_PVS].borrow();
     // A CPU chunk's translation block hints inv(Σ start_pc limbs) (so the circuit can assert
     // the whole pc != 0). Emitted after all verify_one hints, matching the program order.
     let has_cpu = vk_layout
@@ -1390,51 +1507,35 @@ pub fn setup_for_convert_with_program(
         runtime.witness_stream.push_back(kb_to_block(l));
     }
 
-    // VM-layer exe identity witnesses, read by the convert program right after the PV
-    // translation: pc_start (3 limbs) then initial_gcs (x 7, y 7). Raw hints (never absorbed);
-    // the circuit folds them into `riscv_vk_digest = H(DOMAIN ‖ program_commit ‖ pc ‖ gcs)`
-    // and the apex pins that digest against the trusted `RiscvVmVk::digest()`.
+    // Read by the convert program right after the PV translation: the global LogUp's chain
+    // value before this chunk (8), then the VM-layer exe identity — pc_start (3 limbs), the
+    // image table's commitment (8) and its height tier (1). Raw hints (never absorbed); the
+    // circuit folds the identity into `riscv_vk_digest = H(DOMAIN ‖ program_commit ‖ pc ‖
+    // image_commit ‖ image_tier)` and the apex pins that digest against the trusted
+    // `RiscvVmVk::digest()`.
+    for l in global_chain_in {
+        runtime.witness_stream.push_back(kb_to_block(l));
+    }
     for l in riscv_vm_vk.pc_start {
         runtime.witness_stream.push_back(kb_to_block(l));
     }
-    for j in 0..7 {
-        runtime
-            .witness_stream
-            .push_back(kb_to_block(riscv_vm_vk.initial_gcs.0.x.0[j]));
+    for l in riscv_vm_vk.image_commit {
+        runtime.witness_stream.push_back(kb_to_block(l));
     }
-    for j in 0..7 {
-        runtime
-            .witness_stream
-            .push_back(kb_to_block(riscv_vm_vk.initial_gcs.0.y.0[j]));
-    }
+    runtime
+        .witness_stream
+        .push_back(kb_to_block(riscv_vm_vk.image_log_height));
 
-    // Chunk-1 gating + GCS injection hints, in circuit order:
-    //   1. inv(start_chunk − 1) — pushed as 0 when start_chunk == 1 (the gate then forces
-    //      is_first = 1; any value works, 0 is canonical);
-    //   2. four curve-add hint blocks replaying the injection fold
-    //      start + sel − zero + chunk_gcs − start, sel = is_first ? initial_gcs : zero.
+    // Chunk-1 gating: inv(start_chunk − 1) — pushed as 0 when start_chunk == 1 (the gate then
+    // forces is_first = 1; any value works, 0 is canonical).
     {
         let diff = riscv.chunk - Kb::ONE;
-        let is_first = diff == Kb::ZERO;
-        let inv = if is_first { Kb::ZERO } else { diff.inverse() };
-        runtime.witness_stream.push_back(kb_to_block(inv));
-
-        let chunk_gcs = SepticCurve {
-            x: SepticExtension(std::array::from_fn(|j| global_pv[j])),
-            y: SepticExtension(std::array::from_fn(|j| global_pv[7 + j])),
-        };
-        let start = SepticDigest::<Kb>::starting_digest().0;
-        let zero = SepticDigest::<Kb>::zero().0;
-        let sel = if is_first {
-            riscv_vm_vk.initial_gcs.0
+        let inv = if diff == Kb::ZERO {
+            Kb::ZERO
         } else {
-            zero
+            diff.inverse()
         };
-        let mut acc = start;
-        acc = push_curve_add(&mut runtime.witness_stream, &acc, &sel);
-        acc = push_curve_add(&mut runtime.witness_stream, &acc, &zero.neg());
-        acc = push_curve_add(&mut runtime.witness_stream, &acc, &chunk_gcs);
-        push_curve_add(&mut runtime.witness_stream, &acc, &start.neg());
+        runtime.witness_stream.push_back(kb_to_block(inv));
     }
 
     // Whitelist mode: the convert program witnesses vk_root into its public values.
@@ -1528,17 +1629,36 @@ fn push_vk_root_and_paths<'a>(
 
 /// Execute a pre-built combine program over its N child recursion proofs, producing the
 /// recursion record. `is_complete` must match the flag baked into the program: root
-/// programs hint one extra witness element (`inv(next_chunk - 1)`, see the completeness
-/// block in the program builder), pushed LAST.
+/// programs hint the witnesses of their completeness block (`inv(next_chunk - 1)`, then the
+/// global LogUp's closure hints; see the block in the program builder), pushed LAST.
 pub fn setup_for_combine_with_program(
     children: &[CombineChild],
     program: Arc<RecursionProgram<Kb>>,
     is_complete: bool,
     vk_map: Option<&MleVkMap>,
 ) -> (Arc<RecursionProgram<Kb>>, RecursionRecord<Kb>) {
+    setup_for_combine_with_program_within(
+        children,
+        program,
+        is_complete,
+        vk_map,
+        global_logup::MAX_COUNT,
+    )
+}
+
+/// [`setup_for_combine_with_program`] for a root program built with a real-row limit of its
+/// own (`build_verify_n_program_multi_within`): the limit's slack is among the root's hints.
+#[doc(hidden)]
+pub fn setup_for_combine_with_program_within(
+    children: &[CombineChild],
+    program: Arc<RecursionProgram<Kb>>,
+    is_complete: bool,
+    vk_map: Option<&MleVkMap>,
+    max_global_row_count: u64,
+) -> (Arc<RecursionProgram<Kb>>, RecursionRecord<Kb>) {
     // The cross-check runs here, ahead of every timer below (module header, rule 2).
     for (vk, proof, layout) in children {
-        walker_xcheck(vk, proof, layout);
+        walker_xcheck(vk, proof, layout, None);
     }
 
     let perm = default_koalabear_poseidon2_16();
@@ -1562,58 +1682,9 @@ pub fn setup_for_combine_with_program(
             vk,
             proof,
             &query_indices,
+            // Whitelist mode: the node program bakes each child's pre-hash (`verify_one_of_row`).
+            vk_map.is_some(),
         );
-    }
-
-    if children.len() > 1 {
-        // The n>1 PV-merge folds the children's GCS points with `curve_add_septic`, which
-        // HINTS each add as [x(7), y(7), inv(dx)(7)] (the intermediate sum plus the F7
-        // inverse proving dx = p2.x - p1.x != 0) and verifies the chord-law identities
-        // in-circuit. Replay the exact same addition sequence host-side and push each
-        // add's hint block, in program order:
-        //   acc = starting_digest; for each d_i: acc += d_i (push);
-        //   if not last: acc -= zero (push);  finally acc -= starting_digest (push).
-        let read_gcs = |proof: &Proof<Sc>| -> SepticCurve<Kb> {
-            // The recursion PV carrier is the unique RECURSION_NUM_PVS-length slice; picking
-            // the wrong one here would desync the host GCS replay from the circuit's hints.
-            debug_assert_eq!(
-                proof
-                    .public_values
-                    .iter()
-                    .filter(|p| p.len() == RECURSION_NUM_PVS)
-                    .count(),
-                1,
-                "expected exactly one recursion public-values slice"
-            );
-            let pvs = proof
-                .public_values
-                .iter()
-                .find(|p| p.len() == RECURSION_NUM_PVS)
-                .expect("child proof carries no recursion public values");
-            let col = RECURSION_PUBLIC_VALUES_COL_MAP;
-            SepticCurve {
-                x: SepticExtension(std::array::from_fn(|j| {
-                    pvs[col.global_cumulative_sum.0.x.0[j]]
-                })),
-                y: SepticExtension(std::array::from_fn(|j| {
-                    pvs[col.global_cumulative_sum.0.y.0[j]]
-                })),
-            }
-        };
-        let start = SepticDigest::<Kb>::starting_digest().0;
-        let zero = SepticDigest::<Kb>::zero().0;
-        let neg_zero = zero.neg();
-        let neg_start = start.neg();
-        let n = children.len();
-        let mut acc = start;
-        for (i, (_, proof, _)) in children.iter().enumerate() {
-            let d = read_gcs(proof);
-            acc = push_curve_add(&mut runtime.witness_stream, &acc, &d);
-            if i != n - 1 {
-                acc = push_curve_add(&mut runtime.witness_stream, &acc, &neg_zero);
-            }
-        }
-        push_curve_add(&mut runtime.witness_stream, &acc, &neg_start);
     }
 
     if let Some(map) = vk_map {
@@ -1625,23 +1696,42 @@ pub fn setup_for_combine_with_program(
     }
 
     if is_complete {
-        // The root program's completeness block hints inv(next_chunk - 1) as the LAST
-        // witness element. The merged next_chunk is the last child's next_chunk.
-        let (_, last_proof, _) = children.last().expect("combine node needs >= 1 child");
-        let pvs = last_proof
-            .public_values
-            .iter()
-            .find(|p| p.len() == RECURSION_NUM_PVS)
-            .expect("child proof carries no recursion public values");
-        let next_chunk = pvs[RECURSION_PUBLIC_VALUES_COL_MAP.next_chunk];
-        let diff = next_chunk - Kb::ONE;
-        assert!(
-            diff != Kb::ZERO,
-            "complete combine root with next_chunk == 1 (empty execution)"
-        );
+        // The root program's completeness block comes last, and hints inv(next_chunk - 1), then
+        // the global LogUp's closure hints. Both read the node's merged public values: the
+        // merged next_chunk is the last child's, the merged sum is the children's fractions
+        // added, the merged count their sum.
+        let child_pvs = children.iter().map(|(_, proof, _)| {
+            proof
+                .public_values
+                .iter()
+                .find(|p| p.len() == RECURSION_NUM_PVS)
+                .expect("child proof carries no recursion public values")
+        });
+        let next_chunk = child_pvs
+            .clone()
+            .next_back()
+            .expect("combine node needs >= 1 child")[RECURSION_PUBLIC_VALUES_COL_MAP.next_chunk];
         runtime
             .witness_stream
-            .push_back(kb_to_block(diff.inverse()));
+            .push_back(kb_to_block(inverse_past_cursor_one(
+                next_chunk,
+                "complete combine root",
+            )));
+        let (sum, count) = child_pvs
+            .map(|pvs| global_sum_and_row_count(pvs))
+            .reduce(|(sum, count), (child_sum, child_count)| {
+                (
+                    global_logup::add_fractions(sum, child_sum),
+                    count + child_count,
+                )
+            })
+            .expect("combine node needs >= 1 child");
+        push_global_logup_closure_hints(
+            &mut runtime.witness_stream,
+            sum.1,
+            count,
+            max_global_row_count,
+        );
     }
 
     let witness_ms = t_witness.elapsed().as_millis();
@@ -1694,20 +1784,22 @@ pub fn setup_for_combine_with_program(
 /// Execute a pre-built deferred program over its single child — a COMPLETE recursion root of a
 /// *sub-program* — producing the recursion record.
 ///
-/// Hint order after the child's own stream, matching the program's emission order:
-/// `inv(child.next_chunk − 1)` (the child's completeness block), the chain's start digest (8),
-/// the MAIN program's `riscv_vk_digest` (8) and `end_pc` (3), then in whitelist mode the root
-/// and the child's Merkle path.
+/// Hint order after the child's own stream, matching the program's emission order: the hints
+/// of the child's completeness block (`inv(child.next_chunk − 1)`, then the global LogUp's
+/// closure hints over the child's public values), the chain's start digest (8), the global
+/// LogUp's chain value the node passes through (8), the MAIN program's `riscv_vk_digest` (8)
+/// and `end_pc` (3), then in whitelist mode the root and the child's Merkle path.
 pub fn setup_for_deferred_with_program(
     child: &CombineChild,
     program: Arc<RecursionProgram<Kb>>,
     start_digest: [Kb; DIGEST_SIZE],
+    global_chain: [Kb; DIGEST_SIZE],
     riscv_vk_digest: [Kb; DIGEST_SIZE],
     end_pc: [Kb; 3],
     vk_map: Option<&MleVkMap>,
 ) -> (Arc<RecursionProgram<Kb>>, RecursionRecord<Kb>) {
     let (vk, proof, layout) = child;
-    walker_xcheck(vk, proof, layout);
+    walker_xcheck(vk, proof, layout, None);
 
     let perm = default_koalabear_poseidon2_16();
     let mut runtime =
@@ -1723,6 +1815,8 @@ pub fn setup_for_deferred_with_program(
         vk,
         proof,
         &query_indices,
+        // Whitelist mode: the deferred program bakes the sub-proof's pre-hash.
+        vk_map.is_some(),
     );
 
     // The completeness block the program runs over the CHILD's public values asserts
@@ -1732,17 +1826,23 @@ pub fn setup_for_deferred_with_program(
         .iter()
         .find(|p| p.len() == RECURSION_NUM_PVS)
         .expect("deferred child carries no recursion public values");
-    let diff = pvs[RECURSION_PUBLIC_VALUES_COL_MAP.next_chunk] - Kb::ONE;
-    assert!(
-        diff != Kb::ZERO,
-        "deferred child claims to be complete with next_chunk == 1 (empty execution)"
-    );
     runtime
         .witness_stream
-        .push_back(kb_to_block(diff.inverse()));
+        .push_back(kb_to_block(inverse_past_cursor_one(
+            pvs[RECURSION_PUBLIC_VALUES_COL_MAP.next_chunk],
+            "deferred child claims to be complete",
+        )));
+    let (sum, count) = global_sum_and_row_count(pvs);
+    push_global_logup_closure_hints(
+        &mut runtime.witness_stream,
+        sum.1,
+        count,
+        global_logup::MAX_COUNT,
+    );
 
     for l in start_digest
         .into_iter()
+        .chain(global_chain)
         .chain(riscv_vk_digest)
         .chain(end_pc)
     {
@@ -1778,6 +1878,190 @@ pub fn setup_for_deferred_with_program(
         derive_us / 1_000,
         interpreter_probes()
     );
+    (program, runtime.record)
+}
+
+/// Tests only: execute a program of `build_global_logup_closure_program_for_testing` with the hints an
+/// honest prover has for the denominator `q` and the count. `None` when the runtime itself
+/// stops: a build with debug assertions panics at the first unsatisfied assertion, one without
+/// returns the record and leaves the refusal to the proof's verifier.
+#[doc(hidden)]
+pub fn setup_for_global_logup_closure_with_program(
+    program: Arc<RecursionProgram<Kb>>,
+    q: EF,
+    count: Kb,
+    max_count: u64,
+) -> Option<RecursionRecord<Kb>> {
+    let perm = default_koalabear_poseidon2_16();
+    let mut runtime =
+        Runtime::<Kb, EF, _, _, KOALABEAR_S_BOX_DEGREE>::new(Arc::clone(&program), perm);
+    push_global_logup_closure_hints(&mut runtime.witness_stream, q, count, max_count);
+    assert_hint_count("global_logup_closure", &program, &runtime.witness_stream);
+    let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| runtime.run().is_ok()));
+    matches!(ran, Ok(true)).then_some(runtime.record)
+}
+
+/// Tests only: execute a program that takes no hints. `None` when the runtime itself stops, as
+/// for [`setup_for_global_logup_closure_with_program`].
+#[doc(hidden)]
+pub fn setup_for_program_without_hints(
+    program: Arc<RecursionProgram<Kb>>,
+) -> Option<RecursionRecord<Kb>> {
+    let perm = default_koalabear_poseidon2_16();
+    let mut runtime =
+        Runtime::<Kb, EF, _, _, KOALABEAR_S_BOX_DEGREE>::new(Arc::clone(&program), perm);
+    assert_hint_count("no hints", &program, &runtime.witness_stream);
+    let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| runtime.run().is_ok()));
+    matches!(ran, Ok(true)).then_some(runtime.record)
+}
+
+/// What a group node of the global LogUp is told beyond its group proof.
+pub struct GroupNodeWitness {
+    /// The block's challenges, which the group proof was made under.
+    pub challenges: (EF, EF),
+    /// The first chunk the group covers, from 1.
+    pub first_chunk: u32,
+    /// The chain over the Global table commitments of the chunks before `first_chunk`.
+    pub chain_before: [Kb; DIGEST_SIZE],
+    /// The main program's identity digest and entry pc, which the node publishes.
+    pub riscv_vk_digest: [Kb; DIGEST_SIZE],
+    pub pc: [Kb; 3],
+    /// The deferred chain's value at the node, which passes through.
+    pub deferred_digest: [Kb; DIGEST_SIZE],
+    /// Whitelist mode: the root the node publishes.
+    pub vk_root: Option<[Kb; DIGEST_SIZE]>,
+}
+
+/// What the image node of the global LogUp is told beyond the image group proof.
+pub struct ImageNodeWitness {
+    /// The block's challenges, the proof-of-work witness behind them, and the chain root they
+    /// were derived from.
+    pub challenges: (EF, EF),
+    pub pow_witness: Kb,
+    pub chain_root: [Kb; DIGEST_SIZE],
+    /// The chain value under the node's two wraps: the chain over every chunk's Global table
+    /// commitment, which an honest prover also derives the challenges from.
+    pub chain_value: [Kb; DIGEST_SIZE],
+    /// The main program's identity: the node recomputes the digest from the program-table
+    /// commitment, the entry pc, the image commitment its proof opens and its own tier.
+    pub riscv_vk_digest: [Kb; DIGEST_SIZE],
+    pub program_commit: [Kb; DIGEST_SIZE],
+    pub pc: [Kb; 3],
+    /// The deferred chain's value at the node, which passes through.
+    pub deferred_digest: [Kb; DIGEST_SIZE],
+    /// Whitelist mode: the root the node publishes.
+    pub vk_root: Option<[Kb; DIGEST_SIZE]>,
+}
+
+/// Execute a pre-built group node program over its group proof. Hint order: the challenges,
+/// the proof's own stream, then the first chunk, `inv(first chunk − 1)`, the chain before it,
+/// the identity digest, the pc, the deferred chain's value and, in whitelist mode, the root.
+pub fn setup_for_group_node_with_program(
+    group_vk: &MultiStarkVerifyingKey<Sc>,
+    proof: &Proof<Sc>,
+    layout: &RecursionVkLayout,
+    program: Arc<RecursionProgram<Kb>>,
+    witness: &GroupNodeWitness,
+) -> (Arc<RecursionProgram<Kb>>, RecursionRecord<Kb>) {
+    let (alpha, beta) = witness.challenges;
+    let before = alpha
+        .as_basis_coefficients_slice()
+        .iter()
+        .chain(beta.as_basis_coefficients_slice())
+        .copied();
+    let first = Kb::from_u32(witness.first_chunk);
+    let inv = (first - Kb::ONE).try_inverse().unwrap_or(Kb::ZERO);
+    let after = [first, inv]
+        .into_iter()
+        .chain(witness.chain_before)
+        .chain(witness.riscv_vk_digest)
+        .chain(witness.pc)
+        .chain(witness.deferred_digest)
+        .chain(witness.vk_root.into_iter().flatten());
+    setup_for_global_logup_node(
+        "group_node",
+        group_vk,
+        proof,
+        layout,
+        program,
+        witness.challenges,
+        before,
+        after,
+    )
+}
+
+/// Execute a pre-built image node program over the image group proof. Hint order: the identity
+/// digest, the chain root and the proof-of-work witness, the proof's own stream, then the
+/// program-table commitment, the pc, the chain value under the wraps, the deferred chain's
+/// value and, in whitelist mode, the root.
+pub fn setup_for_image_node_with_program(
+    group_vk: &MultiStarkVerifyingKey<Sc>,
+    proof: &Proof<Sc>,
+    layout: &RecursionVkLayout,
+    program: Arc<RecursionProgram<Kb>>,
+    witness: &ImageNodeWitness,
+) -> (Arc<RecursionProgram<Kb>>, RecursionRecord<Kb>) {
+    let before = witness
+        .riscv_vk_digest
+        .into_iter()
+        .chain(witness.chain_root)
+        .chain([witness.pow_witness]);
+    let after = witness
+        .program_commit
+        .into_iter()
+        .chain(witness.pc)
+        .chain(witness.chain_value)
+        .chain(witness.deferred_digest)
+        .chain(witness.vk_root.into_iter().flatten());
+    setup_for_global_logup_node(
+        "image_node",
+        group_vk,
+        proof,
+        layout,
+        program,
+        witness.challenges,
+        before,
+        after,
+    )
+}
+
+/// The shared body of the two node setups: `before`, the group proof's stream, `after`.
+#[allow(clippy::too_many_arguments)]
+fn setup_for_global_logup_node(
+    kind: &'static str,
+    group_vk: &MultiStarkVerifyingKey<Sc>,
+    proof: &Proof<Sc>,
+    layout: &RecursionVkLayout,
+    program: Arc<RecursionProgram<Kb>>,
+    challenges: (EF, EF),
+    before: impl IntoIterator<Item = Kb>,
+    after: impl IntoIterator<Item = Kb>,
+) -> (Arc<RecursionProgram<Kb>>, RecursionRecord<Kb>) {
+    walker_xcheck(group_vk, proof, layout, Some(challenges));
+    let perm = default_koalabear_poseidon2_16();
+    let mut runtime =
+        Runtime::<Kb, EF, _, _, KOALABEAR_S_BOX_DEGREE>::new(Arc::clone(&program), perm);
+    for l in before {
+        runtime.witness_stream.push_back(kb_to_block(l));
+    }
+    let query_indices = derive_whir_query_indices_external(group_vk, proof, layout, challenges);
+    push_proof_to_witness_stream(
+        &mut runtime.witness_stream,
+        layout,
+        group_vk,
+        proof,
+        &query_indices,
+        true,
+    );
+    for l in after {
+        runtime.witness_stream.push_back(kb_to_block(l));
+    }
+    assert_hint_count(kind, &program, &runtime.witness_stream);
+    runtime.dump_label = kind;
+    dump_emulation(runtime.dump_label, &program, &runtime.witness_stream);
+    runtime
+        .run()
+        .unwrap_or_else(|e| panic!("{kind} recursion runtime failed: {e:?}"));
     (program, runtime.record)
 }
 

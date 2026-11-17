@@ -251,6 +251,8 @@ pub(crate) fn generate_test_chunks(elf: TestElf, input: TestInput) -> Vec<Emulat
 /// rule count the MLE keygen derives: one rule per node in the sub-edge closure of
 /// `constraint_idx`, leaves (variables, constants, selectors) included, interaction-only nodes
 /// excluded. Pinning it in a unit test localises any change in constraint expression shape.
+// Its one user proves on the CPU engine and is compiled out under `cuda`.
+#[cfg_attr(feature = "cuda", allow(dead_code))]
 pub(crate) fn reachable_constraint_nodes<F: p3_field::Field>(
     dag: &pico_mle_core::air::symbolic::SymbolicExpressionDag<F>,
 ) -> usize {

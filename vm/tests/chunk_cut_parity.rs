@@ -27,9 +27,10 @@ use pico_vm::{
 mod record_parity;
 use record_parity::{guest, one_at_a_time, opts, program, stdin, workers, WHOLE};
 
-/// About 2.9 million leaves above a chunk's charge before its first step (3.4 million), so the leaf
-/// arm closes each chunk after some thousands of instructions, long before `WHOLE`'s other limits.
-const LEAF_CAP: u64 = 6 << 20;
+/// About 2.9 million leaves above a chunk's charge before its first step (28.6 million, 25.2 of
+/// them the Global table, whose height is fixed), so the leaf arm closes each chunk after some
+/// thousands of instructions, long before `WHOLE`'s other limits.
+const LEAF_CAP: u64 = (6 << 22) + (6 << 20);
 
 /// Below this the leaf cap did not cut the run: `WHOLE`'s other limits alone give the field guests
 /// 2 and 6 chunks.

@@ -4,6 +4,8 @@
 # unreached syscall missing from here. Rewritten with the digests, never by hand.
 BLS12381_FP2_ADD
 BLS12381_FP2_SUB
+BLS12381_G2_ADD
+BLS12381_G2_DOUBLE
 BN254_FP2_ADD
 BN254_FP2_SUB
 SECP256K1_DECOMPRESS

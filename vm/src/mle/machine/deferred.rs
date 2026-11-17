@@ -75,6 +75,13 @@ pub struct DeferredMachine {
     skip_host_checks: bool,
     /// Test hook: keygen nodes without the requirement that the sub-proof defers nothing.
     admit_nested: bool,
+    /// The value of the global LogUp's chain every node passes through: the chain's initial
+    /// value, which chunk 1 starts at, or a test's forged one.
+    global_chain: [Kb; DIGEST_SIZE],
+    /// Test hook: keygen nodes whose own fraction of the global LogUp is `(0, 0)`.
+    zero_denominator: bool,
+    /// Test hook: every key of this machine carries this pre-hash, not its own.
+    forged_pre_hash: Option<[Kb; DIGEST_SIZE]>,
 }
 
 impl DeferredMachine {
@@ -90,6 +97,9 @@ impl DeferredMachine {
             vk_map: None,
             skip_host_checks: false,
             admit_nested: false,
+            global_chain: pico_mle_core::global_logup::chain_iv(),
+            zero_denominator: false,
+            forged_pre_hash: None,
         }
     }
 
@@ -97,6 +107,25 @@ impl DeferredMachine {
     /// is what has to reject it.
     pub fn skip_host_checks_for_testing(&mut self) {
         self.skip_host_checks = true;
+    }
+
+    /// Negative tests only: have every node pass `value` through the global LogUp's chain, not
+    /// the initial value its neighbours meet it with. The parent's continuity check has to
+    /// refuse the node.
+    pub fn set_global_chain_for_testing(&mut self, value: [Kb; DIGEST_SIZE]) {
+        self.global_chain = value;
+    }
+
+    /// Negative tests only: keygen every node of this machine with `(0, 0)` as its own fraction
+    /// of the global LogUp, where an honest node has `(0, 1)`. The root has to refuse a tree
+    /// with such a node in it. Before the first keygen, so no key of this machine is the honest
+    /// one.
+    pub fn zero_denominator_for_testing(&mut self) {
+        assert!(
+            self.pks.is_empty(),
+            "zero_denominator_for_testing after a keygen"
+        );
+        self.zero_denominator = true;
     }
 
     /// Negative tests only: keygen every node of this machine without the requirement that its
@@ -108,6 +137,19 @@ impl DeferredMachine {
             "admit_nested_for_testing after a keygen"
         );
         self.admit_nested = true;
+    }
+
+    /// Negative tests only: every key of this machine carries `pre_hash` where its own would
+    /// be, and its nodes are proved and verify under that key. With another row's pre-hash that
+    /// is the honest node's commitment under a pre-hash that is not its row's: the key a
+    /// whitelist parent has to refuse at the node's row even where a whitelist lists the pair.
+    /// Before the first keygen, so no key of this machine is the honest one.
+    pub fn forge_pre_hash_for_testing(&mut self, pre_hash: [Kb; DIGEST_SIZE]) {
+        assert!(
+            self.pks.is_empty(),
+            "forge_pre_hash_for_testing after a keygen"
+        );
+        self.forged_pre_hash = Some(pre_hash);
     }
 
     /// Supply the whitelist (vk_verification mode; call before proving).
@@ -141,6 +183,11 @@ impl DeferredMachine {
                 layout,
                 self.vk_verification,
             )
+        } else if self.zero_denominator {
+            ConvertVerifierCircuit::build_deferred_program_with_zero_denominator_for_testing::<Kb>(
+                layout,
+                self.vk_verification,
+            )
         } else {
             ConvertVerifierCircuit::build_deferred_program::<Kb>(layout, self.vk_verification)
         };
@@ -160,8 +207,14 @@ impl DeferredMachine {
             stats.values().sum::<usize>(),
         );
         let airs = recursion_air_refs_with_preprocessed(&program);
-        let (pk, vk) = self.engine.keygen_merged_preprocessed(&airs);
+        let (mut pk, mut vk) = self.engine.keygen_merged_preprocessed(&airs);
         admit_production_vk("deferred", "cpu", &vk)?;
+        if let Some(pre_hash) = self.forged_pre_hash {
+            // The prover's transcript starts from the proving key's copy, the verifier's from
+            // the verifying key's.
+            pk.vk_pre_hash = pre_hash;
+            vk.pre_hash = pre_hash;
+        }
         self.pks.push((layout.clone(), program, pk, Arc::new(vk)));
         Ok(self.pks.len() - 1)
     }
@@ -189,10 +242,13 @@ impl DeferredMachine {
             let idx = self.keygen_for(&layout)?;
             let (_, program, pk, node_vk) = &self.pks[idx];
             let child: CombineChild = (vk.clone(), proof.clone(), layout);
+            // The nodes sit right before chunk 1, after the global LogUp's own nodes, so the
+            // chain value they pass through is the one chunk 1 starts at.
             let (_, record) = setup_for_deferred_with_program(
                 &child,
                 Arc::clone(program),
                 acc,
+                self.global_chain,
                 riscv_vk_digest,
                 end_pc,
                 self.vk_map.as_deref(),
