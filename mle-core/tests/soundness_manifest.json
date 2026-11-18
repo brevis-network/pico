@@ -1,8 +1,8 @@
 {
   "generated_by": "cargo run --release -p pico-vm --example mle_soundness_manifest",
-  "commit": "c8e0a69d16d742c93202debb07affd0b4f82249d",
-  "dirty": true,
-  "dirty_paths": ["aot-runtime/src/precompiles/mod.rs", "aot-runtime/src/pure.rs", "aot-runtime/src/syscall.rs", "aot-runtime/src/syscall_context.rs", "docs/release-notes/unreleased.md", "docs/tier-tables.md", "mle-core/src/config/soundness/vk.rs", "mle-core/src/lookup.rs", "sdk/patch-libs/src/lib.rs", "sdk/prover/src/cost.rs", "sdk/prover/src/tests/cost.rs", "sdk/sdk/src/riscv_ecalls/mod.rs", "sdk/sdk/src/zkvm_accelerators/blake2f.rs", "verifier/src/whitelist.rs", "vm/examples/mle_tier_probe.rs", "vm/src/chips/precompiles/code_range_tests.rs", "vm/src/chips/precompiles/mod.rs", "vm/src/emulator/riscv/record.rs", "vm/src/emulator/riscv/syscalls/code.rs", "vm/src/emulator/riscv/syscalls/mod.rs", "vm/src/emulator/riscv/syscalls/precompiles/mod.rs", "vm/src/instances/chiptype/riscv_chiptype.rs", "vm/src/instances/compiler/shapes/riscv_shape.rs", "vm/src/instances/preparer/event_counter.rs", "vm/src/machine/prover.rs", "vm/src/mle/machine/air.rs", "vm/src/mle/machine/global_logup.rs", "vm/src/mle/machine/riscv.rs", "vm/src/mle/machine/shape.rs", "vm/src/mle/machine/trace_oracle.rs", "vm/src/mle/shape_vk_bins/mle_vk_map_kb.bin", "vm/src/mle/shape_vk_bins/mle_vk_root.txt", "vm/tests/common/golden.rs", "vm/tests/riscv_constraint_dump.txt", "vm/tests/unreached_syscalls.txt"],
+  "commit": "e21bcc04a8d466410b258d64d65a5db0d8f8e5d0",
+  "dirty": false,
+  "dirty_paths": [],
   "calculator": "closed-form",
   "program": "perf/bench_data/rv64/fib-elf, n = 10",
   "global_logup": {"bits": 133.95456126446285, "riscv_log_stacked_height": 23, "max_interaction_count": 2130706433, "log_max_message_length": 7, "pow_bits": 18, "first_whir_round_within_unique_decoding": true, "count_unit_rows": 1024, "max_count": 2076672, "note": "the alpha/beta round of a block's global LogUp, which the group proofs share and none of them contains: scored under the group machines' parameters as a proof's own LogUp round is. The tree's root bounds the real rows of each direction below the field's order (the count, in units of count_unit_rows, is at most max_count), and a table is opened under a first WHIR round within the unique-decoding radius"},
