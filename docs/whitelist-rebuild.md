@@ -12,12 +12,13 @@ something, it is a job of the repository's CI that needs no card; the artifact u
 
 ## What ships
 
-Two files in `vm/src/mle/shape_vk_bins/`, committed together and read together:
+Three files in `vm/src/mle/shape_vk_bins/`, committed together and read together:
 
 | file | holds | read by |
 |---|---|---|
-| `mle_vk_map_kb.bin` | the whitelist: the `(pre_hash, merged_preprocessed_commit)` identity of every admitted convert VK (one per riscv shape the shape config enumerates), of every combine node VK, of the deferred node VK and of the compress node VK, in leaf order, plus the shape config digest and the Merkle root | `MleVkMap::load` (`MLE_VK_MAP`); every combine and deferred witness looks its children up in it, every embed witness looks the compress key up in it, and the SDK apex looks a compress proof's key up in it |
+| `mle_vk_map_kb.bin` | the whitelist: the `(pre_hash, merged_preprocessed_commit)` identity of every admitted convert VK (one per riscv shape the shape config enumerates), of every combine node VK, of the global LogUp's node VKs (a group node per group size, an image node per tier of the image table), of the deferred node VK and of the compress node VK, in leaf order, plus the shape config digest and the Merkle root | `MleVkMap::load` (`MLE_VK_MAP`); every combine and deferred witness looks its children up in it, every embed witness looks the compress key up in it, and the SDK apex looks a compress proof's key up in it |
 | `mle_vk_root.txt` | the leaf counts, the whitelist-mode riscv key's pre-hash, and the same digest and root as text; the `MLE_VK_ROOT="..."` line is the constant a deployment pins, the `pre_hash is [...]` line is held against the binary by the artifact unit test | operators (`MLE_VK_ROOT`), the SDK's whitelist tests, the artifact unit test |
+| `mle_compress_vk.bin` | the compress node's verifying key, whose identity is the whitelist's last leaf | `pico-verifier` (`shipped_compress_vk`): a compress envelope carries no key. The artifact unit test holds the file byte for byte against the key this binary keygens |
 
 The bin is self-contained for membership proofs: the tree is rebuilt from the leaves on load,
 `path(index)` gives the sibling path. The root file is what makes the bin trusted: `MleVkMap::load`
@@ -34,23 +35,24 @@ Any of these, on the branch the artifact ships from:
 
 | change | what moves | caught before a proving run by |
 |---|---|---|
-| a shape table (`MLE_CORE_LADDER`, `MLE_RISCV_MAIN_LOG_HEIGHTS`, the precompile or memory enumeration, `MLE_RISCV_PROGRAM_LOG_HEIGHT`), a recursion tier table (`MLE_RECURSION_CONVERT_LADDER`, combine, compress), `MLE_VK_MERKLE_DEPTH` | the config digest, the leaf set, the root | the digest check in `MleVkMap::load`, the artifact unit test |
+| a shape table (`MLE_CORE_LADDER`, `MLE_RISCV_MAIN_LOG_HEIGHTS`, the precompile or memory enumeration, `MLE_RISCV_PROGRAM_LOG_HEIGHT`), a recursion tier table (`MLE_RECURSION_CONVERT_LADDER`, the group nodes' row, combine, compress), the global LogUp's largest group or its range of image tiers (`MAX_GROUP_LEN`, `MIN_IMAGE_LOG_HEIGHT`, `MAX_GLOBAL_LOG_HEIGHT`), `MLE_VK_MERKLE_DEPTH` | the config digest, the leaf set, the root | the digest check in `MleVkMap::load`, the artifact unit test |
 | an AIR's columns, constraints or interactions | the convert VKs of every shape that AIR is present in: a precompile AIR moves its kind's shapes, `Cpu` or `Ecall` the core rows, `MemoryInitialize` the memory shapes | the constraint parity test (`riscv_constraint_parity`), and the artifact unit test through the shape it probes for that family |
-| an AIR added or removed, `DEFAULT_LOG_STACKED_HEIGHT`, the riscv, recursion or compress params, the recursion compiler or lowering, the combine, deferred or compress circuit | every convert VK and/or every combine node VK and/or the deferred node VK and/or the compress node VK | the artifact unit test |
+| an AIR added or removed, `DEFAULT_LOG_STACKED_HEIGHT`, the riscv, recursion or compress params, the recursion compiler or lowering, the combine, deferred or compress circuit, a node program or a group machine of the global LogUp | every convert VK and/or every combine node VK and/or the global LogUp's node VKs and/or the deferred node VK and/or the compress node VK | the artifact unit test |
 | the embed row (`MLE_RECURSION_EMBED_LOG_HEIGHTS`) or the embed params | no rebuild: neither the digest nor a leaf nor the root. The embed key moves: regenerate the soundness manifest, and redo the wrap circuit, its Groth16 setup and the on-chain verifier, which bake the key in (the gnark setup and `contracts/test/dev`, as `contracts/README.md` does them) | the artifact unit test, which keygens embed over the compress proof's synthesized layout and holds it against the manifest |
 
 The digest covers only the first line of the table. The next two move keys without moving the
 digest, which is why the artifact unit test (`the_shipped_artifact_matches_this_binary`, run by
 CI) keygens, from the binary under test, one convert VK per shape family (the first
 core row, the first memory shape, the first shape of each precompile kind), one combine node, the
-deferred node and the compress node, and requires each of them to be a member; the riscv vk it
+global LogUp's 22 nodes, the deferred node and the compress node, and requires each of them to be a
+member; the riscv vk it
 keygens is held against the root file's pre-hash line and the manifest instead. The embed line moves
 no leaf at all; the same test keygens embed over the compress proof's synthesized layout and
 requires the soundness manifest's embed identity. When that test or the parity test fails after a
 change to one of the first three lines, rebuild; there is no way to patch the file.
 
-Do not classify the change to save keygen time. The full build is about an hour and a half on
-eight workers; the classification is where mistakes are made (a checkpoint reused across a
+Do not classify the change to save keygen time. The full build is about half an hour on
+sixteen workers; the classification is where mistakes are made (a checkpoint reused across a
 compiler change puts stale keys in the artifact, and only the shapes a self-check happens to
 touch would notice).
 
@@ -85,7 +87,7 @@ cuts.
 2. Remove any checkpoint from an earlier build: `rm -f mle_vk_map.ckpt` (or whatever
    `MLE_VK_MAP_CKPT` names). The builder refuses a checkpoint written by another build of the
    convert programs, but a full rebuild starts from none.
-3. Run the builder with both self-checks on, from the repository root:
+3. Run the builder with its self-checks on, from the repository root:
 
    ```bash
    OUT=<a new directory outside the repository>
@@ -103,11 +105,19 @@ cuts.
    into the directory only after the last keygen, so a missing directory costs the whole run.
    `PIPESTATUS[0]`: behind `tee`, `$?` is `tee`'s status, not the builder's.
 
-   The artifact, its `.json` twin and `mle_vk_root.txt` land in `$OUT`. Self-check (a)
-   emulates the named blocks and requires every chunk's selected shape to be an enumerated one;
+   The artifact, its `.json` twin, `mle_vk_root.txt` and `mle_compress_vk.bin` land in `$OUT`.
+   Self-check (a) emulates the named blocks and requires every chunk's selected shape to be an
+   enumerated one;
    (b) proves fib-10 and requires each real proof's layout to equal the one synthesized for its
-   shape and each real convert VK to be a member. `MLE_VK_MAP_PROVE_BLOCK=<block>` makes (b)
-   prove a reth block instead; it is slower and not required. `MLE_VK_MAP_LIMIT=<n>` keygens only
+   shape and each real convert VK to be a member; (c) loads the artifact back and proves the
+   same run's whole tree under it with machines of its own, from the global LogUp's nodes to
+   the complete root, a deferred node over that root and the compress proof; the apex over the
+   artifact accepts the root and the compress proof, and the deferred and compress keys of
+   those proofs are the leaves written for them, the compress key also the one in
+   `mle_compress_vk.bin`: the node keys the build pre-registered are the ones real proofs
+   need. `MLE_VK_MAP_PROVE_BLOCK=<block>` makes (b) and (c) prove a reth block instead; it is
+   slower and not required. Leave `MLE_LOG_STACKED_HEIGHT` unset: the config digest does not
+   carry the height, and the builder warns when it is not the one the prover ships with. `MLE_VK_MAP_LIMIT=<n>` keygens only
    the first `n` shapes and writes no artifact: a timing run, which still appends to the
    checkpoint, so remove the checkpoint again before the build.
 4. Read the exit code and the log. `0` means built and every validation passed; `3` built but a
@@ -116,27 +126,28 @@ cuts.
    Keep these lines from the log, as printed, with the change that triggered the rebuild:
    - `whitelist riscv shapes: N (0 checkpointed, N to keygen, 8 workers)`: a full build starts
      from 0;
-   - `complete-root node VKs: 20 extract to one combine-tier layout` (the premise of the one
+   - `complete-root node VKs: 25 extract to one combine-tier layout` (the premise of the one
      compress leaf);
-   - `leaves: N convert + M combine + 1 deferred + 1 compress = T`;
+   - `leaves: N convert + M combine + K global LogUp + 1 deferred + 1 compress = T`;
    - `  config digest = [...]` and `  root          = [...]   (MLE_VK_ROOT="...")`;
-   - `(a) ✓ ... chunk(s) over 4 block(s)` and `(b) ✓ fib-10: ...`;
+   - `(a) ✓ ... chunk(s) over 4 block(s)`, `(b) ✓ fib-10: ...` and `(c) ✓ fib-10: ...`;
    - the last line, ``validations passed; artifact `...` ``.
 
    Anything else stops the rebuild: an exit code other than `0`, a missing line, a panic, a
    test failing in step 7. Report the exit code and the log to the person who asked for the
    rebuild and agree the next step with them; do not change tables, rerun with other settings or
    ship the files on your own.
-5. Copy the two outputs from `$OUT` into `vm/src/mle/shape_vk_bins/`, overwriting the
-   shipped pair: `mle_vk_map_kb.bin` and `mle_vk_root.txt`. Nothing else in the tree changes with
-   the artifact but the soundness manifest (step 6): the leaf count the unit test expects is
+5. Copy the three outputs from `$OUT` into `vm/src/mle/shape_vk_bins/`, overwriting the
+   shipped ones: `mle_vk_map_kb.bin`, `mle_vk_root.txt` and `mle_compress_vk.bin`. Nothing else in
+   the tree changes with the artifact but the soundness manifest (step 6): the leaf count the unit
+   test expects is
    derived from the shape config. (A shape-table change moves three literals with the change
    itself, not with the artifact: the count in `the_whitelist_shape_count_is_pinned`, the headroom
    figures on `MLE_VK_MERKLE_DEPTH` and the shape counts in the `MLE_RECURSION_CONVERT_LADDER` doc
    comment.)
 6. Regenerate the soundness manifest (`docs/soundness/README.md` section 2) from the repository
    root, with `CHUNK_SIZE` and `SPLIT_THRESHOLD` unset: step 3 sets them for the builder only, and
-   the generator refuses them.
+   the generator refuses `CHUNK_SIZE` (and `MLE_LOG_STACKED_HEIGHT`).
 
    ```bash
    cargo run --release -p pico-vm --example mle_soundness_manifest
@@ -144,7 +155,7 @@ cuts.
 
    The manifest records the shipped whitelist's root, and the artifact unit test of step 7 fails
    until that root is the one in `mle_vk_root.txt`. It also records the commit it was generated at
-   and every tracked file, itself excepted, that differs from that commit; with the two new files
+   and every tracked file, itself excepted, that differs from that commit; with the new files
    not committed yet, this run records them and is marked `dirty`, which `pico-mle-core`'s
    `manifest_identities_are_recorded` refuses. Step 8 regenerates it from the commit.
 7. Verify the tree against the new files:
@@ -160,7 +171,7 @@ cuts.
    whitelist. The second command does: it proves fib under the whitelist with the shipped root and
    verifies the proof in a fresh process, which takes minutes and tens of GB (hence one thread;
    CI skips it). It is the check that the artifact works end to end.
-8. Commit the two files in one commit whose message names the change that made the rebuild
+8. Commit the three files in one commit whose message names the change that made the rebuild
    necessary and quotes the leaf count, digest and root. Then run the step 6 command again, which
    now records that commit and no dirty file, and commit the manifest. Open the PR; CI runs the
    artifact test and the soundness manifest's tests against the new files.

@@ -66,7 +66,7 @@ verifier contracts in [`contracts/`](../contracts).
 ## Memory
 
 Proving memory depends on the program. The only figures in this repository are measurements, not
-guarantees: the two example rows were taken with the 3.0 CPU prover and have not been measured
+guarantees: the fibonacci laptop row was taken with the 3.0 CPU prover and has not been measured
 again with the 128-bit parameters; the Groth16 rows are 3.1's. The emulation in them is serial
 (`ProverBuilder::serial_emulation`, `--serial-emulation`); the default snapshot pipeline, which
 emulates with up to 16 replay workers, has not been measured on them:
@@ -74,9 +74,25 @@ emulates with up to 16 replay workers, has not been measured on them:
 | what | machine | peak memory | wall clock |
 |---|---|---|---|
 | fibonacci, `prove` (RISC-V phase) | Apple M4 laptop, 10 cores, 24 GB | 6.7 GB | 25 s |
-| tendermint, prover defaults (19.1 M cycles) | 124-core server, 920 GB | 206 GB | 2 min 28 s |
+| tendermint, prover defaults (19.1 M cycles) | 124-core server, 920 GB | 116 GB | 2 min 27 s |
 | Groth16 setup of the wrap circuit | 124-core server | 15.5 GB | 3 min 48 s |
 | Groth16 prove of the wrap circuit | 124-core server | 11.2 GB | 23 s |
+| fibonacci to the compress proof, one chunk at a time | 16 cores of that server | 6.1 GB | 2 min 17 s |
+| fibonacci to the compress proof, two chunks at a time | 124-core server | 9.4 GB | 1 min 3 s |
+
+The tendermint row and the last two rows are measurements of this version. Each chunk commits
+its cross-chunk events as a table of 2^22 rows at the default stacked height, whatever the
+program: a chunk being proved holds about 2 GB for it, and fibonacci's whole run peaks near
+6 GB with one proof at a time. Left to itself the prover proves up to four chunks at once, and
+fewer on a small host: one below 12 GiB of memory (or of its container's limit), two below 16,
+three below 20. The count is sized for the smallest program on 16 threads. More threads take
+more: two chunks at a time peak under 8 GB on 16 threads and at 9.4 GB on 124 (the last row).
+A chunk full of rows takes many times a small one's memory (the tendermint row proves all its
+chunks at once), so set the count for such a program:
+`ProverBuilder::concurrency`, and `PROVE_CONCURRENCY` for the CLI. On the CPU the same count
+bounds the recursion proofs that follow, the convert proof of each chunk and the nodes of each
+layer of the tree, so a program of many chunks peaks at that many proofs' working sets, not at
+one per chunk.
 
 Sources: [`examples/README.md`](../examples/README.md) (including how a lower stacked height
 trades time for memory) and [`gnark/README.md`](../gnark/README.md).

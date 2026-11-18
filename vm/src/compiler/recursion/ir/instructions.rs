@@ -2,7 +2,6 @@ use super::{Array, Ext, Felt, MemIndex, Ptr, TracedVec, Usize, Var};
 use crate::{
     configs::config::FieldGenericConfig,
     emulator::recursion::public_values::RecursionPublicValues,
-    machine::septic::SepticCurve,
     primitives::consts::{DIGEST_SIZE, EXTENSION_DEGREE},
 };
 
@@ -334,15 +333,6 @@ pub enum DslIr<FC: FieldGenericConfig> {
         Felt<FC::F>,
         Felt<FC::F>,
         Felt<FC::F>,
-    ),
-
-    /// Adds two elliptic curve points. (sum, point_1, point_2).
-    CircuitHintAddCurve(
-        Box<(
-            SepticCurve<Felt<FC::F>>,
-            SepticCurve<Felt<FC::F>>,
-            SepticCurve<Felt<FC::F>>,
-        )>,
     ),
 
     /// Select's a variable based on a condition. (select(cond, true_val, false_val) => output).

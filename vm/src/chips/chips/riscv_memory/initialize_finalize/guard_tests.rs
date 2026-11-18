@@ -9,7 +9,7 @@ use super::{MemoryChipType, MemoryInitializeFinalizeChip};
 use crate::{
     chips::chips::riscv_memory::event::MemoryInitializeFinalizeEvent,
     emulator::riscv::record::EmulationRecord,
-    machine::{chip::ChipBehavior, debug_folder::DebugConstraintFolder, septic::SepticDigest},
+    machine::{chip::ChipBehavior, debug_folder::DebugConstraintFolder},
     primitives::{
         consts::MAX_NUM_PVS,
         layout::{HEAP_END, MEMORY_SIZE, STACK_BOTTOM},
@@ -44,7 +44,6 @@ fn failures(addr: u64) -> Vec<String> {
     let mut folder = DebugConstraintFolder::<F, EF> {
         preprocessed: RowWindow::from_two_rows(&dummy, &dummy),
         main: RowWindow::from_two_rows(&row, &row),
-        global_cumulative_sum: SepticDigest::<F>::zero(),
         is_first_row: F::ZERO,
         is_last_row: F::ZERO,
         is_transition: F::ZERO,

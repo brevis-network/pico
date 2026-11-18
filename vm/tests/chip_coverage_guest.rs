@@ -130,7 +130,6 @@ fn the_chip_coverage_guest_reaches_every_chip_family() {
         "MemoryReadWrite",
         "MemoryLocal",
         "SyscallRiscv",
-        "RiscvKoalaBearPoseidon2",
         "MemoryInitialize",
         "MemoryFinalize",
         "KeccakPermute",

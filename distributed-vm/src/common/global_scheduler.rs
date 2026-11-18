@@ -63,6 +63,12 @@ impl<P> fmt::Debug for CombineTask<P> {
     }
 }
 
+/// Where a block's prefix is filed: the proof over the nodes that lead the tree ahead of the
+/// first chunk (the global LogUp's image and group nodes). No chunk has this index. The prefix
+/// is reported as `[PREFIX_INDEX, PREFIX_INDEX]`, and the root, its join with the node over
+/// every chunk, as `[PREFIX_INDEX, max_chunk]`.
+pub const PREFIX_INDEX: usize = usize::MAX;
+
 /// Task types that can be assigned to workers
 #[derive(Clone)]
 pub enum SchedulerTask<P> {
@@ -170,6 +176,16 @@ pub struct GlobalScheduler<P: Clone + Send + Sync> {
     /// Set by [`Self::abort`]: the run is being drained, so nothing more is handed out or kept.
     aborted: AtomicBool,
 
+    /// The block's tree has a prefix ([`Self::expect_prefix`]): the node over every chunk is
+    /// then an inner node, and the root is its join with the prefix.
+    prefix_expected: AtomicBool,
+    /// The prefix's proof, from [`Self::report_prefix`] until the join takes it.
+    prefix: Mutex<Option<IndexedProof<P>>>,
+    /// The join of the prefix with the chunks' node has been issued.
+    join_issued: AtomicBool,
+    /// The join's proof, the root, has been reported.
+    root_reported: AtomicBool,
+
     #[cfg(test)]
     test_hook: Mutex<Option<TestHook>>,
 }
@@ -198,6 +214,10 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
             no_combine: AtomicBool::new(false),
             wait_slice: WAIT_SLICE,
             aborted: AtomicBool::new(false),
+            prefix_expected: AtomicBool::new(false),
+            prefix: Mutex::new(None),
+            join_issued: AtomicBool::new(false),
+            root_reported: AtomicBool::new(false),
             #[cfg(test)]
             test_hook: Mutex::new(None),
         }
@@ -279,7 +299,7 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
         self.wake_all_waiters_complete();
     }
 
-    fn is_aborted(&self) -> bool {
+    pub fn is_aborted(&self) -> bool {
         self.aborted.load(Ordering::SeqCst)
     }
 
@@ -332,6 +352,7 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
         self.emulation_done.store(true, Ordering::SeqCst);
         // The root, if it was waiting for the finalize, can go now.
         self.release_held_combines();
+        self.try_issue_join();
 
         info!(
             "GlobalScheduler: emulation finalized, chunks [{}, {}], total = {}",
@@ -790,7 +811,7 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
             }
             // The proof is intentionally NOT retained: riscv-only has no combine/aggregation
             // consumer, so we drop it here (freeing the large per-chunk proof) instead of
-            // accumulating every proof in the tree. Cross-chunk GCS is tracked by the caller.
+            // accumulating every proof in the tree.
             drop(proof);
             if self.no_combine_complete() {
                 self.mark_complete();
@@ -809,6 +830,14 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
             "GlobalScheduler: {} reported proof [{}, {}]",
             worker_id, proof.start_chunk, proof.end_chunk
         );
+
+        // The root of a tree with a prefix: the join's proof. It is no node of the chunks'
+        // tree, which stays collapsed on the node over every chunk.
+        if proof.start_chunk == PREFIX_INDEX {
+            self.root_reported.store(true, Ordering::SeqCst);
+            self.complete_if_done("report_proof, root");
+            return None;
+        }
 
         // Track progress
         if proof.start_chunk == proof.end_chunk {
@@ -858,8 +887,18 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
             }
         }
 
+        // With a prefix, a collapse onto the node over every chunk makes the join due.
+        self.try_issue_join();
+
         // Check completion immediately if no new task was generated (or if we fell through)
         // This ensures GatewayHandler detects completion in the same tick
+        self.complete_if_done("report_proof");
+
+        None
+    }
+
+    /// Latch completion once nothing is queued or in flight and the tree has its root.
+    fn complete_if_done(&self, site: &str) {
         let emulation_done = self.emulation_done.load(Ordering::SeqCst);
         let in_flight = self.in_flight.load(Ordering::SeqCst);
         let queue_empty =
@@ -871,14 +910,77 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
             let block = self.block_num.load(Ordering::SeqCst);
             self.last_completed_block.store(block, Ordering::SeqCst);
             info!(
-                "GlobalScheduler: All tasks complete (detected in report_proof), block={}",
+                "GlobalScheduler: All tasks complete (detected in {site}), block={}",
                 block
             );
             // Wake all waiters so they don't wait 300s timeout
             self.wake_all_waiters_complete();
         }
+    }
 
-        None
+    /// Declare that this block's tree has a prefix: nodes that lead it ahead of the first chunk,
+    /// proved outside the chunk queue and handed in as one proof by [`Self::report_prefix`].
+    /// From here on the node over every chunk is an inner node, and the root is its join with
+    /// the prefix. Call it before the block's last chunk can be combined.
+    pub fn expect_prefix(&self) {
+        self.prefix_expected.store(true, Ordering::SeqCst);
+    }
+
+    /// Hand in the prefix's proof. The join with the node over every chunk is issued as soon as
+    /// both exist and the emulation is finalized.
+    pub fn report_prefix(&self, proof: P) {
+        if self.is_aborted() {
+            return;
+        }
+        assert!(
+            self.prefix_expected.load(Ordering::SeqCst),
+            "a prefix reported to a block that expects none"
+        );
+        let prev = self
+            .prefix
+            .lock()
+            .replace(IndexedProof::new(proof, PREFIX_INDEX, PREFIX_INDEX));
+        assert!(prev.is_none(), "a block's prefix reported twice");
+        self.try_issue_join();
+    }
+
+    /// Issue the root's task, the join of the prefix with the node over every chunk, once: when
+    /// the emulation is finalized, the chunks' tree has collapsed onto that node, and the prefix
+    /// is in.
+    fn try_issue_join(&self) {
+        if !self.prefix_expected.load(Ordering::SeqCst)
+            || !self.emulation_done.load(Ordering::SeqCst)
+            || self.join_issued.load(Ordering::SeqCst)
+        {
+            return;
+        }
+        let (min, max) = (
+            self.min_chunk.load(Ordering::SeqCst),
+            self.max_chunk.load(Ordering::SeqCst),
+        );
+        let task = {
+            // Lock order: the prefix, then the tree. Held together so two callers cannot both
+            // see the join as due.
+            let mut prefix = self.prefix.lock();
+            let tree = self.proof_tree.lock();
+            let Some(top) = tree
+                .single_proved()
+                .filter(|top| top.start_chunk == min && top.end_chunk == max)
+            else {
+                return;
+            };
+            let Some(left) = prefix.take() else {
+                return;
+            };
+            self.join_issued.store(true, Ordering::SeqCst);
+            CombineTask {
+                left,
+                right: top,
+                preferred_worker: None,
+            }
+        };
+        debug!("GlobalScheduler: the root's join with the prefix is issued");
+        self.dispatch_or_enqueue(SchedulerTask::Combine(task));
     }
 
     /// Add a combine task: to a waiting worker if there is one, to the queue otherwise. Queueing
@@ -899,6 +1001,10 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
         if !self.emulation_done.load(Ordering::SeqCst) {
             return false;
         }
+        // With a prefix the tree is complete when its root, the join, is in.
+        if self.prefix_expected.load(Ordering::SeqCst) {
+            return self.root_reported.load(Ordering::SeqCst);
+        }
 
         let tree = self.proof_tree.lock();
 
@@ -917,7 +1023,9 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
     /// once the emulation is finalized. Handed out then, it would be built as an inner node and the
     /// run would complete without a root; it is released by the next registration or the finalize.
     fn held_for_finalize(&self, start: usize, end: usize) -> bool {
-        !self.emulation_done.load(Ordering::SeqCst)
+        // With a prefix no node over chunks alone is the root, so none has to wait.
+        !self.prefix_expected.load(Ordering::SeqCst)
+            && !self.emulation_done.load(Ordering::SeqCst)
             && start == self.min_chunk.load(Ordering::SeqCst)
             && end == self.max_chunk.load(Ordering::SeqCst)
     }
@@ -956,6 +1064,10 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
         }
         let min = self.min_chunk.load(Ordering::SeqCst);
         let max = self.max_chunk.load(Ordering::SeqCst);
+        // With a prefix the root is its join with the node over every chunk.
+        if self.prefix_expected.load(Ordering::SeqCst) {
+            return start == PREFIX_INDEX && end == max;
+        }
         start == min && end == max
     }
 
@@ -1072,6 +1184,10 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
         self.total_chunks.store(0, Ordering::SeqCst);
         self.in_flight.store(0, Ordering::SeqCst);
         self.aborted.store(false, Ordering::SeqCst);
+        self.prefix_expected.store(false, Ordering::SeqCst);
+        *self.prefix.lock() = None;
+        self.join_issued.store(false, Ordering::SeqCst);
+        self.root_reported.store(false, Ordering::SeqCst);
         // Waiters must already be drained: report_proof's wake_all_waiters_complete()
         // empties the queue at block completion, and entry checks (`is_complete` /
         // `is_complete_for_block`) reject new acquires until the next block starts.
@@ -1487,5 +1603,129 @@ mod tests {
         thread::sleep(Duration::from_millis(200));
         assert!(waiting.try_recv().is_err(), "nobody gets the held node");
         waiting
+    }
+
+    /// Acquire and report every task the scheduler hands out, a combine "proved" as the node
+    /// over its two ranges; the combines' ranges come back in the order they were handed out.
+    fn drain(sched: &GlobalScheduler<u32>) -> Vec<(usize, usize)> {
+        let mut combines = vec![];
+        loop {
+            match sched.acquire_task("worker-0") {
+                AcquireResult::Task(SchedulerTask::ChunkProof { chunk_idx }) => {
+                    sched.report_proof(IndexedProof::new(0, chunk_idx, chunk_idx), "worker-0");
+                }
+                AcquireResult::Task(SchedulerTask::Combine(task)) => {
+                    let (start, end) = (task.left.start_chunk, task.right.end_chunk);
+                    combines.push((start, end));
+                    sched.report_proof(IndexedProof::new(0, start, end), "worker-0");
+                }
+                _ => return combines,
+            }
+        }
+    }
+
+    /// With a prefix expected, no node over chunks alone is the root, and the run does not
+    /// complete on the chunks' tree. The root is the join of the prefix with the node over every
+    /// chunk, issued once the prefix is in.
+    #[test]
+    fn a_prefix_makes_the_root_its_join_with_the_chunks() {
+        let _mode = runtime_mode("local_single_node");
+        let sched: GlobalScheduler<u32> = GlobalScheduler::new();
+        sched.expect_prefix();
+        for chunk in 0..3 {
+            sched.register_chunk(chunk);
+        }
+        sched.finalize_emulation();
+
+        let combines = drain(&sched);
+        assert_eq!(
+            combines.len(),
+            2,
+            "three chunks reduce in two nodes: {combines:?}"
+        );
+        assert!(combines.contains(&(0, 2)));
+        assert!(!sched.is_final_combine(0, 2));
+        assert!(!sched.is_complete(), "no root before the prefix is in");
+
+        sched.report_prefix(7);
+        let AcquireResult::Task(SchedulerTask::Combine(join)) = sched.acquire_task("worker-0")
+        else {
+            panic!("the join is due once the prefix is in");
+        };
+        assert_eq!(*join.left.inner, 7);
+        assert_eq!(
+            (join.left.start_chunk, join.left.end_chunk),
+            (PREFIX_INDEX, PREFIX_INDEX)
+        );
+        assert_eq!((join.right.start_chunk, join.right.end_chunk), (0, 2));
+        assert!(sched.is_final_combine(join.left.start_chunk, join.right.end_chunk));
+        assert!(!sched.is_complete(), "the join is in flight");
+
+        sched.report_proof(IndexedProof::new(0, PREFIX_INDEX, 2), "worker-0");
+        assert!(sched.is_complete());
+        assert!(matches!(
+            sched.acquire_task("worker-0"),
+            AcquireResult::Complete
+        ));
+    }
+
+    /// A prefix that is in before the chunks waits for their tree to collapse, and for the
+    /// finalize: until then the node over the chunks registered so far may not be the last.
+    #[test]
+    fn a_prefix_that_arrives_first_waits_for_the_chunks_and_the_finalize() {
+        let _mode = runtime_mode("local_single_node");
+        let sched: GlobalScheduler<u32> = GlobalScheduler::new();
+        sched.expect_prefix();
+        sched.register_chunk(0);
+        sched.register_chunk(1);
+        sched.report_prefix(7);
+
+        // The chunks reduce to the node over both without waiting for the finalize: with a
+        // prefix that node is an inner node whatever is registered later.
+        assert_eq!(drain(&sched), vec![(0, 1)]);
+        assert!(!sched.is_complete());
+
+        sched.finalize_emulation();
+        assert_eq!(drain(&sched), vec![(PREFIX_INDEX, 1)]);
+        assert!(sched.is_complete());
+    }
+
+    /// A single chunk has a root too: the join of the prefix with its leaf.
+    #[test]
+    fn a_prefix_gives_a_single_chunk_a_root() {
+        let _mode = runtime_mode("local_single_node");
+        let sched: GlobalScheduler<u32> = GlobalScheduler::new();
+        sched.expect_prefix();
+        sched.register_chunk(0);
+        sched.finalize_emulation();
+        assert_eq!(drain(&sched), Vec::<(usize, usize)>::new());
+        sched.report_prefix(7);
+        assert_eq!(drain(&sched), vec![(PREFIX_INDEX, 0)]);
+        assert!(sched.is_complete());
+    }
+
+    /// The next block starts without a prefix unless it declares one.
+    #[test]
+    fn reset_forgets_the_prefix() {
+        let _mode = runtime_mode("local_single_node");
+        let sched: GlobalScheduler<u32> = GlobalScheduler::new();
+        sched.expect_prefix();
+        sched.register_chunk(0);
+        sched.register_chunk(1);
+        sched.finalize_emulation();
+        drain(&sched);
+        sched.report_prefix(7);
+        drain(&sched);
+        assert!(sched.is_complete());
+
+        sched.reset();
+        sched.register_chunk(0);
+        sched.register_chunk(1);
+        sched.finalize_emulation();
+        assert_eq!(drain(&sched), vec![(0, 1)]);
+        assert!(
+            sched.is_complete(),
+            "without a prefix the node over every chunk is the root"
+        );
     }
 }

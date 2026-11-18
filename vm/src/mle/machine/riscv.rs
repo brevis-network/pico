@@ -6,10 +6,14 @@
 //! workspace shares one p3 version).
 //!
 //! The air list is the full RISCV chip set: 10 ALU + Cpu + memory (Local/RW/Init/Final) + Global
-//! (GCS) + Poseidon2 + Syscall (Riscv/Precompile) + Byte/Program (preprocessed) + the compute
-//! precompiles. Each AIR is optional — `build_ctx` includes a chip only when it's active for the
-//! program (e.g. precompiles fire for reth, not fib), and inactive chips are omitted from the
-//! proof and skipped in `complement`.
+//! (the chunk's cross-chunk event table) + Syscall (Riscv/Precompile) + Byte/Program
+//! (preprocessed) + the compute precompiles. Global is in every chunk; every other AIR is
+//! optional — `build_ctx` includes a chip only when it's active for the program (e.g.
+//! precompiles fire for reth, not fib), and inactive chips are omitted from the proof and
+//! skipped in `complement`.
+//!
+//! A block's proof is its chunk proofs plus the global LogUp over their `Global` tables and the
+//! program's image table ([`super::global_logup`]).
 //!
 //! The engine is CPU by default and GPU under the `cuda` feature (a compile-time swap of the
 //! [`Engine`] alias). Traces are always built on the host ([`build_ctx`] → [`HostPb`]) and bridged
@@ -29,7 +33,13 @@ use p3_koala_bear::KoalaBear;
 use p3_maybe_rayon::prelude::*;
 use serde_json::json;
 
-use super::air::{GcsBindAir, PrepAir, GCS_DIGEST_LEN};
+use super::{
+    air::{GlobalAir, PrepAir},
+    global_logup::{
+        assert_global_bus, check_global_bus, commit_global_table, ChunkTable, GlobalLogUp,
+        GlobalLogUpError, GlobalLogUpProof, ImageCommitment, ImageTable, ImageTooLarge,
+    },
+};
 use crate::{
     chips::{
         chips::{
@@ -47,7 +57,6 @@ use crate::{
                 read_write::MemoryReadWriteChip,
                 unaligned::MemoryUnalignedChip,
             },
-            riscv_poseidon2::FieldSpecificPoseidon2Chip,
             riscv_program::ProgramChip,
             syscall::{SyscallChip, SyscallChunkKind},
         },
@@ -79,7 +88,7 @@ use crate::{
             },
         },
     },
-    compiler::{program::ProgramBehavior, riscv::program::Program},
+    compiler::riscv::program::Program,
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
         opts::{EmulatorOpts, ReplayWorkers, SnapshotMainMode},
@@ -88,6 +97,7 @@ use crate::{
             emulator::{EmulationError, RiscvEmulator},
             history::ExecutionHistory,
             public_values::RecordFinalPvsState,
+            public_values_compat::encode_public_value_pc_limbs,
             record::EmulationRecord,
             record_digest::{digest_words, record_bytes, record_counts},
             record_slots::unbounded_scope,
@@ -98,7 +108,6 @@ use crate::{
     machine::{
         chip::{ChipBehavior, MetaChip},
         report::EmulationReport,
-        septic::{SepticCurve, SepticDigest, SepticExtension},
         witness::ProvingWitness,
     },
     mle::ledger::{self, At, Lane, ProveSlot},
@@ -114,7 +123,7 @@ use pico_mle_core::{
     proof::Proof,
     prover::{AirProvingContext, DeviceMultiStarkProvingKey, ProvingContext},
     verifier::VerifierError,
-    AirRef, StarkEngine, StarkProtocolConfig,
+    AirRef, StarkEngine, StarkProtocolConfig, SystemParams,
 };
 use pico_mle_cpu::{CpuBackend, KoalaBearPoseidon2CpuEngine};
 
@@ -158,16 +167,20 @@ pub(crate) fn bound_device() -> usize {
 /// already `HostPb`).
 #[cfg(not(feature = "cuda"))]
 #[inline]
-pub fn ctx_to_engine(ctx: ProvingContext<HostPb>) -> ProvingContext<Pb> {
+pub fn ctx_to_engine(_engine: &Engine, ctx: ProvingContext<HostPb>) -> ProvingContext<Pb> {
     ctx
 }
 
 /// Bridge a host-built proving context to the engine's backend: an upload to the GPU. The prover
 /// generates traces on-device via [`build_ctx_gpu`]; this is for harnesses that edit a host
 /// context before proving it.
+///
+/// A cached main (the Global table) is committed again on the engine's device, which has to
+/// reproduce the host's commitment.
 #[cfg(feature = "cuda")]
-pub fn ctx_to_engine(ctx: ProvingContext<HostPb>) -> ProvingContext<Pb> {
-    cuda_mle::transport_row_major_ctx_to_device(ctx).expect("upload host proving context to GPU")
+pub fn ctx_to_engine(engine: &Engine, ctx: ProvingContext<HostPb>) -> ProvingContext<Pb> {
+    cuda_mle::transport_row_major_ctx_with_cached_to_device(engine.device(), ctx)
+        .expect("upload host proving context to GPU")
 }
 
 /// Initialize process-wide GPU memory-pool sharing for MLE proving: create pico's global memory
@@ -398,6 +411,9 @@ impl PreparedChunk {
     }
 }
 
+/// The id of every AIR of the RISCV machine: its position in [`mle_riscv_air_refs`]' list and in
+/// the verifying key. The ids are contiguous from zero, and this module is the one place they are
+/// written as numbers; `INCLUDED` gives each chip's name its id.
 pub mod air_id {
     pub const ADD: usize = 0;
     pub const SUB: usize = 1;
@@ -418,32 +434,55 @@ pub mod air_id {
     pub const MEM_INIT: usize = 16;
     pub const MEM_FINAL: usize = 17;
     pub const GLOBAL: usize = 18;
-    pub const POSEIDON2: usize = 19;
-    /// First and last of the precompile and `SyscallPrecompile` AIR ids, literal in `INCLUDED`.
-    pub const PRECOMPILE_FIRST: usize = 20;
-    pub const PRECOMPILE_LAST: usize = 44;
-    /// Dedicated Ecall chip; appended after the precompile block so the literal
-    /// precompile indices stay valid.
-    pub const ECALL: usize = 45;
-    /// Keccak control sibling (syscall + memory, one row per permutation); appended after Ecall
-    /// for the same reason.
-    pub const KECCAK_CONTROL: usize = 46;
-    /// The poseidon2 precompile, returned to the machine after its canonicality and alignment
-    /// fixes; appended last for the same reason as the two above.
-    pub const POSEIDON2_PERMUTE: usize = 47;
-    /// The two Ed25519 precompiles, returned to the machine on the RV64 memory layout; appended
-    /// after the poseidon2 precompile, in the order the three came back.
-    pub const ED_ADD: usize = 48;
-    pub const ED_DECOMPRESS: usize = 49;
-    /// The loads and stores whose address is not a multiple of their width; appended last
-    /// for the same reason.
-    pub const MEM_UNALIGNED: usize = 50;
+    // The precompile block: the compute precompiles a deferred chunk carries one kind of, the
+    // SHA control siblings, and the precompile chunks' syscall table.
+    /// The sliced Keccak permutation.
+    pub const KECCAK_PERMUTE: usize = 19;
+    pub const SHA_EXTEND: usize = 20;
+    pub const SHA_EXTEND_CONTROL: usize = 21;
+    pub const SHA_COMPRESS: usize = 22;
+    pub const SHA_COMPRESS_CONTROL: usize = 23;
+    pub const UINT256_MUL_MOD: usize = 24;
+    pub const SECP256K1_ADD: usize = 25;
+    pub const SECP256K1_DOUBLE: usize = 26;
+    pub const SECP256K1_DECOMPRESS: usize = 27;
+    pub const SECP256R1_ADD: usize = 28;
+    pub const SECP256R1_DOUBLE: usize = 29;
+    pub const SECP256R1_DECOMPRESS: usize = 30;
+    pub const BN254_ADD: usize = 31;
+    pub const BN254_DOUBLE: usize = 32;
+    pub const BLS12381_ADD: usize = 33;
+    pub const BLS12381_DOUBLE: usize = 34;
+    pub const BLS12381_DECOMPRESS: usize = 35;
+    pub const BN254_FP_OP: usize = 36;
+    pub const BN254_FP2_ADD_SUB: usize = 37;
+    pub const BN254_FP2_MUL: usize = 38;
+    pub const BLS381_FP_OP: usize = 39;
+    pub const BLS381_FP2_ADD_SUB: usize = 40;
+    pub const BLS381_FP2_MUL: usize = 41;
+    pub const SECP256K1_FP_OP: usize = 42;
+    /// The precompile chunks' syscall table, the last AIR of the precompile block.
+    pub const SYSCALL_PRECOMPILE: usize = 43;
+    /// First and last AIR of the precompile block.
+    pub const PRECOMPILE_FIRST: usize = KECCAK_PERMUTE;
+    pub const PRECOMPILE_LAST: usize = SYSCALL_PRECOMPILE;
+    /// The dedicated Ecall chip.
+    pub const ECALL: usize = 44;
+    /// The Keccak control sibling (syscall + memory, one row per permutation).
+    pub const KECCAK_CONTROL: usize = 45;
+    /// The poseidon2 precompile.
+    pub const POSEIDON2_PERMUTE: usize = 46;
+    /// The two Ed25519 precompiles, on the RV64 memory layout.
+    pub const ED_ADD: usize = 47;
+    pub const ED_DECOMPRESS: usize = 48;
+    /// The loads and stores whose address is not a multiple of their width.
+    pub const MEM_UNALIGNED: usize = 49;
     /// The sliced Keccak chip's two lookup tables (chi rows, xor5 parities) in one
     /// preprocessed AIR, present in Keccak chunks only.
-    pub const KECCAK_TABLES: usize = 51;
-    /// The BLS12-381 G2 add and double precompiles, appended last so the ids above stay put.
-    pub const BLS12381_G2_ADD: usize = 52;
-    pub const BLS12381_G2_DOUBLE: usize = 53;
+    pub const KECCAK_TABLES: usize = 50;
+    /// The BLS12-381 G2 add and double precompiles.
+    pub const BLS12381_G2_ADD: usize = 51;
+    pub const BLS12381_G2_DOUBLE: usize = 52;
 }
 
 /// Maps brevis chip `name()` → AIR id for the core set. Chips not listed are excluded from both
@@ -468,34 +507,33 @@ const INCLUDED: &[(&str, usize)] = &[
     ("MemoryInitialize", air_id::MEM_INIT),
     ("MemoryFinalize", air_id::MEM_FINAL),
     ("Global", air_id::GLOBAL),
-    ("RiscvKoalaBearPoseidon2", air_id::POSEIDON2),
     // Compute precompiles (air id == air_refs index). Active on programs that use them (reth);
     // brevis chip `constraints.rs` emit matching BYTE_BUS, so no byte_lookup skip is needed.
-    ("KeccakPermute", 20),
-    ("ShaExtend", 21),
-    ("ShaExtendControl", 22),
-    ("ShaCompress", 23),
-    ("ShaCompressControl", 24),
-    ("Uint256MulMod", 25),
-    ("Secp256k1AddAssign", 26),
-    ("Secp256k1DoubleAssign", 27),
-    ("Secp256k1Decompress", 28),
-    ("Secp256r1AddAssign", 29),
-    ("Secp256r1DoubleAssign", 30),
-    ("Secp256r1Decompress", 31),
-    ("Bn254AddAssign", 32),
-    ("Bn254DoubleAssign", 33),
-    ("Bls12381AddAssign", 34),
-    ("Bls12381DoubleAssign", 35),
-    ("Bls12381Decompress", 36),
-    ("Bn254FpOp", 37),
-    ("Bn254Fp2AddSub", 38),
-    ("Bn254Fp2Mul", 39),
-    ("Bls381FpOp", 40),
-    ("Bls381Fp2AddSub", 41),
-    ("Bls381Fp2Mul", 42),
-    ("Secp256k1FpOp", 43),
-    ("SyscallPrecompile", 44),
+    ("KeccakPermute", air_id::KECCAK_PERMUTE),
+    ("ShaExtend", air_id::SHA_EXTEND),
+    ("ShaExtendControl", air_id::SHA_EXTEND_CONTROL),
+    ("ShaCompress", air_id::SHA_COMPRESS),
+    ("ShaCompressControl", air_id::SHA_COMPRESS_CONTROL),
+    ("Uint256MulMod", air_id::UINT256_MUL_MOD),
+    ("Secp256k1AddAssign", air_id::SECP256K1_ADD),
+    ("Secp256k1DoubleAssign", air_id::SECP256K1_DOUBLE),
+    ("Secp256k1Decompress", air_id::SECP256K1_DECOMPRESS),
+    ("Secp256r1AddAssign", air_id::SECP256R1_ADD),
+    ("Secp256r1DoubleAssign", air_id::SECP256R1_DOUBLE),
+    ("Secp256r1Decompress", air_id::SECP256R1_DECOMPRESS),
+    ("Bn254AddAssign", air_id::BN254_ADD),
+    ("Bn254DoubleAssign", air_id::BN254_DOUBLE),
+    ("Bls12381AddAssign", air_id::BLS12381_ADD),
+    ("Bls12381DoubleAssign", air_id::BLS12381_DOUBLE),
+    ("Bls12381Decompress", air_id::BLS12381_DECOMPRESS),
+    ("Bn254FpOp", air_id::BN254_FP_OP),
+    ("Bn254Fp2AddSub", air_id::BN254_FP2_ADD_SUB),
+    ("Bn254Fp2Mul", air_id::BN254_FP2_MUL),
+    ("Bls381FpOp", air_id::BLS381_FP_OP),
+    ("Bls381Fp2AddSub", air_id::BLS381_FP2_ADD_SUB),
+    ("Bls381Fp2Mul", air_id::BLS381_FP2_MUL),
+    ("Secp256k1FpOp", air_id::SECP256K1_FP_OP),
+    ("SyscallPrecompile", air_id::SYSCALL_PRECOMPILE),
     ("Ecall", air_id::ECALL),
     ("KeccakControl", air_id::KECCAK_CONTROL),
     ("Poseidon2Permute", air_id::POSEIDON2_PERMUTE),
@@ -654,6 +692,12 @@ fn bucketed_presence(chip: &MetaChip<Kb, RiscvChipType<Kb>>, record: &EmulationR
 /// (machine constant) and stays in the preimage.
 pub const RISCV_APP_PREP_AIR_IDS: &[usize] = &[air_id::PROGRAM];
 
+/// The AIRs a RISCV chunk proof must carry: the Global AIR. Its table is the chunk's share of the
+/// global LogUp, so a chunk proof without it would keep the chunk's cross-chunk events out of
+/// the block's sum. Every keygen of the RISCV air set registers the same ids, since a required
+/// AIR changes the verifying key and the transcript.
+pub const RISCV_REQUIRED_AIR_IDS: &[usize] = &[air_id::GLOBAL];
+
 /// The program-table preprocessed commitment of a RISCV verifying key — the app-identity
 /// commitment excluded from the lean pre-hash. Panics if the vk carries no program table
 /// (not a RISCV machine vk).
@@ -671,19 +715,21 @@ pub fn riscv_program_commit(
 /// rayon-parallel but leaves a large host underused (reth chunks measured ~30 of 124 busy cores),
 /// so proving a few at once fills the machine; the bound caps peak memory (one full proving
 /// working set per in-flight chunk). Override with the `PROVE_CONCURRENCY` env var; defaults to
-/// [`DEFAULT_PROVE_CONCURRENCY`].
+/// [`default_prove_concurrency`].
 ///
 /// Consulted only when the machine was given no explicit [`RiscvMachine::with_concurrency`]: an
-/// argument outranks the environment.
+/// argument outranks the environment. The recursion proofs after the chunks take the same count
+/// on the host ([`recursion_proofs_at_once`]).
 fn prove_concurrency() -> usize {
     std::env::var("PROVE_CONCURRENCY")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .filter(|&n| n >= 1)
-        .unwrap_or(DEFAULT_PROVE_CONCURRENCY)
+        .unwrap_or_else(default_prove_concurrency)
 }
 
-/// [`prove_concurrency`] without `PROVE_CONCURRENCY`: 4 on the host, 1 on the GPU.
+/// [`prove_concurrency`] without `PROVE_CONCURRENCY`: on the host a count taken from its memory
+/// and sized for the smallest guest, up to 4 ([`concurrency_for_memory`]); 1 on the GPU.
 ///
 /// [`RiscvMachine::prove`] proves every chunk on the calling thread's card, so on the GPU the bound
 /// caps one card's VRAM. `test_mle_e2e` (whitelist on, `--step wrap`, one 32 GiB card):
@@ -694,14 +740,103 @@ fn prove_concurrency() -> usize {
 /// - at 1, those three passed 5 of 5, the pool peaking at 20.8 GiB.
 ///
 /// The multi-card driver runs its own lanes per card and does not read this.
+pub fn default_prove_concurrency() -> usize {
+    #[cfg(not(feature = "cuda"))]
+    {
+        concurrency_for_memory(host_memory_bytes())
+    }
+    #[cfg(feature = "cuda")]
+    {
+        1
+    }
+}
+
+/// The chunks a host with `bytes` of memory proves at once when nothing says how many: up to 4,
+/// which fills a large host, and fewer on a small one. The count is sized for the smallest
+/// guest, not for the guest being proved: 4 GiB for each chunk in flight and 4 GiB for the rest
+/// of the run, so one chunk at a time below 12 GiB, two from 12, three from 16, four from 20.
+///
+/// Fibonacci to the compress proof on 16 threads: a chunk in flight adds about 2 GB (its Global
+/// table has 2^22 rows at the default stacked height whatever the guest). The run peaks in its
+/// last proof, the compress proof, which is proved alone: near 6 GB after one chunk at a time
+/// and under 8 GB after two, when the process still holds more of what the two held. More
+/// threads take more: on 124, two at a time peak at 9.4 GB. The SDK's chain tests, which prove
+/// small guests too, bring their container to 10.5 GB at two at a time. No run of a small
+/// guest with three or four in flight has been measured.
+///
+/// A chunk full of real rows takes many times a small one's memory and the count does not see
+/// it: set the concurrency for such a guest ([`RiscvMachine::with_concurrency`]).
 #[cfg(not(feature = "cuda"))]
-const DEFAULT_PROVE_CONCURRENCY: usize = 4;
-#[cfg(feature = "cuda")]
-const DEFAULT_PROVE_CONCURRENCY: usize = 1;
+fn concurrency_for_memory(bytes: u64) -> usize {
+    const CHUNK_BYTES: u64 = 4 << 30;
+    (bytes / CHUNK_BYTES).saturating_sub(1).clamp(1, 4) as usize
+}
+
+/// This host's memory, or its container's limit where there is one.
+#[cfg(not(feature = "cuda"))]
+fn host_memory_bytes() -> u64 {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    // Where the host's memory cannot be read (no `/proc`), `cgroup_limits` asserts; zero then
+    // gives the one-chunk default.
+    if sys.total_memory() == 0 {
+        return 0;
+    }
+    sys.cgroup_limits().map_or(sys.total_memory(), |limits| {
+        limits.total_memory.min(sys.total_memory())
+    })
+}
 
 /// An explicit concurrency wins; only its absence consults the environment.
 fn resolved_concurrency(explicit: Option<NonZeroUsize>) -> usize {
     explicit.map_or_else(prove_concurrency, |n| n.get())
+}
+
+/// How many of `proofs` recursion proofs (the convert leaves, the nodes of a tree layer) a
+/// machine proves at once. On the host each in-flight proof holds a working set of its own, as a
+/// chunk does, so they take the chunks' setting ([`resolved_concurrency`]): the count the machine
+/// was given, else `PROVE_CONCURRENCY`, else the default for the host's memory
+/// ([`default_prove_concurrency`]). A `cuda` build proves all of them at once on the calling
+/// thread's card, whatever the setting.
+pub(crate) fn recursion_proofs_at_once(explicit: Option<NonZeroUsize>, proofs: usize) -> usize {
+    #[cfg(not(feature = "cuda"))]
+    {
+        let _ = proofs;
+        resolved_concurrency(explicit)
+    }
+    #[cfg(feature = "cuda")]
+    {
+        let _ = explicit;
+        proofs.max(1)
+    }
+}
+
+/// Runs `job` on every item, at most `concurrency` at a time, and returns the results in the
+/// items' order. The items go in batches of `concurrency`, each batch in parallel and the
+/// batches one after another; `job` is given the item's index. An error ends the run with the
+/// batch it is in.
+pub(crate) fn par_bounded<I: Send, T: Send, E: Send>(
+    items: impl IntoIterator<Item = I>,
+    concurrency: usize,
+    job: impl Fn(usize, I) -> Result<T, E> + Sync,
+) -> Result<Vec<T>, E> {
+    assert!(concurrency > 0, "proving needs at least one slot");
+    let mut results = Vec::new();
+    let mut items = items.into_iter();
+    loop {
+        let batch: Vec<I> = items.by_ref().take(concurrency).collect();
+        if batch.is_empty() {
+            break;
+        }
+        let base = results.len();
+        let batch_results: Vec<T> = batch
+            .into_par_iter()
+            .enumerate()
+            .map(|(j, item)| job(base + j, item))
+            .collect::<Result<_, E>>()?;
+        results.extend(batch_results);
+    }
+    Ok(results)
 }
 
 /// Runs `job` on every record, `concurrency` at a time, each inside the [`ProveSlot`] the stage
@@ -730,29 +865,15 @@ fn par_in_prove_slots<R: Borrow<EmulationRecord> + Send, T: Send, E: Send>(
             })
         })
         .collect();
-    let mut results = Vec::with_capacity(records.len());
-    let mut records = records.into_iter();
-    loop {
-        let batch: Vec<R> = records.by_ref().take(concurrency).collect();
-        if batch.is_empty() {
-            break;
-        }
-        let base = results.len();
-        let batch_results: Vec<T> = batch
-            .into_par_iter()
-            .enumerate()
-            .map(|(j, record)| {
-                let slot = ProveSlot {
-                    record: (base + j) as u64,
-                    chunk: chunk_of[base + j],
-                    slot: j,
-                };
-                ledger::with_prove_slot(slot, || job(base + j, record))
-            })
-            .collect::<Result<_, E>>()?;
-        results.extend(batch_results);
-    }
-    Ok(results)
+    // A record's slot is its place in its batch, and the batches are `concurrency` long.
+    par_bounded(records, concurrency, |idx, record| {
+        let slot = ProveSlot {
+            record: idx as u64,
+            chunk: chunk_of[idx],
+            slot: idx % concurrency,
+        };
+        ledger::with_prove_slot(slot, || job(idx, record))
+    })
 }
 
 /// The machine's params-free constraint dump: one line per AIR plus an overall digest, covering
@@ -793,7 +914,11 @@ pub fn riscv_constraint_dump(bucket: bool) -> String {
     };
     let airs = mle_riscv_air_refs(Arc::new(program), bucket);
     let names: Vec<String> = airs.iter().map(|a| a.name()).collect();
-    let (_, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
+    let (_, vk) = engine.keygen_with_app_prep_and_required(
+        &airs,
+        RISCV_APP_PREP_AIR_IDS,
+        RISCV_REQUIRED_AIR_IDS,
+    );
     compute_constraint_dump(engine.config(), &vk.inner, &names).render()
 }
 
@@ -809,31 +934,32 @@ pub fn mle_riscv_air_refs(program: Arc<Program>, bucket: bool) -> Vec<AirRef<Sc>
     } else {
         program
     };
+    // One AIR per `INCLUDED` row, in `air_id` order: the AIR at position `i` is the chip
+    // `INCLUDED[i]` names.
     vec![
-        Arc::new(AddChip::<Kb>::default()) as AirRef<Sc>, // 0
-        Arc::new(SubChip::<Kb>::default()),               // 1
-        Arc::new(MulChip::<Kb>::default()),               // 2
-        Arc::new(BitwiseChip::<Kb>::default()),           // 3
-        Arc::new(LtChip::<Kb>::default()),                // 4
-        Arc::new(SLLChip::<Kb>::default()),               // 5
-        Arc::new(ShiftRightChip::<Kb>::default()),        // 6
-        Arc::new(DivRemChip::<Kb>::default()),            // 7
-        Arc::new(AddwChip::<Kb>::default()),              // 8
-        Arc::new(SubwChip::<Kb>::default()),              // 9
-        Arc::new(CpuChip::<Kb>::default()),               // 10
-        Arc::new(MemoryLocalChip::<Kb>::default()),       // 11
-        Arc::new(MemoryReadWriteChip::<Kb>::default()),   // 12
-        Arc::new(SyscallChip::<Kb>::new(SyscallChunkKind::Riscv)), // 13
-        Arc::new(PrepAir::new(ByteChip::<Kb>::default(), program.clone())), // 14
-        Arc::new(PrepAir::new(ProgramChip::<Kb>::default(), program)), // 15
+        Arc::new(AddChip::<Kb>::default()) as AirRef<Sc>,
+        Arc::new(SubChip::<Kb>::default()),
+        Arc::new(MulChip::<Kb>::default()),
+        Arc::new(BitwiseChip::<Kb>::default()),
+        Arc::new(LtChip::<Kb>::default()),
+        Arc::new(SLLChip::<Kb>::default()),
+        Arc::new(ShiftRightChip::<Kb>::default()),
+        Arc::new(DivRemChip::<Kb>::default()),
+        Arc::new(AddwChip::<Kb>::default()),
+        Arc::new(SubwChip::<Kb>::default()),
+        Arc::new(CpuChip::<Kb>::default()),
+        Arc::new(MemoryLocalChip::<Kb>::default()),
+        Arc::new(MemoryReadWriteChip::<Kb>::default()),
+        Arc::new(SyscallChip::<Kb>::new(SyscallChunkKind::Riscv)),
+        Arc::new(PrepAir::new(ByteChip::<Kb>::default(), program.clone())),
+        Arc::new(PrepAir::new(ProgramChip::<Kb>::default(), program)),
         Arc::new(MemoryInitializeFinalizeChip::<Kb>::new(
             MemoryChipType::Initialize,
-        )), // 16
+        )),
         Arc::new(MemoryInitializeFinalizeChip::<Kb>::new(
             MemoryChipType::Finalize,
-        )), // 17
-        Arc::new(GcsBindAir::<Kb>::default()),            // 18 (GlobalChip + GCS public values)
-        Arc::new(FieldSpecificPoseidon2Chip::<Kb>::default()), // 19 (POSEIDON2_BUS receiver)
+        )),
+        Arc::new(GlobalAir::<Kb>::default()),
         // Compute precompiles: present in the verifying key. They activate on programs that
         // use them (omitted from a proof as optional AIRs when the chunk has no such events).
         // The sliced lookup layout under the `KeccakPermute` name (two permutations per
@@ -862,16 +988,17 @@ pub fn mle_riscv_air_refs(program: Arc<Program>, bucket: bool) -> Vec<AirRef<Sc>
         Arc::new(Fp2AddSubChip::<Kb, Bls381BaseField>::default()),
         Arc::new(Fp2MulChip::<Kb, Bls381BaseField>::default()),
         Arc::new(FpOpChip::<Kb, Secp256k1BaseField>::default()),
-        Arc::new(SyscallChip::<Kb>::new(SyscallChunkKind::Precompile)), // 44 (precompile ecalls)
-        Arc::new(EcallChip::<Kb>::default()),                           // 45
-        Arc::new(KeccakControlChip::<Kb>::default()),                   // 46
-        Arc::new(FieldSpecificPrecompilePoseidon2Chip::<Kb>::default()), // 47
-        Arc::new(EdAddAssignChip::<Kb, Ed25519>::default()),            // 48
-        Arc::new(EdDecompressChip::<Kb, Ed25519Parameters>::default()), // 49
-        Arc::new(MemoryUnalignedChip::<Kb>::default()),                 // 50
-        Arc::new(crate::chips::precompiles::keccak256::KeccakTables::<Kb>::default()), // 51
-        Arc::new(Bls12381G2AddChip::<Kb>::default()),                   // 52
-        Arc::new(Bls12381G2DoubleChip::<Kb>::default()),                // 53
+        // The precompile chunks' syscall table.
+        Arc::new(SyscallChip::<Kb>::new(SyscallChunkKind::Precompile)),
+        Arc::new(EcallChip::<Kb>::default()),
+        Arc::new(KeccakControlChip::<Kb>::default()),
+        Arc::new(FieldSpecificPrecompilePoseidon2Chip::<Kb>::default()),
+        Arc::new(EdAddAssignChip::<Kb, Ed25519>::default()),
+        Arc::new(EdDecompressChip::<Kb, Ed25519Parameters>::default()),
+        Arc::new(MemoryUnalignedChip::<Kb>::default()),
+        Arc::new(crate::chips::precompiles::keccak256::KeccakTables::<Kb>::default()),
+        Arc::new(Bls12381G2AddChip::<Kb>::default()),
+        Arc::new(Bls12381G2DoubleChip::<Kb>::default()),
     ]
 }
 
@@ -1188,27 +1315,6 @@ fn pvs_from_raw(raw_pvs: Vec<Kb>) -> (Vec<Kb>, Vec<Kb>) {
     (pvs_riscv, pvs_max)
 }
 
-/// Row-major offset of the first of the trailing `GCS_DIGEST_LEN` cells on the last row of an
-/// `h`×`w` trace — where `GcsBindAir` writes the per-chunk global cumulative sum.
-#[inline]
-fn gcs_last_row_offset(h: usize, w: usize) -> usize {
-    (h - 1) * w + (w - GCS_DIGEST_LEN)
-}
-
-/// Read the per-chunk GCS digest from the trailing cells of the last row of a host row-major trace.
-fn read_gcs_from_host(values: &[Kb], h: usize, w: usize) -> Vec<Kb> {
-    let off = gcs_last_row_offset(h, w);
-    (0..GCS_DIGEST_LEN).map(|i| values[off + i]).collect()
-}
-
-/// The GLOBAL air's public values: `[gcs ‖ pvs_max]` — the per-chunk cumulative sum followed by the
-/// riscv PublicValues copy, matching `GcsBindAir::num_public_values`.
-fn global_pvs(gcs: Vec<Kb>, pvs_max: &[Kb]) -> Vec<Kb> {
-    let mut pvs = gcs;
-    pvs.extend_from_slice(pvs_max);
-    pvs
-}
-
 /// The record tracegen actually reads: the emulator's, plus every active chip's `extra_record`
 /// output appended back in.
 ///
@@ -1428,8 +1534,8 @@ fn log_natural_shape_probe(
 /// The whitelist shape of a chunk from the GPU preparer's event counter (see
 /// [`crate::mle::machine::shape::mle_natural_heights_from_counter`]). Presence is read off the
 /// raw record: the canonical core set covers every chip an extra-record pass could activate in a
-/// core chunk, and the chips extra-record output feeds elsewhere (Global, Poseidon2, Byte,
-/// Program) are unconditionally active.
+/// core chunk, and the chips extra-record output feeds elsewhere (Global, Byte, Program) are
+/// unconditionally active.
 #[cfg(feature = "cuda")]
 fn select_shape_from_counter(
     chips: &[MetaChip<Kb, RiscvChipType<Kb>>],
@@ -1575,16 +1681,11 @@ fn build_ctx_inner(
         }
         let ctx = match id {
             air_id::CPU | air_id::ECALL => AirProvingContext::simple(trace, pvs_riscv.clone()),
-            air_id::MEM_INIT | air_id::MEM_FINAL => {
+            // GLOBAL: the chip's rows as one matrix, with the riscv PublicValues copy the Global
+            // air carries in every chunk. [`commit_global_table`] turns it into the air's two
+            // partitions before a prove.
+            air_id::MEM_INIT | air_id::MEM_FINAL | air_id::GLOBAL => {
                 AirProvingContext::simple(trace, pvs_max.clone())
-            }
-            air_id::GLOBAL => {
-                // Per-chunk GCS (last-row trailing cells, bound by `GcsBindAir`) followed by the
-                // riscv PublicValues copy — the Global air is every chunk's always-present carrier.
-                let w = trace.width;
-                let h = trace.values.len() / w;
-                let gcs = read_gcs_from_host(&trace.values, h, w);
-                AirProvingContext::simple(trace, global_pvs(gcs, &pvs_max))
             }
             _ => AirProvingContext::simple_no_pis(trace),
         };
@@ -1599,8 +1700,11 @@ fn build_ctx_inner(
 ///
 /// The bridge does three things per trace: chip-name → AIR-id mapping (the `INCLUDED` table),
 /// an on-device row-major → col-major transpose into a fresh pool buffer, and public-value
-/// assembly (GLOBAL's GCS is read from the trailing cells of the last row, then followed by the
-/// riscv PublicValues copy to match `GcsBindAir`'s `[gcs ‖ pvs_max]` layout).
+/// assembly (GLOBAL carries the riscv PublicValues copy, as MemInit and MemFinal do).
+///
+/// The Global chip's rows come back as one trace, as every chip's do. The Global AIR takes the
+/// event table as a committed cached main: [`commit_global_table_on_device`] splits and commits
+/// it before the context is proved.
 ///
 /// `chips` must be in `gpu_generate_extra_record_and_main_chips()` order, not `all_chips()` order:
 /// the orchestrator indexes it by position.
@@ -1614,10 +1718,8 @@ pub fn build_ctx_gpu(
         chips::trace::TraceData, configs::stark_config::KoalaBearPoseidon2 as FriSc,
         machine::prover::BaseProver, mle::spans::device,
     };
-    use cuda_mle::runtime::{
-        copy::cuda_memcpy, d_buffer::DeviceBuffer, stream::current_stream_sync,
-    };
-    use std::{ffi::c_void, mem::ManuallyDrop};
+    use cuda_mle::runtime::{d_buffer::DeviceBuffer, stream::current_stream_sync};
+    use std::mem::ManuallyDrop;
 
     let t_stage = ledger::ProveMark::now();
     let device_id = bound_device();
@@ -1670,26 +1772,8 @@ pub fn build_ctx_gpu(
                 (h as u64) * (w as u64)
             );
         }
-        let (matrix, gcs) = match trace {
+        let matrix = match trace {
             TraceData::Gpu(_, alloc) => {
-                // GLOBAL's per-chunk GCS lives in the trailing GCS_DIGEST_LEN cells of the last
-                // row — read it from the row-major device buffer before transposing.
-                // NOTE: this D2H is async (per-thread stream). Moving the Vec into `pv` below is
-                // fine (the heap buffer address is stable); the values must not be *read* until
-                // the `current_stream_sync()` at the end of this function has run.
-                let gcs = (id == air_id::GLOBAL).then(|| {
-                    let mut host = vec![Kb::ZERO; GCS_DIGEST_LEN];
-                    let offset = gcs_last_row_offset(h, w);
-                    device::wait_with(|| unsafe {
-                        cuda_memcpy::<true, false>(
-                            host.as_mut_ptr() as *mut c_void,
-                            alloc.as_ptr().add(offset) as *const c_void,
-                            GCS_DIGEST_LEN * std::mem::size_of::<Kb>(),
-                        )
-                    })
-                    .expect("GCS extraction D2H failed");
-                    host
-                });
                 // Borrow the pool allocation as a cuda-mle DeviceBuffer (ManuallyDrop: the buffer
                 // must not free a pointer it does not own).
                 let input = ManuallyDrop::new(unsafe {
@@ -1703,35 +1787,30 @@ pub fn build_ctx_gpu(
                 }
                 device::transposed_on_thread(transpose);
                 live_allocs.push(alloc);
-                (
-                    cuda_mle::base::DeviceMatrix::new(Arc::new(output), h, w),
-                    gcs,
-                )
+                cuda_mle::base::DeviceMatrix::new(Arc::new(output), h, w)
             }
             TraceData::Cpu(m) => {
-                // CPU fallback chip: extract GCS on host, then reuse the existing H2D+transpose.
-                let gcs = (id == air_id::GLOBAL).then(|| read_gcs_from_host(&m.values, h, w));
+                // CPU fallback chip: reuse the existing H2D+transpose.
                 let upload = device::start_on_thread();
                 let matrix = device::wait_with(|| {
                     cuda_mle::data_transporter::transport_matrix_h2d_row_major(&m)
                 })
                 .expect("CPU-fallback trace H2D failed");
                 device::uploaded_on_thread(upload);
-                (matrix, gcs)
+                matrix
             }
             TraceData::Debug(..) => unreachable!("debug trace variant in production path"),
         };
         let pv = match id {
             air_id::CPU | air_id::ECALL => pvs_riscv.clone(),
-            air_id::MEM_INIT | air_id::MEM_FINAL => pvs_max.clone(),
-            air_id::GLOBAL => global_pvs(gcs.expect("GLOBAL gcs extracted above"), &pvs_max),
+            air_id::MEM_INIT | air_id::MEM_FINAL | air_id::GLOBAL => pvs_max.clone(),
             _ => Vec::new(),
         };
         per_trace.push((id, AirProvingContext::new(vec![], matrix, pv)));
     }
 
-    // One sync covers all per-thread-stream work (transposes + GCS D2H); after it the
-    // orchestrator's allocations can be returned to the pool.
+    // One sync covers all per-thread-stream work (the transposes); after it the orchestrator's
+    // allocations can be returned to the pool.
     device::final_wait_with(current_stream_sync).expect("sync after GPU trace bridge");
     drop(live_allocs);
     // Finished inside the facts, after the stage's clock is read, so reading the events stays out
@@ -1753,6 +1832,129 @@ pub fn build_ctx_gpu(
 
     per_trace.sort_by_key(|(id, _)| *id);
     ProvingContext::new(per_trace)
+}
+
+/// [`commit_global_table`] for a context built on the device: split the Global chip's trace
+/// into the event table and the rest, both at the fixed height, commit the table on the device
+/// as the AIR's cached main, and copy its rows to the host for the group prover.
+///
+/// # Panics
+/// If the chunk has more events than the fixed height holds: the emulator cuts chunks so that it
+/// does not.
+#[cfg(feature = "cuda")]
+pub fn commit_global_table_on_device(
+    engine: &Engine,
+    mut ctx: ProvingContext<Pb>,
+) -> (ProvingContext<Pb>, ChunkTable) {
+    use crate::chips::chips::riscv_global::columns::{
+        NUM_GLOBAL_AUX_COLS, NUM_GLOBAL_COLS, NUM_GLOBAL_TABLE_COLS,
+    };
+    use cuda_mle::{
+        base::DeviceMatrix,
+        runtime::{copy::MemCopyD2H, d_buffer::DeviceBuffer, stream::current_stream_sync},
+    };
+    use p3_matrix::dense::RowMajorMatrix;
+    use pico_mle_core::{
+        global_logup,
+        poly::matrix::MatrixDimensions,
+        prover::{CommittedTraceData, TraceCommitter},
+    };
+    use std::mem::ManuallyDrop;
+
+    let log_height = global_logup::global_log_height(engine.params());
+    let entry = ctx
+        .per_trace
+        .iter_mut()
+        .find(|(air, _)| *air == air_id::GLOBAL)
+        .expect("every riscv chunk has the Global AIR");
+    let raw = &entry.1.common_main;
+    let rows = raw.height();
+    assert!(
+        entry.1.cached_mains.is_empty() && raw.width() == NUM_GLOBAL_COLS,
+        "the Global table of this context is already committed"
+    );
+    // TODO(global-table-height): the emulator cuts records for the table of the default stacked
+    // height (2^22 events: the chunk splitter's cap, the precompile blocks and the memory
+    // buckets of `emulator::riscv::record`), so below that height a record can hold more
+    // events than this table has rows, and is refused here
+    // (`global_logup::commit_global_table` is the host's); a memory record's size does not
+    // follow the chunk size. One table of 2^22 rows is a first implementation: once the
+    // table's shape is settled, cut the records for it at every stacked height.
+    assert!(
+        rows <= 1 << log_height,
+        "the chunk has more cross-chunk events ({rows} rows) than a Global table of \
+         2^{log_height} holds; below the default stacked height the records are still cut for \
+         the default's table, and a higher stacked height holds this one"
+    );
+
+    // The device trace is column-major, the table's columns first: each part is a run of whole
+    // columns, padded with zero rows to the fixed height.
+    let padded = 1usize << log_height;
+    let table = DeviceBuffer::<Kb>::with_capacity(padded * NUM_GLOBAL_TABLE_COLS);
+    let aux = DeviceBuffer::<Kb>::with_capacity(padded * NUM_GLOBAL_AUX_COLS);
+    unsafe {
+        cuda_mle::batch_expand_pad_any(
+            table.as_mut_ptr(),
+            raw.buffer().as_ptr(),
+            NUM_GLOBAL_TABLE_COLS as u32,
+            padded as u32,
+            rows as u32,
+        )
+        .expect("pad the Global table");
+        cuda_mle::batch_expand_pad_any(
+            aux.as_mut_ptr(),
+            raw.buffer().as_ptr().add(rows * NUM_GLOBAL_TABLE_COLS),
+            NUM_GLOBAL_AUX_COLS as u32,
+            padded as u32,
+            rows as u32,
+        )
+        .expect("pad the Global chip's own columns");
+    }
+    // The table's rows for the host, without its padding: the events are the trace's first rows
+    // (`real_rows`) and every row after them is zero, so only the head of each table column
+    // crosses. A whitelist shape gives the trace its full height here already, nearly all of it
+    // padding: copying that would move the whole table to the host for every chunk, and back
+    // for its group proof.
+    let real = entry.1.real_rows.map_or(rows, |real| real.clamp(1, rows));
+    let mut values = vec![Kb::ZERO; real * NUM_GLOBAL_TABLE_COLS];
+    for column in 0..NUM_GLOBAL_TABLE_COLS {
+        let cells = ManuallyDrop::new(unsafe {
+            DeviceBuffer::<Kb>::from_raw_parts(
+                raw.buffer().as_ptr().add(column * rows) as *mut Kb,
+                real,
+            )
+        })
+        .to_host()
+        .expect("copy the Global table to the host");
+        for (row, &cell) in cells.iter().enumerate() {
+            values[row * NUM_GLOBAL_TABLE_COLS + column] = cell;
+        }
+    }
+    current_stream_sync().expect("stream sync after splitting the Global trace");
+
+    let table = DeviceMatrix::new(Arc::new(table), padded, NUM_GLOBAL_TABLE_COLS);
+    let (commitment, data) = TraceCommitter::<Pb>::commit(engine.device(), &[&table])
+        .expect("a table no taller than the stacked height commits");
+    let committed = CommittedTraceData {
+        commitment,
+        trace: table,
+        data: Arc::new(data),
+    };
+    let public_values = std::mem::take(&mut entry.1.public_values);
+    let real_rows = entry.1.real_rows;
+    entry.1 = AirProvingContext::new(
+        vec![committed],
+        DeviceMatrix::new(Arc::new(aux), padded, NUM_GLOBAL_AUX_COLS),
+        public_values,
+    );
+    entry.1.real_rows = real_rows;
+    (
+        ctx,
+        ChunkTable::new(
+            commitment,
+            RowMajorMatrix::new(values, NUM_GLOBAL_TABLE_COLS),
+        ),
+    )
 }
 
 /// Log one record's per-AIR prove times and return them as `air.<name>.prove_us` facts: each AIR's
@@ -1834,7 +2036,7 @@ pub struct TraceReport {
 /// `cuda`; with it, `prove` prepares each chunk's events for the device instead.
 ///
 /// The stages are [`build_ctx`]'s own, in the prove slots `prove` uses and at its concurrency
-/// (`None`: `PROVE_CONCURRENCY`, else [`DEFAULT_PROVE_CONCURRENCY`]), so a stage ledger reads the
+/// (`None`: `PROVE_CONCURRENCY`, else [`default_prove_concurrency`]), so a stage ledger reads the
 /// same `prove.augment.*`, `prove.shape` and `prove.tracegen.*` lines here as in a host prove, and
 /// `prove.prove` and `prove.verify` as skipped. A record's traces drop before its slot takes the next record, so the
 /// peak is `concurrency` records' traces, not the run's. The records are borrowed, so each is
@@ -1894,35 +2096,25 @@ pub fn debug_records(
         StarkEngine::new(riscv_params_with_128_bits_security(log_stacked_height));
     let airs = mle_riscv_air_refs(program, bucket);
     // Keygen once and reuse across chunks — `debug` would otherwise re-run it per record.
-    let (pk, _) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
+    let (pk, _) = engine.keygen_with_app_prep_and_required(
+        &airs,
+        RISCV_APP_PREP_AIR_IDS,
+        RISCV_REQUIRED_AIR_IDS,
+    );
     let chips = RiscvChipType::<Kb>::all_chips();
     for (i, record) in records.iter().enumerate() {
-        let ctx = build_ctx(&chips, record, bucket);
+        let (ctx, _) = commit_global_table(build_ctx(&chips, record, bucket), engine.params());
         engine.debug_with_pk(&airs, &ctx, &pk);
         tracing::info!("chunk {i}: MLE debug (constraints + interactions) OK");
     }
-}
-
-/// Reconstruct a per-chunk `SepticDigest` from `GcsBindAir`'s public values (x = first 7, y = last
-/// 7 of the [`GCS_DIGEST_LEN`] elements).
-fn gcs_from_pvs(pvs: &[Kb]) -> SepticDigest<Kb> {
-    assert!(
-        pvs.len() >= GCS_DIGEST_LEN,
-        "GlobalChip public values ({}) too short for a {GCS_DIGEST_LEN}-element GCS digest",
-        pvs.len()
-    );
-    SepticDigest(SepticCurve {
-        x: SepticExtension(std::array::from_fn(|i| pvs[i])),
-        y: SepticExtension(std::array::from_fn(|i| pvs[GCS_DIGEST_LEN / 2 + i])),
-    })
 }
 
 /// Negative-test hook (NOT public API): bump the value of one MemoryFinalize event (`addr >=
 /// 0x1000`, clear of the x0 row the chip pins) in a single record. The record's traces are all
 /// built from its events, so the chunk stays internally consistent and its per-chunk proof
 /// remains valid; but the Global receive its MemoryFinalize row now carries has no matching send
-/// from the chunk that produced the word's final state, so `Σ gcs != 0`. Returns `true` if a
-/// finalize event was found and corrupted.
+/// from the chunk that produced the word's final state, so the global LogUp does not balance.
+/// Returns `true` if a finalize event was found and corrupted.
 ///
 /// Finalize only: a main-memory word whose initial value is zero has no MemoryInitialize event
 /// at all (`riscv_memory/event.rs`), so a "bump a matching init/final pair" form would find
@@ -1946,16 +2138,55 @@ pub fn corrupt_one_record(rec: &mut EmulationRecord) -> bool {
     true
 }
 
-/// A RISCV Phase-1 proof bundle: the shared verifying key plus one chunk proof per record.
+/// A block's global LogUp challenges, and the proof-of-work witness they were derived behind
+/// ([`RiscvMachine::global_challenges`]).
+#[derive(Clone, Copy)]
+pub struct GlobalChallenges {
+    pub pow_witness: Kb,
+    alpha: <Sc as pico_mle_core::StarkProtocolConfig>::EF,
+    beta: <Sc as pico_mle_core::StarkProtocolConfig>::EF,
+}
+
+/// A RISCV proof bundle: the shared verifying key, one chunk proof per record, and the global
+/// LogUp over the chunks' cross-chunk events.
 ///
 /// `vk` is `Arc`-wrapped so downstream consumers can share a single verifying key across many shapes
-/// without cloning; `chunk_proofs` are in record order. Decoupling prove from verify lets a caller
-/// serialize, inspect, or independently re-verify the proofs.
+/// without cloning; `chunk_proofs` are in record order, which is also the chunks' order in the
+/// global LogUp's chain. Decoupling prove from verify lets a caller serialize, inspect, or
+/// independently re-verify the proofs.
+#[derive(Clone)]
 pub struct RiscvProof {
     /// Verifying key for the full RISCV air set, shared across all chunks.
     pub vk: Arc<MultiStarkVerifyingKey<Sc>>,
     /// One proof per emulation record, in order.
     pub chunk_proofs: Vec<Proof<Sc>>,
+    /// The second phase: the group proofs over the chunks' Global tables and the memory image.
+    pub global: GlobalLogUpProof,
+}
+
+/// What a verifier trusts about a program beyond the RISCV verifying key: where execution
+/// starts, and the committed memory image.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProgramIdentity {
+    /// Guest entry pc, as the public values carry it.
+    pub pc_start: [Kb; 3],
+    pub image: ImageCommitment,
+}
+
+impl ProgramIdentity {
+    /// The identity of `program` under the RISCV machine at `riscv`. Commits the image table.
+    pub fn new(program: &Program, riscv: &SystemParams) -> Result<Self, ImageTooLarge> {
+        Ok(Self {
+            pc_start: encode_public_value_pc_limbs(program.pc_start).map(Kb::from_u32),
+            image: ImageTable::new(program, riscv)?.commitment(),
+        })
+    }
+
+    /// The program's vk digest, over the program-table commitment of `vk`.
+    fn vm_vk_digest(&self, vk: &MultiStarkVerifyingKey<Sc>) -> <Sc as StarkProtocolConfig>::Digest {
+        self.image
+            .vm_vk_digest(&riscv_program_commit(vk), &self.pc_start)
+    }
 }
 
 impl RiscvProof {
@@ -1980,10 +2211,12 @@ pub enum VerifyRiscvError {
         chunk: usize,
         source: VerifierError<<Sc as StarkProtocolConfig>::EF>,
     },
-    /// The trusted initial GCS plus the per-chunk global cumulative sums do not cancel: cross-chunk
-    /// memory is inconsistent.
-    #[error("cross-chunk global cumulative sum != 0 (memory inconsistency)")]
-    CrossChunkMemoryInconsistency,
+    /// The global LogUp over the chunks' cross-chunk events does not verify.
+    #[error(transparent)]
+    GlobalLogUp(#[from] GlobalLogUpError),
+    /// The trusted verifying key's Global bus is not a RISCV machine's.
+    #[error("the verifying key is not a RISCV machine's: {0}")]
+    NotARiscvMachine(String),
     /// An app-identity preprocessed commitment in the bundle's vk body (e.g. the program table)
     /// does not match the trusted value. The lean pre-hash deliberately does not cover these
     /// commitments, so this explicit check is what binds the bundle to the trusted program.
@@ -2012,6 +2245,9 @@ pub enum ProveRiscvError {
     /// Keygen produced a verifying key below the production soundness budget.
     #[error(transparent)]
     UnderBudget(#[from] UnderBudgetError),
+    /// The block's global LogUp could not be proved.
+    #[error("global LogUp: {message}")]
+    GlobalLogUp { message: String },
 }
 
 /// Stateful, reusable RISCV prover/verifier for the MLE/WHIR backend (CPU or GPU per the
@@ -2019,9 +2255,10 @@ pub enum ProveRiscvError {
 ///
 /// Keygen + device transport run once in [`RiscvMachine::new`]; the engine, device-resident proving
 /// key, verifying key, and chip set are then shared read-only. Each [`Self::prove_chunk`] builds its
-/// own proving context + Fiat-Shamir transcript, so proving concurrently from `&self` is sound.
-/// Per-chunk `SepticDigest` GCS terms are accumulated internally (seeded with the program's initial
-/// GCS) and checked by [`Self::assert_cross_chunk_gcs_zero`] — the streaming single-node path.
+/// own proving context + Fiat-Shamir transcript, so proving the chunks of one block concurrently
+/// from `&self` is sound. Each proved chunk's Global table is kept, under its chunk index, until
+/// [`Self::prove_global_logup`] proves the block's second phase over them: the machine proves
+/// one block at a time, and [`Self::prove`] is not to be called while another call is running.
 ///
 /// The free functions [`prove_riscv`] / [`verify_riscv`] are thin wrappers over the batch API.
 pub struct RiscvMachine {
@@ -2035,28 +2272,14 @@ pub struct RiscvMachine {
     /// Held here because the constructor takes no arguments: its result cannot depend on the chunk.
     #[cfg(feature = "cuda")]
     orchestrator_chips: Vec<MetaChip<Kb, RiscvChipType<Kb>>>,
-    /// Accumulated per-chunk GCS digests — **chunk terms only**; the program's initial cumulative
-    /// sum lives in [`Self::initial_gcs`] beside it. Every [`Self::prove_chunk`] pushes here,
-    /// including the batch [`Self::prove`] path; only [`Self::assert_cross_chunk_gcs_zero`] (the
-    /// streaming single-node path) consumes it. The batch [`Self::verify`] path ignores this field
-    /// and recomputes GCS independently from the bundle, so the accumulation is simply unused there.
-    gcs_terms: std::sync::Mutex<Vec<SepticDigest<Kb>>>,
-    /// The program's initial cumulative sum, held **apart from the chunk terms above** so that a
-    /// drain can add it without consuming it.
-    ///
-    /// It used to be term zero of `gcs_terms`, which is correct for a process that proves one
-    /// block and exits: `drain_cross_chunk_gcs_over` takes the whole vector and the seed goes with
-    /// it. A resident process that proves block after block off one machine needs the seed to
-    /// survive the drain, or block 2 sums chunk terms against no seed and fails the `Σ == 0`
-    /// assertion with a message that reads exactly like a memory-consistency bug.
-    ///
-    /// Re-seeding per block would be the obvious alternative and is wrong: **which** machine owns
-    /// the seed is decided once, at construction time, from two-machine role state
-    /// (`keeps_initial_gcs_seed()` in the orchestrator). Re-seeding "card 0, every block"
-    /// double-counts the seed on a two-machine secondary from block 2 onward while block 1 still
-    /// passes, because block 1's ownership came from the constructor. One decision point, not one
-    /// per block.
-    initial_gcs: std::sync::Mutex<Option<SepticDigest<Kb>>>,
+    /// The group machines of this operating point.
+    global: GlobalLogUp,
+    /// The program's memory image table and entry pc. A machine built without its program
+    /// ([`Self::from_airs`]) proves chunks but not the global LogUp.
+    program: Option<(ImageTable, [Kb; 3])>,
+    /// The Global table of every chunk proved since the last [`Self::prove_global_logup`], by the
+    /// chunk's index.
+    chunk_tables: std::sync::Mutex<std::collections::BTreeMap<u32, ChunkTable>>,
     /// Whitelist-mode shape bucketing (see `shape`); off = natural heights, dynamic shapes.
     /// Read only on the CPU `prove_chunk` path; the GPU path generates traces on-device and does
     /// not bucket, so the field is unused under `cuda`.
@@ -2130,6 +2353,7 @@ fn keygen_reusing(
     let (pk, vk) = engine.keygen_with_app_prep_reusing(
         airs,
         RISCV_APP_PREP_AIR_IDS,
+        RISCV_REQUIRED_AIR_IDS,
         &reuse,
         Some(pre_hash_memo()),
     );
@@ -2157,20 +2381,42 @@ fn non_app_preps(
 
 impl RiscvMachine {
     /// Keygen once: build the engine from `log_stacked_height`, keygen the RISCV air set, transport
-    /// the proving key to the device, and materialize the chip set for trace generation. Seeds the
-    /// GCS accumulator with the program's initial cumulative sum.
+    /// the proving key to the device, and materialize the chip set for trace generation. Commits the
+    /// program's memory image table.
+    ///
+    /// # Panics
+    /// If the image is larger than the largest image table.
     pub fn new(
         program: Arc<Program>,
         log_stacked_height: usize,
         bucket: bool,
     ) -> Result<Self, UnderBudgetError> {
-        let machine = Self::from_airs(
+        Ok(Self::from_airs(
             mle_riscv_air_refs(program.clone(), bucket),
             log_stacked_height,
             bucket,
-        )?;
-        machine.seed_initial_gcs(&program);
-        Ok(machine)
+        )?
+        .with_program(&program))
+    }
+
+    /// Give a machine built by [`Self::from_airs`] its program, so that it can prove and verify
+    /// the global LogUp. Commits the program's memory image table.
+    ///
+    /// # Panics
+    /// If the image is larger than the largest image table ([`Self::try_with_program`] returns
+    /// that as an error).
+    pub fn with_program(self, program: &Program) -> Self {
+        self.try_with_program(program)
+            .unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// [`Self::with_program`], refusing a program whose memory image is larger than the largest
+    /// image table of this machine's stacked height.
+    pub fn try_with_program(mut self, program: &Program) -> Result<Self, ImageTooLarge> {
+        let image = ImageTable::new(program, self.engine.params())?;
+        let pc_start = encode_public_value_pc_limbs(program.pc_start).map(Kb::from_u32);
+        self.program = Some((image, pc_start));
+        Ok(self)
     }
 
     /// [`Self::new`] for a caller that has already built the air set — and, in `bucket` mode, has
@@ -2178,9 +2424,9 @@ impl RiscvMachine {
     /// this exists to avoid, so `airs` must be [`mle_riscv_air_refs`]'s output for the same
     /// program and the same `bucket`.
     ///
-    /// Without the program the GCS accumulator is not seeded, so the streaming
-    /// [`Self::assert_cross_chunk_gcs_zero`] needs [`Self::new`]; the batch [`Self::verify`] takes
-    /// the initial GCS as an argument and is unaffected.
+    /// Without the program there is no memory image table, so the global LogUp
+    /// ([`Self::prove`], [`Self::prove_global_logup`], [`Self::verify`]) needs
+    /// [`Self::with_program`] first; chunk proving does not.
     pub fn from_airs(
         airs: Vec<AirRef<Sc>>,
         log_stacked_height: usize,
@@ -2205,11 +2451,17 @@ impl RiscvMachine {
         let t_keygen = Instant::now();
         let (pk, vk) = keygen_reusing(&engine, &airs, log_stacked_height, bucket);
         ledger::add_setup(ledger::Setup::Keygen, t_keygen.elapsed());
-        admit_production_vk(
-            "riscv",
-            if cfg!(feature = "cuda") { "gpu" } else { "cpu" },
-            &vk,
-        )?;
+        let backend = if cfg!(feature = "cuda") { "gpu" } else { "cpu" };
+        admit_production_vk("riscv", backend, &vk)?;
+        assert_global_bus(&vk.inner);
+        #[allow(unused_mut)]
+        let mut global = GlobalLogUp::new(engine.params());
+        // The group proofs run this machine's parameters: their keys pass the same gate.
+        global.admit_production(backend)?;
+        // The group proofs are proved on this machine's card, their kernels compiled here for
+        // the reason the comment below gives.
+        #[cfg(feature = "cuda")]
+        global.use_device();
         // Only the Program table's preprocessed data depends on the program; the AIRs' GPU
         // constraint data is shared with every earlier program's key on this card.
         #[cfg(feature = "cuda")]
@@ -2239,8 +2491,9 @@ impl RiscvMachine {
             chips,
             #[cfg(feature = "cuda")]
             orchestrator_chips,
-            gcs_terms: std::sync::Mutex::new(Vec::new()),
-            initial_gcs: std::sync::Mutex::new(None),
+            global,
+            program: None,
+            chunk_tables: Default::default(),
             bucket,
             concurrency: None,
         })
@@ -2255,10 +2508,10 @@ impl RiscvMachine {
         self
     }
 
-    /// Prove one prepared chunk on the MLE/WHIR backend (optionally verifying it), accumulating the
-    /// chunk's GCS digest. Takes `&self` so a worker pool can prove concurrently: each call builds
-    /// its own context + transcript. On GPU, traces are generated on-device (no host build + H2D);
-    /// on CPU, `build_ctx` runs on the host.
+    /// Prove one prepared chunk on the MLE/WHIR backend (optionally verifying it), keeping the
+    /// chunk's `Global` table for the global LogUp. Takes `&self` so a worker pool can prove
+    /// concurrently: each call builds its own context + transcript. On GPU, traces are generated
+    /// on-device (no host build + H2D); on CPU, `build_ctx` runs on the host.
     pub fn prove_chunk(&self, chunk: &PreparedChunk, verify: bool) -> Proof<Sc> {
         self.prove_chunk_hooked(chunk, verify, None)
     }
@@ -2286,7 +2539,17 @@ impl RiscvMachine {
     ) -> Proof<Sc> {
         let ctx = self.chunk_ctx(chunk);
         if let Some(cb) = after_tracegen {
-            cb(self.ctx_per_air_log_heights(&ctx));
+            #[allow(unused_mut)]
+            let mut heights = self.ctx_per_air_log_heights(&ctx);
+            // On the host the Global table is committed in `try_prove_ctx`, which pads it to its
+            // fixed height: that height is the final one, not the one the trace has here.
+            #[cfg(not(feature = "cuda"))]
+            {
+                heights[air_id::GLOBAL] = Some(pico_mle_core::global_logup::global_log_height(
+                    self.engine.params(),
+                ));
+            }
+            cb(heights);
         }
         let index = chunk.record.chunk_index().saturating_sub(1);
         self.try_prove_ctx(ctx, index, chunk.record.public_values.chunk, verify)
@@ -2321,7 +2584,10 @@ impl RiscvMachine {
             ctx
         }
         #[cfg(not(feature = "cuda"))]
-        ctx_to_engine(build_ctx(&self.chips, &chunk.record, self.bucket))
+        ctx_to_engine(
+            &self.engine,
+            build_ctx(&self.chips, &chunk.record, self.bucket),
+        )
     }
 
     /// Per-AIR committed log-heights in `vk.inner.per_air` index order; `None` = absent from this
@@ -2342,8 +2608,37 @@ impl RiscvMachine {
         out
     }
 
+    /// A prepared chunk's share of the block's real-row bound (`global_logup::chunk_count`),
+    /// from the heights it will be proved at: its whitelist shape when it has one, else its
+    /// natural heights padded to a power of two and never below `2^MLE_MIN_LOG_HEIGHT`. A
+    /// pipeline adds the shares up as chunks leave its preparers, so that a block over
+    /// `global_logup::MAX_COUNT`, which the tree's root refuses, stops before it is proved.
+    #[cfg(feature = "cuda")]
+    pub fn chunk_global_row_count(&self, chunk: &PreparedChunk) -> u64 {
+        use super::global_logup::chunk_count;
+        let min = crate::mle::machine::shape::MLE_MIN_LOG_HEIGHT;
+        let riscv = &self.vk.inner.params;
+        match &chunk.record.shape {
+            Some(shape) => chunk_count(riscv, |air| {
+                let log = *shape.inner.get(air_name(air)?)?;
+                Some(log.max(min))
+            }),
+            None => {
+                let natural = crate::mle::machine::shape::mle_natural_heights_from_counter(
+                    &chunk.record,
+                    &chunk.prepared.event_counter,
+                );
+                chunk_count(riscv, |air| {
+                    let rows = *natural.get(air_name(air)?)?;
+                    (rows > 0).then(|| p3_util::log2_ceil_usize(rows).max(min))
+                })
+            }
+        }
+    }
+
     /// Build a chunk's proving context (GPU trace-gen + bridge), inline from
-    /// [`Self::prove_chunk`].
+    /// [`Self::prove_chunk`]. The chunk's Global table is committed here, on the device, and
+    /// kept for the group proof.
     #[cfg(feature = "cuda")]
     pub fn build_chunk_ctx(&self, chunk: &PreparedChunk) -> ProvingContext<Pb> {
         let mut ctx = build_ctx_gpu(&chunk.record, &chunk.prepared, &self.orchestrator_chips);
@@ -2351,11 +2646,26 @@ impl RiscvMachine {
             compare_gpu_ctx_against_cpu(&self.chips, &chunk.record, &ctx);
         }
         mark_real_rows(&mut ctx, &chunk.record, &chunk.prepared.event_counter);
+        // The convert leaf writes the chunk's share of the real-row bound from these heights;
+        // it is the share a pipeline counted before the chunk was traced.
+        let heights = self.ctx_per_air_log_heights(&ctx);
+        assert_eq!(
+            super::global_logup::chunk_count(&self.vk.inner.params, |air| heights[air]),
+            self.chunk_global_row_count(chunk),
+            "chunk {}: its traces' share of the real-row bound is not the one its shape gave",
+            chunk.record.public_values.chunk
+        );
+        let (ctx, table) = commit_global_table_on_device(&self.engine, ctx);
+        self.chunk_tables
+            .lock()
+            .expect("chunk tables poisoned")
+            .insert(chunk.record.public_values.chunk, table);
         ctx
     }
 
-    /// Shared prove tail: engine prove (+ optional self-verify) + GCS accumulation. `pv_chunk` is
-    /// the record's stamped chunk index, which the ledger's prove line carries beside the slot.
+    /// Shared prove tail: commit the Global table, engine prove (+ optional self-verify), and
+    /// keep the table for the group proof. `pv_chunk` is the record's stamped chunk index, which
+    /// the ledger's prove line carries beside the slot and the kept table is filed under.
     fn try_prove_ctx(
         &self,
         ctx: ProvingContext<Pb>,
@@ -2370,6 +2680,16 @@ impl RiscvMachine {
         #[cfg(feature = "cuda")]
         let mut air_window =
             crate::mle::spans::device::switched_on().then(cuda_mle::air_times::begin);
+        // On the GPU the context arrives with its table committed (`build_chunk_ctx`).
+        #[cfg(not(feature = "cuda"))]
+        let ctx = {
+            let (ctx, table) = commit_global_table(ctx, self.engine.params());
+            self.chunk_tables
+                .lock()
+                .expect("chunk tables poisoned")
+                .insert(pv_chunk, table);
+            ctx
+        };
         let t_prove = ledger::ProveMark::now();
         let proof = self
             .engine
@@ -2415,100 +2735,146 @@ impl RiscvMachine {
                 || json!({ "ok": true, "kind": "inline" }),
             );
         }
-        let gcs = gcs_from_pvs(&proof.public_values[air_id::GLOBAL]);
-        self.gcs_terms.lock().expect("gcs mutex poisoned").push(gcs);
         Ok(proof)
     }
 
-    /// Seeds the cross-chunk GCS accumulator with `program`'s initial sum, as [`Self::new`] does,
-    /// for a machine built by [`Self::from_airs`] that a streaming run now adopts.
-    pub fn seed_initial_gcs(&self, program: &Program) {
-        let seed = if crate::mle::env_flag("SKIP_INITIAL_GCS") {
-            tracing::warn!("SKIP_INITIAL_GCS set: omitting initial GCS (negative test)");
-            None
-        } else {
-            Some(program.initial_global_cumulative_sum())
-        };
-        *self.initial_gcs.lock().expect("gcs mutex poisoned") = seed;
-    }
-
-    /// Drops the chunk GCS terms a batch [`Self::prove`] left behind; the seed stays. For a machine
-    /// a streaming run may also use, so the batch path's terms never reach its drain.
-    pub fn discard_chunk_gcs_terms(&self) {
-        self.gcs_terms.lock().expect("gcs mutex poisoned").clear();
-    }
-
-    /// Whether chunk GCS terms are waiting for a drain, e.g. from a [`Self::prove`] on this machine.
-    pub fn has_chunk_gcs_terms(&self) -> bool {
-        !self
-            .gcs_terms
+    /// The commitment of the Global table kept for the chunk stamped `chunk`: there once the
+    /// chunk's traces are built on the device (on the CPU, once its proof is).
+    pub fn chunk_table_commit(
+        &self,
+        chunk: u32,
+    ) -> Option<<Sc as pico_mle_core::StarkProtocolConfig>::Digest> {
+        self.chunk_tables
             .lock()
-            .expect("gcs mutex poisoned")
+            .expect("chunk tables poisoned")
+            .get(&chunk)
+            .map(|table| table.commit)
+    }
+
+    /// Take the Global tables kept for chunks proved since the last
+    /// [`Self::prove_global_logup`], by chunk index: for a caller that proves a block's chunks on
+    /// several machines and the second phase over all of them.
+    pub fn take_chunk_tables(&self) -> BTreeMap<u32, ChunkTable> {
+        std::mem::take(&mut *self.chunk_tables.lock().expect("chunk tables poisoned"))
+    }
+
+    /// Drop the Global tables kept for chunks proved since the last
+    /// [`Self::prove_global_logup`], for a caller that will not prove the second phase over them.
+    pub fn discard_chunk_tables(&self) {
+        self.chunk_tables
+            .lock()
+            .expect("chunk tables poisoned")
+            .clear();
+    }
+
+    /// Whether Global tables of chunks proved since the last [`Self::prove_global_logup`] are
+    /// kept, e.g. by a run still proving on this machine.
+    pub fn has_chunk_tables(&self) -> bool {
+        !self
+            .chunk_tables
+            .lock()
+            .expect("chunk tables poisoned")
             .is_empty()
     }
 
-    /// Remove the initial-GCS seed this constructor planted. Multi-card runs one machine per
-    /// card, and every constructor seeds the program's initial cumulative sum — but the
-    /// cross-card aggregate must count it exactly ONCE, so the orchestrator unseeds every card
-    /// but the first, right after construction. Calling this after a prove has pushed terms
-    /// would silently drop a chunk's digest, hence the assert.
-    /// Permanent, not per-block: once a card is not the seed holder it never becomes one, so a
-    /// resident process calls this exactly once per card at construction and never again.
-    pub fn unseed_initial_gcs(&self) {
-        let terms = self.gcs_terms.lock().expect("gcs mutex poisoned");
-        assert!(
-            terms.is_empty(),
-            "unseed_initial_gcs must run before any chunk is proven ({} chunk terms present)",
-            terms.len()
-        );
-        drop(terms);
-        *self.initial_gcs.lock().expect("gcs mutex poisoned") = None;
-    }
-
-    /// Assert cross-chunk memory consistency for the streaming path: `Σ per-chunk gcs + initial ==
-    /// 0`. Call once after all chunks have been proven via [`Self::prove_chunk`].
-    pub fn assert_cross_chunk_gcs_zero(&self) {
-        Self::assert_cross_chunk_gcs_zero_over([self]);
-    }
-
-    /// Multi-machine form of [`Self::assert_cross_chunk_gcs_zero`]: with one machine per GPU card,
-    /// each accumulates only its own chunks' terms, and only the sum over ALL of them closes to
-    /// zero. Drains every machine's terms.
-    pub fn assert_cross_chunk_gcs_zero_over<'a>(machines: impl IntoIterator<Item = &'a Self>) {
-        let total = Self::drain_cross_chunk_gcs_over(machines);
-        assert!(
-            total.is_zero(),
-            "cross-chunk global cumulative sum is not zero (memory inconsistency)"
-        );
-        tracing::info!("cross-chunk global cumulative sum == 0 ✓");
-    }
-
-    /// The partial sum over these machines, drained but NOT asserted.
-    ///
-    /// Two-machine needs this: neither process's own chunks close to zero on their own, only the
-    /// sum over both does, so the secondary computes its partial here and ships it to the primary
-    /// to finish the reduction. A `SepticDigest<Kb>` is two septic extension elements — 56 bytes —
-    /// so the exchange is free next to the proof traffic, which is why the cheap early detector is
-    /// worth keeping across the link rather than falling back to the root proof's in-circuit
-    /// closure alone.
-    ///
-    /// Drains the **chunk** terms, like the assert it backs: they are single-shot per block, so
-    /// callers must collect the remote partial BEFORE draining the local one.
-    ///
-    /// The initial-GCS seed is *added but not taken*. It belongs to the program, not to the block,
-    /// so a resident process proving block after block off one machine needs it to still be there
-    /// next time — see [`Self::initial_gcs`] for why re-seeding per block is the wrong fix.
-    pub fn drain_cross_chunk_gcs_over<'a>(
-        machines: impl IntoIterator<Item = &'a Self>,
-    ) -> SepticDigest<Kb> {
-        machines
-            .into_iter()
-            .flat_map(|m| {
-                let chunks = std::mem::take(&mut *m.gcs_terms.lock().expect("gcs mutex poisoned"));
-                let seed = *m.initial_gcs.lock().expect("gcs mutex poisoned");
-                chunks.into_iter().chain(seed)
+    /// The trusted identity of this machine's program, when it was built with one.
+    pub fn program_identity(&self) -> Option<ProgramIdentity> {
+        self.program
+            .as_ref()
+            .map(|(image, pc_start)| ProgramIdentity {
+                pc_start: *pc_start,
+                image: image.commitment(),
             })
-            .sum()
+    }
+
+    /// Prove the second phase of a block over the chunks this machine has proved since the last
+    /// call: derive the block's challenges from their Global table commitments, and prove the
+    /// group proofs under them. The chunks must be the whole block, with indices `1..=n`.
+    pub fn prove_global_logup(&self) -> Result<GlobalLogUpProof, ProveRiscvError> {
+        let tables = std::mem::take(&mut *self.chunk_tables.lock().expect("chunk tables poisoned"));
+        if !tables.keys().copied().eq(1..=tables.len() as u32) {
+            return Err(ProveRiscvError::GlobalLogUp {
+                message: format!(
+                    "the proved chunks are not 1..={}: {:?}",
+                    tables.len(),
+                    tables.keys().collect::<Vec<_>>()
+                ),
+            });
+        }
+        let tables: Vec<ChunkTable> = tables.into_values().collect();
+        self.prove_global_logup_over(&tables)
+    }
+
+    /// The pieces of [`Self::prove_global_logup_over`], for a caller that spreads a block's
+    /// group proofs over its cards, or over several machines: the block's challenges with the
+    /// proof-of-work witness behind them, from the root of the chain over its tables'
+    /// commitments in chunk order (`global_logup::Chain`). A machine that holds only some of
+    /// the tables derives them all the same: the witness is the least valid one.
+    pub fn global_challenges(
+        &self,
+        chain_root: &<Sc as pico_mle_core::StarkProtocolConfig>::Digest,
+    ) -> GlobalChallenges {
+        let (pow_witness, alpha, beta) =
+            self.global.challenges_at(&self.vm_vk_digest(), chain_root);
+        GlobalChallenges {
+            pow_witness,
+            alpha,
+            beta,
+        }
+    }
+
+    fn vm_vk_digest(&self) -> <Sc as pico_mle_core::StarkProtocolConfig>::Digest {
+        let (image, pc_start) = self.image_and_entry();
+        image
+            .commitment()
+            .vm_vk_digest(&riscv_program_commit(&self.vk), pc_start)
+    }
+
+    /// The image group's proof under a block's challenges, on this machine.
+    pub fn prove_global_logup_image(
+        &self,
+        under: &GlobalChallenges,
+    ) -> Result<Proof<Sc>, ProveRiscvError> {
+        let (image, _) = self.image_and_entry();
+        self.global
+            .prove_image_of(image, under.alpha, under.beta)
+            .map_err(|message| ProveRiscvError::GlobalLogUp { message })
+    }
+
+    /// One chunk group's proof under a block's challenges, on this machine: `tables` are
+    /// consecutive chunks' tables, at most `global_logup::GROUP_LEN` of them.
+    pub fn prove_global_logup_group(
+        &self,
+        tables: &[ChunkTable],
+        under: &GlobalChallenges,
+    ) -> Result<Proof<Sc>, ProveRiscvError> {
+        self.global
+            .prove_group_of(tables, under.alpha, under.beta)
+            .map_err(|message| ProveRiscvError::GlobalLogUp { message })
+    }
+
+    fn image_and_entry(&self) -> &(ImageTable, [Kb; 3]) {
+        self.program
+            .as_ref()
+            .expect("the global LogUp needs the program; build the machine with it")
+    }
+
+    /// [`Self::prove_global_logup`] over tables handed in: a block's tables in chunk order,
+    /// whichever machines proved the chunks and kept them ([`Self::take_chunk_tables`]).
+    pub fn prove_global_logup_over(
+        &self,
+        tables: &[ChunkTable],
+    ) -> Result<GlobalLogUpProof, ProveRiscvError> {
+        let (image, pc_start) = self
+            .program
+            .as_ref()
+            .expect("the global LogUp needs the program; build the machine with it");
+        let vm_vk_digest = image
+            .commitment()
+            .vm_vk_digest(&riscv_program_commit(&self.vk), pc_start);
+        self.global
+            .prove(&vm_vk_digest, image, tables)
+            .map_err(|message| ProveRiscvError::GlobalLogUp { message })
     }
 
     /// Prove the whole program into a serializable bundle: one [`Proof`] per record, in order, plus
@@ -2568,6 +2934,28 @@ impl RiscvMachine {
         &self,
         records: impl IntoIterator<Item = Cow<'a, EmulationRecord>>,
     ) -> Result<RiscvProof, ProveRiscvError> {
+        if self.program.is_none() {
+            return Err(ProveRiscvError::GlobalLogUp {
+                message: "the machine was built without its program, which the global LogUp \
+                          needs"
+                    .into(),
+            });
+        }
+        // Whatever the run leaves in the machine's table map goes when the run ends. The
+        // second phase takes the tables of a run that reaches it; those of a run that failed
+        // part-way, by an error or a panic, are not the next run's.
+        struct DiscardTables<'m>(&'m RiscvMachine);
+        impl Drop for DiscardTables<'_> {
+            fn drop(&mut self) {
+                // A poisoned lock still guards the map, and this may run while unwinding.
+                self.0
+                    .chunk_tables
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clear();
+            }
+        }
+        let _discard = DiscardTables(self);
         let chunk_proofs = par_in_prove_slots::<_, _, ProveRiscvError>(
             records,
             resolved_concurrency(self.concurrency),
@@ -2594,7 +2982,7 @@ impl RiscvMachine {
                         Cow::Borrowed(record) => build_ctx(&self.chips, record, self.bucket),
                         Cow::Owned(record) => build_ctx_owned(&self.chips, record, self.bucket),
                     };
-                    self.try_prove_ctx(ctx_to_engine(ctx), idx, pv_chunk, false)?
+                    self.try_prove_ctx(ctx_to_engine(&self.engine, ctx), idx, pv_chunk, false)?
                 };
                 tracing::info!(
                     "chunk {idx}: MLE prove OK ({} ms)",
@@ -2603,22 +2991,50 @@ impl RiscvMachine {
                 Ok(proof)
             },
         )?;
+        // This run's tables and no other's: a second run on the machine at the same time
+        // would have put its own among them.
+        let kept = self
+            .chunk_tables
+            .lock()
+            .expect("chunk tables poisoned")
+            .len();
+        if kept != chunk_proofs.len() {
+            return Err(ProveRiscvError::GlobalLogUp {
+                message: format!(
+                    "the machine holds the Global tables of {kept} chunk(s) after proving {}: \
+                     two runs at once on one machine",
+                    chunk_proofs.len()
+                ),
+            });
+        }
+        let global = self.prove_global_logup()?;
         Ok(RiscvProof {
             vk: Arc::new(self.vk.clone()),
             chunk_proofs,
+            global,
         })
     }
 
-    /// Verify a bundle against this machine's *trusted* verifying key: per-chunk `engine.verify` +
-    /// the cross-chunk `initial_gcs + Σ per-chunk gcs == 0` memory-consistency check. Because the
-    /// machine keygen'd `self.vk`, no `expected_vk_pre_hash` argument is needed; the stateless
-    /// [`verify_riscv`] takes one for deserialized bundles whose vk is untrusted.
-    pub fn verify(
-        &self,
-        proof: &RiscvProof,
-        initial_gcs: SepticDigest<Kb>,
-    ) -> Result<(), VerifyRiscvError> {
-        verify_chunks_and_gcs(&self.engine, &self.vk, &proof.chunk_proofs, initial_gcs)
+    /// Verify a bundle against this machine's *trusted* verifying key and program: per-chunk
+    /// `engine.verify`, then the global LogUp over the chunks' cross-chunk events. Because the
+    /// machine keygen'd `self.vk` and committed the program's image, no trusted argument is
+    /// needed; the stateless [`verify_riscv`] takes them for deserialized bundles whose vk is
+    /// untrusted.
+    pub fn verify(&self, proof: &RiscvProof) -> Result<(), VerifyRiscvError> {
+        let (image, pc_start) = self
+            .program
+            .as_ref()
+            .expect("the global LogUp needs the program; build the machine with it");
+        verify_chunks(&self.engine, &self.vk, &proof.chunk_proofs)?;
+        let vm_vk_digest = image
+            .commitment()
+            .vm_vk_digest(&riscv_program_commit(&self.vk), pc_start);
+        Ok(self.global.verify(
+            &proof.chunk_proofs,
+            &proof.global,
+            &vm_vk_digest,
+            &image.commitment(),
+        )?)
     }
 
     /// The canonical verifying key.
@@ -2634,17 +3050,12 @@ impl RiscvMachine {
     }
 }
 
-/// Shared verify core: per-chunk `engine.verify(vk, ..)` + the cross-chunk
-/// `initial_gcs + Σ per-chunk gcs == 0` memory-consistency check. Passing `SepticDigest::zero()` as
-/// `initial_gcs` is equivalent to omitting the term (the septic `Sum` treats it as the identity).
-fn verify_chunks_and_gcs(
+/// Per-chunk `engine.verify(vk, ..)`, the first half of verifying a bundle.
+fn verify_chunks(
     engine: &Engine,
     vk: &MultiStarkVerifyingKey<Sc>,
     chunk_proofs: &[Proof<Sc>],
-    initial_gcs: SepticDigest<Kb>,
 ) -> Result<(), VerifyRiscvError> {
-    // The initial-memory term comes from the trusted argument, never from the bundle.
-    let mut gcs_terms: Vec<SepticDigest<Kb>> = vec![initial_gcs];
     for (i, chunk_proof) in chunk_proofs.iter().enumerate() {
         let t_verify = Instant::now();
         engine
@@ -2658,15 +3069,8 @@ fn verify_chunks_and_gcs(
             Instant::now(),
             || json!({ "ok": true, "kind": "bundle" }),
         );
-        gcs_terms.push(gcs_from_pvs(&chunk_proof.public_values[air_id::GLOBAL]));
         tracing::info!("chunk {i}: MLE verify OK");
     }
-
-    let total: SepticDigest<Kb> = gcs_terms.into_iter().sum();
-    if !total.is_zero() {
-        return Err(VerifyRiscvError::CrossChunkMemoryInconsistency);
-    }
-    tracing::info!("cross-chunk global cumulative sum == 0 ✓");
     Ok(())
 }
 
@@ -2682,11 +3086,62 @@ pub fn prove_riscv(
     RiscvMachine::new(program, log_stacked_height, bucket)?.prove(records)
 }
 
+/// Prove one chunk from a host context, for a harness that drives the engine itself (to edit a
+/// context before proving it): commits the context's Global table, proves, and appends the table
+/// to `tables` for [`prove_global_logup`].
+pub fn prove_host_ctx(
+    engine: &Engine,
+    d_pk: &DeviceMultiStarkProvingKey<Pb>,
+    ctx: ProvingContext<HostPb>,
+    tables: &mut Vec<ChunkTable>,
+) -> Result<Proof<Sc>, pico_mle_core::ProverError<Engine>> {
+    let (ctx, table) = commit_global_table(ctx, engine.params());
+    tables.push(table);
+    engine.prove(d_pk, ctx_to_engine(engine, ctx))
+}
+
+/// The second phase over chunks proved by [`prove_host_ctx`]: `tables` in chunk order, for the
+/// whole block. Keygens the group machines and commits the program's image, so it is for
+/// harnesses; a [`RiscvMachine`] holds both.
+pub fn prove_global_logup(
+    program: &Program,
+    vk: &MultiStarkVerifyingKey<Sc>,
+    tables: &[ChunkTable],
+) -> Result<GlobalLogUpProof, ProveRiscvError> {
+    prove_global_logup_grouped(
+        program,
+        vk,
+        tables,
+        pico_mle_core::global_logup::MAX_GROUP_LEN,
+    )
+}
+
+/// [`prove_global_logup`] with `group_len` tables to a group (`GlobalLogUp::prove_grouped`).
+#[doc(hidden)]
+pub fn prove_global_logup_grouped(
+    program: &Program,
+    vk: &MultiStarkVerifyingKey<Sc>,
+    tables: &[ChunkTable],
+    group_len: usize,
+) -> Result<GlobalLogUpProof, ProveRiscvError> {
+    let riscv = &vk.inner.params;
+    let image = ImageTable::new(program, riscv).map_err(|e| ProveRiscvError::GlobalLogUp {
+        message: e.to_string(),
+    })?;
+    let pc_start = encode_public_value_pc_limbs(program.pc_start).map(Kb::from_u32);
+    let vm_vk_digest = image
+        .commitment()
+        .vm_vk_digest(&riscv_program_commit(vk), &pc_start);
+    GlobalLogUp::new(riscv)
+        .prove_grouped(&vm_vk_digest, &image, tables, group_len)
+        .map_err(|message| ProveRiscvError::GlobalLogUp { message })
+}
+
 /// Verify a *deserialized* bundle whose verifying key is untrusted (e.g. after a wire round-trip),
-/// and check cross-chunk memory consistency: `initial_gcs + Σ per-chunk gcs == 0`. When you already
-/// hold the machine, prefer [`RiscvMachine::verify`].
+/// and check cross-chunk consistency with the global LogUp. When you already hold the machine,
+/// prefer [`RiscvMachine::verify`].
 ///
-/// `expected_vk_pre_hash`, `expected_app_commits`, and `initial_gcs` are **trusted inputs** —
+/// `expected_vk_pre_hash`, `expected_app_commits`, and `program` are **trusted inputs** —
 /// never taken from the bundle. `expected_app_commits` lists `(air_id, trusted commitment)` for
 /// every app-identity preprocessed table (for a RISCV bundle:
 /// `[(air_id::PROGRAM, <trusted program commitment>)]`); the SAME air-id set must have been
@@ -2697,7 +3152,7 @@ pub fn verify_riscv(
     proof: &RiscvProof,
     expected_vk_pre_hash: <Sc as StarkProtocolConfig>::Digest,
     expected_app_commits: &[(usize, <Sc as StarkProtocolConfig>::Digest)],
-    initial_gcs: SepticDigest<Kb>,
+    program: &ProgramIdentity,
 ) -> Result<(), VerifyRiscvError> {
     // Reconstruct the engine from the vk's (untrusted) system params. The KoalaBear hasher is
     // param-independent, so the recomputation below is canonical regardless.
@@ -2728,7 +3183,16 @@ pub fn verify_riscv(
         }
     }
 
-    verify_chunks_and_gcs(&engine, &proof.vk, &proof.chunk_proofs, initial_gcs)
+    verify_chunks(&engine, &proof.vk, &proof.chunk_proofs)?;
+    // The key is the trusted machine's; the real-row bound reads its Global bus, so a trusted key
+    // that is not a RISCV machine's stops here.
+    check_global_bus(&proof.vk.inner).map_err(VerifyRiscvError::NotARiscvMachine)?;
+    Ok(GlobalLogUp::new(&proof.vk.inner.params).verify(
+        &proof.chunk_proofs,
+        &proof.global,
+        &program.vm_vk_digest(&proof.vk),
+        &program.image,
+    )?)
 }
 
 #[cfg(test)]
@@ -2738,16 +3202,35 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
 
     use super::*;
-    use crate::{
-        compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program},
-        machine::septic::{SepticCurve, SepticDigest, SepticExtension},
-        mle::machine::air::GCS_DIGEST_LEN,
-    };
+    use crate::compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program};
 
     /// Prebuilt RV64 fibonacci guest committing `(n, F(n), F(n+1))` as three 32-byte big-endian
     /// words, byte-identical to `perf/bench_data/rv64/fib-elf`. Keep it prebuilt: a rebuild, from
     /// `examples/fibonacci/app` or anywhere else, is a different ELF with a different program id.
     const RV64_FIB_ELF: &[u8] = include_bytes!("../../compiler/test_elf/fib-elf");
+
+    /// The default follows the host's memory: one chunk at a time where a second working set
+    /// does not fit, four on a large host.
+    #[cfg(not(feature = "cuda"))]
+    #[test]
+    fn the_default_concurrency_follows_the_hosts_memory() {
+        let gib = |n: u64| n << 30;
+        for (memory, chunks) in [
+            (0, 1),
+            (gib(4), 1),
+            (gib(8), 1),
+            (gib(11) + (gib(1) >> 1), 1),
+            (gib(12), 2),
+            (gib(15), 2),
+            (gib(16), 3),
+            (gib(19), 3),
+            (gib(20), 4),
+            (gib(920), 4),
+        ] {
+            assert_eq!(concurrency_for_memory(memory), chunks, "{memory} bytes");
+        }
+        assert!((1..=4).contains(&default_prove_concurrency()));
+    }
 
     /// An explicit concurrency outranks `PROVE_CONCURRENCY`; without one the environment decides.
     ///
@@ -3035,6 +3518,49 @@ mod tests {
         assert_eq!(report.cpu_chunks_traced, 0);
     }
 
+    /// `par_bounded` never has more than its bound in flight, hands every job its item's index,
+    /// returns the results in the items' order, and does not start a batch after one that failed.
+    #[test]
+    fn par_bounded_keeps_its_bound_and_the_order() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        for bound in [1usize, 2, 3, 8] {
+            let in_flight = AtomicUsize::new(0);
+            let most = AtomicUsize::new(0);
+            let squares =
+                par_bounded::<_, _, std::convert::Infallible>(0..7usize, bound, |idx, n| {
+                    assert_eq!(idx, n);
+                    let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                    most.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    in_flight.fetch_sub(1, Ordering::SeqCst);
+                    Ok(n * n)
+                })
+                .unwrap_or_else(|never| match never {});
+            assert_eq!(squares, [0, 1, 4, 9, 16, 25, 36]);
+            assert!(most.load(Ordering::SeqCst) <= bound, "bound {bound}");
+        }
+
+        let started = std::sync::Mutex::new(Vec::new());
+        let failed = par_bounded(0..7usize, 2, |_, n| {
+            started.lock().unwrap().push(n);
+            if n == 2 {
+                Err("the third item")
+            } else {
+                Ok(n)
+            }
+        });
+        assert_eq!(failed, Err("the third item"));
+        // Items 0 and 1 are the first batch, 2 and 3 the one that fails (its other item may or
+        // may not have started); the batches after it are never started.
+        let mut started = started.into_inner().unwrap();
+        started.sort_unstable();
+        assert!(
+            started == [0, 1, 2] || started == [0, 1, 2, 3],
+            "{started:?}"
+        );
+    }
+
     /// A job's slot names its record by its place in proving order, its CPU chunk by the CPU chunks
     /// before it (a deferred record has none) and its lane by its place in its batch; results come
     /// back in record order across batches. The stage ledger reads all three.
@@ -3152,8 +3678,8 @@ mod tests {
     /// A small, self-consistent single-chunk bundle proven on the **CPU engine** — the exact engine
     /// [`verify_riscv`] reconstructs from the vk params, so an untampered proof verifies and only
     /// tampering breaks it. The bundle carries one dummy AIR, not the RISCV set, so it exercises only
-    /// `verify_riscv`'s early-exit paths (vk-trust + per-chunk verify), both of which short-circuit
-    /// before `gcs_from_pvs` ever indexes `public_values[air_id::GLOBAL]`.
+    /// `verify_riscv`'s early-exit paths (vk-trust + per-chunk verify), both of which return
+    /// before the global LogUp is looked at; its second phase here is a placeholder.
     ///
     /// CPU-only: exercises the pure-verify guards, which need no GPU backend.
     #[cfg(not(feature = "cuda"))]
@@ -3165,7 +3691,30 @@ mod tests {
             .expect("fixture proof must verify under the CPU engine");
         RiscvProof {
             vk: Arc::new(vk),
+            global: placeholder_global(&proof),
             chunk_proofs: vec![proof],
+        }
+    }
+
+    /// A second phase for a fixture bundle whose checks return before it is read.
+    #[cfg(not(feature = "cuda"))]
+    fn placeholder_global(proof: &Proof<Sc>) -> GlobalLogUpProof {
+        GlobalLogUpProof {
+            pow_witness: Kb::ZERO,
+            image_proof: proof.clone(),
+            group_proofs: vec![],
+        }
+    }
+
+    /// A program identity for the same fixtures.
+    #[cfg(not(feature = "cuda"))]
+    fn placeholder_program() -> ProgramIdentity {
+        ProgramIdentity {
+            pc_start: [Kb::ZERO; 3],
+            image: ImageCommitment {
+                commit: [Kb::ZERO; 8],
+                log_height: 16,
+            },
         }
     }
 
@@ -3179,7 +3728,7 @@ mod tests {
         let mut wrong = bundle.vk.pre_hash;
         wrong[0] += Kb::ONE; // Digest = [Kb; DIGEST_SIZE]; perturb one limb
         assert!(matches!(
-            verify_riscv(&bundle, wrong, &[], SepticDigest::zero()),
+            verify_riscv(&bundle, wrong, &[], &placeholder_program()),
             Err(VerifyRiscvError::UnexpectedVerifyingKey)
         ));
     }
@@ -3206,9 +3755,10 @@ mod tests {
                 pre_hash: expected,
             }),
             chunk_proofs: honest.chunk_proofs.clone(),
+            global: honest.global.clone(),
         };
         assert!(matches!(
-            verify_riscv(&forged, expected, &[], SepticDigest::zero()),
+            verify_riscv(&forged, expected, &[], &placeholder_program()),
             Err(VerifyRiscvError::UnexpectedVerifyingKey)
         ));
     }
@@ -3233,10 +3783,11 @@ mod tests {
         let vk_hash = vk.pre_hash;
         let tampered = RiscvProof {
             vk,
+            global: bundle.global.clone(),
             chunk_proofs: vec![proof],
         };
         assert!(matches!(
-            verify_riscv(&tampered, vk_hash, &[], SepticDigest::zero()),
+            verify_riscv(&tampered, vk_hash, &[], &placeholder_program()),
             Err(VerifyRiscvError::Chunk { chunk: 0, .. })
         ));
     }
@@ -3275,8 +3826,11 @@ mod tests {
                     "program {i}: reuse taken only after the first"
                 );
                 let (pk, vk) = keygen_reusing(&engine, &airs, HEIGHT, bucket);
-                let (fresh_pk, fresh_vk) =
-                    engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
+                let (fresh_pk, fresh_vk) = engine.keygen_with_app_prep_and_required(
+                    &airs,
+                    RISCV_APP_PREP_AIR_IDS,
+                    RISCV_REQUIRED_AIR_IDS,
+                );
                 assert_eq!(bytes(&vk), bytes(&fresh_vk), "verifying keys differ");
                 assert_eq!(pk.vk_pre_hash, fresh_pk.vk_pre_hash);
                 for (a, b) in pk.per_air.iter().zip(&fresh_pk.per_air) {
@@ -3304,7 +3858,11 @@ mod tests {
     fn lean_pre_hash_excludes_exactly_the_app_commitment() {
         let engine: Engine = StarkEngine::new(riscv_params_with_128_bits_security(22));
         let airs = mle_riscv_air_refs(Arc::new(test_program()), false);
-        let (_, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
+        let (_, vk) = engine.keygen_with_app_prep_and_required(
+            &airs,
+            RISCV_APP_PREP_AIR_IDS,
+            RISCV_REQUIRED_AIR_IDS,
+        );
 
         let base = compute_vk_pre_hash(engine.config(), &vk.inner, RISCV_APP_PREP_AIR_IDS);
         assert_eq!(base, vk.pre_hash, "keygen must use the same lean SSOT");
@@ -3363,22 +3921,43 @@ mod tests {
     fn verify_riscv_rejects_program_commit_substitution() {
         let engine: Engine = StarkEngine::new(riscv_params_with_128_bits_security(22));
         let airs = mle_riscv_air_refs(Arc::new(test_program()), false);
-        let (_, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
+        let (_, vk) = engine.keygen_with_app_prep_and_required(
+            &airs,
+            RISCV_APP_PREP_AIR_IDS,
+            RISCV_REQUIRED_AIR_IDS,
+        );
         let trusted_pre_hash = vk.pre_hash;
         let trusted_program_commit = riscv_program_commit(&vk);
 
-        // Honest empty-chunk bundle passes (gcs total = zero initial term alone).
+        // A bundle under the trusted key and commitment, with no chunk: it gets past both checks
+        // and is refused only where the block's second phase is verified, for holding no chunk.
+        let program = test_program();
+        let riscv = &vk.inner.params;
+        let identity = ProgramIdentity::new(&program, riscv).expect("an empty image fits");
+        let global = GlobalLogUp::new(riscv)
+            .prove(
+                &identity.vm_vk_digest(&vk),
+                &ImageTable::new(&program, riscv).unwrap(),
+                &[],
+            )
+            .expect("the image group proves");
         let honest = RiscvProof {
             vk: Arc::new(vk.clone()),
             chunk_proofs: vec![],
+            global: global.clone(),
         };
-        verify_riscv(
-            &honest,
-            trusted_pre_hash,
-            &[(air_id::PROGRAM, trusted_program_commit)],
-            SepticDigest::zero(),
-        )
-        .expect("honest bundle must pass");
+        assert!(
+            matches!(
+                verify_riscv(
+                    &honest,
+                    trusted_pre_hash,
+                    &[(air_id::PROGRAM, trusted_program_commit)],
+                    &identity,
+                ),
+                Err(VerifyRiscvError::GlobalLogUp(GlobalLogUpError::NoChunks))
+            ),
+            "the trusted commitment must get past the commitment check"
+        );
 
         // Swap the program commitment; the lean pre-hash stays valid — only the explicit
         // app-commitment check can catch this.
@@ -3394,13 +3973,14 @@ mod tests {
                 pre_hash: trusted_pre_hash,
             }),
             chunk_proofs: vec![],
+            global,
         };
         assert!(matches!(
             verify_riscv(
                 &forged,
                 trusted_pre_hash,
                 &[(air_id::PROGRAM, trusted_program_commit)],
-                SepticDigest::zero(),
+                &identity,
             ),
             Err(VerifyRiscvError::UnexpectedAppCommitment {
                 air_id: air_id::PROGRAM
@@ -3428,30 +4008,6 @@ mod tests {
             .expect("decoded proof must verify");
     }
 
-    /// `gcs_from_pvs` splits the GLOBAL public values into the septic-curve `(x, y)` halves and
-    /// ignores any trailing recursion-padding values.
-    #[test]
-    fn gcs_from_pvs_splits_x_and_y_halves() {
-        let pvs: Vec<Kb> = (0..GCS_DIGEST_LEN).map(|i| Kb::from_usize(i + 1)).collect();
-        let want = SepticDigest(SepticCurve {
-            x: SepticExtension(std::array::from_fn(|i| pvs[i])),
-            y: SepticExtension(std::array::from_fn(|i| pvs[GCS_DIGEST_LEN / 2 + i])),
-        });
-        assert_eq!(gcs_from_pvs(&pvs), want);
-
-        // Extra public values beyond the digest (recursion padding) are ignored.
-        let mut padded = pvs;
-        padded.push(Kb::from_usize(999));
-        assert_eq!(gcs_from_pvs(&padded), want);
-    }
-
-    /// `gcs_from_pvs` panics loudly when the public values are too short for a full digest.
-    #[test]
-    #[should_panic(expected = "too short")]
-    fn gcs_from_pvs_panics_on_short_pvs() {
-        let _ = gcs_from_pvs(&[Kb::ZERO; GCS_DIGEST_LEN - 1]);
-    }
-
     /// The RISCV air table is position-indexed (`INCLUDED[i].1 == i`), chip names round-trip through
     /// `air_id_for`, the named `air_id::*` constants agree with their table rows, and
     /// `mle_riscv_air_refs` yields exactly one air ref per table row — the positional invariant
@@ -3466,10 +4022,17 @@ mod tests {
                 "air_id_for({name}) must be Some({i})"
             );
         }
-        // Named core-set constants agree with their table positions.
+        // The named constants agree with their table positions: the first row, the two ends of
+        // the precompile block, and the last row.
         assert_eq!(INCLUDED[air_id::ADD].1, air_id::ADD);
         assert_eq!(INCLUDED[air_id::GLOBAL].1, air_id::GLOBAL);
-        assert_eq!(INCLUDED[air_id::POSEIDON2].1, air_id::POSEIDON2);
+        assert_eq!(air_id::PRECOMPILE_FIRST, air_id::GLOBAL + 1);
+        assert_eq!(
+            INCLUDED[air_id::SYSCALL_PRECOMPILE].0,
+            "SyscallPrecompile",
+            "the precompile block ends at the precompile syscall table"
+        );
+        assert_eq!(air_id::BLS12381_G2_DOUBLE, INCLUDED.len() - 1);
         // One air ref per table row, in order (constructed cheaply from an empty program).
         let airs = mle_riscv_air_refs(Arc::new(Program::default()), false);
         assert_eq!(airs.len(), INCLUDED.len());
@@ -3535,23 +4098,28 @@ mod tests {
             "GPU-generated chips with no MLE RISC-V air: {unplaceable:?}"
         );
 
-        // `BYTE_CHIP_INDEX`, `ECALL_CHIP_INDEX`, `HOST_TRACEGEN_PRECOMPILE_INDICES` and
-        // `MEMORY_UNALIGNED_CHIP_INDEX`, `KECCAK_TABLES_CHIP_INDEX` and `G2_CHIP_INDICES`.
+        // `BYTE_CHIP_INDEX`, `ECALL_CHIP_INDEX`, `HOST_TRACEGEN_PRECOMPILE_INDICES`,
+        // `MEMORY_UNALIGNED_CHIP_INDEX`, `KECCAK_TABLES_CHIP_INDEX` and `G2_CHIP_INDICES`: the
+        // list's tail, after the precompile block.
+        let tail = [
+            "Byte",
+            "Ecall",
+            "Poseidon2Permute",
+            "EdAddAssign",
+            "EdDecompress",
+            "MemoryUnaligned",
+            "KeccakTables",
+            "Bls12381G2AddAssign",
+            "Bls12381G2DoubleAssign",
+        ];
         assert_eq!(
-            listed[45..],
-            [
-                "Byte",
-                "Ecall",
-                "Poseidon2Permute",
-                "EdAddAssign",
-                "EdDecompress",
-                "MemoryUnaligned",
-                "KeccakTables",
-                "Bls12381G2AddAssign",
-                "Bls12381G2DoubleAssign"
-            ],
+            listed[listed.len() - tail.len()..],
+            tail,
             "the orchestrator's positional tail moved"
         );
+        // `GLOBAL_CHIP_INDEX`, the last position before `BATCH_3_CHIP_INDICES`.
+        assert_eq!(listed[15], "Global");
+        assert_eq!(listed[16..19], ["ShiftRight", "ShiftLeft", "Bitwise"]);
     }
 
     /// `natural_air_rows` names the AIRs `build_ctx` generates, and each trace is its row count

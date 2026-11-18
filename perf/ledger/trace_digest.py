@@ -47,10 +47,10 @@ default) checks neither.
 `--split-vs-unsplit` compares a split replay (the candidate) with an unsplit one (the reference), and
 implies `--reference-split unsplit --candidate-split split`. A cut through a chunk's replay gives an
 address live across it two chained local-memory windows where the unsplit replay had one, on every
-sink, so four chips differ by design and are left out of every comparison: MemoryLocal, its global
-lookups (Global), their Poseidon2 hashes (RiscvKoalaBearPoseidon2) and the byte lookups behind them
+sink, so three chips differ by design and are left out of every comparison: MemoryLocal, its global
+lookups (Global) and the byte lookups behind them
 (Byte). Each is printed as an `EXCLUDED` line with the traces it left out. The two windows chain and
-cancel on the global bus, but no ledger line carries the global cumulative sum or the local-memory
+cancel on the global bus, but no ledger line carries the global LogUp's sum or the local-memory
 chain, so neither is compared here. Every other chip is compared exactly. Without the flag every chip
 is, as runs of the same segmentation should agree on all of them.
 
@@ -91,7 +91,7 @@ PRODUCER_STREAMS = ("cpu_events", "memory_read_write_event_indices", "add_events
 # The envelope's `representation` for each replay sink.
 REPRESENTATION = {"legacy": "streams", "dual": "dual", "history": "history"}
 # The chips a split replay's traces differ in from an unsplit one's, by design.
-SPLIT_EXCLUDED = ("MemoryLocal", "Global", "RiscvKoalaBearPoseidon2", "Byte")
+SPLIT_EXCLUDED = ("MemoryLocal", "Global", "Byte")
 # What the CPU chip appends for the branch steps on a record traced from the streams alone.
 BRANCH_COMPARES = "lt_events"
 

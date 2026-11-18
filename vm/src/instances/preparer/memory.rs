@@ -27,7 +27,6 @@ use crate::{
             traces::{byte_lookup_row, NUM_ROWS},
         },
         riscv_global::event::GlobalInteractionEvent,
-        riscv_poseidon2::Poseidon2Event,
     },
     cuda_adaptor::get_global_mem_pool,
     emulator::riscv::record::EmulationRecord,
@@ -40,9 +39,6 @@ use crate::{
 pub struct PreallocatedGpuMemory<'a> {
     // Global events
     pub d_global_events: Option<DevicePoolAllocation<'a, GlobalInteractionEvent>>,
-
-    // Poseidon2 events
-    pub d_poseidon2_events: Option<DevicePoolAllocation<'a, Poseidon2Event>>,
 
     // Byte trace
     pub d_byte_trace: Option<DevicePoolAllocation<'a, KoalaBear>>,
@@ -61,15 +57,6 @@ impl<'a> PreallocatedGpuMemory<'a> {
     ) -> Result<&mut DevicePoolAllocation<'a, GlobalInteractionEvent>, GpuMemoryError> {
         self.d_global_events.as_mut().ok_or_else(|| {
             GpuMemoryError::AllocationFailed("Global events not allocated".to_string())
-        })
-    }
-
-    /// Get mutable reference to Poseidon2 events
-    pub fn poseidon2_events_mut(
-        &mut self,
-    ) -> Result<&mut DevicePoolAllocation<'a, Poseidon2Event>, GpuMemoryError> {
-        self.d_poseidon2_events.as_mut().ok_or_else(|| {
-            GpuMemoryError::AllocationFailed("Poseidon2 events not allocated".to_string())
         })
     }
 
@@ -170,54 +157,6 @@ pub fn gpu_allocate_and_copy_global_events<'a>(
     )?;
 
     Ok(d_global_events)
-}
-
-/// Allocate GPU memory for Poseidon2 events and copy original Poseidon2 events to GPU.
-/// Global chip will later write its extra events starting at global_extra_poseidon2_start_index.
-pub fn gpu_allocate_and_copy_poseidon2_events<'a>(
-    stream: &'a CudaStream,
-    device_id: usize,
-    original_poseidon2_events: &[Poseidon2Event],
-    prepared_gpu_events: &'a PreparedGpuEvents,
-) -> Result<Option<DevicePoolAllocation<'a, Poseidon2Event>>, GpuMemoryError> {
-    let sync_mem_pool = get_global_mem_pool(device_id);
-    let mem_pool = &sync_mem_pool.0;
-
-    // Total poseidon2 events = original events + events created by global chip
-    let event_size = prepared_gpu_events.event_counter.num_poseidon2_events;
-    if event_size == 0 {
-        return Ok(None);
-    }
-
-    let mut d_poseidon2_events =
-        DevicePoolAllocation::<Poseidon2Event>::alloc_from_pool_async(event_size, mem_pool, stream)
-            .map_err(|e| GpuMemoryError::AllocationFailed(e.to_string()))?;
-
-    // Copy original poseidon2 events from the record to GPU.
-    // Global chip will later fill in the rest starting at global_extra_poseidon2_start_index.
-    if !original_poseidon2_events.is_empty() {
-        let copy = device::start(stream);
-        unsafe {
-            let _ = cudaMemcpyAsync(
-                d_poseidon2_events.as_mut_c_void_ptr(),
-                original_poseidon2_events.as_ptr() as *const _,
-                std::mem::size_of_val(original_poseidon2_events),
-                CudaMemoryCopyKind::HostToDevice,
-                stream.into(),
-            );
-        }
-        device::copied(
-            copy,
-            stream,
-            "poseidon2_events",
-            Some((
-                original_poseidon2_events.as_ptr() as *const _,
-                std::mem::size_of_val(original_poseidon2_events),
-            )),
-        );
-    }
-
-    Ok(Some(d_poseidon2_events))
 }
 
 /// Allocate byte trace GPU memory and initialize byte trace

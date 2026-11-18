@@ -302,7 +302,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::machine::{debug_folder::DebugConstraintFolder, septic::SepticDigest};
+    use crate::machine::debug_folder::DebugConstraintFolder;
     use core::borrow::{Borrow, BorrowMut};
     use p3_air::{Air, AirBuilder, BaseAir, RowWindow, WindowAccess};
     use p3_field::extension::QuinticTrinomialExtensionField;
@@ -344,7 +344,6 @@ mod tests {
         let mut folder = DebugConstraintFolder::<F, EF> {
             preprocessed: RowWindow::from_two_rows(&dummy, &dummy),
             main: RowWindow::from_two_rows(row, row),
-            global_cumulative_sum: SepticDigest::<F>::zero(),
             is_first_row: F::ZERO,
             is_last_row: F::ZERO,
             is_transition: F::ONE,

@@ -38,7 +38,7 @@ use crate::{
     },
     machine::{
         chip::ChipBehavior, debug_folder::DebugConstraintFolder,
-        field::FieldSpecificPoseidon2Config, septic::SepticDigest,
+        field::FieldSpecificPoseidon2Config,
     },
     primitives::consts::{KoalaBearConfig, PERMUTATION_WIDTH},
 };
@@ -180,7 +180,6 @@ fn failures(row: &[F]) -> usize {
     let mut folder = DebugConstraintFolder::<F, EF> {
         preprocessed: RowWindow::from_two_rows(&dummy, &dummy),
         main: RowWindow::from_two_rows(row, row),
-        global_cumulative_sum: SepticDigest::<F>::zero(),
         is_first_row: F::ZERO,
         is_last_row: F::ZERO,
         is_transition: F::ONE,

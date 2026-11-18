@@ -20,6 +20,7 @@
 mod backend;
 mod device;
 pub mod engine;
+mod gkr_runs;
 pub mod logup_zerocheck;
 pub mod merkle;
 pub mod pcs_data;

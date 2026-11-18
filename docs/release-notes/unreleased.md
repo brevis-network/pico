@@ -43,19 +43,71 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
 - **GPU kernels.** The `cuda` build needs the kernels `Cargo.toml` names: they fill the
   code-range and stack-guard columns and take the segmented GKR input; the 3.1 kernels do not
   match this tree.
+- **Cross-chunk consistency is a global LogUp; the keys and the whitelist change again.** The
+  chunks' cross-chunk events (memory and syscalls) used to be summed on a curve, and the sums
+  added up outside the proof tree. Now each chunk commits its events as a table, the challenges
+  are drawn once every table of the run is committed, group proofs take the tables through one
+  LogUp, and the tree's root asserts that it sums to zero
+  ([docs/soundness/README.md](../soundness/README.md)). The curve and its chips are gone. Every
+  key changes and the whitelist is rebuilt, with a leaf for each node the global LogUp adds to
+  the tree; a proof made before this change does not verify here, nor the other way round.
+  - A run whose chunks hold more cross-chunk events than one proof may count is refused: on the
+    GPU pipeline with `ProveError::TooManyGlobalRows`, before its tree is proved; on the CPU
+    where the RISC-V proofs are verified, as `ProveError::Verification`. A p99 Ethereum block
+    reaches under 4% of the limit.
+  - A program's initial memory image is committed as one table of at most 2^22 words (32 MiB of
+    initialized data) at the default stacked height, and of at most 2^h words at
+    `log_stacked_height(h)` below 22. `ProverBuilder::build` refuses a larger one with
+    `ProveError::InconsistentOptions`.
+  - In whitelist mode a recursion program holds each child's key to the row its slot reads:
+    the row's key pre-hash is a constant of the program, where the program used to take the
+    child's pre-hash from its witness and check that the key was a whitelist member. A key of
+    another row is no member there.
+  - Formats and types that changed with it: the VK bundle is version 3 (`pico-verifier`'s
+    `VmVk` has 20 limbs where it had 25: the image table's commitment and tier in place of the
+    initial sum), so a deployment's bundle is generated again; a proof's codec version is 6 and
+    a stored `Phase::Riscv` artifact (container version 4) carries the second phase's proofs, so
+    one stored before this change is refused by its version; `VerifyRiscvError` has `GlobalLogUp`
+    and `NotARiscvMachine`, and no `CrossChunkMemoryInconsistency`.
+  - In a `cuda` build the SDK's default chunk concurrency is 1 where it was 4: it now follows
+    the VM's default, and a card proves one chunk at a time.
+  - Below the default stacked height a chunk's table is smaller, 2^(h-1) rows at
+    `log_stacked_height(h)`, while the emulator still cuts its records for the default's 2^22. A
+    program whose record holds more cross-chunk events than the table (one that touches more
+    than 2^(h-1) memory words in all, for one) stops with "more cross-chunk events ... than a
+    Global table ... holds", and proves at a higher stacked height.
+  - On two machines (`two_machine_mle.sh`) each machine commits the tables of the chunks it
+    proves: the secondary reports its commitments to the primary and follows the primary's, each
+    machine proves the group proofs over its own tables and their nodes, and the primary reduces
+    both machines' nodes. The scheduler's gRPC service has three messages for it, so the two
+    machines run the same build. A two-machine run to `--step riscv` or `--step convert`, which
+    never completed, is refused at start.
+  - On the CPU each chunk's table has 2^22 rows at the default stacked height whatever the
+    program, and a chunk being proved holds about 2 GB for it: fibonacci proves to the compress
+    proof in about 6 GB one chunk at a time and under 8 GB two at a time on 16 cores, 9.4 GB on
+    124. The default concurrency, 4 in 3.1, is lower on a small host: 3 under 20 GiB of memory,
+    2 under 16, 1 under 12 ([docs/requirements.md](../requirements.md)).
+  - On the CPU `ProverBuilder::concurrency` (and `PROVE_CONCURRENCY`) now also bounds the
+    recursion proofs: the convert proofs and the nodes of a tree layer are proved that many at a
+    time, where every chunk's convert proof used to be proved at once. A program of many chunks
+    peaks lower for it, and at `concurrency(1)` one proof is proved at a time throughout. Key
+    generation is not bounded: the convert programs of a run, one per distinct chunk shape, are
+    still keygen'd together. A `cuda` build is unchanged.
 
 ## Added
 
 - **Compress proofs verify in `pico-verifier`.** `verify_compress` / `verify_compress_with` take a
-  compress proof as a v4 envelope (`Proof::export_compress_v4`), with the checks `verify` runs on
+  compress proof as a v5 envelope (`Proof::export_compress_v5`), with the checks `verify` runs on
   a combine root; neither entry point accepts the other's envelope. The envelope holds the proof
   alone: the whitelist has one compress key, which `pico-verifier` ships
-  (`shipped_compress_vk`, from `vm/src/mle/shape_vk_bins/mle_compress_vk.bin`).
+  (`shipped_compress_vk`, from `vm/src/mle/shape_vk_bins/mle_compress_vk.bin`). Its WHIR Merkle
+  openings travel as multiproofs, about 13% smaller before zstd and 5% after; the decoder rebuilds
+  the flat proof, so the verifier, the circuits and every key are unchanged.
 - **Compress on the GPU.** In a `cuda` build, a whitelist-mode `prove_to(Phase::Compress)` proves
   the root on the multi-card GPU pipeline, as `prove` does, then the compress layer on card 0.
 - **The ethproofs entry submits compress proofs.** With `MLE_STEP=compress` (whitelist mode,
   `VK_VERIFICATION=true`), `mle-ethproofs-single-node` answers each block with its compress proof as
-  a v4 envelope, typed `COMPRESS`, which `pico_verifier::verify_compress` checks under the cluster's
+  a v5 envelope, typed `COMPRESS`, which `pico_verifier::verify_compress` checks under the cluster's
   VK bundle (the bundle already carries the compress key's membership). `MLE_STEP=combine`, the
   default, still submits the v3 root. RSP needs no change.
 - **`cargo pico execute` serves a test harness.** `--public-output <file>` writes the committed
@@ -68,6 +120,9 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
 
 ## Performance
 
+- The global LogUp takes less GPU work than the cumulative sum it replaces: on four cards the p99
+  corpus proves to its compress proof in 8.06 s a block on average against 8.30 s, with 12% fewer
+  lane-seconds. The core and convert ladders are refitted for it.
 - The AOT replay workers run recording blocks that write the records themselves.
 - The chunk split counts what a precompile costs the RISC-V chunk, not each of its memory accesses.
 - The GPU pipeline holds 16 history slots by default.

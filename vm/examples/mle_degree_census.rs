@@ -65,7 +65,11 @@ fn main() {
 
     let engine: Engine = StarkEngine::new(riscv_params_with_128_bits_security(23));
     let airs = riscv::mle_riscv_air_refs(program, true);
-    let (_, vk) = engine.keygen_with_app_prep(&airs, riscv::RISCV_APP_PREP_AIR_IDS);
+    let (_, vk) = engine.keygen_with_app_prep_and_required(
+        &airs,
+        riscv::RISCV_APP_PREP_AIR_IDS,
+        riscv::RISCV_REQUIRED_AIR_IDS,
+    );
     let global = vk.inner.max_constraint_degree();
     info!("global max_constraint_degree = {global}");
 

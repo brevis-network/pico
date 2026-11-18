@@ -571,9 +571,11 @@ where
     PB: mle_core::prover::ProverBackend<
         Matrix = mle_core::p3_matrix::dense::RowMajorMatrix<HS::BaseField>,
         Val = HS::BaseField,
+        Challenge = HS::ExtField,
     >,
 {
     use mle_core::prover::AirProvingContext as APC;
+    let external_logup_challenges = cpu_ctx.external_logup_challenges;
     let per_trace = cpu_ctx
         .per_trace
         .into_iter()
@@ -598,7 +600,76 @@ where
         })
         .collect::<Result<Vec<_>, MemCopyError>>()?;
     current_stream_sync()?;
-    Ok(ProvingContext { per_trace })
+    Ok(ProvingContext {
+        per_trace,
+        external_logup_challenges,
+    })
+}
+
+/// [`transport_row_major_ctx_to_device`] for a context whose AIRs may carry cached mains, and
+/// which may be in the external LogUp challenge mode.
+///
+/// The host commitment data of a cached main is not carried over. Its trace is uploaded and
+/// committed again on `device`, and the commitment has to be the one the host made: the proof
+/// publishes it, and whoever made the host context may already have handed it on.
+pub fn transport_row_major_ctx_with_cached_to_device<HS, PB>(
+    device: &GpuDevice,
+    cpu_ctx: ProvingContext<PB>,
+) -> Result<ProvingContext<GenericGpuBackend<HS>>, ProverError>
+where
+    HS: GpuHashScheme,
+    HS::MerkleHash: crate::merkle_tree::MerkleTreeConstructor,
+    PB: mle_core::prover::ProverBackend<
+        Matrix = mle_core::p3_matrix::dense::RowMajorMatrix<HS::BaseField>,
+        Val = HS::BaseField,
+        Commitment = HS::Digest,
+        Challenge = HS::ExtField,
+    >,
+{
+    use mle_core::prover::{AirProvingContext as APC, TraceCommitter};
+    let external_logup_challenges = cpu_ctx.external_logup_challenges;
+    let per_trace = cpu_ctx
+        .per_trace
+        .into_iter()
+        .map(|(air_id, air_ctx)| {
+            let cached_mains = air_ctx
+                .cached_mains
+                .iter()
+                .map(|host| {
+                    let trace = transport_matrix_h2d_row_major(&host.trace)?;
+                    let (commitment, data) =
+                        <GpuDevice as TraceCommitter<GenericGpuBackend<HS>>>::commit(
+                            device,
+                            &[&trace],
+                        )?;
+                    assert!(
+                        commitment == host.commitment,
+                        "air {air_id}: the device commits a cached main to another root than                          the host did"
+                    );
+                    Ok(CommittedTraceData {
+                        commitment,
+                        trace,
+                        data: Arc::new(data),
+                    })
+                })
+                .collect::<Result<Vec<_>, ProverError>>()?;
+            let common_main = transport_matrix_h2d_row_major(&air_ctx.common_main)?;
+            Ok((
+                air_id,
+                APC {
+                    cached_mains,
+                    common_main,
+                    public_values: air_ctx.public_values,
+                    real_rows: air_ctx.real_rows,
+                },
+            ))
+        })
+        .collect::<Result<Vec<_>, ProverError>>()?;
+    current_stream_sync().map_err(ProverError::CurrentStreamSync)?;
+    Ok(ProvingContext {
+        per_trace,
+        external_logup_challenges,
+    })
 }
 
 pub fn transport_matrix_d2h_col_major<T>(

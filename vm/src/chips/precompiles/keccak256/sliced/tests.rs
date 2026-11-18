@@ -192,7 +192,9 @@ fn sliced_trace_proves_with_the_bus() {
                 .map(|(i, m)| (i, AirProvingContext::simple_no_pis(m)))
                 .collect(),
         );
-        let proof = engine.prove(&d_pk, ctx_to_engine(ctx)).expect("prove");
+        let proof = engine
+            .prove(&d_pk, ctx_to_engine(&engine, ctx))
+            .expect("prove");
         engine
             .verify(&vk, &proof)
             .unwrap_or_else(|e| panic!("n={n}: verify failed: {e:?}"));

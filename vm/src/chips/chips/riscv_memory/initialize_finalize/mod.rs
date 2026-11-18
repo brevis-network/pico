@@ -185,8 +185,7 @@ mod tests {
         let cpu_finalize_trace = cpu_generate_main(&mem_finalize_chip, &complete_record);
 
         let mut counted_record = original_record.clone();
-        let mut event_counter = precompute_event_size::<F>(&mut counted_record);
-        event_counter.num_poseidon2_events = complete_record.poseidon2_events.len();
+        let event_counter = precompute_event_size::<F>(&mut counted_record);
 
         counted_record.shape = Some(RiscvPadShape::default());
         counted_record
@@ -297,8 +296,7 @@ mod tests {
             let mut complete_record = original_record.clone();
             chip.extra_record(&original_record, &mut complete_record);
             let mut counted_record = original_record.clone();
-            let mut event_counter = precompute_event_size::<F>(&mut counted_record);
-            event_counter.num_poseidon2_events = complete_record.poseidon2_events.len();
+            let event_counter = precompute_event_size::<F>(&mut counted_record);
 
             let log2 = (n as f64).log2().ceil() as usize + 1;
             complete_record.shape = Some(RiscvPadShape::default());
@@ -443,8 +441,7 @@ mod tests {
             let mut complete_record = original_record.clone();
             chip.extra_record(&original_record, &mut complete_record);
             let mut counted_record = original_record.clone();
-            let mut event_counter = precompute_event_size::<F>(&mut counted_record);
-            event_counter.num_poseidon2_events = complete_record.poseidon2_events.len();
+            let event_counter = precompute_event_size::<F>(&mut counted_record);
 
             let log2 = (n as f64).log2().ceil() as usize + 1;
             complete_record.shape = Some(RiscvPadShape::default());

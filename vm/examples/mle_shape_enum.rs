@@ -44,7 +44,7 @@ fn main() {
     println!("\n{} kinds, {} shapes", per_kind.len(), shapes.len());
 
     if verbose {
-        println!("\n-- every shape (kind:h control:h syscall memory_local global poseidon2) --");
+        println!("\n-- every shape (kind:h control:h syscall memory_local) --");
         for s in &shapes {
             let ctl = s
                 .control
@@ -52,14 +52,8 @@ fn main() {
                 .map(|(n, h)| format!(" {n}:{h}"))
                 .unwrap_or_default();
             println!(
-                "[pshape] {}:{}{} SyscallPrecompile:{} MemoryLocal:{} Global:{} Poseidon2:{}",
-                s.kind,
-                s.kind_log_height,
-                ctl,
-                s.syscall_precompile,
-                s.memory_local,
-                s.global,
-                s.poseidon2
+                "[pshape] {}:{}{} SyscallPrecompile:{} MemoryLocal:{}",
+                s.kind, s.kind_log_height, ctl, s.syscall_precompile, s.memory_local,
             );
         }
     }

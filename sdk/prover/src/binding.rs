@@ -11,7 +11,7 @@ use pico_verifier::public_values;
 use pico_vm::{
     compiler::word::Word,
     emulator::riscv::{public_values::PublicValues, record::EmulationRecord},
-    mle::machine::{air::GCS_DIGEST_LEN, riscv::air_id},
+    mle::machine::riscv::air_id,
     primitives::consts::{PV_DIGEST_NUM_WORDS, RISCV_NUM_PVS, WORD_SIZE},
 };
 
@@ -100,31 +100,8 @@ pub(crate) fn commits(records: &[EmulationRecord]) -> bool {
     })
 }
 
-/// Refuse a RISC-V bundle any of whose chunks lacks its global cumulative sum.
-///
-/// `verify_riscv` reads each chunk's sum out of the Global AIR's public values and aborts when they
-/// are short. That AIR is optional in the key, so a chunk proof that omits it still passes its
-/// STARK verify; a bundle from a file is checked here first.
-pub(crate) fn ensure_chunk_gcs<'a>(
-    chunks: impl Iterator<Item = &'a [Vec<Kb>]>,
-) -> Result<(), ProveError> {
-    for (chunk, pv_sets) in chunks.enumerate() {
-        let len = pv_sets.get(air_id::GLOBAL).map_or(0, Vec::len);
-        if len < GCS_DIGEST_LEN {
-            return Err(ProveError::verification(
-                Phase::Riscv,
-                format!(
-                    "chunk {chunk}: {len} Global AIR public value(s), too few for its global \
-                     cumulative sum"
-                ),
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// The AIRs `build_ctx` hands a copy of the chunk's RISC-V public values at offset zero. The Global
-/// AIR carries one more, after its global cumulative sum.
+/// The AIRs `build_ctx` hands a copy of the chunk's RISC-V public values, besides the Global AIR,
+/// which carries one in every chunk.
 const RISCV_PV_AIRS: [usize; 4] = [
     air_id::CPU,
     air_id::ECALL,
@@ -142,7 +119,7 @@ pub(crate) fn ensure_exit_code_zero<'a>(
     for (chunk, pv_sets) in chunks.enumerate() {
         let global = pv_sets
             .get(air_id::GLOBAL)
-            .and_then(|pvs| pvs.get(GCS_DIGEST_LEN..))
+            .map(Vec::as_slice)
             .unwrap_or_default();
         let others = RISCV_PV_AIRS
             .iter()
@@ -332,31 +309,6 @@ mod tests {
         ));
     }
 
-    /// A chunk whose Global AIR carries no values, too few, or no slot at all is refused by name.
-    #[test]
-    fn a_chunk_without_its_global_cumulative_sum_is_refused() {
-        let with_global = |len: usize| {
-            let mut sets = vec![Vec::new(); air_id::GLOBAL + 1];
-            sets[air_id::GLOBAL] = vec![Kb::ZERO; len];
-            sets
-        };
-        let whole = with_global(GCS_DIGEST_LEN);
-        ensure_chunk_gcs([whole.as_slice()].into_iter()).expect("a whole sum is accepted");
-
-        for (case, sets) in [
-            ("empty", with_global(0)),
-            ("short", with_global(GCS_DIGEST_LEN - 1)),
-            ("no slot", vec![Vec::new(); air_id::GLOBAL]),
-        ] {
-            let err =
-                ensure_chunk_gcs([whole.as_slice(), sets.as_slice()].into_iter()).expect_err(case);
-            assert!(
-                matches!(&err, ProveError::Verification { phase: Phase::Riscv, message } if message.starts_with("chunk 1:")),
-                "{case}: {err}"
-            );
-        }
-    }
-
     /// The digest is read from the Ecall copy, the one it is constrained in: a Cpu copy carrying
     /// a different digest does not move it.
     #[test]
@@ -394,7 +346,7 @@ mod tests {
     /// A chunk that ran the CPU and an ecall, each copy with its own exit code.
     fn cpu_chunk(global: u32, cpu: u32, ecall: u32) -> Vec<Vec<Kb>> {
         let mut sets = vec![Vec::new(); air_id::ECALL + 1];
-        sets[air_id::GLOBAL] = [vec![Kb::ZERO; GCS_DIGEST_LEN], riscv_pvs(global)].concat();
+        sets[air_id::GLOBAL] = riscv_pvs(global);
         sets[air_id::CPU] = riscv_pvs(cpu)[..RISCV_NUM_PVS].to_vec();
         sets[air_id::ECALL] = riscv_pvs(ecall)[..RISCV_NUM_PVS].to_vec();
         sets
@@ -403,7 +355,7 @@ mod tests {
     /// A chunk with no CPU rows: memory finalization only.
     fn memory_chunk(global: u32, finalize: u32) -> Vec<Vec<Kb>> {
         let mut sets = vec![Vec::new(); air_id::GLOBAL + 1];
-        sets[air_id::GLOBAL] = [vec![Kb::ZERO; GCS_DIGEST_LEN], riscv_pvs(global)].concat();
+        sets[air_id::GLOBAL] = riscv_pvs(global);
         sets[air_id::MEM_FINAL] = riscv_pvs(finalize);
         sets
     }
@@ -466,7 +418,7 @@ mod tests {
     #[test]
     fn a_chunk_without_the_global_copy_is_refused() {
         let mut chunk = cpu_chunk(0, 0, 0);
-        chunk[air_id::GLOBAL].truncate(GCS_DIGEST_LEN);
+        chunk[air_id::GLOBAL].clear();
         let err = check(&[chunk]).expect_err("no exit code to read");
         assert!(
             matches!(&err, ProveError::Verification { phase: Phase::Riscv, message } if message.starts_with("chunk 0:")),

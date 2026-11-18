@@ -79,6 +79,23 @@ pub struct ProvingContext<PB: ProverBackend> {
     /// For each AIR with non-empty trace, the pair of (AIR ID, [AirProvingContext]), where AIR
     /// ID is with respect to the vkey ordering.
     pub per_trace: Vec<(usize, AirProvingContext<PB>)>,
+    /// The LogUp challenges `(alpha, beta)` of a proof under a key in the external challenge
+    /// mode ([`LogUpChallengeMode::External`](crate::interaction::LogUpChallengeMode)). Required
+    /// for such a key and refused for any other.
+    #[new(default)]
+    pub external_logup_challenges: Option<[PB::Challenge; 2]>,
+}
+
+impl<PB: ProverBackend> ProvingContext<PB> {
+    /// `self`, to be proved under the caller's LogUp challenges (external challenge mode).
+    pub fn with_external_logup_challenges(
+        mut self,
+        alpha: PB::Challenge,
+        beta: PB::Challenge,
+    ) -> Self {
+        self.external_logup_challenges = Some([alpha, beta]);
+        self
+    }
 }
 
 #[derive(derive_new::new)]

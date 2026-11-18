@@ -1,10 +1,10 @@
 //! The compress phase — the final compression layer — through the facade: what the proof
 //! says about itself, the container it travels in, and what another prover can and cannot answer
-//! for. One compress proof of fib serves every dev-mode assertion, and the combine root of the
-//! same input serves the swapped-key cases: those two chains are the cost of the default run. Of
-//! the two ignored whitelist tests, the shipped-whitelist one proves one whitelist chain and the
-//! trimmed-map one three, one per entry point (`prove_to(Compress)`, `prove_to(Wrap)`,
-//! `prove_evm`), each refused at compress.
+//! for. One run of fib to compress serves every dev-mode assertion: its compress proof, and the
+//! combine root it went past, which serves the swapped-key cases. Of the two ignored whitelist
+//! tests, the shipped-whitelist one proves one whitelist chain and the trimmed-map one three, one
+//! per entry point (`prove_to(Compress)`, `prove_to(Wrap)`, `prove_evm`), each refused at
+//! compress.
 
 use std::sync::Arc;
 
@@ -36,9 +36,12 @@ const SIZE_LIMIT: usize = 300 * 1024;
 #[test]
 fn a_compress_proof_round_trips_and_another_prover_refuses_it() {
     let mut prover = builder().build().expect("prover");
-    let proof = prover
-        .prove_to(Stdin::from(&N), Phase::Compress)
+    let mut run = prover
+        .prove_to_keeping_earlier(Stdin::from(&N), Phase::Compress)
         .expect("compress");
+    let proof = run.pop().expect("the run's own proof is its last");
+    let root = run.pop().expect("a run to compress goes past combine");
+    assert_eq!(root.phase(), Phase::Combine);
 
     // What the proof says about itself.
     assert_eq!(proof.phase(), Phase::Compress);
@@ -101,7 +104,6 @@ fn a_compress_proof_round_trips_and_another_prover_refuses_it() {
     // the two can be mixed: the compress proof under the root's key, and the root proof and key
     // under a Compress label. Both write consistent containers that no prover has an honest
     // compress shape for, and are refused by name.
-    let root = prover.prove(Stdin::from(&N)).expect("combine");
     let Payload::Combine(root) = &root.payload else {
         panic!("a Phase::Combine proof carries the root");
     };

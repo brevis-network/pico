@@ -168,7 +168,7 @@ fn check_whir_round(log_stacked_height: usize) -> Result<(), ParamsError> {
 /// are the embed preset's, value for value, and the two are separate functions, since they are
 /// tuned for different costs — compress for proof size, embed for the Groth16 circuit's cost per
 /// WHIR query. Keeping embed's values equal to these is a choice (the wrap circuit over them is
-/// 7,243,820 R1CS, 13.6% under 2^23), not a necessity: `compress_and_embed_params_agree_today` in
+/// 7,256,115 R1CS, 13.5% under 2^23), not a necessity: `compress_and_embed_params_agree_today` in
 /// `tests/soundness.rs` pins it while it holds.
 ///
 /// # Assumptions for 128-bit security
@@ -176,14 +176,14 @@ fn check_whir_round(log_stacked_height: usize) -> Result<(), ParamsError> {
 /// interactions per AIR, ≤ 21 AIRs, ≤ 2,000 columns, `w_stack` 64. Measured: 21 AIRs / 170
 /// constraints / 34 interactions / 1409 columns, 128.05 bits. In dev mode (whitelist off) the
 /// heights are the program's natural heights over the root it is given, so the size follows the
-/// input: stacked width 20 + 5 (main + preprocessed) = 25 and 299,179 bytes = 292.17 KiB with
-/// `--step compress` on reth 18884864 (and on reth 24600825 when the layer was introduced);
-/// fib-10's smaller root gives 15 + 5 = 20 and 278,279 bytes. In whitelist mode the heights are the
+/// input: stacked width 20 + 5 (main + preprocessed) = 25 and 299,231 bytes = 292.22 KiB with
+/// `--step compress` on reth 18884864; fib-10's smaller root gives 15 + 5 = 20 and 278,331
+/// bytes. In whitelist mode the heights are the
 /// compress tier row's (`MLE_RECURSION_COMPRESS_LOG_HEIGHTS`), the program's natural heights over
 /// the one combine-tier root layout, the largest a root takes, so every proof has the largest
-/// dev-mode shape: stacked width 20 + 5 = 25 against `w_stack` 64, 299,179 bytes, 128.05 bits,
-/// measured under a self-built whitelist on fib-10 and reth 18884864 / 24600825 and under the
-/// shipped artifact. (Before compress had its own row, it padded to the embed row of the time:
+/// dev-mode shape: stacked width 20 + 5 = 25 against `w_stack` 64, 299,231 bytes, 128.05 bits,
+/// measured under a self-built whitelist on fib-10 and under the shipped artifact on fib-10 and
+/// reth 18884864 / 24600825. (Before compress had its own row, it padded to the embed row of the time:
 /// stacked width 52, 403.85 KiB. The row decides the whitelist-mode size.)
 ///
 /// Config: `l_skip=4, n_stack=16, log_blowup=4`, `ListDecoding { m: 2 }`, fold PoW 16, μ PoW 18,
@@ -231,12 +231,12 @@ pub fn compress_params_with_128_bits_security() -> SystemParams {
 /// KoalaBear's two-adicity, so this is the largest blowup (hence the fewest WHIR queries) the field
 /// allows at this stacked height. Measured in dev mode over the compress proof of fib-10:
 /// tallest chip 2^16 (16× headroom) and stacked width 8 + 3 (main + preprocessed) = 11 against
-/// `w_stack = 64`, proof 239,319 bytes = 233.71 KiB; in whitelist mode the heights are the embed
+/// `w_stack = 64`, proof 239,371 bytes = 233.76 KiB; in whitelist mode the heights are the embed
 /// tier row's (`MLE_RECURSION_EMBED_LOG_HEIGHTS`), the natural heights of the embed program over
 /// the compress proof's layout, measured by the tier probe: tallest chip 2^16 (ExtAlu);
-/// `--step wrap` (through embed) under the shipped artifact measured the same on fib-10 and reth
-/// 18884864: stacked width 11, 239,319 bytes. (When embed re-proved the combine root, it had the
-/// compress proof's shape: stacked width 25 and 299,179 bytes in whitelist mode.)
+/// `--step embed` under the shipped artifact measured the same on fib-10 and reth 18884864:
+/// stacked width 11, 239,371 bytes. (When embed re-proved the combine root, it had the
+/// compress proof's shape: stacked width 25 in whitelist mode.)
 ///
 /// # Why ListDecoding { m: 2 }
 ///

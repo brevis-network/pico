@@ -69,6 +69,12 @@ pub enum LookupType {
     /// Sliced Keccak theta column parities (`[key, c0..c3]`) against the xor5 table
     /// (`KeccakTables`).
     KeccakXor5 = 16,
+
+    /// The bus of the global-LogUp group proofs: each row of a committed Global event table
+    /// (or of the memory image table), `[m0..m7, kind]`, with its signed multiplicity, under the
+    /// block's external `(alpha, beta)`. No machine but the group machines uses it, and no AIR
+    /// receives on it: the fractional sums are added up across the block's group proofs.
+    GlobalLogUp = 17,
 }
 
 impl LookupType {
@@ -99,36 +105,28 @@ impl LookupType {
 /// `is_receive`, `kind`).
 pub const GLOBAL_KIND_VALUE_INDEX: usize = 10;
 
-/// Exclusive bound on a Global-bus `kind`. The global-interaction digest packs the kind above a
-/// 25-bit message element (`values[0] + kind * 2^25`), and this bound keeps the sum under 2^30:
-/// (2^25 - 1) + 31 * 2^25 = 2^30 - 1 < p. Comfortably sufficient rather than tight.
-pub const GLOBAL_KIND_LIMIT: u8 = 32;
-
-/// Enforce, at keygen, the invariant that the Global chip's `kind` column rests on now that its
-/// range check is gone: every Global-bus sender passes a compile-time constant kind below
-/// [`GLOBAL_KIND_LIMIT`], so the multiset pins the receiver's column. Callers reduce the kind
-/// element of their own expression type to `Some(constant)` first, passing `None` when it is not
-/// a constant.
+/// Enforce, at keygen, that every Global-bus sender passes its `kind` as a compile-time constant.
+/// The kind separates the domains of the cross-chunk messages (a memory event and a syscall
+/// event with the same words must not cancel), and nothing in the Global AIR constrains its
+/// `kind` column: the regional multiset pins it to what the senders sent. Were a sender to take
+/// the kind from a column, a prover could send a syscall-side message under the memory kind.
+/// Callers reduce the kind element of their own expression type to `Some(constant)` first,
+/// passing `None` when it is not a constant.
 ///
 /// `values_len` is checked because the kind is read at a fixed index: a longer message would put
-/// `is_receive` there, and that IS a bounded constant, so the guard would pass while the real kind
-/// went unchecked. The digest gadget takes exactly 8 message words, so the layout is fixed.
-pub fn assert_global_kind_is_bounded_constant<F: Field>(kind: Option<F>, values_len: usize) {
+/// `is_receive` there, and that IS a constant, so the guard would pass while the real kind went
+/// unchecked.
+pub fn assert_global_kind_is_constant<F: Field>(kind: Option<F>, values_len: usize) {
     assert_eq!(
         values_len,
         GLOBAL_KIND_VALUE_INDEX + 1,
         "Global-bus message must be exactly {} elements with the kind last",
         GLOBAL_KIND_VALUE_INDEX + 1
     );
-    let kind = kind.unwrap_or_else(|| {
-        panic!(
-            "Global-bus looking interaction must carry a compile-time constant kind at values \
-             index {GLOBAL_KIND_VALUE_INDEX} (its range check was removed on that invariant)"
-        )
-    });
     assert!(
-        (0..GLOBAL_KIND_LIMIT).any(|k| kind == F::from_u8(k)),
-        "Global-bus sender kind constant must be < {GLOBAL_KIND_LIMIT}"
+        kind.is_some(),
+        "Global-bus looking interaction must carry a compile-time constant kind at values \
+         index {GLOBAL_KIND_VALUE_INDEX}"
     );
 }
 
@@ -192,51 +190,39 @@ impl<E> SymbolicLookup<E> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        assert_global_kind_is_bounded_constant, LookupType, GLOBAL_KIND_LIMIT,
-        GLOBAL_KIND_VALUE_INDEX,
-    };
-    use p3_field::{PrimeCharacteristicRing, PrimeField32};
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
 
+    use super::{assert_global_kind_is_constant, LookupType, GLOBAL_KIND_VALUE_INDEX};
+
     /// The length every Global-bus message has, so the tests below exercise the guard's kind
-    /// legs rather than its length leg.
+    /// leg rather than its length leg.
     const LEN: usize = GLOBAL_KIND_VALUE_INDEX + 1;
 
-    // The guard stands in for the range check the Global chip used to carry, so the tests below
-    // cover each way it can be defeated -- a kind that is not a compile-time constant, a constant
-    // at or above the packing budget, and a message whose length moves the kind out of the slot
-    // the guard reads -- alongside a positive test that every admissible constant is accepted.
+    // Nothing in the Global AIR constrains its `kind` column, so the tests below cover each way
+    // the guard can be defeated: a kind that is not a compile-time constant, and a message whose
+    // length moves the kind out of the slot the guard reads.
 
     #[test]
-    fn global_kind_guard_accepts_every_admissible_constant() {
-        for k in 0..GLOBAL_KIND_LIMIT {
-            assert_global_kind_is_bounded_constant(Some(KoalaBear::from_u8(k)), LEN);
+    fn global_kind_guard_accepts_a_constant() {
+        for kind in [LookupType::Memory, LookupType::Syscall] {
+            assert_global_kind_is_constant(Some(KoalaBear::from_u8(kind as u8)), LEN);
         }
     }
 
     #[test]
     #[should_panic(expected = "must carry a compile-time constant kind")]
     fn global_kind_guard_rejects_a_non_constant_kind() {
-        assert_global_kind_is_bounded_constant::<KoalaBear>(None, LEN);
-    }
-
-    #[test]
-    #[should_panic(expected = "must be < 32")]
-    fn global_kind_guard_rejects_a_constant_at_the_budget() {
-        assert_global_kind_is_bounded_constant(
-            Some(KoalaBear::from_u32(GLOBAL_KIND_LIMIT as u32)),
-            LEN,
-        );
+        assert_global_kind_is_constant::<KoalaBear>(None, LEN);
     }
 
     /// A longer message shifts the kind out of the slot the guard reads, and what lands there
-    /// (`is_receive`) is itself a bounded constant -- so without this leg the guard would pass
-    /// while the real kind went unchecked.
+    /// (`is_receive`) is itself a constant -- so without this leg the guard would pass while the
+    /// real kind went unchecked.
     #[test]
     #[should_panic(expected = "must be exactly 11 elements")]
     fn global_kind_guard_rejects_a_message_of_the_wrong_length() {
-        assert_global_kind_is_bounded_constant(Some(KoalaBear::ZERO), LEN + 1);
+        assert_global_kind_is_constant(Some(KoalaBear::ZERO), LEN + 1);
     }
 
     /// The discriminants enter the MLE backend's logUp fingerprint and the vk's
@@ -261,75 +247,9 @@ mod tests {
             (LookupType::KeccakPermute, 14),
             (LookupType::KeccakChi, 15),
             (LookupType::KeccakXor5, 16),
+            (LookupType::GlobalLogUp, 17),
         ] {
             assert_eq!(kind as u16, value);
         }
-    }
-
-    /// The global-interaction digest packs the interaction kind above a 25-bit message element
-    /// (`values[0] + kind * 2^25`). The budget we hold ourselves to is a 5-bit kind, keeping the
-    /// sum under 2^30: (2^25 - 1) + 31 * 2^25 = 2^30 - 1. The modulus alone would permit more, so
-    /// this is the declared bound rather than a hard one -- but it is the bound keygen enforces
-    /// and the one the CUDA mirror documents, so a new kind past it must fail loudly here.
-    #[test]
-    fn lookup_type_kinds_fit_the_global_digest_packing() {
-        /// Exclusive upper bound on the kind discriminant imposed by the bit-25 packing.
-        const KIND_LIMIT: u32 = GLOBAL_KIND_LIMIT as u32;
-        // Every variant, including the two `all_types()` omits for legacy-FRI compatibility. The
-        // exhaustive `match` below makes the compiler fail this test when a variant is appended,
-        // so a new kind cannot slip past the budget check.
-        let all = [
-            LookupType::Memory,
-            LookupType::Program,
-            LookupType::Instruction,
-            LookupType::Alu,
-            LookupType::Byte,
-            LookupType::Range,
-            LookupType::Field,
-            LookupType::Syscall,
-            LookupType::Poseidon2,
-            LookupType::Global,
-            LookupType::ShaCompress,
-            LookupType::ShaExtend,
-            LookupType::Ecall,
-            LookupType::KeccakPermute,
-            LookupType::KeccakChi,
-            LookupType::KeccakXor5,
-        ];
-        for kind in all {
-            // Exhaustiveness guard: adding a variant breaks this `match` until it is listed above.
-            match kind {
-                LookupType::Memory
-                | LookupType::Program
-                | LookupType::Instruction
-                | LookupType::Alu
-                | LookupType::Byte
-                | LookupType::Range
-                | LookupType::Field
-                | LookupType::Syscall
-                | LookupType::Poseidon2
-                | LookupType::Global
-                | LookupType::ShaCompress
-                | LookupType::ShaExtend
-                | LookupType::Ecall
-                | LookupType::KeccakPermute
-                | LookupType::KeccakChi
-                | LookupType::KeccakXor5 => {}
-            }
-            assert!(
-                (kind as u32) < KIND_LIMIT,
-                "LookupType::{kind:?} = {} does not fit the global-digest packing budget \
-                 (must be < {KIND_LIMIT}); widening it requires re-deriving the packing shift \
-                 in the Global interaction gadget and its CUDA mirror",
-                kind as u32,
-            );
-        }
-        // The worst case must stay inside the field: max value + max kind shifted.
-        let max_packed = ((1u64 << 25) - 1) + (KIND_LIMIT as u64 - 1) * (1u64 << 25);
-        let koala_bear_modulus = u64::from(p3_koala_bear::KoalaBear::ORDER_U32);
-        assert!(
-            max_packed < koala_bear_modulus,
-            "packing budget exceeds the field"
-        );
     }
 }

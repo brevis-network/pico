@@ -2,7 +2,7 @@
 //! circuit that verifies it. Proofs are grouped by [`RecursionVkLayout`] so each
 //! distinct shape is keygen'd once; all proofs of a shape then prove in parallel.
 
-use std::sync::Arc;
+use std::{num::NonZeroUsize, sync::Arc};
 // The process-global program cache is `cuda`-only, and so are these. `pico-vm` builds without
 // that feature (pico-aot-codegen pulls it in that shape) under `deny(warnings)`, where an
 // unconditional import of them is a hard error.
@@ -20,11 +20,13 @@ use crate::{
         compiler::recursion::{ConvertProgramInput, ConvertVerifierCircuit, RecursionVkLayout},
         machine::{
             exe::RiscvVmVk,
+            global_logup::{assert_global_bus, chain_values},
             recursion::{
                 build_proving_ctx, extract_recursion_vk_layout,
                 recursion_air_refs_with_preprocessed, recursion_vk_layouts_equal,
                 setup_for_convert_with_program, Engine, Kb, Sc,
             },
+            riscv::{par_bounded, recursion_proofs_at_once},
         },
     },
     primitives::consts::DIGEST_SIZE,
@@ -82,7 +84,7 @@ pub struct ConvertMachine {
     // Used only for the `ChipBehavior` methods; the FRI parts are dead. See `ConvertMachine::new`.
     pub chips: Vec<MetaChip<Kb, RecursionChipType<Kb>>>,
     pub riscv_vk: Arc<MultiStarkVerifyingKey<Sc>>,
-    /// VM-layer exe identity (program_commit, pc_start, initial_gcs). Witnessed into every
+    /// VM-layer exe identity (program_commit, pc_start, memory image). Witnessed into every
     /// convert proof; the circuit folds it into the `riscv_vk_digest` public value.
     pub riscv_vm_vk: RiscvVmVk,
     /// Whitelist mode (baked into the programs at `new`): proofs witness `vk_root` into their
@@ -93,6 +95,8 @@ pub struct ConvertMachine {
     vk_root: Option<[Kb; 8]>,
     /// The digest the tree's deferred nodes end on; zero when the tree has none.
     final_deferred_digest: [Kb; DIGEST_SIZE],
+    /// How many leaves are proved at once, if the owner said ([`Self::set_concurrency`]).
+    concurrency: Option<NonZeroUsize>,
 }
 
 /// Keygen one convert proving key: build the verify program for `layout`, then key it.
@@ -143,6 +147,9 @@ impl ConvertMachine {
         if proofs.is_empty() {
             return Err(ConvertError::EmptyBundle);
         }
+        // The convert program counts a chunk's cross-chunk events from the audited sender table
+        // and the layout's heights; the key it verifies under must have exactly that bus.
+        assert_global_bus(&riscv_vk.inner);
 
         let engine: Engine = StarkEngine::new(params);
         // As in `RiscvMachine::new`: the recursion trace generation uses these chips only for their
@@ -214,7 +221,16 @@ impl ConvertMachine {
             vk_verification,
             vk_root: None,
             final_deferred_digest: [Kb::ZERO; DIGEST_SIZE],
+            concurrency: None,
         })
+    }
+
+    /// Prove at most `n` leaves at once. On the host a leaf being proved holds a working set of
+    /// its own, so a block of many chunks peaks at as many of them as are in flight. Unset, the
+    /// machine takes what the chunks take with nothing said: `PROVE_CONCURRENCY`, else what the
+    /// host's memory holds (`recursion_proofs_at_once`). A `cuda` build does not read it.
+    pub fn set_concurrency(&mut self, n: NonZeroUsize) {
+        self.concurrency = Some(n);
     }
 
     /// Keygen a proving key for every layout in `proofs` that has none yet, and report how many
@@ -308,52 +324,75 @@ impl ConvertMachine {
     }
 
     /// Prove all RISCV proofs and pair each convert proof with its convert VK (dynamic-VK safe).
+    ///
+    /// `riscv_proofs` are a block's chunk proofs in chunk order, from chunk 1: each leaf enters
+    /// the global LogUp's chain at the value after the chunks before it.
     pub fn prove_with_vks(&self, riscv_proofs: &[Proof<Sc>]) -> eyre::Result<Vec<ProofWithVk>> {
-        riscv_proofs
-            .par_iter()
-            .enumerate()
-            .map(|(i, proof)| {
-                // One span per convert proof (`RUST_LOGGER=forest` prints its duration with the
-                // prover's phase spans nested below); the proofs run concurrently under rayon, so a
-                // worker can interleave two of them.
-                let _span = tracing::info_span!("convert_prove", i).entered();
-                let t0 = std::time::Instant::now();
-                let (_, keygen_program, pk, vk) = self.find_pk(proof)?;
-                let d_pk = self.engine.device().transport_pk_to_device(pk);
-                let transport_ms = t0.elapsed().as_millis();
-                let t1 = std::time::Instant::now();
-                if self.vk_verification && self.vk_root.is_none() {
-                    return Err(ConvertError::Whitelist(
-                        "vk_verification mode: call set_vk_root before proving",
-                    )
-                    .into());
-                }
-                let (_, record) = setup_for_convert_with_program(
-                    &self.riscv_vk,
-                    &self.riscv_vm_vk,
-                    proof,
-                    Arc::clone(keygen_program),
-                    self.final_deferred_digest,
-                    self.vk_root,
-                );
-                let setup_ms = t1.elapsed().as_millis();
-                let t2 = std::time::Instant::now();
-                let ctx = build_proving_ctx(&record, &self.chips, "convert");
-                let tracegen_ms = t2.elapsed().as_millis();
-                let t3 = std::time::Instant::now();
-                let result = self
-                    .engine
-                    .prove(&d_pk, ctx)
-                    .map(|convert_proof| (convert_proof, vk.clone()))
-                    .map_err(|e| eyre::eyre!("{e:?}"));
-                tracing::info!(
-                    "convert_timing proof: transport_ms = {transport_ms}, setup_ms = {setup_ms}, \
+        let global_chain = chain_values(&self.riscv_vk.inner.params, riscv_proofs)?;
+        self.prove_with_chain(riscv_proofs, &global_chain)
+    }
+
+    /// Negative tests only: [`Self::prove_with_vks`] with each leaf's entry into the global
+    /// LogUp's chain handed in (`global_chain[i]` for the `i`-th proof) instead of computed from the
+    /// proofs, so that a forged entry reaches the circuit.
+    #[doc(hidden)]
+    pub fn prove_with_chain_for_testing(
+        &self,
+        riscv_proofs: &[Proof<Sc>],
+        global_chain: &[[Kb; DIGEST_SIZE]],
+    ) -> eyre::Result<Vec<ProofWithVk>> {
+        self.prove_with_chain(riscv_proofs, global_chain)
+    }
+
+    /// One convert proof per RISCV proof, the `i`-th entering the chain at `global_chain[i]`.
+    fn prove_with_chain(
+        &self,
+        riscv_proofs: &[Proof<Sc>],
+        global_chain: &[[Kb; DIGEST_SIZE]],
+    ) -> eyre::Result<Vec<ProofWithVk>> {
+        let at_once = recursion_proofs_at_once(self.concurrency, riscv_proofs.len());
+        par_bounded(riscv_proofs, at_once, |i, proof| {
+            // One span per convert proof (`RUST_LOGGER=forest` prints its duration with the
+            // prover's phase spans nested below); the proofs of a batch run concurrently under
+            // rayon, so a worker can interleave two of them.
+            let _span = tracing::info_span!("convert_prove", i).entered();
+            let t0 = std::time::Instant::now();
+            let (_, keygen_program, pk, vk) = self.find_pk(proof)?;
+            let d_pk = self.engine.device().transport_pk_to_device(pk);
+            let transport_ms = t0.elapsed().as_millis();
+            let t1 = std::time::Instant::now();
+            if self.vk_verification && self.vk_root.is_none() {
+                return Err(ConvertError::Whitelist(
+                    "vk_verification mode: call set_vk_root before proving",
+                )
+                .into());
+            }
+            let (_, record) = setup_for_convert_with_program(
+                &self.riscv_vk,
+                &self.riscv_vm_vk,
+                proof,
+                Arc::clone(keygen_program),
+                global_chain[i],
+                self.final_deferred_digest,
+                self.vk_root,
+            );
+            let setup_ms = t1.elapsed().as_millis();
+            let t2 = std::time::Instant::now();
+            let ctx = build_proving_ctx(&record, &self.chips, "convert");
+            let tracegen_ms = t2.elapsed().as_millis();
+            let t3 = std::time::Instant::now();
+            let result = self
+                .engine
+                .prove(&d_pk, ctx)
+                .map(|convert_proof| (convert_proof, vk.clone()))
+                .map_err(|e| eyre::eyre!("{e:?}"));
+            tracing::info!(
+                "convert_timing proof: transport_ms = {transport_ms}, setup_ms = {setup_ms}, \
                      tracegen_ms = {tracegen_ms}, prove_ms = {}",
-                    t3.elapsed().as_millis()
-                );
-                result
-            })
-            .collect()
+                t3.elapsed().as_millis()
+            );
+            result
+        })
     }
 
     /// VK from the first registered PK.
@@ -665,11 +704,11 @@ impl MissTiming {
 #[cfg(feature = "cuda")]
 static CONVERT_WHITELIST_MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
-/// The core ladder row the whitelist-mode warmup keygens: row 3 holds 629 of the 4,256 corpus CPU
+/// The core ladder row the whitelist-mode warmup keygens: row 5 holds 420 of the 3,047 corpus CPU
 /// chunks (`MLE_CORE_LADDER`). Any row serves the warmup's purpose; this one is the likeliest
 /// cache hit.
 #[cfg(feature = "cuda")]
-const WARMUP_CORE_CLASS: usize = 3;
+const WARMUP_CORE_CLASS: usize = 5;
 
 #[cfg(feature = "cuda")]
 fn convert_whitelist_mode() -> bool {
@@ -735,6 +774,8 @@ impl GpuConvertMachine {
         params: SystemParams,
         vk_verification: bool,
     ) -> Self {
+        // As in the CPU machine: the convert program's row count assumes the audited Global bus.
+        assert_global_bus(&riscv_vk.inner);
         if CONVERT_WHITELIST_MODE.set(vk_verification).is_err() {
             assert_eq!(
                 convert_whitelist_mode(),
@@ -807,9 +848,14 @@ impl GpuConvertMachine {
             let class = crate::mle::machine::shape::MLE_CORE_LADDER[WARMUP_CORE_CLASS];
             crate::mle::machine::riscv::per_air_log_heights_of(class, num_airs)
         } else {
-            // l_skip + 1 keeps every air's hypercube_dim positive while staying tiny.
-            let l_skip = self.riscv_vk.inner.params.l_skip;
-            vec![Some(l_skip + 1); num_airs]
+            // l_skip + 1 keeps every air's hypercube_dim positive while staying tiny. The
+            // Global air has one height at an operating point, and no convert program exists
+            // for another.
+            let params = &self.riscv_vk.inner.params;
+            let mut heights = vec![Some(params.l_skip + 1); num_airs];
+            heights[crate::mle::machine::riscv::air_id::GLOBAL] =
+                Some(pico_mle_core::global_logup::global_log_height(params));
+            heights
         };
         let layout = crate::mle::machine::recursion::extract_recursion_vk_layout_from_heights(
             &self.riscv_vk,
@@ -988,14 +1034,25 @@ impl GpuConvertMachine {
 
     /// Prove ONE riscv proof into a convert proof (FRI-model, per-chunk), paired with the
     /// convert vk it verifies under.
-    pub fn prove_one(&self, proof: &Proof<Sc>) -> eyre::Result<ProofWithVk> {
-        let prepared = self.prepare_one(proof);
+    pub fn prove_one(
+        &self,
+        proof: &Proof<Sc>,
+        global_chain_in: [Kb; DIGEST_SIZE],
+    ) -> eyre::Result<ProofWithVk> {
+        let prepared = self.prepare_one(proof, global_chain_in);
         self.prove_prepared(prepared)
     }
 
     /// CPU stage of the per-chunk pipeline (the FRI convert-preparer role): layout extraction,
     /// keygen-cache lookup, and the recursion emulation producing the record. Runs off the GPU.
-    pub fn prepare_one(&self, proof: &Proof<Sc>) -> GpuPreparedConvert {
+    ///
+    /// `global_chain_in` is the global LogUp's chain value after the chunks before this one
+    /// ([`chain_values`]).
+    pub fn prepare_one(
+        &self,
+        proof: &Proof<Sc>,
+        global_chain_in: [Kb; DIGEST_SIZE],
+    ) -> GpuPreparedConvert {
         let t_extract = std::time::Instant::now();
         let layout = extract_recursion_vk_layout(&self.riscv_vk, Some(proof));
         let extract_us = t_extract.elapsed().as_micros();
@@ -1026,6 +1083,7 @@ impl GpuConvertMachine {
             &self.riscv_vm_vk,
             proof,
             Arc::clone(&entry.0),
+            global_chain_in,
             self.final_deferred_digest,
             self.vk_root,
         );

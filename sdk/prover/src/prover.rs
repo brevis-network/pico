@@ -19,12 +19,9 @@ use pico_mle_core::{
 #[cfg(feature = "cuda")]
 use pico_vm::proverchain::riscv::default_pipeline_workers;
 use pico_vm::{
-    compiler::{
-        program::ProgramBehavior,
-        riscv::{
-            compiler::{Compiler, SourceType},
-            program::Program,
-        },
+    compiler::riscv::{
+        compiler::{Compiler, SourceType},
+        program::Program,
     },
     emulator::{
         opts::{EmulatorOpts, ReplayWorkers, SnapshotMainMode},
@@ -35,16 +32,17 @@ use pico_vm::{
         },
     },
     instances::chiptype::riscv_chiptype::RiscvChipType,
-    machine::{chip::ChipBehavior, report::EmulationReport, septic::SepticDigest},
+    machine::{chip::ChipBehavior, report::EmulationReport},
     mle::machine::{
         apex::MleApexVerifier,
         combine::CombineMachine,
         compress::CompressMachine,
         convert::{ConvertMachine, ProofWithVk},
         exe::RiscvVmVk,
+        global_logup_nodes::GlobalLogUpNodeMachine,
         recursion::extract_recursion_vk_layout,
         riscv::{self, RiscvMachine, RiscvProof},
-        vk_bundle::encode_vk_bundle_v2,
+        vk_bundle::encode_vk_bundle_v3,
         vk_map::{vk_identity, MleVkMap, VkMapError},
     },
     primitives::consts::MAX_LOG_NUMBER_OF_CHUNKS,
@@ -78,9 +76,12 @@ pub(crate) const WHITELIST_LOG_STACKED_HEIGHT: usize = riscv::DEFAULT_LOG_STACKE
 /// precompile events at the sequencer (`vm/src/emulator/opts.rs`).
 const CHUNK_BATCH_SIZE: u32 = 1;
 
-/// Chunks proved at once. Stated rather than left to `PROVE_CONCURRENCY`, which the VM would
-/// otherwise consult; the value is the VM's own default.
-const DEFAULT_CONCURRENCY: NonZeroUsize = NonZeroUsize::new(4).unwrap();
+/// Chunks proved at once when [`ProverBuilder::concurrency`] is not called. Stated rather than
+/// left to `PROVE_CONCURRENCY`, which the VM would otherwise consult; the value is the VM's own
+/// default: up to 4, fewer on a host of less than 20 GiB, 1 in a `cuda` build.
+fn default_concurrency() -> NonZeroUsize {
+    NonZeroUsize::new(riscv::default_prove_concurrency()).expect("at least one chunk at a time")
+}
 
 /// Most replay workers a build runs without being told how many. Each holds the snapshot memory of
 /// the batch it replays, so the default stops here rather than following the core count up on a
@@ -94,7 +95,9 @@ pub(crate) const DEFAULT_MAX_EMULATION_WORKERS: usize = 16;
 ///
 /// In whitelist mode convert keys take [`MAX_RETAINED_WHITELIST_CONVERT_KEYS`], combine node keys
 /// are kept (they are among the [`CombineMachine::standard_node_count`] standard nodes, each
-/// keygened the first time a tree needs it, about 0.27 GiB of host memory per node key), and
+/// keygened the first time a tree needs it, about 0.27 GiB of host memory per node key), the
+/// global LogUp's node keys are kept too (at most a group node per group size and an image node
+/// per image tier, in either mode), and
 /// compress and embed keep this bound (in whitelist mode compress has one key, the whitelist's
 /// compress leaf).
 const MAX_RETAINED_KEYS: usize = 16;
@@ -284,7 +287,7 @@ impl ProverBuilder {
             elf: elf.to_vec(),
             log_stacked_height: riscv::DEFAULT_LOG_STACKED_HEIGHT,
             chunk_size: None,
-            concurrency: DEFAULT_CONCURRENCY,
+            concurrency: default_concurrency(),
             verify_keys: false,
             vk_map: None,
             trusted_vk_root: None,
@@ -323,19 +326,28 @@ impl ProverBuilder {
         self
     }
 
-    /// How many RISC-V chunks are proved at once. Defaults to 4, in both modes.
+    /// How many proofs are in flight at once: RISC-V chunks, and on the host the recursion
+    /// proofs after them, the convert leaves and the nodes of each layer of the tree. Defaults
+    /// to a count taken from the host's memory, 4 at most (below), in both modes; to 1 in a
+    /// `cuda` build, where a card proves one chunk at a time and the recursion proofs are not
+    /// bounded.
     ///
     /// Always passed through as an argument, so `PROVE_CONCURRENCY` never decides it. The bound
-    /// caps the RISC-V phase's peak memory: one full proving working set per in-flight chunk. It
-    /// does not reach [`Phase::Convert`], which proves every chunk's recursion proof at once.
+    /// caps the peak memory of each phase: one full proving working set per in-flight proof.
+    /// Key generation is outside it: the convert programs of a run, one per distinct chunk
+    /// shape, are keygen'd together before the leaves are proved.
     ///
-    /// Measured peak resident memory proving reth block 18884864 (9 RISC-V chunks plus 6
-    /// precompile chunks) to [`Phase::Combine`] in whitelist mode at the default stacked height,
-    /// with the peak in the RISC-V phase each time: 124 GiB at 1, 150 GiB at 2 and 261 GiB at 4.
-    /// 4 is the largest of 1, 2 and 4 whose peak stays within 75% of a 920 GiB machine; a smaller
-    /// machine needs a lower setting. With every chunk forced onto the catch-all shape, proving
-    /// one at a time peaks at about 413 GiB (measured to [`Phase::Riscv`]), so a block whose chunks
-    /// fall to the catch-all should be proved at concurrency 1 even there.
+    /// Peak resident memory proving reth block 18884864 (9 RISC-V chunks plus 6 precompile
+    /// chunks) to [`Phase::Combine`] in whitelist mode at the default stacked height, with the
+    /// peak in the RISC-V phase each time: 124 GiB at 1, 150 GiB at 2 and 261 GiB at 4. 4 is the
+    /// largest of 1, 2 and 4 whose peak stays within 75% of a 920 GiB machine; a smaller machine
+    /// needs a lower setting. Left unset, the builder takes 4 only where the host's memory (or
+    /// its container's limit) is 20 GiB or more, and fewer below that, down to 1: a floor for
+    /// small guests, not a measure of this one. With every chunk forced onto the catch-all
+    /// shape, proving one at a time peaks at about 413 GiB (measured to [`Phase::Riscv`]), so a
+    /// block whose chunks fall to the catch-all should be proved at concurrency 1 even there.
+    /// Every figure of reth here was taken with the 3.0 CPU prover and has not been measured
+    /// since.
     pub fn concurrency(mut self, n: NonZeroUsize) -> Self {
         self.concurrency = n;
         self
@@ -660,8 +672,20 @@ impl ProverBuilder {
         check_preprocessed_fit(&airs, self.log_stacked_height)?;
 
         let machine = RiscvMachine::from_airs(airs, self.log_stacked_height, self.verify_keys)?
+            .try_with_program(&program)
+            .map_err(|err| {
+                ProveError::InconsistentOptions(format!(
+                    "{err}, at log_stacked_height {}",
+                    self.log_stacked_height
+                ))
+            })?
             .with_concurrency(self.concurrency);
-        let riscv_vm_vk = RiscvVmVk::from_program_and_vk(&program, machine.vk());
+        // The machine committed the program's memory image when it was given the program; the
+        // identity is assembled from that commitment rather than committing the image again.
+        let program_identity = machine
+            .program_identity()
+            .expect("the machine was given its program");
+        let riscv_vm_vk = RiscvVmVk::from_identity(machine.vk(), &program_identity);
         let program_id = ProgramId(digest_words(&riscv_vm_vk.digest()));
         let expected_vk_pre_hash = machine.vk().pre_hash;
         // Every id keygen marked, so the recomputed pre-hash and the commitments pinned beside it
@@ -675,9 +699,8 @@ impl ProverBuilder {
                     .map(|prep| (id, prep.commit))
             })
             .collect();
-        let initial_gcs = program.initial_global_cumulative_sum();
 
-        let combine = combine_machine(riscv_vm_vk.clone(), self.verify_keys);
+        let combine = combine_machine(riscv_vm_vk.clone(), self.verify_keys, self.concurrency);
 
         // One verifier for every later `verify_artifact`, rather than one engine per proof checked.
         let apex = vk_map.as_ref().map(|map| {
@@ -708,11 +731,14 @@ impl ProverBuilder {
             program_id,
             expected_vk_pre_hash,
             expected_app_commits,
-            initial_gcs,
+            program_identity,
             convert: None,
+            global_logup_nodes: None,
             combine,
             apex,
             compress: None,
+            #[cfg(test)]
+            earlier: None,
             #[cfg(feature = "cuda")]
             gpu_compress: None,
             #[cfg(feature = "multi-field-transcript")]
@@ -915,12 +941,18 @@ impl ProverBuilder {
     }
 }
 
-fn combine_machine(riscv_vm_vk: RiscvVmVk, verify_keys: bool) -> CombineMachine {
-    CombineMachine::new(
+fn combine_machine(
+    riscv_vm_vk: RiscvVmVk,
+    verify_keys: bool,
+    concurrency: NonZeroUsize,
+) -> CombineMachine {
+    let mut combine = CombineMachine::new(
         recursion_params_with_128_bits_security(),
         riscv_vm_vk,
         verify_keys,
-    )
+    );
+    combine.set_concurrency(concurrency);
+    combine
 }
 
 fn compile(elf: &[u8]) -> Result<Arc<Program>, ProveError> {
@@ -1189,10 +1221,13 @@ pub struct Prover {
     program_id: ProgramId,
     expected_vk_pre_hash: [Kb; 8],
     expected_app_commits: Vec<(usize, [Kb; 8])>,
-    initial_gcs: SepticDigest<Kb>,
+    program_identity: riscv::ProgramIdentity,
     /// Built on the first prove that reaches [`Phase::Convert`], then extended in place, so a
     /// layout a later run repeats is keyed once while its key is retained.
     convert: Option<ConvertMachine>,
+    /// The prover of the global LogUp's nodes, which lead the tree; built on the first prove
+    /// that reaches [`Phase::Combine`].
+    global_logup_nodes: Option<GlobalLogUpNodeMachine>,
     combine: CombineMachine,
     /// The whitelist verifier, built with the map rather than per call. `None` without a
     /// whitelist, where [`Self::verify_artifact`] falls back to the machine that keygen'd.
@@ -1214,6 +1249,10 @@ pub struct Prover {
     /// The GPU prove's replay workers.
     #[cfg(feature = "cuda")]
     gpu_emulation_workers: NonZeroUsize,
+    /// Tests only ([`Self::prove_to_keeping_earlier`]): while set, a run that goes past RISC-V
+    /// keeps its RISC-V proof here, and one that goes past Combine its combine root.
+    #[cfg(test)]
+    earlier: Option<Vec<Proof>>,
 }
 
 impl std::fmt::Debug for Prover {
@@ -1276,7 +1315,7 @@ impl Prover {
             .ok_or(ProveError::WhitelistModeRequired {
                 what: "a VK bundle",
             })?;
-        encode_vk_bundle_v2(&self.riscv_vm_vk, map)
+        encode_vk_bundle_v3(&self.riscv_vm_vk, map)
             .map_err(|e| ProveError::Format(format!("cannot encode the VK bundle: {e}")))
     }
 
@@ -1345,6 +1384,52 @@ impl Prover {
     /// chain (compress, embed, wrap).
     pub fn prove(&mut self, stdin: Stdin) -> Result<Proof, ProveError> {
         self.prove_to(stdin, Phase::Combine)
+    }
+
+    /// Tests only: [`Self::prove_to`], which also returns the RISC-V proof and the combine root of
+    /// the run when `phase` is past them, each as `prove_to` at that phase returns it for this
+    /// input. In order: RISC-V, Combine, then `phase`'s own proof, last. A run to a later phase
+    /// proves every earlier one and a proof carries its own phase alone, so a test that needs the
+    /// chain's proofs at several phases takes them from one run.
+    ///
+    /// A `cuda` build's whitelist-mode run to Combine or Compress goes through the GPU pipeline,
+    /// which keeps none: the result is that run's own proof alone.
+    #[cfg(test)]
+    pub(crate) fn prove_to_keeping_earlier(
+        &mut self,
+        stdin: Stdin,
+        phase: Phase,
+    ) -> Result<Vec<Proof>, ProveError> {
+        self.earlier = Some(Vec::new());
+        let proved = self.prove_to(stdin, phase);
+        let earlier = self.earlier.take().expect("set above");
+        let last = proved?;
+        // `prove_to` puts the run's count on the proof it returns.
+        let misaligned_accesses = last.misaligned_accesses;
+        Ok(earlier
+            .into_iter()
+            .map(|proof| Proof {
+                misaligned_accesses,
+                ..proof
+            })
+            .chain([last])
+            .collect())
+    }
+
+    /// Tests only. Under [`Self::prove_to_keeping_earlier`], makes with `make` the proof of a run
+    /// that stops at the phase the caller is at, and keeps it. Otherwise does nothing, and `make`
+    /// is not called.
+    #[cfg(test)]
+    fn keep_earlier(
+        &mut self,
+        make: impl FnOnce(&Self) -> Result<Proof, ProveError>,
+    ) -> Result<(), ProveError> {
+        let Some(mut earlier) = self.earlier.take() else {
+            return Ok(());
+        };
+        let kept = make(self).map(|proof| earlier.push(proof));
+        self.earlier = Some(earlier);
+        kept
     }
 
     /// Prove up to `phase`, verify the result, and bind the guest's output to it.
@@ -1431,7 +1516,8 @@ impl Prover {
             convert.pks.drain(..excess);
         }
         if !self.verify_keys && self.combine.num_distinct_shapes() > MAX_RETAINED_KEYS {
-            self.combine = combine_machine(self.riscv_vm_vk.clone(), self.verify_keys);
+            self.combine =
+                combine_machine(self.riscv_vm_vk.clone(), self.verify_keys, self.concurrency);
         }
         if self
             .compress
@@ -1464,22 +1550,27 @@ impl Prover {
     ) -> Result<Proof, ProveError> {
         check_chips_provable(&records)?;
         self.riscv.check_chunk_shapes(&records)?;
-        let bundle = self.riscv.prove_owned(records);
-        // The GPU path may prove with this machine too (see `prove_root_gpu`); its streaming GCS
-        // drain must not see this batch's terms.
-        self.riscv.discard_chunk_gcs_terms();
-        let bundle = bundle.map_err(|e| ProveError::proving(Phase::Riscv, e.to_string()))?;
+        let bundle = self
+            .riscv
+            .prove_owned(records)
+            .map_err(|e| ProveError::proving(Phase::Riscv, e.to_string()))?;
         self.riscv
-            .verify(&bundle, self.initial_gcs)
+            .verify(&bundle)
             .map_err(|e| ProveError::verification(Phase::Riscv, e.to_string()))?;
         binding::ensure_exit_code_zero(binding::public_values(&bundle.chunk_proofs))?;
 
         if phase == Phase::Riscv {
-            return self.riscv_proof(bundle, committed, Some(1));
+            return self.stopped_at_riscv(bundle, committed);
         }
+        #[cfg(test)]
+        self.keep_earlier(|this| this.stopped_at_riscv(bundle.clone(), committed.clone()))?;
         let chunk_count = Some(bundle.chunk_proofs.len());
 
-        let (riscv_vk, riscv_proofs) = bundle.into_parts();
+        let RiscvProof {
+            vk: riscv_vk,
+            chunk_proofs: riscv_proofs,
+            global: riscv_global,
+        } = bundle;
         self.bound_key_caches();
         let vk_map = self.vk_map.clone();
         // `new` keygens one circuit per distinct RISC-V proof layout and `register_layouts` only
@@ -1504,6 +1595,9 @@ impl Prover {
                 .map_err(|e| ProveError::proving(Phase::Convert, e.to_string()))?,
             ),
         };
+
+        // The leaves are proved as many at once as the chunks were.
+        convert.set_concurrency(self.concurrency);
 
         if let Some(map) = &vk_map {
             // Checked before anything is proved under the new keys. They are dropped again, so a
@@ -1577,18 +1671,53 @@ impl Prover {
             self.combine.set_vk_map(map);
         }
 
+        // The global LogUp's nodes lead the tree: the image node, then the group nodes. They
+        // wrap the second phase of the RISC-V proof, verified above with the chunk proofs.
+        let vk_root = self.vk_map.as_ref().map(|map| map.root());
+        let global_logup_nodes = self.global_logup_nodes.get_or_insert_with(|| {
+            GlobalLogUpNodeMachine::new(
+                recursion_params_with_128_bits_security(),
+                &self.riscv.vk().inner.params,
+                self.verify_keys,
+            )
+        });
+        if let Some(root) = vk_root {
+            global_logup_nodes.set_vk_root(root);
+        }
+        let mut leaves = global_logup_nodes
+            .prove(
+                &self.riscv_vm_vk,
+                &riscv_proofs,
+                &riscv_global,
+                // The deferred chain's start: these nodes come before any deferred node.
+                Default::default(),
+            )
+            .map_err(|e| ProveError::proving(Phase::Combine, format!("{e:#}")))?;
+        if let Some(map) = &self.vk_map {
+            let missing = not_whitelisted(map, leaves.iter().map(|(_, vk)| &**vk));
+            if missing > 0 {
+                return Err(ProveError::KeyNotWhitelisted {
+                    phase: Phase::Combine,
+                    missing,
+                });
+            }
+        }
+        leaves.extend(convert_proofs);
         let root = self
             .combine
-            .prove_tree(convert_proofs)
+            .prove_tree(leaves)
             .map_err(|e| ProveError::proving(Phase::Combine, format!("{e:#}")))?;
         self.combine
             .verify(&root)
             .map_err(|e| ProveError::verification(Phase::Combine, format!("{e:#}")))?;
 
         if phase == Phase::Combine {
-            let shapes = Some(self.combine.num_distinct_shapes());
-            return self.combine_proof(Box::new(root), committed, chunk_count, shapes);
+            return self.stopped_at_combine(root, committed, chunk_count);
         }
+        #[cfg(test)]
+        self.keep_earlier(|this| {
+            this.stopped_at_combine(root.clone(), committed.clone(), chunk_count)
+        })?;
         // The chain goes on through compress: its proof is the one handed out, and embed's child.
         let (compress, shapes) = self.compress_root(root)?;
         if phase == Phase::Compress {
@@ -1746,6 +1875,26 @@ impl Prover {
         ))
     }
 
+    /// The proof of a run that stops at RISC-V.
+    fn stopped_at_riscv(
+        &self,
+        bundle: RiscvProof,
+        committed: Vec<u8>,
+    ) -> Result<Proof, ProveError> {
+        self.riscv_proof(bundle, committed, Some(1))
+    }
+
+    /// The proof of a run that stops at Combine, around its verified `root`.
+    fn stopped_at_combine(
+        &self,
+        root: ProofWithVk,
+        committed: Vec<u8>,
+        chunk_count: Option<usize>,
+    ) -> Result<Proof, ProveError> {
+        let shapes = Some(self.combine.num_distinct_shapes());
+        self.combine_proof(Box::new(root), committed, chunk_count, shapes)
+    }
+
     /// A verified RISC-V bundle as a [`Proof`], once `committed` is bound to it.
     fn riscv_proof(
         &self,
@@ -1761,7 +1910,7 @@ impl Prover {
             bound,
             chunk_count,
             distinct_shapes,
-            Payload::Riscv(bundle),
+            Payload::Riscv(Box::new(bundle)),
         ))
     }
 
@@ -1931,7 +2080,7 @@ impl Prover {
     ///
     /// | phase | what this does | what the committed bytes are then bound to |
     /// |---|---|---|
-    /// | [`Phase::Riscv`] | verifies against keys derived from **this prover's** ELF — sound in a fresh process — then refuses any chunk whose public values carry an exit code other than 0, with [`ProveError::NonZeroExitCode`] | a set of chunks, each proved and each carrying exit code 0 in its public values, whose global cumulative sums cancel the program's initial one. Whether they form one run that reached its halt is what [`Proof::binds_complete_execution`] reports, and it is false here |
+    /// | [`Phase::Riscv`] | verifies against keys derived from **this prover's** ELF — sound in a fresh process — then refuses any chunk whose public values carry an exit code other than 0, with [`ProveError::NonZeroExitCode`] | a set of chunks, each proved and each carrying exit code 0 in its public values, whose cross-chunk events balance against the program's memory image. Whether they form one run that reached its halt is what [`Proof::binds_complete_execution`] reports, and it is false here |
     /// | [`Phase::Combine`] | verifies against the pinned whitelist, or against the shapes this prover keygen'd while proving and still retains; with neither, [`ProveError::WhitelistRequired`] | one complete execution: the root carries `flag_complete`, so the in-circuit continuity and halting asserts ran |
     /// | [`Phase::Compress`] | verifies against the pinned whitelist (the compress key is a whitelist leaf, checked by the apex under the compress preset), or against the compress shape this prover keygen'd while proving and still retains; with neither, [`ProveError::WhitelistRequired`] | the same complete execution as the root it re-proves: the public values are the root's, unchanged |
     ///
@@ -1963,16 +2112,15 @@ impl Prover {
 
         match payload {
             LoadedPayload::Riscv(bundle) => {
-                binding::ensure_chunk_gcs(binding::public_values(&bundle.chunk_proofs))?;
                 riscv::verify_riscv(
                     &bundle,
                     self.expected_vk_pre_hash,
                     &self.expected_app_commits,
-                    self.initial_gcs,
+                    &self.program_identity,
                 )
                 .map_err(|e| ProveError::verification(phase, e.to_string()))?;
                 binding::ensure_exit_code_zero(binding::public_values(&bundle.chunk_proofs))?;
-                self.riscv_proof(bundle, committed, None)
+                self.riscv_proof(*bundle, committed, None)
             }
             LoadedPayload::Combine(root) => {
                 self.verify_root(&root)?;

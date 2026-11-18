@@ -392,6 +392,7 @@ pub fn strip(spans: &[Span], cell_us: u64, cells: usize, window_us: u64) -> Vec<
             WorkKind::ProveRiscv,
             WorkKind::ProveConvert,
             WorkKind::ProveCombine,
+            WorkKind::ProveGlobalLogUp,
         ]
         .into_iter()
         .filter(|work| fig.busy_by_work.contains_key(work.as_str()))

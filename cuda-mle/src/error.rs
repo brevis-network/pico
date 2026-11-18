@@ -60,6 +60,13 @@ pub enum StackedReductionError {
 
 #[derive(Error, Debug)]
 pub enum LogupZerocheckError {
+    #[error(
+        "the proving context carries external LogUp challenges exactly when the key is in the \
+         external challenge mode"
+    )]
+    LogUpChallengeModeMismatch,
+    #[error("an external-mode proof needs at least one interaction")]
+    ExternalModeWithoutInteractions,
     #[error(transparent)]
     MemCopy(#[from] MemCopyError),
     #[error("proof-of-work grinding failed: {0}")]

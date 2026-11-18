@@ -109,7 +109,9 @@ pub mod rs_stream {
 }
 
 pub mod data_transporter;
-pub use data_transporter::transport_row_major_ctx_to_device;
+pub use data_transporter::{
+    transport_row_major_ctx_to_device, transport_row_major_ctx_with_cached_to_device,
+};
 pub mod hash_scheme;
 pub mod logup_zerocheck;
 pub mod merkle_tree;
@@ -130,7 +132,11 @@ mod error;
 mod gpu_backend;
 mod pkey;
 mod types;
-pub use cuda::{field_kernels::FieldKernels, jit::jit_cache_len, matrix::matrix_transpose_fp_any};
+pub use cuda::{
+    field_kernels::FieldKernels,
+    jit::jit_cache_len,
+    matrix::{batch_expand_pad_any, matrix_transpose_fp_any},
+};
 pub use device::*;
 pub use engine::*;
 pub use error::*;

@@ -72,7 +72,7 @@ fn read(record: &EmulationRecord) -> Reading {
         natural: mle_natural_heights(&augmented),
         heights: RiscvChipType::<Kb>::riscv_heights(&augmented),
         less_than_ops,
-        estimate: format!("{:?}", EventSizeCapture::snapshot(record, "kb").estimate()),
+        estimate: format!("{:?}", EventSizeCapture::snapshot(record).estimate()),
         stats: record.stats().into_iter().collect(),
         branches: record
             .history
@@ -137,7 +137,7 @@ fn batches(guest: &Guest, run: &Run, batch_size: u32) -> RunReading {
         let mut chunks = 0;
         let report = emulator
             .emulate_batch(&mut |record: EmulationRecord| {
-                expected_estimates.push(EventSizeCapture::snapshot(&record, "kb").estimate());
+                expected_estimates.push(EventSizeCapture::snapshot(&record).estimate());
                 if record.is_cpu_chunk {
                     out.records.push((
                         record.is_cpu_chunk,

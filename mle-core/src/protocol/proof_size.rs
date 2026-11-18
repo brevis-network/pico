@@ -17,6 +17,7 @@ use thiserror::Error;
 
 use crate::{
     config::{StarkProtocolConfig, SystemParams},
+    interaction::LogUpChallengeMode,
     keygen::types::MultiStarkVerifyingKeyInner,
     protocol::{
         codec::{EncodableConfig, Encode},
@@ -267,9 +268,14 @@ impl ProofShape {
             + self.num_airs * len
             + self.num_public_values * f;
 
-        // Grinding witness, root denominator, per-layer claims, and layer j's j cubic rounds.
+        // Grinding witness (internal challenge mode) or root numerator (external), root
+        // denominator, per-layer claims, and layer j's j cubic rounds.
         let r = self.num_gkr_rounds;
-        let gkr = f + ef + len + r * 4 * ef + r * r.saturating_sub(1) / 2 * 3 * ef;
+        let root_lead = match params.logup.challenge_mode {
+            LogUpChallengeMode::Internal => f,
+            LogUpChallengeMode::External => ef,
+        };
+        let gkr = root_lead + ef + len + r * 4 * ef + r * r.saturating_sub(1) / 2 * 3 * ef;
 
         // Numerator and denominator terms, the univariate round, the multilinear rounds, and the
         // column openings of each present AIR's parts.
@@ -320,6 +326,64 @@ impl ProofShape {
 
         preamble + gkr + batch_constraint + stacking + whir
     }
+
+    /// Expected bytes of a proof of this shape in the multiproof form
+    /// ([`crate::protocol::multiproof`]), rounded to the nearest byte. Unlike [`Self::encoded_len`]
+    /// it is not exact: how many siblings a tree's multiproof needs depends on where the queries
+    /// land, and query indices are uniform and independent, so this is the mean. The flat paths'
+    /// digests are replaced by the expected pruned ones, plus the version, the initial depth and
+    /// one u32 per query index.
+    pub fn expected_multiproof_len<SC: EncodableConfig>(&self, params: &SystemParams) -> usize {
+        let digest = encoded(|w| SC::encode_digest(&SC::Digest::default(), w)) as f64;
+        let k = params.k_whir();
+        let queries: Vec<usize> = params.whir.rounds.iter().map(|r| r.num_queries).collect();
+        let commits = self.stacking_widths.len();
+        let depth0 = (params.log_stacked_height() + params.log_blowup).saturating_sub(k);
+
+        // Trees per round: the initial round's commitments, then one codeword tree per round.
+        let trees = |round: usize| if round == 0 { commits } else { 1 };
+        let mut pruned = 0f64;
+        for (round, &q) in queries.iter().enumerate() {
+            let depth = depth0.saturating_sub(round);
+            pruned += trees(round) as f64 * expected_multiproof_siblings(q, depth);
+        }
+        (self.multiproof_len_without_siblings::<SC>(params) as f64 + pruned * digest).round()
+            as usize
+    }
+
+    /// The multiproof form's bytes other than its pruned siblings: exact for the shape.
+    fn multiproof_len_without_siblings<SC: EncodableConfig>(&self, params: &SystemParams) -> usize {
+        let digest = encoded(|w| SC::encode_digest(&SC::Digest::default(), w));
+        let word = encoded(|w| 0u32.encode(w));
+        let k = params.k_whir();
+        let queries: Vec<usize> = params.whir.rounds.iter().map(|r| r.num_queries).collect();
+        let commits = self.stacking_widths.len();
+        let depth0 = (params.log_stacked_height() + params.log_blowup).saturating_sub(k);
+        let flat: usize = queries
+            .iter()
+            .enumerate()
+            .map(|(round, &q)| {
+                let trees = if round == 0 { commits } else { 1 };
+                trees * q * depth0.saturating_sub(round)
+            })
+            .sum();
+        self.encoded_len::<SC>(params) - flat * digest
+            + 2 * word
+            + queries.iter().sum::<usize>() * word
+    }
+}
+
+/// Expected siblings a multiproof of `queries` uniform, independent leaves needs in a tree of
+/// `depth`. At a level of `n` nodes a node is reached with probability `1 - (1 - 1/n)^queries`; a
+/// sibling is sent exactly when one node of a pair is reached and the other is not, which for the
+/// `n/2` pairs has expectation `n · ((1 - 1/n)^queries - (1 - 2/n)^queries)`.
+pub fn expected_multiproof_siblings(queries: usize, depth: usize) -> f64 {
+    (0..depth)
+        .map(|level| {
+            let n = 2f64.powi((depth - level) as i32);
+            n * ((1.0 - 1.0 / n).powi(queries as i32) - (1.0 - 2.0 / n).powi(queries as i32))
+        })
+        .sum()
 }
 
 fn encoded(write: impl FnOnce(&mut Vec<u8>) -> std::io::Result<()>) -> usize {
@@ -343,6 +407,90 @@ mod tests {
     };
 
     type Engine = KoalaBearPoseidon2RefEngine<DuplexSponge>;
+
+    /// The expectation against the count itself, averaged over pseudo-random query sets, at the
+    /// compress proof's tree shapes and at small ones; and exact where it is known by hand.
+    #[test]
+    fn expected_multiproof_siblings_matches_sampling() {
+        assert!((expected_multiproof_siblings(1, 20) - 20.0).abs() < 1e-9);
+        assert!((expected_multiproof_siblings(1, 1) - 1.0).abs() < 1e-9);
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = |depth: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> (64 - depth)) as usize
+        };
+        for (queries, depth) in [(65, 20), (34, 19), (24, 18), (3, 5), (8, 3)] {
+            let samples = 4000;
+            let total: usize = (0..samples)
+                .map(|_| {
+                    let idx: Vec<usize> = (0..queries).map(|_| next(depth)).collect();
+                    crate::protocol::multiproof::sibling_count(&idx, depth).unwrap()
+                })
+                .sum();
+            let mean = total as f64 / samples as f64;
+            let expected = expected_multiproof_siblings(queries, depth);
+            assert!(
+                (mean - expected).abs() <= 0.01 * expected + 0.05,
+                "({queries}, {depth}): sampled {mean}, expected {expected}"
+            );
+        }
+    }
+
+    /// Everything but the pruned siblings is priced exactly: with a real proof's own sibling count
+    /// put in place of the expectation, the price is the multiproof's length.
+    #[test]
+    fn multiproof_is_priced_exactly_but_for_its_siblings() {
+        type Ref =
+            KoalaBearPoseidon2RefEngine<crate::config::koala_bear_poseidon2::DuplexSpongeRecorder>;
+        let engine = Ref::new(test_system_params_small(2, 5, 3));
+        let fixture = MixtureFixture::standard(
+            4,
+            KoalaBearPoseidon2Config::default_from_params(engine.params().clone()),
+        );
+        let (pk, vk) = fixture.keygen(&engine);
+        let proof = fixture.prove(&engine, &pk);
+        let walk = crate::verifier::replay_transcript(
+            engine.config(),
+            &vk,
+            &proof,
+            &mut engine.initial_transcript(),
+        )
+        .unwrap();
+        let mut bytes = Vec::new();
+        crate::protocol::multiproof::encode_multiproof(
+            &proof,
+            walk.whir_query_indices(),
+            &mut bytes,
+        )
+        .unwrap();
+
+        let params = engine.params();
+        let shape = ProofShape::from_proof(&vk.inner, &proof).unwrap();
+        let depth0 = (params.log_stacked_height() + params.log_blowup) - params.k_whir();
+        let siblings: usize = walk
+            .whir_query_indices()
+            .iter()
+            .enumerate()
+            .map(|(round, idx)| {
+                let trees = if round == 0 {
+                    shape.stacking_widths.len()
+                } else {
+                    1
+                };
+                trees * crate::protocol::multiproof::sibling_count(idx, depth0 - round).unwrap()
+            })
+            .sum();
+        let digest = encoded(|w| KoalaBearPoseidon2Config::encode_digest(&Default::default(), w));
+        assert_eq!(
+            shape.multiproof_len_without_siblings::<KoalaBearPoseidon2Config>(params)
+                + siblings * digest,
+            bytes.len()
+        );
+        let expected = shape.expected_multiproof_len::<KoalaBearPoseidon2Config>(params);
+        assert!(expected < shape.encoded_len::<KoalaBearPoseidon2Config>(params));
+    }
 
     fn assert_priced_exactly(
         vk: &MultiStarkVerifyingKeyInner<KoalaBearPoseidon2Config>,

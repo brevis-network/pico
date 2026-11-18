@@ -15,10 +15,7 @@ use pico_mle_core::{
     StarkEngine,
 };
 use pico_vm::{
-    compiler::{
-        program::ProgramBehavior,
-        riscv::compiler::{Compiler, SourceType},
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP, stdin::EmulatorStdin},
     mle::machine::{
@@ -26,6 +23,7 @@ use pico_vm::{
         compress::CompressMachine,
         convert::{ConvertMachine, ProofWithVk},
         exe::RiscvVmVk,
+        global_logup_nodes::prove_global_logup_nodes,
         riscv::{self, air_id, RiscvProof},
     },
     primitives::consts::RECURSION_NUM_PVS,
@@ -97,12 +95,11 @@ fn direct_chain(n: u32) -> Direct {
         false,
     )
     .expect("riscv prove");
-    let initial_gcs = program.initial_global_cumulative_sum();
     riscv::verify_riscv(
         &bundle,
         bundle.vk.pre_hash,
         &[(air_id::PROGRAM, riscv::riscv_program_commit(&bundle.vk))],
-        initial_gcs,
+        &riscv::ProgramIdentity::new(&program, &bundle.vk.inner.params).expect("the image fits"),
     )
     .expect("riscv verify");
 
@@ -117,6 +114,7 @@ fn direct_chain(n: u32) -> Direct {
     let keep = RiscvProof {
         vk: bundle.vk.clone(),
         chunk_proofs: bundle.chunk_proofs.clone(),
+        global: bundle.global.clone(),
     };
     let (riscv_vk, riscv_proofs) = bundle.into_parts();
 
@@ -140,7 +138,11 @@ fn direct_chain(n: u32) -> Direct {
         riscv_vm_vk.clone(),
         false,
     );
-    let root = combine.prove_tree(convert_proofs).expect("combine prove");
+    // The global LogUp's nodes lead the tree, ahead of the chunks' leaves.
+    let mut leaves = prove_global_logup_nodes(&keep, &riscv_vm_vk, Default::default())
+        .expect("global LogUp nodes");
+    leaves.extend(convert_proofs);
+    let root = combine.prove_tree(leaves).expect("combine prove");
     combine.verify(&root).expect("combine verify");
 
     let mut compress =
@@ -190,8 +192,9 @@ fn as_proof(facts: &Facts, phase: Phase, payload: Payload) -> Proof {
 }
 
 /// The facade proves the same thing the chain does, and each side's proof is accepted by the
-/// other. The container round-trips through a fresh process, and its two version fields are
-/// checked before any verification runs.
+/// other. It proves twice on one prover, to compress and then to combine, so the second run goes
+/// through the machines and keys the first one built. The container round-trips through a fresh
+/// process, and its two version fields are checked before any verification runs.
 #[test]
 #[cfg_attr(
     feature = "cuda",
@@ -205,16 +208,48 @@ fn the_facade_proves_what_the_direct_chain_proves() {
     let direct = direct_chain(N);
     assert_is_fib_output(&direct.facts.committed, N);
 
+    // Two runs of the facade on one prover. The first goes to compress, and a run to a later
+    // phase proves every earlier one, so it also gives the RISC-V proof and the combine root it
+    // went past. The second stops at combine. It goes through the convert, global-LogUp-node
+    // and combine machines the first built, on a prover that also holds the first run's
+    // compress machine.
     let mut prover = builder().build().expect("prover");
-    let riscv_proof = prover
-        .prove_to(Stdin::from(&N), Phase::Riscv)
-        .expect("facade riscv");
-    // Every proof this prover makes reports the run's misaligned accesses: fib makes none.
-    assert_eq!(riscv_proof.misaligned_accesses(), Some(0));
+    let mut run = prover
+        .prove_to_keeping_earlier(Stdin::from(&N), Phase::Compress)
+        .expect("facade compress")
+        .into_iter();
+    let (Some(riscv_proof), Some(root_on_the_way), Some(compress_proof), None) =
+        (run.next(), run.next(), run.next(), run.next())
+    else {
+        panic!("a run to compress goes past RISC-V and combine, and ends at compress");
+    };
     let combine_proof = prover.prove(Stdin::from(&N)).expect("facade combine");
-    let compress_proof = prover
-        .prove_to(Stdin::from(&N), Phase::Compress)
-        .expect("facade compress");
+    // Every proof this prover returns reports its run's misaligned accesses: fib makes none.
+    assert_eq!(combine_proof.misaligned_accesses(), Some(0));
+    assert_eq!(compress_proof.misaligned_accesses(), Some(0));
+
+    // the combine root the first run went past says what the run that stopped there says
+    assert_eq!(root_on_the_way.phase(), Phase::Combine);
+    assert_eq!(root_on_the_way.program_id(), combine_proof.program_id());
+    assert_eq!(root_on_the_way.vk_pre_hash(), combine_proof.vk_pre_hash());
+    assert_eq!(
+        root_on_the_way.vk_merged_commit(),
+        combine_proof.vk_merged_commit()
+    );
+    assert_eq!(
+        root_on_the_way.committed_value_digest(),
+        combine_proof.committed_value_digest()
+    );
+    assert_eq!(
+        root_on_the_way.committed().as_bytes(),
+        combine_proof.committed().as_bytes()
+    );
+    assert_eq!(root_on_the_way.chunk_count(), combine_proof.chunk_count());
+    assert_eq!(root_on_the_way.proof_count(), combine_proof.proof_count());
+    assert_eq!(
+        root_on_the_way.distinct_shapes(),
+        combine_proof.distinct_shapes()
+    );
 
     // the two runs mean the same thing
     assert_eq!(riscv_proof.phase(), Phase::Riscv);
@@ -287,10 +322,13 @@ fn the_facade_proves_what_the_direct_chain_proves() {
             air_id::PROGRAM,
             riscv::riscv_program_commit(&direct.riscv.vk),
         )],
-        Compiler::new(SourceType::RISCV, FIB_ELF)
-            .expect("elf")
-            .compile()
-            .initial_global_cumulative_sum(),
+        &riscv::ProgramIdentity::new(
+            &Compiler::new(SourceType::RISCV, FIB_ELF)
+                .expect("elf")
+                .compile(),
+            &direct.riscv.vk.inner.params,
+        )
+        .expect("the image fits"),
     )
     .expect("the facade's RISC-V bundle must verify under the direct path's trusted inputs");
 
@@ -299,10 +337,11 @@ fn the_facade_proves_what_the_direct_chain_proves() {
     as_proof(
         &direct.facts,
         Phase::Riscv,
-        Payload::Riscv(RiscvProof {
+        Payload::Riscv(Box::new(RiscvProof {
             vk: direct.riscv.vk.clone(),
             chunk_proofs: direct.riscv.chunk_proofs.clone(),
-        }),
+            global: direct.riscv.global.clone(),
+        })),
     )
     .write(&direct_riscv_file)
     .expect("write the direct bundle");
@@ -377,10 +416,11 @@ fn the_facade_proves_what_the_direct_chain_proves() {
     let mut forged = as_proof(
         &direct.facts,
         Phase::Riscv,
-        Payload::Riscv(RiscvProof {
+        Payload::Riscv(Box::new(RiscvProof {
             vk: direct.riscv.vk.clone(),
             chunk_proofs: direct.riscv.chunk_proofs.clone(),
-        }),
+            global: direct.riscv.global.clone(),
+        })),
     );
     forged.committed = vec![0xAB; direct.facts.committed.len()];
     forged
@@ -640,6 +680,7 @@ fn the_end_to_end_example_still_drives_the_machines_directly() {
         "riscv::verify_riscv(",
         "ConvertMachine::new(",
         "CombineMachine::new(",
+        "GlobalLogUpNodeMachine::new(",
         ".prove_tree(",
         "prove_compress_node(root,",
         "compress.prove(",

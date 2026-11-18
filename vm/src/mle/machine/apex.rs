@@ -88,7 +88,7 @@ impl MleApexVerifier {
 
     /// [`Self::new`] without the map: a proof's vk is authenticated by `members`, Merkle
     /// memberships under `trusted_root` of the keys a root or a compress proof can carry (the
-    /// combine, deferred and compress node keys). A member whose path does not reach
+    /// complete combine roots and the compress node key). A member whose path does not reach
     /// `trusted_root` is refused here, so later a match on identity is a proof of membership.
     pub fn with_members(
         params: SystemParams,
@@ -247,13 +247,10 @@ mod tests {
     };
 
     use super::MleApexVerifier;
-    use crate::{
-        machine::septic::SepticDigest,
-        mle::machine::{
-            exe::RiscvVmVk,
-            recursion::{Engine, Kb, Sc},
-            vk_map::{vk_identity, MleVkMap},
-        },
+    use crate::mle::machine::{
+        exe::RiscvVmVk,
+        recursion::{Engine, Kb, Sc},
+        vk_map::{vk_identity, MleVkMap},
     };
 
     const A: u64 = 0;
@@ -289,7 +286,8 @@ mod tests {
         RiscvVmVk {
             program_commit: Default::default(),
             pc_start: [Kb::ZERO; 3],
-            initial_gcs: SepticDigest::<Kb>::zero(),
+            image_commit: Default::default(),
+            image_log_height: Kb::ZERO,
         }
     }
 

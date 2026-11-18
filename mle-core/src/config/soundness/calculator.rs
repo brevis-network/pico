@@ -16,6 +16,7 @@
 
 use crate::{
     config::{ProximityRegime, SystemParams, WhirConfig},
+    interaction::LogUpChallengeMode,
     WhirProximityStrategy,
 };
 
@@ -109,12 +110,19 @@ impl SoundnessCalculator {
         // log2_list_size is log2(L_{PCS}) where L_{PCS} is the list size with respect to the
         // proximity radius of the _initial_ WHIR round.
         let log2_list_size = init_prox_gap.log2_list_size;
-        let logup_bits = Self::logup_soundness(
-            params.logup.max_interaction_count,
-            params.logup.log_max_message_length,
-            challenge_field_bits,
-            log2_list_size,
-        ) + Self::effective_pow_bits(params.logup.pow_bits, base_field_order);
+        let logup_bits = match params.logup.challenge_mode {
+            LogUpChallengeMode::Internal => Self::logup_round_bits(
+                params,
+                base_field_order,
+                challenge_field_bits,
+                log2_list_size,
+            ),
+            // A proof in external mode neither draws the LogUp challenges nor grinds for them,
+            // and its sum is not asserted zero: the alpha/beta round is not part of this proof.
+            // It belongs to whoever derives the challenges and adds the sums up, and is
+            // accounted there ([`Self::global_logup_bits`]).
+            LogUpChallengeMode::External => f64::INFINITY,
+        };
 
         let gkr_sumcheck_bits =
             Self::calculate_gkr_sumcheck_soundness(challenge_field_bits, params.l_skip, n_logup);
@@ -174,6 +182,67 @@ impl SoundnessCalculator {
             whir_details,
             total_bits,
         }
+    }
+
+    /// The α/β round of a LogUp argument under `params`, with its grinding.
+    fn logup_round_bits(
+        params: &SystemParams,
+        base_field_order: f64,
+        challenge_field_bits: f64,
+        log2_list_size: f64,
+    ) -> f64 {
+        Self::logup_soundness(
+            params.logup.max_interaction_count,
+            params.logup.log_max_message_length,
+            challenge_field_bits,
+            log2_list_size,
+        ) + Self::effective_pow_bits(params.logup.pow_bits, base_field_order)
+    }
+
+    /// Provable bits of the α/β round of a block's global LogUp, the round that proofs in the
+    /// external challenge mode leave out ([`Self::calculate`]).
+    ///
+    /// `params` are those proofs' parameters. The round's challenges are drawn once for the
+    /// block, behind `params.logup.pow_bits` of proof of work, after every table they are
+    /// applied to is committed, and the proofs' sums are added up where the challenges were
+    /// derived. It is charged as a proof's own LogUp round is:
+    /// - the tables are opened under `params`, whose first WHIR round stays within the
+    ///   unique-decoding radius (asserted), so a commitment fixes its table; the list size is
+    ///   the one the calculator gives that round, 1 under unique decoding;
+    /// - whoever adds the sums up bounds the real rows of each direction below the field's
+    ///   order, so the block's fractional sum has no more terms than the
+    ///   `2 * max_interaction_count` the bound allows a single proof.
+    ///
+    /// # Panics
+    /// If `params` is not an external-mode set with such a first round.
+    pub fn global_logup_bits(
+        params: &SystemParams,
+        base_field_order: f64,
+        challenge_field_bits: f64,
+    ) -> f64 {
+        assert_eq!(
+            params.logup.challenge_mode,
+            LogUpChallengeMode::External,
+            "the global LogUp's round is the one external-mode proofs leave out"
+        );
+        assert!(
+            params.first_whir_round_within_unique_decoding(),
+            "the global LogUp needs a first WHIR round within the unique-decoding radius"
+        );
+        let log2_list_size = Self::whir_proximity_gap_security(
+            params.whir.proximity.initial_round(),
+            challenge_field_bits,
+            params.log_stacked_height(),
+            params.log_blowup,
+            params.w_stack,
+        )
+        .log2_list_size;
+        Self::logup_round_bits(
+            params,
+            base_field_order,
+            challenge_field_bits,
+            log2_list_size,
+        )
     }
 
     /// LogUp soundness from α/β sampling (before proof-of-work grinding).
@@ -311,10 +380,8 @@ impl SoundnessCalculator {
         n_logup: usize,
         log2_list_size: f64,
     ) -> f64 {
-        assert!(
-            max_num_constraints_per_air > 0,
-            "batch-constraint soundness requires at least one constraint"
-        );
+        // A machine may have no constraints at all (the global-LogUp group machines): the
+        // batch sumcheck still carries each AIR's two LogUp claims.
         assert!(
             num_airs > 0,
             "batch-constraint soundness requires at least one nonempty AIR"
@@ -329,7 +396,7 @@ impl SoundnessCalculator {
         // 2. LogUp numerator (p̂(ξ) input layer)
         // 3. LogUp denominator (q̂(ξ) input layer)
         let fused_boundary_degree =
-            n_extra.max(3) + skip_degree + (max_num_constraints_per_air - 1);
+            n_extra.max(3) + skip_degree + max_num_constraints_per_air.saturating_sub(1);
         let batch_sumcheck_batching_degree = 3 * num_airs - 1;
 
         let fused_boundary_bits = challenge_field_bits - (fused_boundary_degree as f64).log2();
@@ -1045,6 +1112,7 @@ mod tests {
                 max_interaction_count: 1 << 20,
                 log_max_message_length: 4,
                 pow_bits: 16,
+                challenge_mode: Default::default(),
             },
             max_constraint_degree: 5,
         }

@@ -3,6 +3,6 @@
 //! with the FRI path; a chip's lookups are now summarised by `MetaChip` through the MLE symbolic
 //! builder (`LookupSummary`).
 pub use pico_mle_core::lookup::{
-    assert_global_kind_is_bounded_constant, LookupScope, LookupSummary, LookupType, SymbolicLookup,
+    assert_global_kind_is_constant, LookupScope, LookupSummary, LookupType, SymbolicLookup,
     GLOBAL_KIND_VALUE_INDEX,
 };

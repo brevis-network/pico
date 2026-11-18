@@ -54,7 +54,7 @@ use crate::{
         },
         stdin::EmulatorStdin,
     },
-    machine::{chip::ChipBehavior, debug_folder::DebugConstraintFolder, septic::SepticDigest},
+    machine::{chip::ChipBehavior, debug_folder::DebugConstraintFolder},
 };
 use num::BigUint;
 use p3_air::{Air, RowWindow};
@@ -217,7 +217,6 @@ where
     let mut folder = DebugConstraintFolder::<F, EF> {
         preprocessed: RowWindow::from_two_rows(&dummy, &dummy),
         main: RowWindow::from_two_rows(row, row),
-        global_cumulative_sum: SepticDigest::<F>::zero(),
         is_first_row: F::ZERO,
         is_last_row: F::ZERO,
         is_transition: F::ONE,

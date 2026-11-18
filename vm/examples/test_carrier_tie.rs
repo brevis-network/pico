@@ -18,10 +18,14 @@
 //!     change. Convert + combine must then FAIL (`TIE_EXPECT=patched`, the default), or, on a tree
 //!     without the tie, prove a root carrying the forged digest (`TIE_EXPECT=unpatched`).
 //!
+//! `CARRIER_TIE_CASES=a,b` runs those cases only, in that order; every name has to be a case.
+//! CI takes `padding-control` and `forged-carrier`: the control proves the honest root too,
+//! which is what `baseline` checks.
+//!
 //! Usage (from the repo root):
 //!   cargo run --release -p pico-vm --example test_carrier_tie
 //!
-//! The process exits 0 only when every case matched its expectation.
+//! The process exits 0 only when every case that ran matched its expectation.
 
 use std::{env, panic, sync::Arc};
 
@@ -32,10 +36,7 @@ use pico_mle_core::{
     StarkEngine,
 };
 use pico_vm::{
-    compiler::{
-        program::ProgramBehavior,
-        riscv::compiler::{Compiler, SourceType},
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
         record::RecordBehavior, recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP,
@@ -44,12 +45,12 @@ use pico_vm::{
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::logger::setup_logger,
     mle::machine::{
-        air::GCS_DIGEST_LEN,
         combine::CombineMachine,
         convert::ConvertMachine,
         exe::RiscvVmVk,
+        global_logup_nodes::prove_global_logup_nodes,
         riscv::{
-            self, air_id, build_ctx, ctx_to_engine, mle_riscv_air_refs, Engine, Kb, RiscvProof,
+            self, air_id, build_ctx, mle_riscv_air_refs, Engine, Kb, RiscvProof,
             RISCV_APP_PREP_AIR_IDS,
         },
     },
@@ -80,12 +81,35 @@ impl Case {
         }
     }
 
+    /// The cases `CARRIER_TIE_CASES` names, in the order given, or all three.
+    fn selected() -> Vec<Case> {
+        let all = [Case::Baseline, Case::PaddingControl, Case::ForgedCarrier];
+        let names = match env::var("CARRIER_TIE_CASES") {
+            Ok(names) => names,
+            Err(env::VarError::NotPresent) => return all.to_vec(),
+            Err(env::VarError::NotUnicode(_)) => panic!("CARRIER_TIE_CASES is not Unicode"),
+        };
+        names
+            .split(',')
+            .map(|name| {
+                let name = name.trim();
+                all.into_iter()
+                    .find(|case| case.name() == name)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "CARRIER_TIE_CASES names `{name}`, which is no case: the cases are \
+                             `baseline`, `padding-control` and `forged-carrier`"
+                        )
+                    })
+            })
+            .collect()
+    }
+
     /// The slot this case changes inside `air`'s public values, if any: relative to the riscv
-    /// `PublicValues` copy, which sits after the GCS prefix in the Global air.
+    /// `PublicValues` copy.
     fn slot(self, air: usize) -> Option<usize> {
         let base = match air {
-            air_id::GLOBAL => GCS_DIGEST_LEN,
-            air_id::MEM_INIT | air_id::MEM_FINAL => 0,
+            air_id::GLOBAL | air_id::MEM_INIT | air_id::MEM_FINAL => 0,
             air_id::CPU if self == Case::ForgedCarrier => 0,
             _ => return None,
         };
@@ -113,6 +137,7 @@ fn main() {
         "unpatched" => false,
         other => panic!("TIE_EXPECT must be `patched` or `unpatched`, got `{other}`"),
     };
+    let cases = Case::selected();
 
     let elf = std::fs::read("./perf/bench_data/rv64/fib-elf")
         .expect("run from the repo root: ./perf/bench_data/rv64/fib-elf not found");
@@ -128,17 +153,22 @@ fn main() {
 
     let engine: Engine = StarkEngine::new(riscv_params_with_128_bits_security(LOG_STACKED_HEIGHT));
     let airs = mle_riscv_air_refs(Arc::clone(&program), BUCKET);
-    let (pk, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
+    let (pk, vk) = engine.keygen_with_app_prep_and_required(
+        &airs,
+        RISCV_APP_PREP_AIR_IDS,
+        pico_vm::mle::machine::riscv::RISCV_REQUIRED_AIR_IDS,
+    );
     let d_pk = engine.device().transport_pk_to_device(&pk);
     let vk = Arc::new(vk);
     let chips = RiscvChipType::<Kb>::all_chips();
     let vm_vk = RiscvVmVk::from_program_and_vk(&program, &vk);
 
     let mut failures = 0;
-    for case in [Case::Baseline, Case::PaddingControl, Case::ForgedCarrier] {
+    for &case in &cases {
         let name = case.name();
         let mut honest = None;
         let mut forged = None;
+        let mut tables = Vec::new();
         let proofs: Vec<_> = records
             .iter()
             .map(|record| {
@@ -167,9 +197,7 @@ fn main() {
                         }
                     }
                 }
-                engine
-                    .prove(&d_pk, ctx_to_engine(ctx))
-                    .expect("riscv prove failed")
+                riscv::prove_host_ctx(&engine, &d_pk, ctx, &mut tables).expect("riscv prove failed")
             })
             .collect();
         // Without a COMMIT the Ecall constraints are vacuous and this harness tests nothing.
@@ -178,12 +206,14 @@ fn main() {
         let bundle = RiscvProof {
             vk: Arc::clone(&vk),
             chunk_proofs: proofs,
+            global: riscv::prove_global_logup(&program, &vk, &tables).expect("global LogUp"),
         };
         let riscv_ok = riscv::verify_riscv(
             &bundle,
             bundle.vk.pre_hash,
             &[(air_id::PROGRAM, riscv::riscv_program_commit(&bundle.vk))],
-            program.initial_global_cumulative_sum(),
+            &riscv::ProgramIdentity::new(&program, &bundle.vk.inner.params)
+                .expect("the image fits"),
         );
         if let Err(e) = riscv_ok {
             tracing::error!("case {name}: riscv verify rejected ({e}) — the harness tests nothing");
@@ -200,9 +230,13 @@ fn main() {
                 false,
             )
             .map_err(|e| format!("{e:?}"))?;
-            let children = convert
-                .prove_with_vks(&bundle.chunk_proofs)
+            let mut children = prove_global_logup_nodes(&bundle, &vm_vk, Default::default())
                 .map_err(|e| format!("{e}"))?;
+            children.extend(
+                convert
+                    .prove_with_vks(&bundle.chunk_proofs)
+                    .map_err(|e| format!("{e}"))?,
+            );
             let mut combine = CombineMachine::new(
                 recursion_params_with_128_bits_security(),
                 vm_vk.clone(),
@@ -260,5 +294,8 @@ fn main() {
     }
 
     assert_eq!(failures, 0, "{failures} case(s) did not match expectation");
-    tracing::info!("carrier tie: every case matched ✓");
+    tracing::info!(
+        "carrier tie: every one of the {} case(s) matched ✓",
+        cases.len()
+    );
 }

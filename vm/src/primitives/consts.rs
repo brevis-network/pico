@@ -225,7 +225,6 @@ pub const SR_DATAPAR: usize = 1;
 pub const BITWISE_DATAPAR: usize = 1;
 pub const MEMORY_RW_DATAPAR: usize = 1;
 pub const LOCAL_MEMORY_DATAPAR: usize = 4;
-pub const RISCV_POSEIDON2_DATAPAR: usize = 4;
 
 pub const BASE_ALU_DATAPAR: usize = 2;
 pub const EXT_ALU_DATAPAR: usize = 4;

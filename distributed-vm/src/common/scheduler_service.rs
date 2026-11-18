@@ -4,12 +4,18 @@
 //! Runs on Primary machine, handles task distribution to all workers.
 
 use crate::{
-    common::global_scheduler::{AcquireResult, CombineTask, GlobalScheduler, SchedulerTask},
+    common::{
+        global_logup_exchange::{
+            exchange, ChainNews, ChunkTableReport, GroupNodeReport, OtherBlock,
+        },
+        global_scheduler::{AcquireResult, CombineTask, GlobalScheduler, SchedulerTask},
+    },
     gateway::handler::proof_tree::IndexedProof,
     scheduler_server::{Scheduler, SchedulerServer},
-    AcquireTaskRequest, AcquireTaskResponse, CheckCompleteResponse, ChunkProofTask,
-    CombineProofTask, CompleteTask, RegisterChunkRequest, ReportGcsDigestRequest,
-    ReportProofRequest, ReportProofResponse, WaitForNextBlockInputResponse, WaitTask,
+    AcquireTaskRequest, AcquireTaskResponse, AwaitChunkTablesRequest, AwaitChunkTablesResponse,
+    CheckCompleteResponse, ChunkProofTask, CombineProofTask, CompleteTask, RegisterChunkRequest,
+    ReportChunkTableRequest, ReportGroupNodeRequest, ReportProofRequest, ReportProofResponse,
+    WaitForNextBlockInputResponse, WaitTask,
 };
 use anyhow::Result;
 use once_cell::sync::Lazy;
@@ -20,6 +26,16 @@ use std::sync::{
 };
 use tonic::{Request, Response, Status};
 use tracing::{error, info};
+
+/// How long `AwaitChunkTables` holds a poll that has nothing to answer with. Well under the
+/// client's request timeout, and short enough that a follower whose run was stopped meanwhile
+/// notices soon.
+const CHUNK_TABLES_POLL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// A global LogUp message for a block the primary is not on, as the status its sender gets.
+fn other_block(refused: OtherBlock) -> Status {
+    Status::failed_precondition(refused.to_string())
+}
 
 /// What the scheduler services carry. `GlobalScheduler<P>` has always been payload-generic
 /// (`global_scheduler.rs:82`); only these transport layers were pinned to `MetaProof<SC>`, which is
@@ -311,20 +327,6 @@ impl<P: SchedulerPayload> Scheduler for SchedulerService<P> {
         }))
     }
 
-    /// Receive a machine's partial cross-chunk GCS digest and park it for the pipeline to reduce.
-    ///
-    /// The service does not interpret the bytes: only the caller knows the field type, and decoding
-    /// it here would restate that layout in a second place.
-    async fn report_gcs_digest(
-        &self,
-        request: Request<ReportGcsDigestRequest>,
-    ) -> Result<Response<()>, Status> {
-        let req = request.into_inner();
-        crate::common::transfer_stats::record_in(req.digest.len(), 0);
-        crate::common::gcs_digest::push_remote_digest(req.worker_id, req.digest);
-        Ok(Response::new(()))
-    }
-
     async fn wait_for_next_block_input(
         &self,
         _request: Request<()>,
@@ -359,6 +361,57 @@ impl<P: SchedulerPayload> Scheduler for SchedulerService<P> {
                 .await
                 .map_err(|_| Status::internal("Block input watch channel closed"))?;
         }
+    }
+
+    async fn report_chunk_table(
+        &self,
+        request: Request<ReportChunkTableRequest>,
+    ) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+        crate::common::transfer_stats::record_in(req.commit.len(), 0);
+        let report = ChunkTableReport {
+            chunk_idx: req.chunk_idx as usize,
+            commit: req.commit,
+            row_count: req.row_count,
+        };
+        exchange()
+            .report_table(req.block_num, report)
+            .map_err(other_block)?;
+        Ok(Response::new(()))
+    }
+
+    async fn await_chunk_tables(
+        &self,
+        request: Request<AwaitChunkTablesRequest>,
+    ) -> Result<Response<AwaitChunkTablesResponse>, Status> {
+        let req = request.into_inner();
+        let ChainNews { commits, chunks } = exchange()
+            .await_commits(req.block_num, req.from_chunk as usize, CHUNK_TABLES_POLL)
+            .await
+            .map_err(other_block)?;
+        crate::common::transfer_stats::record_out(commits.iter().map(Vec::len).sum(), 0);
+        Ok(Response::new(AwaitChunkTablesResponse {
+            commits,
+            chunks_known: chunks.is_some(),
+            chunks: chunks.unwrap_or_default() as u64,
+        }))
+    }
+
+    async fn report_group_node(
+        &self,
+        request: Request<ReportGroupNodeRequest>,
+    ) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+        crate::common::transfer_stats::record_in(req.proof_data.len(), 1);
+        let node = GroupNodeReport {
+            first_chunk: req.first_chunk as usize,
+            chunks: req.chunks as usize,
+            proof: req.proof_data,
+        };
+        exchange()
+            .report_node(req.block_num, node)
+            .map_err(other_block)?;
+        Ok(Response::new(()))
     }
 }
 
@@ -500,18 +553,6 @@ impl<P: SchedulerPayload> SchedulerClientWrapper<P> {
         Ok(())
     }
 
-    /// Send this machine's partial cross-chunk GCS digest to the primary.
-    pub async fn report_gcs_digest(&self, worker_id: &str, digest: Vec<u8>) -> Result<()> {
-        crate::common::transfer_stats::record_out(digest.len(), 0);
-        let request = ReportGcsDigestRequest {
-            digest,
-            worker_id: worker_id.to_string(),
-        };
-        let mut client = self.client.clone();
-        let _ = client.report_gcs_digest(Request::new(request)).await?;
-        Ok(())
-    }
-
     /// Report a proof to the scheduler
     /// Note: Uses &self and clones the tonic client internally to allow concurrent calls
     pub async fn report_proof(
@@ -563,6 +604,96 @@ impl<P: SchedulerPayload> SchedulerClientWrapper<P> {
         let response = client.wait_for_next_block_input(Request::new(())).await?;
         let resp = response.into_inner();
         Ok((resp.block_number, resp.input_data))
+    }
+
+    /// Report the Global table commitment of a chunk this machine traced, with the chunk's
+    /// share of the block's real-row count.
+    pub async fn report_chunk_table(
+        &self,
+        block_num: u64,
+        report: ChunkTableReport,
+    ) -> Result<(), ExchangeError> {
+        crate::common::transfer_stats::record_out(report.commit.len(), 0);
+        let request = ReportChunkTableRequest {
+            block_num,
+            chunk_idx: report.chunk_idx as u64,
+            commit: report.commit,
+            row_count: report.row_count,
+        };
+        let mut client = self.client.clone();
+        client.report_chunk_table(Request::new(request)).await?;
+        Ok(())
+    }
+
+    /// The commitments the primary holds from chunk `from_chunk` on. Returns within the
+    /// primary's poll time, with nothing if nothing came.
+    pub async fn await_chunk_tables(
+        &self,
+        block_num: u64,
+        from_chunk: usize,
+    ) -> Result<ChainNews, ExchangeError> {
+        let request = AwaitChunkTablesRequest {
+            block_num,
+            from_chunk: from_chunk as u64,
+        };
+        let mut client = self.client.clone();
+        let response = client
+            .await_chunk_tables(Request::new(request))
+            .await?
+            .into_inner();
+        crate::common::transfer_stats::record_in(response.commits.iter().map(Vec::len).sum(), 0);
+        Ok(ChainNews {
+            commits: response.commits,
+            chunks: response.chunks_known.then_some(response.chunks as usize),
+        })
+    }
+
+    /// Hand in the node over the group of `chunks` chunks from `first_chunk` on.
+    pub async fn report_group_node(
+        &self,
+        block_num: u64,
+        first_chunk: usize,
+        chunks: usize,
+        node: &P,
+    ) -> Result<(), ExchangeError> {
+        let proof_data =
+            bincode::serialize(node).map_err(|e| ExchangeError::Failed(e.to_string()))?;
+        crate::common::transfer_stats::record_out(proof_data.len(), 1);
+        let request = ReportGroupNodeRequest {
+            block_num,
+            first_chunk: first_chunk as u64,
+            chunks: chunks as u64,
+            proof_data,
+        };
+        let mut client = self.client.clone();
+        client.report_group_node(Request::new(request)).await?;
+        Ok(())
+    }
+}
+
+/// Why a global LogUp message did not go through.
+#[derive(Debug)]
+pub enum ExchangeError {
+    /// The primary is not on the sender's block, and refused the message.
+    OtherBlock(String),
+    /// The call failed: the transport, or the message's encoding.
+    Failed(String),
+}
+
+impl std::fmt::Display for ExchangeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OtherBlock(why) | Self::Failed(why) => f.write_str(why),
+        }
+    }
+}
+
+impl From<Status> for ExchangeError {
+    fn from(status: Status) -> Self {
+        match status.code() {
+            tonic::Code::FailedPrecondition => Self::OtherBlock(status.message().to_string()),
+            _ => Self::Failed(status.to_string()),
+        }
     }
 }
 

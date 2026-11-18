@@ -11,7 +11,6 @@ mod lookup;
 mod range_check;
 mod recursion;
 mod riscv_memory;
-mod septic;
 mod sub_builder;
 mod word;
 
@@ -30,7 +29,6 @@ pub use lookup::ChipLookupBuilder;
 pub use range_check::ChipRangeBuilder;
 pub use recursion::RecursionBuilder;
 pub use riscv_memory::RiscVMemoryBuilder;
-pub use septic::SepticExtensionBuilder;
 pub use sub_builder::SubAirBuilder;
 pub use word::ChipWordBuilder;
 
@@ -43,4 +41,3 @@ impl<F: Field, CB: ChipBuilder<F>> ChipWordBuilder<F> for CB {}
 impl<F: Field, CB: ChipBuilder<F>, const D: usize> ExtensionBuilder<F, D> for CB {}
 impl<F: Field, CB: ChipBuilder<F>> RecursionBuilder<F> for CB {}
 impl<F: Field, CB: ChipBuilder<F>> RiscVMemoryBuilder<F> for CB {}
-impl<F: Field, CB: ChipBuilder<F>> SepticExtensionBuilder<F> for CB {}
