@@ -37,10 +37,7 @@ use crate::{
         riscv::{public_values::PublicValues, record::EmulationRecord, syscalls::SyscallCode},
         stdin::EmulatorStdin,
     },
-    machine::{
-        chip::ChipBehavior, debug_folder::DebugConstraintFolder, lookup::LookupType,
-        septic::SepticDigest,
-    },
+    machine::{chip::ChipBehavior, debug_folder::DebugConstraintFolder, lookup::LookupType},
     primitives::consts::MAX_NUM_PVS,
 };
 use core::borrow::{Borrow, BorrowMut};
@@ -98,7 +95,6 @@ fn failures(trace: &RowMajorMatrix<F>, public_values: &[F]) -> Vec<String> {
         let mut folder = DebugConstraintFolder::<F, EF> {
             preprocessed: RowWindow::from_two_rows(&dummy, &dummy),
             main: RowWindow::from_two_rows(local, next),
-            global_cumulative_sum: SepticDigest::<F>::zero(),
             is_first_row: F::from_bool(row == 0),
             is_last_row: F::from_bool(row == height - 1),
             is_transition: F::from_bool(row != height - 1),

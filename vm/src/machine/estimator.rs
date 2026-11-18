@@ -19,9 +19,10 @@ use crate::{
         record::{AluStream, EmulationRecord},
         syscalls::{precompiles::PrecompileLocalMemory, SyscallCode},
     },
+    mle::machine::shape::MLE_GLOBAL_LOG_HEIGHT,
     primitives::consts::{
         ADD_DATAPAR, BITWISE_DATAPAR, DIVREM_DATAPAR, LOCAL_MEMORY_DATAPAR, LT_DATAPAR,
-        MEMORY_RW_DATAPAR, MUL_DATAPAR, POSEIDON2_DATAPAR, SLL_DATAPAR, SR_DATAPAR,
+        MEMORY_RW_DATAPAR, MUL_DATAPAR, SLL_DATAPAR, SR_DATAPAR,
     },
 };
 use hashbrown::HashMap;
@@ -134,15 +135,13 @@ pub struct EventSizeCapture<'a> {
     // System events
     pub(crate) num_syscall_events: usize,
     pub(crate) num_precompile_syscall_events: usize,
-    pub(crate) num_poseidon2_events: usize,
     pub(crate) num_global_lookup_events: usize,
 
     record: Option<&'a EmulationRecord>,
-    field: &'a str,
 }
 
 impl<'a> EventSizeCapture<'a> {
-    pub fn snapshot(record: &'a EmulationRecord, field: &'a str) -> Self {
+    pub fn snapshot(record: &'a EmulationRecord) -> Self {
         let recorded = |stream| AluOps::recorded(record, stream).len();
         let mut result = Self {
             num_lt_events: recorded(AluStream::Lt),
@@ -150,9 +149,7 @@ impl<'a> EventSizeCapture<'a> {
             num_mul_events: recorded(AluStream::Mul),
             num_program_events: record.program.instructions.len(),
             num_global_lookup_events: record.global_lookup_events.len(),
-            num_poseidon2_events: record.poseidon2_events.len(),
             record: Some(record),
-            field,
             ..Self::default()
         };
 
@@ -362,19 +359,13 @@ impl<'a> EventSizeCapture<'a> {
         data[CHIP_SYSCALLPRECOMPILE] = self.num_precompile_syscall_events;
         let nb_rows = record.shape_chip_size("SyscallPrecompile");
         data[CHIP_SYSCALLPRECOMPILE] = next_power_of_two(data[CHIP_SYSCALLPRECOMPILE], nb_rows);
-        // riscv global: 1 row per event, plus the trailing padding row the accumulation
-        // constraints require (`riscv_global/traces.rs`, `mem_tail_padded_cost`): a power-of-two
-        // event count lands one row above the boundary and the trace doubles.
-        data[CHIP_GLOBAL] = self.num_global_lookup_events + 1;
-        let nb_rows = record.shape_chip_size("Global");
-        data[CHIP_GLOBAL] = next_power_of_two(data[CHIP_GLOBAL], nb_rows);
+        // riscv global: one fixed height in every chunk, whatever the event count (the machine
+        // pads the table to it). At a stacked height under the production one the table is
+        // shorter, and this is an over-estimate.
+        data[CHIP_GLOBAL] = 1 << MLE_GLOBAL_LOG_HEIGHT;
         // byte: fixed 2^16
         // therefore no need to pad
         data[CHIP_BYTE] = 1 << 16;
-        // poseidon2: use datapar
-        data[CHIP_POSEIDON2] = self.num_poseidon2_events.div_ceil(POSEIDON2_DATAPAR);
-        let nb_rows = record.shape_chip_size(&format!("Riscv{}Poseidon2", self.field));
-        data[CHIP_POSEIDON2] = next_power_of_two(data[CHIP_POSEIDON2], nb_rows);
 
         CycleEstimator { data }
     }
@@ -419,8 +410,7 @@ const CHIP_SYSCALLRISCV: usize = 35;
 const CHIP_SYSCALLPRECOMPILE: usize = 36;
 const CHIP_GLOBAL: usize = 37;
 const CHIP_BYTE: usize = 38;
-const CHIP_POSEIDON2: usize = 39;
-const NUM_RISCV_CHIPS: usize = 40;
+const NUM_RISCV_CHIPS: usize = 39;
 
 /// This struct contains the information that will be used to estimate the
 /// number of CPU cycles that will be consumed by an R7a.48xlarge machine when
@@ -540,18 +530,23 @@ struct Scaler {
 #[cfg(test)]
 mod tests {
     use super::{EstimatorJson, EstimatorModel, EventSizeCapture, CHIP_GLOBAL};
-    use crate::emulator::riscv::record::EmulationRecord;
+    use crate::{
+        emulator::riscv::record::EmulationRecord, mle::machine::shape::MLE_GLOBAL_LOG_HEIGHT,
+    };
 
-    /// The Global trace always ends in one padding row, so its estimated height must follow
-    /// the trace generator across a power-of-two event count.
+    /// The Global table has one height per chunk, so its estimate does not move with the
+    /// event count.
     #[test]
-    fn global_height_estimate_includes_the_padding_row() {
+    fn global_height_estimate_is_the_fixed_table_height() {
         let record = EmulationRecord::default();
-        let mut capture = EventSizeCapture::snapshot(&record, "kb");
-        capture.num_global_lookup_events = 1 << 20;
-        assert_eq!(capture.estimate().data[CHIP_GLOBAL], 1 << 21);
-        capture.num_global_lookup_events = (1 << 20) - 1;
-        assert_eq!(capture.estimate().data[CHIP_GLOBAL], 1 << 20);
+        let mut capture = EventSizeCapture::snapshot(&record);
+        for events in [0, 1, (1 << 20) - 1, 1 << 20] {
+            capture.num_global_lookup_events = events;
+            assert_eq!(
+                capture.estimate().data[CHIP_GLOBAL],
+                1 << MLE_GLOBAL_LOG_HEIGHT
+            );
+        }
     }
 
     #[test]

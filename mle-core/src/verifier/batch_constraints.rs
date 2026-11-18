@@ -10,6 +10,7 @@ use tracing::{debug, instrument};
 
 use crate::{
     air::symbolic::symbolic_expression::SymbolicEvaluator,
+    interaction::LogUpChallengeMode,
     keygen::types::MultiStarkVerifyingKeyInner,
     poly::{eval_eq_mle, eval_eq_sharp_uni, eval_eq_uni, UnivariatePoly},
     proof::{column_openings_by_rot, BatchConstraintProof, GkrProof},
@@ -17,7 +18,7 @@ use crate::{
     verifier::{
         evaluator::VerifierConstraintEvaluator,
         fractional_sumcheck_gkr::{verify_gkr_inner, GkrVerificationError},
-        Pass,
+        Fraction, Pass,
     },
     FiatShamirTranscript, StarkProtocolConfig,
 };
@@ -26,6 +27,23 @@ use crate::{
 pub enum BatchConstraintError<EF: core::fmt::Debug + core::fmt::Display + PartialEq + Eq> {
     #[error("Invalid logup_pow_witness")]
     InvalidLogupPowWitness,
+
+    /// The verifying key's LogUp challenge mode is not the one this entry point serves:
+    /// external challenges were supplied for an internal-mode key, or withheld from an
+    /// external-mode one.
+    #[error(
+        "The verifying key's LogUp challenge mode does not match the verification entry point"
+    )]
+    LogUpChallengeModeMismatch,
+
+    /// The proof is not of the verifying key's LogUp challenge mode: an internal-mode proof
+    /// carries a root numerator, or an external-mode proof lacks one or carries a proof-of-work
+    /// witness.
+    #[error("The proof does not match the verifying key's LogUp challenge mode")]
+    LogUpProofModeMismatch,
+
+    #[error("An external-mode proof has no interactions")]
+    ExternalModeWithoutInteractions,
 
     #[error("GKR verification failed: {0}")]
     GkrVerificationFailed(#[from] GkrVerificationError<EF>),
@@ -52,6 +70,8 @@ pub enum BatchConstraintError<EF: core::fmt::Debug + core::fmt::Display + Partia
 }
 
 /// `public_values` should be in vkey (air_idx) order, including non-present AIRs.
+///
+/// Internal LogUp challenge mode only; an external-mode key is refused.
 #[allow(clippy::too_many_arguments)]
 pub fn verify_zerocheck_and_logup<SC: StarkProtocolConfig, TS: FiatShamirTranscript<SC>>(
     transcript: &mut TS,
@@ -72,8 +92,10 @@ pub fn verify_zerocheck_and_logup<SC: StarkProtocolConfig, TS: FiatShamirTranscr
         trace_id_to_air_id,
         n_per_trace,
         omega_skip_pows,
+        None,
         Pass::Verify,
     )
+    .map(|(r, _root)| r)
 }
 
 /// [`verify_zerocheck_and_logup`] under an explicit [`Pass`].
@@ -83,7 +105,12 @@ pub fn verify_zerocheck_and_logup<SC: StarkProtocolConfig, TS: FiatShamirTranscr
 /// evaluation are skipped. Kept: every observation, the sampled challenges, the interaction count
 /// that fixes `n_logup` (and so the GKR round count), and the returned `rs` — all of which shape
 /// what happens next.
-#[allow(clippy::too_many_arguments)]
+///
+/// `external_logup` is the caller's `(alpha, beta)` for an external-mode key and `None` for an
+/// internal-mode one; the key's mode decides which it must be, and the proof must be of that
+/// mode too. Returns the final evaluation point and the GKR root fraction `(p0, q0)`, whose
+/// numerator is zero in internal mode.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 #[instrument(name = "verify_zerocheck_and_logup", level = "debug", skip_all)]
 pub(crate) fn verify_zerocheck_and_logup_inner<
     SC: StarkProtocolConfig,
@@ -97,8 +124,9 @@ pub(crate) fn verify_zerocheck_and_logup_inner<
     trace_id_to_air_id: &[usize],
     n_per_trace: &[isize],
     omega_skip_pows: &[SC::F],
+    external_logup: Option<[SC::EF; 2]>,
     pass: Pass,
-) -> Result<Vec<SC::EF>, BatchConstraintError<SC::EF>> {
+) -> Result<(Vec<SC::EF>, Fraction<SC::EF>), BatchConstraintError<SC::EF>> {
     let l_skip = mvk.params.l_skip;
     // Proof shape asserts that numerator_term_per_air.len() == denominator_term_per_air.len() ==
     // num_traces (=: num_airs_present)
@@ -110,17 +138,39 @@ pub(crate) fn verify_zerocheck_and_logup_inner<
         column_openings,
     } = batch_proof;
 
-    // 1. Check GKR witness. `check_witness` moves the sponge (`observe` + `sample_bits`), so it
-    // must be CALLED on both passes; only its verdict is conditional.
-    let logup_pow_ok =
-        transcript.check_witness(mvk.params.logup.pow_bits, gkr_proof.logup_pow_witness);
-    if pass.checks() && !logup_pow_ok {
-        return Err(BatchConstraintError::InvalidLogupPowWitness);
+    // The mode is the key's. The entry point and the proof each have to be of that mode; both
+    // decide what the transcript absorbs, so they are checked on both passes.
+    let external = mvk.params.logup.challenge_mode == LogUpChallengeMode::External;
+    if external != external_logup.is_some() {
+        return Err(BatchConstraintError::LogUpChallengeModeMismatch);
+    }
+    if external != gkr_proof.p0_claim.is_some()
+        || (external && gkr_proof.logup_pow_witness != SC::F::ZERO)
+    {
+        return Err(BatchConstraintError::LogUpProofModeMismatch);
     }
 
-    // 2. Sample alpha and beta, receive xi, sample lambda
-    let alpha_logup = transcript.sample_ext();
-    let beta_logup = transcript.sample_ext();
+    let (alpha_logup, beta_logup) = match external_logup {
+        None => {
+            // 1. Check GKR witness. `check_witness` moves the sponge (`observe` +
+            // `sample_bits`), so it must be CALLED on both passes; only its verdict is
+            // conditional.
+            let logup_pow_ok =
+                transcript.check_witness(mvk.params.logup.pow_bits, gkr_proof.logup_pow_witness);
+            if pass.checks() && !logup_pow_ok {
+                return Err(BatchConstraintError::InvalidLogupPowWitness);
+            }
+            // 2. Sample alpha and beta
+            (transcript.sample_ext(), transcript.sample_ext())
+        }
+        Some([alpha, beta]) => {
+            // External mode: no proof of work and nothing sampled. The challenges are absorbed,
+            // so everything this proof samples afterwards depends on them.
+            transcript.observe_ext(alpha);
+            transcript.observe_ext(beta);
+            (alpha, beta)
+        }
+    };
     debug!(%alpha_logup, %beta_logup);
     let total_interactions = zip(trace_id_to_air_id, n_per_trace)
         .map(|(&air_idx, &n)| {
@@ -141,8 +191,12 @@ pub(crate) fn verify_zerocheck_and_logup_inner<
     let mut q_xi_claim = alpha_logup;
     if total_interactions > 0 {
         (p_xi_claim, q_xi_claim, xi) =
-            verify_gkr_inner::<SC, TS>(gkr_proof, transcript, l_skip + n_logup, pass)?;
+            verify_gkr_inner::<SC, TS>(gkr_proof, transcript, l_skip + n_logup, external, pass)?;
         debug_assert_eq!(xi.len(), l_skip + n_logup);
+    } else if external {
+        // No GKR ran, so there is no fraction to hand back. A machine in external mode exists
+        // to produce one; its builder asserts it has interactions.
+        return Err(BatchConstraintError::ExternalModeWithoutInteractions);
     } else if pass.checks() && gkr_proof.q0_claim != SC::EF::ONE {
         // No GKR ran, so `q0_claim` is otherwise unobserved/unchecked; pin it to 1 to remove the
         // proof malleability. Unreachable in this system (recursion / RISC-V machines always carry
@@ -466,5 +520,9 @@ pub(crate) fn verify_zerocheck_and_logup_inner<
         }
     }
 
-    Ok(rs)
+    let root = (
+        gkr_proof.p0_claim.unwrap_or(SC::EF::ZERO),
+        gkr_proof.q0_claim,
+    );
+    Ok((rs, root))
 }

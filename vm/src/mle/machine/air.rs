@@ -13,9 +13,9 @@
 //! chip. The wrapped chip's `constraints.rs` reads the table through `builder.preprocessed()`,
 //! which the builders' `ChipBuilder` impls map to the MLE preprocessed matrix.
 
-use std::{marker::PhantomData, sync::Arc};
+use std::{borrow::Borrow, marker::PhantomData, sync::Arc};
 
-use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -28,12 +28,15 @@ use crate::{
         byte::ByteChip,
         riscv_cpu::CpuChip,
         riscv_ecall::EcallChip,
-        riscv_global::GlobalChip,
+        riscv_global::{
+            columns::{GlobalCols, NUM_GLOBAL_AUX_COLS, NUM_GLOBAL_COLS, NUM_GLOBAL_TABLE_COLS},
+            constraints::eval_global_row,
+            GlobalChip,
+        },
         riscv_memory::{
             initialize_finalize::MemoryInitializeFinalizeChip, local::MemoryLocalChip,
             read_write::MemoryReadWriteChip, unaligned::MemoryUnalignedChip,
         },
-        riscv_poseidon2::Poseidon2ChipP3,
         riscv_program::ProgramChip,
         syscall::SyscallChip,
     },
@@ -42,14 +45,14 @@ use crate::{
     machine::{builder::ChipBuilder, chip::ChipBehavior},
     primitives::consts::{MAX_NUM_PVS, RISCV_NUM_PVS},
 };
-use pico_mle_core::{BaseAirWithPublicValues, PartitionedBaseAir};
+use pico_mle_core::{air::PartitionedAirBuilder, BaseAirWithPublicValues, PartitionedBaseAir};
 
 // ──────────── PartitionedBaseAir + BaseAirWithPublicValues (per chip) ────────────
 //
 // Both traits are opted-in per chip. The empty `PartitionedBaseAir` impl uses the default
 // (no cached main, common_main = full width) — correct for every brevis chip, which uses a single
 // un-partitioned main trace. `BaseAirWithPublicValues` defaults to 0 public values;
-// `CpuChip`/`EcallChip`/`MemInit`/`MemFinal`/`GcsBindAir` override below.
+// `CpuChip`/`EcallChip`/`MemInit`/`MemFinal` override below, and `GlobalAir` has its own impls.
 
 macro_rules! no_pvs {
     ($($ty:ty),* $(,)?) => {
@@ -112,16 +115,6 @@ impl<F: Field> BaseAirWithPublicValues<F> for MemoryInitializeFinalizeChip<F> {
     fn num_public_values(&self) -> usize {
         MAX_NUM_PVS
     }
-}
-
-// POSEIDON2_BUS receiver (covers the `FieldSpecificPoseidon2Chip` alias).
-impl<F: Field, LL, Config: Poseidon2Config> PartitionedBaseAir<F>
-    for Poseidon2ChipP3<F, LL, Config>
-{
-}
-impl<F: Field, LL, Config: Poseidon2Config> BaseAirWithPublicValues<F>
-    for Poseidon2ChipP3<F, LL, Config>
-{
 }
 
 // The poseidon2 *precompile* chip (covers the `FieldSpecificPrecompilePoseidon2Chip` alias).
@@ -264,62 +257,55 @@ where
     }
 }
 
-// ───────────────────────── GcsBindAir: expose + bind the per-chunk GCS ─────────────────────────
+// ───────────────────────── GlobalAir: the Global chip, partitioned ─────────────────────────
 
-/// A `SepticDigest` is `(x, y)` over the degree-7 septic extension = 14 base-field elements.
-pub const GCS_DIGEST_LEN: usize = 14;
-
-/// Wraps `GlobalChip` to expose its per-chunk global cumulative sum (the last-row `cum` columns,
-/// the trailing [`GCS_DIGEST_LEN`] of the main trace; the last row is always padding, so its
-/// incoming sum is the chunk total) as public values, bound to the trace by a `when_last_row`
-/// equality. The digest thus becomes a verifier-bound proof output that a harness (and later a
-/// recursion circuit) can read and sum to check `Σ gcs + initial == 0`.
+/// The Global chip as the MLE machine proves it.
+///
+/// A Global row's leading columns are the chunk's cross-chunk event table. Here they are the
+/// AIR's cached main trace, committed on its own, so that a global-LogUp group proof can open
+/// the same commitment later; the row's remaining columns are the common main trace. The
+/// constraints are the chip's, applied to the row assembled from the two partitions.
+///
+/// The AIR is present in every chunk (the machine registers it as required), which also makes
+/// it the carrier of the riscv public values the Convert layer reads: its public values are a
+/// copy of them, committed and unconstrained here, like MemInit's copy.
 #[derive(Default)]
-pub struct GcsBindAir<F> {
-    pub inner: GlobalChip<F>,
+pub struct GlobalAir<F>(PhantomData<F>);
+
+impl<F: Field> PartitionedBaseAir<F> for GlobalAir<F> {
+    fn cached_main_widths(&self) -> Vec<usize> {
+        vec![NUM_GLOBAL_TABLE_COLS]
+    }
+    fn common_main_width(&self) -> usize {
+        NUM_GLOBAL_AUX_COLS
+    }
 }
 
-impl<F: Field> PartitionedBaseAir<F> for GcsBindAir<F> {}
-
-impl<F: Field> BaseAir<F> for GcsBindAir<F> {
+impl<F: Field> BaseAir<F> for GlobalAir<F> {
     fn width(&self) -> usize {
-        BaseAir::<F>::width(&self.inner)
+        NUM_GLOBAL_COLS
     }
 }
 
-impl<F: Field> BaseAirWithPublicValues<F> for GcsBindAir<F> {
+impl<F: Field> BaseAirWithPublicValues<F> for GlobalAir<F> {
     fn num_public_values(&self) -> usize {
-        // [gcs (GCS_DIGEST_LEN) || riscv PublicValues copy (MAX_NUM_PVS)]. The Global air is
-        // present in EVERY chunk (unlike CPU or MemInit/MemFinal, absent in memory-only /
-        // precompile-table chunks), so it is the one carrier the Convert layer can always read
-        // the riscv public values from. The gcs half is constrained by `eval` below; the copy
-        // half is a committed-but-unconstrained carrier (same trust model as MemInit's
-        // `pvs_max` copy — the recursion layer's cross-chunk continuity closes the chain).
-        GCS_DIGEST_LEN + MAX_NUM_PVS
+        MAX_NUM_PVS
     }
 }
 
-impl<F, CB> Air<CB> for GcsBindAir<F>
+impl<F, CB> Air<CB> for GlobalAir<F>
 where
     F: Field,
-    CB: ChipBuilder<F>,
-    CB::Expr: std::any::Any,
-    GlobalChip<F>: Air<CB>,
+    CB: ChipBuilder<F> + PartitionedAirBuilder,
 {
     fn eval(&self, builder: &mut CB) {
-        // GlobalChip's own constraints (incl. the septic accumulation into `cum`).
-        self.inner.eval(builder);
-
-        // Bind the last-row `cum` (trailing GCS_DIGEST_LEN columns) to the public values.
-        let w = BaseAir::<F>::width(&self.inner);
-        let main = builder.main();
-        let local = main.current_slice();
-        let cols: Vec<CB::Var> = (0..GCS_DIGEST_LEN)
-            .map(|i| local[w - GCS_DIGEST_LEN + i])
+        let row: Vec<CB::Var> = builder.cached_mains()[0]
+            .current_slice()
+            .iter()
+            .chain(builder.common_main().current_slice())
+            .copied()
             .collect();
-        let pvs: Vec<CB::PublicVar> = builder.public_values()[..GCS_DIGEST_LEN].to_vec();
-        for (col, pv) in cols.into_iter().zip(pvs) {
-            builder.when_last_row().assert_eq(col, pv);
-        }
+        let local: &GlobalCols<CB::Var> = row.as_slice().borrow();
+        eval_global_row(builder, local);
     }
 }

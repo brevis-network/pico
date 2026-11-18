@@ -252,7 +252,7 @@ mod tests {
     }
 
     fn placeholder_vm_vk() -> VmVk {
-        VmVk::from_limbs(&[Kb::ZERO; 25])
+        VmVk::from_limbs(&[Kb::ZERO; 20])
     }
 
     /// A whitelist of `vk` and one other identity, the other first, so `vk` sits at leaf 1.

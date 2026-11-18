@@ -71,21 +71,21 @@ pub fn verify_with_root(
     envelope: &[u8],
     committed: &[u8],
 ) -> Result<(), VerifyError> {
-    let bundle = bundle::decode_vk_bundle_v2(vk_bundle)?;
+    let bundle = bundle::decode_vk_bundle_v3(vk_bundle)?;
     let apex = bundle::apex_from_bundle(&bundle, trusted_root)?;
     verify_with(&apex, envelope, committed)
 }
 
-/// Verify a compress proof (a [`envelope::ENVELOPE_V4_COMPRESS`] envelope) and the bytes it commits
+/// Verify a compress proof (an [`envelope::ENVELOPE_V5_COMPRESS`] envelope) and the bytes it commits
 /// to, under the shipped whitelist root and its compress key ([`shipped_compress_vk`]), with the
-/// checks of [`verify`]. A v3 root envelope is refused.
+/// checks of [`verify`]. A v3 root envelope, and the retired flat v4, are refused.
 #[cfg(feature = "codec")]
 pub fn verify_compress(
     vk_bundle: &[u8],
     envelope: &[u8],
     committed: &[u8],
 ) -> Result<(), VerifyError> {
-    let bundle = bundle::decode_vk_bundle_v2(vk_bundle)?;
+    let bundle = bundle::decode_vk_bundle_v3(vk_bundle)?;
     let apex = bundle::apex_from_bundle(&bundle, shipped_vk_root())?;
     verify_compress_with(&apex, &shipped_compress_vk(), envelope, committed)
 }
@@ -100,7 +100,7 @@ pub fn verify_compress_with(
     committed: &[u8],
 ) -> Result<(), VerifyError> {
     let proof = (
-        envelope::decode_compress_proof_v4(envelope)?,
+        envelope::decode_compress_proof_v5(envelope)?,
         Arc::clone(compress_vk),
     );
     apex.verify_compress(&proof)?;
@@ -144,6 +144,7 @@ mod tests {
     use pico_mle_core::{
         air::any_air::BaseAirWithPublicValues,
         builder::LookupBuilder,
+        codec::Encode,
         lookup::SymbolicLookup,
         poly::matrix::ColMajorMatrix,
         prover::{AirProvingContext, DeviceDataTransporter, Prover, ProvingContext},
@@ -160,7 +161,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        bundle::{decode_vk_bundle_v2, encode_vk_bundle_v2},
+        bundle::{decode_vk_bundle_v3, encode_vk_bundle_v3},
         envelope::{encode_v3, MleRootProofV3},
         hash::sponge_hash,
         public_values::{NUM_PV_ELMS_TO_HASH, RECURSION_NUM_PVS, RECURSION_PV_OFFSETS},
@@ -224,7 +225,7 @@ mod tests {
     }
 
     fn vm_vk() -> VmVk {
-        VmVk::from_u32s(&(1..=25).collect::<Vec<u32>>()).unwrap()
+        VmVk::from_u32s(&(1..=20).collect::<Vec<u32>>()).unwrap()
     }
 
     fn other_identity() -> VkIdentity {
@@ -296,7 +297,7 @@ mod tests {
 
         let body = MleRootProofV3::from_root(&(proof, Arc::new(vk))).unwrap();
         Fixture {
-            bundle: encode_vk_bundle_v2(&vm_vk(), &tree.root(), &[tree.membership(1, entries[1])])
+            bundle: encode_vk_bundle_v3(&vm_vk(), &tree.root(), &[tree.membership(1, entries[1])])
                 .unwrap(),
             envelope: encode_v3(&body).unwrap(),
             entries,
@@ -305,26 +306,73 @@ mod tests {
 
     /// [`verify_with_root`] under the test params, trusting the bundle's own root.
     fn verify_test(bundle: &[u8], envelope: &[u8], committed: &[u8]) -> Result<(), VerifyError> {
-        let b = decode_vk_bundle_v2(bundle)?;
+        let b = decode_vk_bundle_v3(bundle)?;
         let apex = MleApexVerifier::with_members(params(), b.members, b.vm_vk, b.vk_root)?;
         verify_with(&apex, envelope, committed)
     }
 
-    /// The fixture's proof, made under the test params, as a compress proof: the compress engine
-    /// set to those params verifies it from a v4 envelope, and each entry point refuses the other
-    /// kind's envelope.
+    /// The compress envelope carries the proof in the multiproof form: smaller than the flat
+    /// encoding, it rebuilds the same proof value. A changed sibling fails the STARK verify; a flat
+    /// proof, under version 5 or as the retired v4, is refused before it.
     #[test]
-    fn a_compress_envelope_verifies_only_as_one() {
+    fn a_compress_envelope_rebuilds_its_proof_from_multiproofs() {
         let f = fixture();
-        let b = decode_vk_bundle_v2(&f.bundle).unwrap();
+        let b = decode_vk_bundle_v3(&f.bundle).unwrap();
         let apex = MleApexVerifier::with_members(params(), b.members, b.vm_vk, b.vk_root)
             .unwrap()
             .with_compress_params(params());
         let (proof, vk) = envelope::decode_root_proof_v3(&f.envelope).unwrap();
-        let compress = envelope::encode_compress_v4(
-            &envelope::MleCompressProofV4::from_proof(&proof).unwrap(),
-        )
+        let body = envelope::MleCompressProofV5::from_proof(&proof, &vk).unwrap();
+        assert_eq!(
+            body.to_proof().unwrap(),
+            proof,
+            "the body rebuilds the proof"
+        );
+        let flat = proof.encode_to_vec().unwrap();
+        assert!(
+            body.proof.len() < flat.len(),
+            "multiproof {} B, flat {} B",
+            body.proof.len(),
+            flat.len()
+        );
+        let v5 = envelope::encode_compress_v5(&body).unwrap();
+        verify_compress_with(&apex, &vk, &v5, COMMITTED).expect("the envelope verifies");
+
+        // A changed sibling rebuilds a wrong path, which the STARK verify rejects.
+        let mut tampered = body.clone();
+        let last = tampered.proof.len() - 32;
+        tampered.proof[last] ^= 1;
+        let tampered = envelope::encode_compress_v5(&tampered).unwrap();
+        let err = verify_compress_with(&apex, &vk, &tampered, COMMITTED).unwrap_err();
+        assert!(matches!(err, VerifyError::Stark(_)), "{err}");
+
+        // The flat proof is not a wire form: under version 5 it is not a multiproof, and the v4
+        // envelope that carried it is retired.
+        let flat_v5 = envelope::encode_compress_v5(&envelope::MleCompressProofV5 {
+            proof: flat.clone(),
+        })
         .unwrap();
+        let err = verify_compress_with(&apex, &vk, &flat_v5, COMMITTED).unwrap_err();
+        assert!(matches!(err, VerifyError::Envelope(_)), "{err}");
+        let mut flat_v4 = flat_v5;
+        flat_v4[8..12].copy_from_slice(&4u32.to_le_bytes());
+        let err = verify_compress_with(&apex, &vk, &flat_v4, COMMITTED).unwrap_err();
+        assert!(matches!(err, VerifyError::Envelope(_)), "{err}");
+    }
+
+    /// The fixture's proof, made under the test params, as a compress proof: the compress engine
+    /// set to those params verifies it from a compress envelope, and each entry point refuses the
+    /// other kind's envelope.
+    #[test]
+    fn a_compress_envelope_verifies_only_as_one() {
+        let f = fixture();
+        let b = decode_vk_bundle_v3(&f.bundle).unwrap();
+        let apex = MleApexVerifier::with_members(params(), b.members, b.vm_vk, b.vk_root)
+            .unwrap()
+            .with_compress_params(params());
+        let (proof, vk) = envelope::decode_root_proof_v3(&f.envelope).unwrap();
+        let body = envelope::MleCompressProofV5::from_proof(&proof, &vk).unwrap();
+        let compress = envelope::encode_compress_v5(&body).unwrap();
 
         verify_compress_with(&apex, &vk, &compress, COMMITTED)
             .expect("the compress envelope verifies");
@@ -333,9 +381,9 @@ mod tests {
         let err = verify_compress_with(&apex, &vk, &f.envelope, COMMITTED).unwrap_err();
         assert!(matches!(err, VerifyError::Envelope(_)), "{err}");
         // The proof bytes and nothing after them.
-        let mut padded = envelope::MleCompressProofV4::from_proof(&proof).unwrap();
+        let mut padded = body;
         padded.proof.push(0);
-        let padded = envelope::encode_compress_v4(&padded).unwrap();
+        let padded = envelope::encode_compress_v5(&padded).unwrap();
         let err = verify_compress_with(&apex, &vk, &padded, COMMITTED).unwrap_err();
         assert!(matches!(err, VerifyError::Envelope(_)), "{err}");
         let err = verify_with(&apex, &compress, COMMITTED).unwrap_err();
@@ -391,7 +439,7 @@ mod tests {
     }
 
     fn b_members(f: &Fixture) -> Vec<crate::whitelist::VkMembership> {
-        decode_vk_bundle_v2(&f.bundle).unwrap().members
+        decode_vk_bundle_v3(&f.bundle).unwrap().members
     }
 
     #[test]
@@ -408,10 +456,10 @@ mod tests {
         assert!(matches!(err, VerifyError::CommittedValuesUnbound), "{err}");
 
         // Another guest's bundle: a different vm_vk.
-        let decoded = decode_vk_bundle_v2(&f.bundle).unwrap();
+        let decoded = decode_vk_bundle_v3(&f.bundle).unwrap();
         let mut other_vm_vk = decoded.vm_vk;
         other_vm_vk.pc_start[0] += Kb::ONE;
-        let bundle = encode_vk_bundle_v2(&other_vm_vk, &decoded.vk_root, &decoded.members).unwrap();
+        let bundle = encode_vk_bundle_v3(&other_vm_vk, &decoded.vk_root, &decoded.members).unwrap();
         let err = verify_test(&bundle, &f.envelope, COMMITTED).unwrap_err();
         assert!(
             matches!(err, VerifyError::RiscvVkDigestMismatch { .. }),
@@ -422,21 +470,21 @@ mod tests {
         let other: Vec<VkIdentity> = vec![f.entries[1], other_identity()];
         let tree = VkMerkleTree::try_build(&other).unwrap();
         let bundle =
-            encode_vk_bundle_v2(&vm_vk(), &tree.root(), &[tree.membership(0, other[0])]).unwrap();
+            encode_vk_bundle_v3(&vm_vk(), &tree.root(), &[tree.membership(0, other[0])]).unwrap();
         let err = verify_test(&bundle, &f.envelope, COMMITTED).unwrap_err();
         assert!(matches!(err, VerifyError::VkRootMismatch { .. }), "{err}");
 
         // The right members under a wrong root build no apex.
         let mut root = decoded.vk_root;
         root[0] += Kb::ONE;
-        let bundle = encode_vk_bundle_v2(&vm_vk(), &root, &decoded.members).unwrap();
+        let bundle = encode_vk_bundle_v3(&vm_vk(), &root, &decoded.members).unwrap();
         let err = verify_test(&bundle, &f.envelope, COMMITTED).unwrap_err();
         assert!(matches!(err, VerifyError::MemberOffRoot { .. }), "{err}");
 
         // A bundle without the root key's membership.
         let tree = VkMerkleTree::try_build(&f.entries).unwrap();
         let bundle =
-            encode_vk_bundle_v2(&vm_vk(), &tree.root(), &[tree.membership(0, f.entries[0])])
+            encode_vk_bundle_v3(&vm_vk(), &tree.root(), &[tree.membership(0, f.entries[0])])
                 .unwrap();
         let err = verify_test(&bundle, &f.envelope, COMMITTED).unwrap_err();
         assert!(matches!(err, VerifyError::NotWhitelisted), "{err}");
@@ -447,7 +495,7 @@ mod tests {
     #[test]
     fn a_self_made_whitelist_is_refused() {
         let f = fixture();
-        let decoded = decode_vk_bundle_v2(&f.bundle).unwrap();
+        let decoded = decode_vk_bundle_v3(&f.bundle).unwrap();
         assert_ne!(decoded.vk_root, shipped_vk_root());
 
         let err = verify(&f.bundle, &f.envelope, COMMITTED).unwrap_err();

@@ -134,8 +134,7 @@ mod tests {
         chip.extra_record(&original_record, &mut complete_record);
 
         let mut counted_record = original_record.clone();
-        let mut event_counter = precompute_event_size::<F>(&mut counted_record);
-        event_counter.num_poseidon2_events = complete_record.poseidon2_events.len();
+        let event_counter = precompute_event_size::<F>(&mut counted_record);
         event_counter.assert_event_counts_match(&complete_record);
 
         let log_rows = 15;
@@ -253,8 +252,7 @@ mod tests {
             let mut complete_record = original_record.clone();
             chip.extra_record(&original_record, &mut complete_record);
             let mut counted_record = original_record.clone();
-            let mut event_counter = precompute_event_size::<F>(&mut counted_record);
-            event_counter.num_poseidon2_events = complete_record.poseidon2_events.len();
+            let event_counter = precompute_event_size::<F>(&mut counted_record);
 
             let log2 = (n as f64).log2().ceil() as usize + 1;
             complete_record.shape = Some(RiscvPadShape::default());
@@ -392,7 +390,7 @@ mod normalization_tests {
     use crate::{
         chips::chips::events::{MemoryLocalEvent, MemoryRecord},
         emulator::riscv::record::EmulationRecord,
-        machine::{chip::ChipBehavior, debug_folder::DebugConstraintFolder, septic::SepticDigest},
+        machine::{chip::ChipBehavior, debug_folder::DebugConstraintFolder},
         primitives::consts::CHUNK_CLK_START,
     };
     use p3_air::{Air, RowWindow};
@@ -439,7 +437,6 @@ mod normalization_tests {
         let mut folder = Folder {
             preprocessed: RowWindow::from_two_rows(&dummy_f, &dummy_f),
             main: RowWindow::from_two_rows(row, row),
-            global_cumulative_sum: SepticDigest::<F>::zero(),
             is_first_row: F::ZERO,
             is_last_row: F::ZERO,
             is_transition: F::ONE,

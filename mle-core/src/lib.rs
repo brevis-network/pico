@@ -30,6 +30,7 @@ pub mod canonical_serde;
 pub mod config;
 pub mod engine;
 pub mod extension;
+pub mod global_logup;
 pub mod interaction;
 pub mod keygen;
 pub mod lookup;

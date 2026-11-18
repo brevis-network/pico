@@ -19,6 +19,7 @@ var (
 	proofPath       = flag.String("proof", "./data/proof.data", "path of proof file")
 	solidifyPath    = flag.String("sol", "./data/Groth16Verifier.sol", "path of solidify file")
 	manifestPath    = flag.String("manifest", "./data/manifest.json", "path of the setup manifest: setup writes it, prove checks -constraints against it")
+	inputsPath      = flag.String("inputs", "", "verify: path of the inputs.json naming the program vkey and the public values; the public inputs are computed from it")
 )
 
 // The `-groth16` switch is deliberately absent. It selected koalabear.go's `api.ToBinary`
@@ -73,6 +74,12 @@ func main() {
 	err = os.Setenv("MANIFEST_PATH", *manifestPath)
 	if err != nil {
 		fmt.Printf("failed to set manifest path env var: %v\n", err)
+		return
+	}
+
+	err = os.Setenv("INPUTS_PATH", *inputsPath)
+	if err != nil {
+		fmt.Printf("failed to set inputs path env var: %v\n", err)
 		return
 	}
 

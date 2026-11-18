@@ -16,6 +16,8 @@ pub mod deferred;
 #[cfg(feature = "multi-field-transcript")]
 pub mod embed;
 pub mod exe;
+pub mod global_logup;
+pub mod global_logup_nodes;
 pub mod recursion;
 pub mod riscv;
 pub mod shape;

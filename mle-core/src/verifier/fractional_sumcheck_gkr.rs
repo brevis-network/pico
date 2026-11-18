@@ -15,6 +15,10 @@ pub enum GkrVerificationError<EF: core::fmt::Debug + core::fmt::Display + Partia
     InvalidZeroRoundValue { actual: EF },
     #[error("Zero-check failed: numerator at root should be zero, got {actual}")]
     ZeroCheckFailed { actual: EF },
+    #[error("Numerator consistency check failed at root: expected {expected}, got {actual}")]
+    RootNumeratorCheckFailed { expected: EF, actual: EF },
+    #[error("The proof's root numerator does not fit the LogUp challenge mode")]
+    RootNumeratorModeMismatch,
     #[error("Denominator consistency check failed at root: expected {expected}, got {actual}")]
     RootConsistencyCheckFailed { expected: EF, actual: EF },
     #[error("Layer consistency check failed at round {round}: expected {expected}, got {actual}")]
@@ -66,10 +70,15 @@ pub fn verify_gkr<SC: StarkProtocolConfig, TS: FiatShamirTranscript<SC>>(
     transcript: &mut TS,
     total_rounds: usize,
 ) -> Result<(SC::EF, SC::EF, Vec<SC::EF>), GkrVerificationError<SC::EF>> {
-    verify_gkr_inner(proof, transcript, total_rounds, Pass::Verify)
+    verify_gkr_inner(proof, transcript, total_rounds, false, Pass::Verify)
 }
 
-/// [`verify_gkr`] under an explicit [`Pass`].
+/// [`verify_gkr`] under an explicit [`Pass`] and LogUp challenge mode.
+///
+/// `external_logup` is the mode of the verifying key. In internal mode the root numerator must be
+/// zero and the proof must not carry one. In external mode the proof's `p0_claim` is absorbed
+/// ahead of `q0_claim` and the root numerator must equal it; the caller reads the root fraction
+/// `(p0_claim, q0_claim)` off the proof once this returns `Ok`.
 ///
 /// Under [`Pass::TranscriptOnly`] the cross-term relations, the layer-consistency and root checks,
 /// the per-sub-round cubic interpolation and the single-evaluation reduction are skipped, so the
@@ -80,8 +89,14 @@ pub(crate) fn verify_gkr_inner<SC: StarkProtocolConfig, TS: FiatShamirTranscript
     proof: &GkrProof<SC>,
     transcript: &mut TS,
     total_rounds: usize,
+    external_logup: bool,
     pass: Pass,
 ) -> Result<(SC::EF, SC::EF, Vec<SC::EF>), GkrVerificationError<SC::EF>> {
+    // The mode decides what is absorbed, so this is checked on both passes.
+    if proof.p0_claim.is_some() != external_logup {
+        return Err(GkrVerificationError::RootNumeratorModeMismatch);
+    }
+    let p0_claim = proof.p0_claim.unwrap_or(SC::EF::ZERO);
     if total_rounds == 0 {
         // Proof shape asserts that `proof.claims_per_layer` and `proof.sumcheck_polys` are empty.
         debug_assert!(proof.claims_per_layer.is_empty());
@@ -90,6 +105,10 @@ pub(crate) fn verify_gkr_inner<SC: StarkProtocolConfig, TS: FiatShamirTranscript
             return Err(GkrVerificationError::InvalidZeroRoundValue {
                 actual: proof.q0_claim,
             });
+        }
+        // An external-mode machine always has interactions; its caller rejects this case.
+        if external_logup {
+            return Err(GkrVerificationError::RootNumeratorModeMismatch);
         }
         return Ok((SC::EF::ZERO, SC::EF::ONE, vec![]));
     }
@@ -112,6 +131,9 @@ pub(crate) fn verify_gkr_inner<SC: StarkProtocolConfig, TS: FiatShamirTranscript
         });
     }
 
+    if external_logup {
+        transcript.observe_ext(p0_claim);
+    }
     transcript.observe_ext(proof.q0_claim);
 
     // Handle round 0 (no sumcheck, direct tree evaluation)
@@ -122,10 +144,17 @@ pub(crate) fn verify_gkr_inner<SC: StarkProtocolConfig, TS: FiatShamirTranscript
         // Compute recursive relations for layer 1 → 0
         let (p_cross_term, q_cross_term) = compute_recursive_relations::<SC>(layer_claims);
 
-        // Zero-check: p̂₀ must be zero
-        if p_cross_term != SC::EF::ZERO {
-            return Err(GkrVerificationError::ZeroCheckFailed {
-                actual: p_cross_term,
+        // Internal mode: p̂₀ must be zero. External mode: it must be the claimed numerator.
+        if p_cross_term != p0_claim {
+            return Err(if external_logup {
+                GkrVerificationError::RootNumeratorCheckFailed {
+                    expected: p0_claim,
+                    actual: p_cross_term,
+                }
+            } else {
+                GkrVerificationError::ZeroCheckFailed {
+                    actual: p_cross_term,
+                }
             });
         }
 

@@ -77,14 +77,25 @@ pub struct TraceVData<SC: StarkProtocolConfig> {
 )]
 #[serde(bound = "")]
 pub struct GkrProof<SC: StarkProtocolConfig> {
-    /// The grinding proof-of-work witness before sampling LogUp alpha,beta
+    /// The grinding proof-of-work witness before sampling LogUp alpha,beta.
+    ///
+    /// Internal challenge mode only. An external-mode proof has no LogUp proof of work: the
+    /// field is zero there, is not encoded and is not absorbed, and the verifier rejects any
+    /// other value.
     pub logup_pow_witness: SC::F,
+    /// The numerator of the root layer, in an external-mode proof
+    /// ([`LogUpChallengeMode::External`](crate::interaction::LogUpChallengeMode)); `None` in an
+    /// internal-mode proof, whose numerator is zero and is not sent.
+    ///
+    /// Which of the two a proof must be is read from the verifying key, never from this field:
+    /// the verifier rejects a proof whose field does not match the key's mode. Were presence
+    /// alone to select the mode, an internal-mode proof could carry a non-zero sum and pass
+    /// with an unbalanced LogUp.
+    pub p0_claim: Option<SC::EF>,
     /// The denominator of the root layer.
     ///
-    /// Note that the numerator claim is always zero, so we don't include it in
-    /// the proof. Despite that the numerator is zero, the representation of the
-    /// denominator is important for the verification procedure and thus must be
-    /// provided.
+    /// The representation of the denominator matters to the verification procedure even when
+    /// the numerator is zero, so it is always provided.
     pub q0_claim: SC::EF,
     /// The claims for p_j(xi, 0), p_j(xi, 1), q_j(xi, 0), and q_j(xi, 0) for each layer j > 0.
     pub claims_per_layer: Vec<GkrLayerClaims<SC>>,
@@ -241,7 +252,17 @@ impl<SC: EncodableConfig> Encode for GkrLayerClaims<SC> {
 /// keygen mode for the recursion machines).
 /// v5: extension-field values encode as five felts (KoalaBear^5) and the vk params moved
 /// to the 128-bit presets; the version enters the vk pre-hash and the constraint digests.
-pub const CODEC_VERSION: u32 = 5;
+/// v6: the LogUp params carry the challenge mode, and an external-mode proof sends the GKR
+/// root numerator in place of the LogUp proof-of-work witness (see
+/// [`EXTERNAL_LOGUP_PROOF_FLAG`]). An internal-mode proof's bytes differ from v5's only in
+/// the version word.
+pub const CODEC_VERSION: u32 = 6;
+
+/// Set in the version word that leads an encoded [`Proof`] when the proof is an external-mode
+/// one. Decoding does not see the verifying key, so the mode has to be explicit in the bytes;
+/// the verifier then requires it to equal the key's mode.
+pub const EXTERNAL_LOGUP_PROOF_FLAG: u32 = 1 << 31;
+const _: () = assert!(CODEC_VERSION & EXTERNAL_LOGUP_PROOF_FLAG == 0);
 
 /// Vk-blind upper bound on `num_commits` when decoding a [`WhirProof`]. Valid proofs have
 /// `num_commits ≤ w_stack` (≤ 4096 in use), so `2^16` never rejects one; it only caps a hostile
@@ -255,8 +276,13 @@ const MAX_K_WHIR: usize = 32;
 
 impl<SC: EncodableConfig> Encode for Proof<SC> {
     fn encode<W: Write>(&self, writer: &mut W) -> Result<()> {
-        // We explicitly implement Encode for Proof to add CODEC_VERSION
-        CODEC_VERSION.encode(writer)?;
+        // We explicitly implement Encode for Proof to add CODEC_VERSION and the mode flag
+        let mode_flag = if self.gkr_proof.p0_claim.is_some() {
+            EXTERNAL_LOGUP_PROOF_FLAG
+        } else {
+            0
+        };
+        (CODEC_VERSION | mode_flag).encode(writer)?;
         SC::encode_digest(&self.common_main_commit, writer)?;
 
         // We encode trace_vdata by encoding the number of AIRs, encoding a bitmap of
@@ -287,8 +313,13 @@ impl<SC: EncodableConfig> Encode for Proof<SC> {
 }
 
 impl<SC: EncodableConfig> Encode for GkrProof<SC> {
+    /// An external-mode proof sends `p0_claim` where an internal-mode one sends the proof-of-work
+    /// witness; the enclosing [`Proof`]'s version word says which (`EXTERNAL_LOGUP_PROOF_FLAG`).
     fn encode<W: Write>(&self, writer: &mut W) -> Result<()> {
-        SC::encode_base_field(&self.logup_pow_witness, writer)?;
+        match &self.p0_claim {
+            None => SC::encode_base_field(&self.logup_pow_witness, writer)?,
+            Some(p0_claim) => SC::encode_extension_field(p0_claim, writer)?,
+        }
         SC::encode_extension_field(&self.q0_claim, writer)?;
         self.claims_per_layer.encode(writer)?;
         // We should know the length of sumcheck_polys and each nested vector based
@@ -473,8 +504,10 @@ impl<SC: DecodableConfig> Decode for GkrLayerClaims<SC> {
 
 impl<SC: DecodableConfig> Decode for Proof<SC> {
     fn decode<R: Read>(reader: &mut R) -> Result<Self> {
-        // We explicitly implement Decode for Proof to check CODEC_VERSION
-        let codec_version = u32::decode(reader)?;
+        // We explicitly implement Decode for Proof to check CODEC_VERSION and read the mode flag
+        let version_word = u32::decode(reader)?;
+        let external_logup = version_word & EXTERNAL_LOGUP_PROOF_FLAG != 0;
+        let codec_version = version_word & !EXTERNAL_LOGUP_PROOF_FLAG;
         if codec_version != CODEC_VERSION {
             return Err(Error::other(format!(
                 "CODEC_VERSION mismatch, expected: {}, actual: {}",
@@ -523,7 +556,7 @@ impl<SC: DecodableConfig> Decode for Proof<SC> {
             common_main_commit,
             trace_vdata,
             public_values,
-            gkr_proof: GkrProof::decode(reader)?,
+            gkr_proof: GkrProof::decode_in_mode(reader, external_logup)?,
             batch_constraint_proof: BatchConstraintProof::decode(reader)?,
             stacking_proof: StackingProof::decode(reader)?,
             whir_proof: WhirProof::decode(reader)?,
@@ -531,9 +564,14 @@ impl<SC: DecodableConfig> Decode for Proof<SC> {
     }
 }
 
-impl<SC: DecodableConfig> Decode for GkrProof<SC> {
-    fn decode<R: Read>(reader: &mut R) -> Result<Self> {
-        let logup_pow_witness = SC::decode_base_field(reader)?;
+impl<SC: DecodableConfig> GkrProof<SC> {
+    /// Decode in the mode the enclosing [`Proof`]'s version word names.
+    fn decode_in_mode<R: Read>(reader: &mut R, external_logup: bool) -> Result<Self> {
+        let (logup_pow_witness, p0_claim) = if external_logup {
+            (SC::F::ZERO, Some(SC::decode_extension_field(reader)?))
+        } else {
+            (SC::decode_base_field(reader)?, None)
+        };
         let q0_claim = SC::decode_extension_field(reader)?;
         let claims_per_layer = Vec::<GkrLayerClaims<SC>>::decode(reader)?;
 
@@ -554,6 +592,7 @@ impl<SC: DecodableConfig> Decode for GkrProof<SC> {
 
         Ok(Self {
             logup_pow_witness,
+            p0_claim,
             q0_claim,
             claims_per_layer,
             sumcheck_polys,

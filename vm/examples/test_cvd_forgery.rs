@@ -33,28 +33,24 @@
 
 use std::{env, panic, sync::Arc};
 
+use pico_vm::mle::machine::global_logup::commit_global_table;
+
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use pico_mle_core::{
     config::riscv_params_with_128_bits_security, prover::DeviceDataTransporter, StarkEngine,
 };
 use pico_vm::{
-    compiler::{
-        program::ProgramBehavior,
-        riscv::{
-            compiler::{Compiler, SourceType},
-            program::Program,
-        },
+    compiler::riscv::{
+        compiler::{Compiler, SourceType},
+        program::Program,
     },
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{record::RecordBehavior, riscv::record::EmulationRecord, stdin::EmulatorStdin},
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::logger::setup_logger,
-    mle::machine::{
-        air::GCS_DIGEST_LEN,
-        riscv::{
-            self, air_id, build_ctx, ctx_to_engine, mle_riscv_air_refs, Engine, Kb, RiscvProof,
-            RISCV_APP_PREP_AIR_IDS,
-        },
+    mle::machine::riscv::{
+        self, air_id, build_ctx, ctx_to_engine, mle_riscv_air_refs, Engine, Kb, RiscvProof,
+        RISCV_APP_PREP_AIR_IDS,
     },
     primitives::consts::PV_DIGEST_NUM_WORDS,
 };
@@ -119,8 +115,7 @@ fn digest_base(air: usize, scope_all: bool) -> Option<usize> {
         air_id::CPU | air_id::ECALL => Some(0),
         // `pvs_max` — same layout, MAX_NUM_PVS long.
         air_id::MEM_INIT | air_id::MEM_FINAL if scope_all => Some(0),
-        // `[gcs (GCS_DIGEST_LEN) || pvs_max]`.
-        air_id::GLOBAL if scope_all => Some(GCS_DIGEST_LEN),
+        air_id::GLOBAL if scope_all => Some(0),
         _ => None,
     }
 }
@@ -175,14 +170,15 @@ fn run_case(
                         doctor.apply(&mut air_ctx.public_values, base);
                     }
                 }
-                ctx_to_engine(ctx)
+                let (ctx, table) = commit_global_table(ctx, engine.params());
+                (ctx_to_engine(engine, ctx), table)
             })
             .collect()
     };
 
     // --- signal 1: the MLE debug constraint checker (panics on violation) ---
     let debug_ctxs = make_ctxs();
-    for (air, air_ctx) in debug_ctxs[0].per_trace.iter() {
+    for (air, air_ctx) in debug_ctxs[0].0.per_trace.iter() {
         if *air == air_id::CPU {
             limbs = air_ctx.public_values[..NUM_DIGEST_LIMBS]
                 .iter()
@@ -191,7 +187,7 @@ fn run_case(
         }
     }
     let debug_ok = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        for ctx in debug_ctxs.iter() {
+        for (ctx, _) in debug_ctxs.iter() {
             engine.debug_with_pk(airs, ctx, pk);
         }
     }))
@@ -204,22 +200,24 @@ fn run_case(
     let proved = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         prove_ctxs
             .into_iter()
-            .map(|ctx| engine.prove(d_pk, ctx).expect("prove failed"))
-            .collect::<Vec<_>>()
+            .map(|(ctx, table)| (engine.prove(d_pk, ctx).expect("prove failed"), table))
+            .unzip::<_, _, Vec<_>, Vec<_>>()
     }));
 
     let (prove_ok, verify_ok, detail) = match proved {
         Err(_) => (false, false, "prover panicked/errored".to_string()),
-        Ok(chunk_proofs) => {
+        Ok((chunk_proofs, tables)) => {
             let bundle = RiscvProof {
                 vk: Arc::new(vk.clone()),
                 chunk_proofs,
+                global: riscv::prove_global_logup(&program, vk, &tables).expect("global LogUp"),
             };
             let res = riscv::verify_riscv(
                 &bundle,
                 bundle.vk.pre_hash,
                 &[(air_id::PROGRAM, riscv::riscv_program_commit(&bundle.vk))],
-                program.initial_global_cumulative_sum(),
+                &riscv::ProgramIdentity::new(&program, &bundle.vk.inner.params)
+                    .expect("the image fits"),
             );
             match res {
                 Ok(()) => (true, true, "verify_riscv OK".to_string()),
@@ -303,7 +301,11 @@ fn main() {
     // Keygen once, reuse across every case (keygen is the expensive part and is case-independent).
     let engine: Engine = StarkEngine::new(riscv_params_with_128_bits_security(LOG_STACKED_HEIGHT));
     let airs = mle_riscv_air_refs(program.clone(), BUCKET);
-    let (pk, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
+    let (pk, vk) = engine.keygen_with_app_prep_and_required(
+        &airs,
+        RISCV_APP_PREP_AIR_IDS,
+        pico_vm::mle::machine::riscv::RISCV_REQUIRED_AIR_IDS,
+    );
     let d_pk = engine.device().transport_pk_to_device(&pk);
     let chips = RiscvChipType::<Kb>::all_chips();
 

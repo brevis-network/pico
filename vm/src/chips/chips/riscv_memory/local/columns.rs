@@ -47,7 +47,7 @@ pub struct SingleMemoryLocal<T> {
     /// zero. Such an entry declares its initial state instead: the AIR pins `initial_value` to
     /// zero on it and sends no Global receive, and the emulator raises no MemoryInitialize event
     /// for its address. The memory argument's sources for an address are then the
-    /// MemoryInitialize row, the image digest or this declaration, and Global balance still
+    /// MemoryInitialize row, the image table or this declaration, and Global balance still
     /// forces exactly one source per finalized address (see `constraints.rs`).
     ///
     /// One on every other real entry (registers, image words, hint-written words, intervals that

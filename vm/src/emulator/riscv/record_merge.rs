@@ -6,7 +6,12 @@
 //! `cpu_local_memory_access` is concatenated, not re-aggregated by address: an unsplit chunk
 //! already carries several windows per address, so folding them by address destroys ones it
 //! keeps and the memory bus goes unbalanced. A split only adds the one window that spans the
-//! cut, and the two chain, so the global cumulative sum still closes.
+//! cut, and the two chain, so the global LogUp still balances.
+//!
+//! Each added window is two cross-chunk events the chunk splitter did not count: it holds the
+//! unsplit replay's events under the height of the chunk's `Global` table, and a fold can be
+//! past it where that record is not. Such a fold has its chained windows rejoined
+//! ([`rejoin_chained_windows`]), which leaves the unsplit replay's windows or fewer.
 //!
 //! An execution history holds indices into its own tables, so `append` folds it whatever the
 //! caller, moving each later segment's past the steps and accesses before them
@@ -15,8 +20,13 @@
 //!
 //! The equivalence gate in [`super::record_digest`] is what says the fold is right.
 
+use hashbrown::HashMap;
+
 use super::record::EmulationRecord;
-use crate::emulator::record::RecordBehavior;
+use crate::{
+    chips::chips::riscv_memory::event::MemoryLocalEvent, emulator::record::RecordBehavior,
+    mle::machine::shape::MLE_GLOBAL_LOG_HEIGHT,
+};
 
 /// `MLE_SPLIT_CHECK=1` logs what each fold saw. Read once: a value that changed mid-run would
 /// make the numbers it prints incomparable.
@@ -28,7 +38,16 @@ static SPLIT_CHECK: std::sync::LazyLock<bool> =
 /// One segment folds to itself. The caller short-circuits that case rather than calling here, so
 /// that with split replay off the shipped path does not run this code at all; the identity is
 /// kept, and tested, so a caller that does pass one segment still gets the right answer.
-pub fn merge_segments(mut segments: Vec<EmulationRecord>) -> EmulationRecord {
+pub fn merge_segments(segments: Vec<EmulationRecord>) -> EmulationRecord {
+    merge_segments_within(segments, 1 << MLE_GLOBAL_LOG_HEIGHT)
+}
+
+/// [`merge_segments`] for a `Global` table of `global_event_cap` rows: the cap the chunk
+/// splitter cut the chunk under ([`super::chunk_split::ChunkSplitConfig`]).
+pub fn merge_segments_within(
+    mut segments: Vec<EmulationRecord>,
+    global_event_cap: usize,
+) -> EmulationRecord {
     assert!(
         !segments.is_empty(),
         "a chunk always has at least one replay segment"
@@ -99,11 +118,69 @@ pub fn merge_segments(mut segments: Vec<EmulationRecord>) -> EmulationRecord {
         );
     }
 
+    // The splitter counted the unsplit replay's cross-chunk events against the cap; the fold
+    // has two more for every address live across a cut. Only a fold past the cap is rejoined:
+    // the join walks every window, and the windows it removes cancel on the bus as they are.
+    if segment_count > 1 && global_events_at_most(&merged) > global_event_cap {
+        let before = merged.cpu_local_memory_access.len();
+        let rejoined = rejoin_chained_windows(&mut merged.cpu_local_memory_access);
+        tracing::info!(
+            target: "bench",
+            "split replay: the fold of {segment_count} segments held {before} memory windows, \
+             past what the chunk's Global table takes; {rejoined} rejoined across the cuts"
+        );
+    }
+
     merged.public_values = tail_public_values;
     merged.public_values.start_pc = head_start_pc;
     merged.is_last = tail_is_last;
     merged.shape = tail_shape;
     merged
+}
+
+/// The cross-chunk events of a chunk's own record, at most: two for every memory window (a
+/// fresh one has one, which this does not look for) and one for every syscall, which the
+/// chunk's history lists.
+fn global_events_at_most(record: &EmulationRecord) -> usize {
+    let syscalls = record
+        .history
+        .as_ref()
+        .map_or(0, |history| history.syscalls.len());
+    2 * record.cpu_local_memory_access.len() + syscalls
+}
+
+/// Join, per address, every window to the one it chains into: a window whose final access is
+/// the initial access of the next one to close becomes one window with it. Returns how many
+/// windows that removed. A joined window stays where the first of its run was.
+///
+/// The inner pair of two such windows cancels on the Global bus and on the chunk's memory bus,
+/// so the joined window leaves both as they were. A cut gives every address live across it
+/// exactly such a pair where the unsplit replay has one window.
+pub fn rejoin_chained_windows(windows: &mut Vec<MemoryLocalEvent>) -> usize {
+    let mut by_addr: HashMap<u64, Vec<usize>> = HashMap::with_capacity(windows.len());
+    for (index, window) in windows.iter().enumerate() {
+        by_addr.entry(window.addr).or_default().push(index);
+    }
+    let mut removed = vec![false; windows.len()];
+    let mut rejoined = 0;
+    for indices in by_addr.values_mut().filter(|indices| indices.len() > 1) {
+        // In the order they close: an initial access carries the record from whenever the
+        // address was last touched, which says nothing about where its window sits.
+        indices.sort_unstable_by_key(|&index| windows[index].final_mem_access.timestamp);
+        let mut run = indices[0];
+        for &next in &indices[1..] {
+            if windows[run].final_mem_access == windows[next].initial_mem_access {
+                windows[run].final_mem_access = windows[next].final_mem_access;
+                removed[next] = true;
+                rejoined += 1;
+            } else {
+                run = next;
+            }
+        }
+    }
+    let mut removed = removed.into_iter();
+    windows.retain(|_| !removed.next().expect("a flag for every window"));
+    rejoined
 }
 
 /// Overwrites each word of `words` with `later`'s where `later`'s is nonzero: a record leaves a
@@ -269,6 +346,87 @@ mod tests {
             vec![(0x100, 10), (0x200, 11), (0x100, 42), (0x300, 43)],
             "in segment order"
         );
+    }
+
+    /// A window of `addr` that opens on `initial` and closes on `(value, timestamp)`.
+    fn window(addr: u64, initial: MemoryRecord, value: u64, timestamp: u32) -> MemoryLocalEvent {
+        MemoryLocalEvent {
+            addr,
+            initial_mem_access: initial,
+            final_mem_access: MemoryRecord {
+                value,
+                chunk: 1,
+                timestamp,
+            },
+        }
+    }
+
+    /// Windows that chain are joined, each run into the place of its first; a window that
+    /// opens on another record than the previous one closed on stays.
+    #[test]
+    fn chained_windows_are_rejoined() {
+        let entry = MemoryRecord::default();
+        let a1 = window(0x100, entry, 1, 10);
+        let a2 = window(0x100, a1.final_mem_access, 2, 40);
+        let a3 = window(0x100, a2.final_mem_access, 3, 70);
+        // 0x200: a precompile wrote it between the two windows, so they do not chain.
+        let b1 = window(0x200, entry, 5, 20);
+        let other = MemoryRecord {
+            value: 6,
+            chunk: 1,
+            timestamp: 30,
+        };
+        let b2 = window(0x200, other, 7, 50);
+        let c = window(0x300, entry, 9, 60);
+        // The list is in no order of closing: the later window of 0x100 comes first.
+        let mut windows = vec![a3, b1, a1, c, b2, a2];
+
+        assert_eq!(rejoin_chained_windows(&mut windows), 2);
+
+        let joined = window(0x100, entry, 3, 70);
+        let as_tuples = |windows: &[MemoryLocalEvent]| -> Vec<(u64, MemoryRecord, MemoryRecord)> {
+            windows
+                .iter()
+                .map(|w| (w.addr, w.initial_mem_access, w.final_mem_access))
+                .collect()
+        };
+        assert_eq!(as_tuples(&windows), as_tuples(&[b1, joined, c, b2]));
+    }
+
+    /// A fold whose windows take the chunk past its Global table has the pairs the cuts added
+    /// rejoined, and is then the record the equivalence gate takes it for; a fold within the
+    /// table is left as concatenated.
+    #[test]
+    fn a_fold_past_the_global_table_is_rejoined() {
+        let entry = MemoryRecord::default();
+        let segments = || {
+            let head_100 = window(0x100, entry, 1, 10);
+            let head = EmulationRecord {
+                cpu_local_memory_access: vec![head_100, window(0x200, entry, 2, 11)],
+                ..Default::default()
+            };
+            let tail = EmulationRecord {
+                cpu_local_memory_access: vec![
+                    window(0x100, head_100.final_mem_access, 9, 42),
+                    window(0x300, entry, 3, 43),
+                ],
+                ..Default::default()
+            };
+            vec![head, tail]
+        };
+
+        // Four windows are eight events at most.
+        let concatenated = merge_segments_within(segments(), 8);
+        assert_eq!(concatenated.cpu_local_memory_access.len(), 4);
+
+        let rejoined = merge_segments_within(segments(), 7);
+        let windows: Vec<(u64, u32)> = rejoined
+            .cpu_local_memory_access
+            .iter()
+            .map(|event| (event.addr, event.final_mem_access.timestamp))
+            .collect();
+        assert_eq!(windows, vec![(0x100, 42), (0x200, 11), (0x300, 43)]);
+        assert_eq!(first_difference(&rejoined, &concatenated), None);
     }
 
     #[test]

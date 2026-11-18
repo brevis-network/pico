@@ -26,14 +26,22 @@ service Scheduler {
   // Secondary blocks until Primary stores the next block input (zero-delay)
   rpc WaitForNextBlockInput(google.protobuf.Empty) returns (WaitForNextBlockInputResponse);
 
-  // Secondary reports its partial cross-chunk GCS digest so the Primary can close the sum.
-  //
-  // Neither machine's chunks sum to zero on their own -- only the total over both does -- so the
-  // host-side memory-consistency check has to be a cross-process reduction. The payload is a
-  // SepticDigest: two septic extension elements, 56 bytes, free next to the proof traffic. Kept
-  // rather than dropped in favour of the root proof's in-circuit closure because it is the cheap
-  // EARLY detector: without it an inconsistency surfaces only after the whole tree is built.
-  rpc ReportGcsDigest(ReportGcsDigestRequest) returns (google.protobuf.Empty);
+  // The global LogUp of a block proved on two machines (MLE). A chunk's convert leaf enters a
+  // hash chain over the Global table commitments of the chunks before it, whichever machine
+  // traced them: the primary gathers every chunk's commitment and the secondary follows it.
+  // All three refuse a block the primary is not on with FAILED_PRECONDITION.
+
+  // Secondary reports the Global table commitment of a chunk it traced, with the chunk's share
+  // of the block's real-row count.
+  rpc ReportChunkTable(ReportChunkTableRequest) returns (google.protobuf.Empty);
+
+  // Secondary long-polls for the commitments the primary holds from a chunk on, in chunk order
+  // without a gap.
+  rpc AwaitChunkTables(AwaitChunkTablesRequest) returns (AwaitChunkTablesResponse);
+
+  // Secondary hands in the node over a group of its chunks' tables; the primary reduces it
+  // with its own into the tree's prefix.
+  rpc ReportGroupNode(ReportGroupNodeRequest) returns (google.protobuf.Empty);
 }
 
 // Request to acquire a task
@@ -98,15 +106,6 @@ message RegisterChunkRequest {
   uint64 chunk_idx = 1;
 }
 
-// A machine's partial cross-chunk global cumulative sum.
-message ReportGcsDigestRequest {
-  // bincode-serialised SepticDigest, to avoid restating the field layout in two places and letting
-  // them drift -- the same reason proofs travel as opaque bytes here.
-  bytes digest = 1;
-  // Which machine sent it, for the error message when the sum does not close.
-  string worker_id = 2;
-}
-
 // Check completion response
 message CheckCompleteResponse {
   bool completed = 1;
@@ -121,4 +120,42 @@ message CheckCompleteResponse {
 message WaitForNextBlockInputResponse {
   uint64 block_number = 1;
   bytes input_data = 2;
+}
+
+// A chunk's Global table commitment, from the machine that traced the chunk
+message ReportChunkTableRequest {
+  // Block the sender is working on
+  uint64 block_num = 1;
+  uint64 chunk_idx = 2;
+  // The commitment, bincode-serialised (opaque to the scheduler service)
+  bytes commit = 3;
+  // The chunk's share of the block's real-row count
+  uint64 row_count = 4;
+}
+
+message AwaitChunkTablesRequest {
+  // Block the sender is working on
+  uint64 block_num = 1;
+  // The first chunk whose commitment the sender lacks
+  uint64 from_chunk = 2;
+}
+
+message AwaitChunkTablesResponse {
+  // Commitments of chunks from_chunk, from_chunk + 1, ..., as in ReportChunkTableRequest;
+  // empty if none came within the wait
+  repeated bytes commits = 1;
+  // Whether the primary's emulation is finalized, and the block's chunk count if so
+  bool chunks_known = 2;
+  uint64 chunks = 3;
+}
+
+// The node over a group of consecutive chunks' Global tables
+message ReportGroupNodeRequest {
+  // Block the sender is working on
+  uint64 block_num = 1;
+  // The group's first chunk, and how many chunks it covers
+  uint64 first_chunk = 2;
+  uint64 chunks = 3;
+  // The node's proof, bincode-serialised like ReportProofRequest.proof_data
+  bytes proof_data = 4;
 }

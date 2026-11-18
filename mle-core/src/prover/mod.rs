@@ -29,7 +29,7 @@ pub use hal::{
 };
 pub use logup_zerocheck::{
     evaluator, fractional_sumcheck_gkr, prove_zerocheck_and_logup, ColMajorEvalHelper,
-    LogupZerocheckColMajor, ZerocheckLogupProof,
+    LogupChallenges, LogupZerocheckColMajor, ZerocheckLogupProof,
 };
 pub use reference::{ReferenceColMajorBackend, ReferenceDevice};
 pub use types::{

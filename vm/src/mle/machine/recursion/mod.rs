@@ -33,9 +33,14 @@ pub use layout::{
     recursion_tier_log_heights, recursion_vk_layouts_equal, stacking_layout_for_commit,
 };
 pub use root_check::{check_complete_root_public_values, recursion_public_values};
+pub(crate) use witness::global_sum_and_row_count;
 pub use witness::{
-    setup_for_combine_with_program, setup_for_convert, setup_for_convert_with_program,
-    setup_for_deferred_with_program, witness_flags, CombineChild,
+    let_empty_executions_reach_the_circuit_for_testing, setup_for_combine_with_program,
+    setup_for_combine_with_program_within, setup_for_convert, setup_for_convert_with_program,
+    setup_for_deferred_with_program, setup_for_global_logup_closure_with_program,
+    setup_for_group_node_with_program, setup_for_image_node_with_program,
+    setup_for_program_without_hints, witness_flags, CombineChild, GroupNodeWitness,
+    ImageNodeWitness,
 };
 
 /// Log a recursion proof's serialized size plus a per-field attribution, `label`-prefixed

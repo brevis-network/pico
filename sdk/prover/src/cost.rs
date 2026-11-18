@@ -20,7 +20,7 @@ pub enum CostComponent {
     /// The precompiles and the syscall tables that dispatch to them.
     Precompile,
     /// Shared infrastructure: the byte and program tables, memory initialization and
-    /// finalization, local memory, and the global lookup with the Poseidon2 table that hashes it.
+    /// finalization, local memory, and the global lookup's event table.
     System,
 }
 
@@ -33,8 +33,7 @@ impl CostComponent {
             | air_id::MEM_INIT
             | air_id::MEM_FINAL
             | air_id::MEM_LOCAL
-            | air_id::GLOBAL
-            | air_id::POSEIDON2 => Self::System,
+            | air_id::GLOBAL => Self::System,
             air_id::SYSCALL_RISCV
             | air_id::PRECOMPILE_FIRST..=air_id::PRECOMPILE_LAST
             | air_id::KECCAK_CONTROL

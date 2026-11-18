@@ -16,7 +16,7 @@ pub struct Interaction<Expr> {
     pub message: Vec<Expr>,
     pub count: Expr,
     /// The lookup kind specifying the bus to send the message over. Discriminants are
-    /// at most 12, far below the field characteristic p, so the bus label folded into
+    /// at most 17, far below the field characteristic p, so the bus label folded into
     /// the logUp fingerprint can never wrap around.
     pub kind: LookupType,
     /// Determines the contribution of each interaction message to a linear constraint on the trace
@@ -45,6 +45,32 @@ pub struct LogUpSecurityParameters {
     pub log_max_message_length: u32,
     /// The number of proof-of-work bits for the LogUp proof-of-work phase.
     pub pow_bits: usize,
+    /// Where the LogUp challenges come from. It is part of the verifying key (the params are in
+    /// the vk pre-hash), and the key is the only place a prover or verifier reads it from.
+    ///
+    /// Absent from a self-describing encoding (the JSON manifests written before the field
+    /// existed), it is the internal mode, which is what every machine was then.
+    #[serde(default)]
+    pub challenge_mode: LogUpChallengeMode,
+}
+
+/// Where a proof's LogUp challenges `(alpha, beta)` come from, and with that what its GKR root
+/// has to be.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LogUpChallengeMode {
+    /// The proof draws them from its own transcript after the LogUp proof of work, and its
+    /// fractional sum must be zero. Every machine but the global-LogUp group machines.
+    #[default]
+    Internal,
+    /// The caller hands them in and the proof absorbs them: no LogUp proof of work, nothing
+    /// sampled. The fractional sum is not asserted zero; the proof carries its numerator
+    /// (`GkrProof::p0_claim`) and the verifier returns the pair `(p0, q0)` for the caller to
+    /// add up across proofs that share the challenges.
+    ///
+    /// The prover knows the challenges before it commits the common main trace, so a machine in
+    /// this mode must not let that trace into an interaction: its interactions read cached main
+    /// columns only, which were committed before the challenges existed.
+    External,
 }
 
 impl LogUpSecurityParameters {

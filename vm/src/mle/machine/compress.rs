@@ -13,9 +13,9 @@
 //! What the layer buys is size: the combine root is proved at the recursion preset
 //! (`log_blowup = 2`, 383 WHIR queries, height 2^21) and weighs 646–716 KiB (fib-10 and reth
 //! 18884864, dev and whitelist mode); re-proved at `log_blowup = 4` with list decoding (123
-//! queries, height 2^20) the same statement weighs 292.17 KiB in whitelist mode and at most that in
-//! dev mode [whitelist mode: fib-10 and reth 18884864; dev mode: 292.17 KiB over reth 18884864
-//! (and 24600825 when the layer was introduced), 271.76 KiB on fib-10].
+//! queries, height 2^20) the same statement weighs 292.22 KiB in whitelist mode and at most that in
+//! dev mode [whitelist mode: fib-10 and reth 18884864; dev mode: 292.22 KiB over reth 18884864,
+//! 271.81 KiB on fib-10].
 //!
 //! This file and `embed.rs` are two machines rather than one generic over the engine, by design:
 //! with the `cuda` feature compress has its own engine and device path, which embed does not.

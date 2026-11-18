@@ -3,7 +3,7 @@ pub mod batch_chunk_mapping;
 pub mod block_list;
 pub mod block_notifier;
 pub mod bridge_runtime;
-pub mod gcs_digest;
+pub mod global_logup_exchange;
 pub mod global_scheduler;
 pub mod machine_role;
 pub mod mle_scheduler_singleton;

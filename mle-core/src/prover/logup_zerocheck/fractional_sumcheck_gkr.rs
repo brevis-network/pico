@@ -246,6 +246,7 @@ mod tests {
         GkrProof {
             // Not consulted by `verify_gkr`; the PoW witness is checked one layer up.
             logup_pow_witness: F::ZERO,
+            p0_claim: None,
             q0_claim: proof.fractional_sum.1,
             claims_per_layer: proof.claims_per_layer,
             sumcheck_polys: proof.sumcheck_polys,

@@ -19,11 +19,18 @@
 //!   * `sub-not-complete` — a sub-proof that is a member but not a complete root: a deferred node
 //!     is refused by the host check, and a convert leaf, with that check skipped, by the node's
 //!     in-circuit `flag_complete == 1`.
+//!   * `node-of-another-row` — deferred nodes proved under a key that has the honest node's
+//!     commitment and a convert row's pre-hash, a pair the self-map lists. Each node is a member,
+//!     verifies, carries the root and continues the chain; a parent that reads it at the deferred
+//!     row cannot take it, so the one that does bakes the forged pre-hash, is no standard node,
+//!     and the tree stops where that parent's own key is looked up. (A parent that took the
+//!     child's pre-hash from its witness would be the standard node, and the tree would prove.)
+//!     Self-map only: the shipped whitelist has no such leaf.
 //!   * `wrong-trusted-root` — the happy root handed to an apex pinned to another whitelist root.
 //!
 //! The whitelist is `MLE_VK_MAP` (with `MLE_VK_ROOT` pinning its root) when set — the shipped
 //! artifact, which is what shows the deferred leaf it carries is the one this binary keygens —
-//! and otherwise a self-map of this run's own keys.
+//! and otherwise a self-map of this run's own keys, with one leaf more for `node-of-another-row`.
 //!
 //! Run by hand; the process exits 0 only when every case matched its expectation.
 //!
@@ -51,6 +58,8 @@ use pico_vm::{
         convert::{ConvertMachine, ProofWithVk},
         deferred::DeferredMachine,
         exe::RiscvVmVk,
+        global_logup::GlobalLogUpProof,
+        global_logup_nodes::GlobalLogUpNodeMachine,
         recursion::{recursion_public_values, Kb},
         riscv::{self, Sc},
         vk_map::{pinned_root_from_env, vk_identity, MleVkMap, VkIdentity},
@@ -71,6 +80,8 @@ struct Guest {
     riscv_vk: Arc<MultiStarkVerifyingKey<Sc>>,
     vm_vk: RiscvVmVk,
     proofs: Vec<Proof<Sc>>,
+    /// The second phase over `proofs`.
+    global: GlobalLogUpProof,
     committed_bytes: Vec<u8>,
 }
 
@@ -87,20 +98,25 @@ fn prove_guest(elf: &str, stdin: EmulatorStdin) -> Guest {
         opts.chunk_size
     );
     let emulated = emulate::emulate_with_opts(Arc::clone(&program), &stdin, opts);
-    let (riscv_vk, proofs) = riscv::prove_riscv(
+    let bundle = riscv::prove_riscv(
         Arc::clone(&program),
         &emulated.records,
         LOG_STACKED_HEIGHT,
         true,
     )
-    .expect("riscv prove failed")
-    .into_parts();
+    .expect("riscv prove failed");
+    let riscv::RiscvProof {
+        vk: riscv_vk,
+        chunk_proofs: proofs,
+        global,
+    } = bundle;
     let vm_vk = RiscvVmVk::from_program_and_vk(&program, &riscv_vk);
     info!("{elf}: {} chunk proof(s) ✓", proofs.len());
     Guest {
         riscv_vk,
         vm_vk,
         proofs,
+        global,
         committed_bytes: emulated.committed_bytes,
     }
 }
@@ -116,8 +132,19 @@ fn convert_machine(guest: &Guest) -> ConvertMachine {
     .expect("convert machine")
 }
 
+/// The prover of the global LogUp's nodes for `guest`'s operating point, in whitelist mode.
+fn global_logup_node_machine(guest: &Guest) -> GlobalLogUpNodeMachine {
+    GlobalLogUpNodeMachine::new(
+        recursion_params_with_128_bits_security(),
+        &guest.riscv_vk.inner.params,
+        true,
+    )
+}
+
 /// A whitelist of this run's own keys: every convert key the guests use, the standard combine
-/// nodes and the deferred node — the same leaf families `mle_build_vk_map` writes.
+/// nodes, the global LogUp's nodes and the deferred node — the same leaf families
+/// `mle_build_vk_map` writes — and, last, a leaf no build writes: the deferred node's commitment
+/// under a convert key's pre-hash (`node-of-another-row`).
 fn self_map(guests: &[&Guest]) -> MleVkMap {
     let mut ids: Vec<VkIdentity> = Vec::new();
     let mut convert_vk = None;
@@ -143,6 +170,13 @@ fn self_map(guests: &[&Guest]) -> MleVkMap {
             .iter()
             .map(|vk| vk_identity(vk)),
     );
+    ids.extend(
+        global_logup_node_machine(guests[0])
+            .preregister()
+            .unwrap_or_else(|e| panic!("{e}"))
+            .iter()
+            .map(|vk| vk_identity(vk)),
+    );
     let mut deferred = DeferredMachine::new(
         recursion_params_with_128_bits_security(),
         guests[0].vm_vk.clone(),
@@ -154,12 +188,16 @@ fn self_map(guests: &[&Guest]) -> MleVkMap {
     let node = deferred
         .preregister(&combine_tier)
         .unwrap_or_else(|e| panic!("{e}"));
-    ids.push(vk_identity(&node));
+    let node = vk_identity(&node);
+    ids.push(node);
+    assert_ne!(convert_vk.pre_hash, node.0, "the two rows' pre-hashes");
+    ids.push((convert_vk.pre_hash, node.1));
     MleVkMap::build(ids)
 }
 
-/// Convert + combine `guest` under `map`, with `prefix` (deferred nodes) at the head and the
-/// leaves carrying `chain`; the root is verified by the machine before it is returned.
+/// Convert + combine `guest` under `map`: the global LogUp's nodes, then `prefix` (deferred
+/// nodes), then the leaves carrying `chain`; the root is verified by the machine before it is
+/// returned.
 fn tree(
     guest: &Guest,
     map: &Arc<MleVkMap>,
@@ -169,7 +207,15 @@ fn tree(
     let mut convert = convert_machine(guest);
     convert.set_vk_root(map.root())?;
     convert.set_final_deferred_digest(chain);
-    let mut children = prefix.to_vec();
+    let mut global_logup_nodes = global_logup_node_machine(guest);
+    global_logup_nodes.set_vk_root(map.root());
+    let mut children = global_logup_nodes.prove(
+        &guest.vm_vk,
+        &guest.proofs,
+        &guest.global,
+        [Kb::ZERO; DIGEST_SIZE],
+    )?;
+    children.extend_from_slice(prefix);
     children.extend(convert.prove_with_vks(&guest.proofs)?);
     let mut combine = CombineMachine::new(
         recursion_params_with_128_bits_security(),
@@ -394,6 +440,41 @@ fn main() {
         || nodes(&agg, &map, std::slice::from_ref(&leaf), true),
         "deferred node failed STARK verify",
     );
+
+    // The honest node's commitment under another row's pre-hash, where the map lists the pair.
+    let node_id = vk_identity(&agg_nodes[0].1);
+    let listed_under_another_row = map
+        .entries
+        .iter()
+        .find(|id| id.1 == node_id.1 && id.0 != node_id.0)
+        .map(|id| id.0);
+    match listed_under_another_row {
+        Some(forged) => expect_err(
+            &mut check,
+            "node-of-another-row (parent)",
+            || {
+                let mut deferred = DeferredMachine::new(
+                    recursion_params_with_128_bits_security(),
+                    agg.vm_vk.clone(),
+                    true,
+                );
+                deferred.set_vk_map(map.clone());
+                deferred.forge_pre_hash_for_testing(forged);
+                let (nodes, end) = deferred.prove_chain(&subs)?;
+                for node in &nodes {
+                    deferred.verify(node)?;
+                    // Nothing but its row is wrong with the node: its key is a member too.
+                    eyre::ensure!(
+                        map.find(&vk_identity(&node.1)).is_some(),
+                        "the forged key is not listed, so the case tests nothing"
+                    );
+                }
+                tree(&agg, &map, end, &nodes)
+            },
+            "not in the whitelist",
+        ),
+        None => info!("case node-of-another-row: skipped — the whitelist has no such leaf"),
+    }
 
     let wrong = reordered(&map);
     let apex = MleApexVerifier::new(

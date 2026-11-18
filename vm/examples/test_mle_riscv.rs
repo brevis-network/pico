@@ -40,18 +40,18 @@ use pico_vm::{
         },
         precompiles::keccak256::sliced::KeccakSlicedCols,
     },
-    compiler::{
-        program::ProgramBehavior,
-        riscv::{
-            compiler::{Compiler, SourceType},
-            program::Program,
-        },
+    compiler::riscv::{
+        compiler::{Compiler, SourceType},
+        program::Program,
     },
     configs::stark_config::KoalaBearPoseidon2,
     emulator::riscv::record::EmulationRecord,
     instances::chiptype::riscv_chiptype::RiscvChipType,
-    machine::{logger::setup_logger, septic::SepticDigest},
-    mle::machine::riscv::{self, RiscvProof, VerifyRiscvError},
+    machine::logger::setup_logger,
+    mle::machine::{
+        global_logup::{commit_global_table, GlobalLogUpError},
+        riscv::{self, RiscvProof, VerifyRiscvError},
+    },
 };
 use tracing::{info, warn};
 
@@ -103,7 +103,11 @@ fn reject_forged_memory_witness(program: Arc<Program>, records: &[EmulationRecor
         riscv::log_stacked_height_from_env(),
     ));
     let airs = riscv::mle_riscv_air_refs(program, false);
-    let (pk, _) = engine.keygen_with_app_prep(&airs, riscv::RISCV_APP_PREP_AIR_IDS);
+    let (pk, _) = engine.keygen_with_app_prep_and_required(
+        &airs,
+        riscv::RISCV_APP_PREP_AIR_IDS,
+        riscv::RISCV_REQUIRED_AIR_IDS,
+    );
     let chips = RiscvChipType::<riscv::Kb>::all_chips();
 
     // (name, target, which rows, delta). `delta` is 1 unless the arm's comment says why a larger
@@ -553,7 +557,7 @@ fn reject_forged_memory_witness(program: Arc<Program>, records: &[EmulationRecor
 
         // The debug check panics on a violation; silence the hook so the expected failure does not
         // print a backtrace, then restore it.
-        let ctx = riscv::ctx_to_engine(ctx);
+        let ctx = riscv::ctx_to_engine(&engine, commit_global_table(ctx, engine.params()).0);
         let hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
         let rejected =
@@ -623,7 +627,11 @@ fn reject_pc_limb_shift(program: Arc<Program>, records: &[EmulationRecord]) {
         riscv::log_stacked_height_from_env(),
     ));
     let airs = riscv::mle_riscv_air_refs(program, false);
-    let (pk, _) = engine.keygen_with_app_prep(&airs, riscv::RISCV_APP_PREP_AIR_IDS);
+    let (pk, _) = engine.keygen_with_app_prep_and_required(
+        &airs,
+        riscv::RISCV_APP_PREP_AIR_IDS,
+        riscv::RISCV_REQUIRED_AIR_IDS,
+    );
     let chips = RiscvChipType::<riscv::Kb>::all_chips();
 
     // Cap on the run length. Two rows is already the whole argument (one shifted `pc`, one
@@ -715,7 +723,7 @@ fn reject_pc_limb_shift(program: Arc<Program>, records: &[EmulationRecord]) {
     // The debug check panics on a violation; silence the hook so the expected failure does not
     // print a backtrace, then restore it. `check_logup` still prints the offending bus tuples on
     // stdout, which is the useful half of the diagnostic.
-    let ctx = riscv::ctx_to_engine(ctx);
+    let ctx = riscv::ctx_to_engine(&engine, commit_global_table(ctx, engine.params()).0);
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let outcome =
@@ -761,7 +769,11 @@ fn reject_jump_return_carry_shift(program: Arc<Program>, records: &[EmulationRec
         riscv::log_stacked_height_from_env(),
     ));
     let airs = riscv::mle_riscv_air_refs(program, false);
-    let (pk, _) = engine.keygen_with_app_prep(&airs, riscv::RISCV_APP_PREP_AIR_IDS);
+    let (pk, _) = engine.keygen_with_app_prep_and_required(
+        &airs,
+        riscv::RISCV_APP_PREP_AIR_IDS,
+        riscv::RISCV_REQUIRED_AIR_IDS,
+    );
     let chips = RiscvChipType::<riscv::Kb>::all_chips();
 
     let zero = riscv::Kb::ZERO;
@@ -806,7 +818,7 @@ fn reject_jump_return_carry_shift(program: Arc<Program>, records: &[EmulationRec
         )
     });
 
-    let ctx = riscv::ctx_to_engine(ctx);
+    let ctx = riscv::ctx_to_engine(&engine, commit_global_table(ctx, engine.params()).0);
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let outcome =
@@ -849,7 +861,11 @@ fn reject_jalr_lsb_slide(program: Arc<Program>, records: &[EmulationRecord]) {
         riscv::log_stacked_height_from_env(),
     ));
     let airs = riscv::mle_riscv_air_refs(program, false);
-    let (pk, _) = engine.keygen_with_app_prep(&airs, riscv::RISCV_APP_PREP_AIR_IDS);
+    let (pk, _) = engine.keygen_with_app_prep_and_required(
+        &airs,
+        riscv::RISCV_APP_PREP_AIR_IDS,
+        riscv::RISCV_REQUIRED_AIR_IDS,
+    );
     let chips = RiscvChipType::<riscv::Kb>::all_chips();
 
     let zero = riscv::Kb::ZERO;
@@ -891,7 +907,7 @@ fn reject_jalr_lsb_slide(program: Arc<Program>, records: &[EmulationRecord]) {
         )
     });
 
-    let ctx = riscv::ctx_to_engine(ctx);
+    let ctx = riscv::ctx_to_engine(&engine, commit_global_table(ctx, engine.params()).0);
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let outcome =
@@ -928,7 +944,11 @@ fn reject_pc_carry_off_table(program: Arc<Program>, records: &[EmulationRecord])
         riscv::log_stacked_height_from_env(),
     ));
     let airs = riscv::mle_riscv_air_refs(program, false);
-    let (pk, _) = engine.keygen_with_app_prep(&airs, riscv::RISCV_APP_PREP_AIR_IDS);
+    let (pk, _) = engine.keygen_with_app_prep_and_required(
+        &airs,
+        riscv::RISCV_APP_PREP_AIR_IDS,
+        riscv::RISCV_REQUIRED_AIR_IDS,
+    );
     let chips = RiscvChipType::<riscv::Kb>::all_chips();
 
     let zero = riscv::Kb::ZERO;
@@ -967,7 +987,7 @@ fn reject_pc_carry_off_table(program: Arc<Program>, records: &[EmulationRecord])
         )
     });
 
-    let ctx = riscv::ctx_to_engine(ctx);
+    let ctx = riscv::ctx_to_engine(&engine, commit_global_table(ctx, engine.params()).0);
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let outcome =
@@ -997,7 +1017,7 @@ fn reject_pc_carry_off_table(program: Arc<Program>, records: &[EmulationRecord])
 /// x0 row the chip pins) in one record. Every trace of that record is built from its events, so
 /// the chunk stays internally consistent and its proof valid; but the Global receive its
 /// MemoryFinalize row now carries matches no send from the chunk that produced the word's final
-/// state, so `Σ gcs != 0`. Finalize only: a zero-initial main-memory word has no MemoryInitialize
+/// state, so the global LogUp does not balance. Finalize only: a zero-initial main-memory word has no MemoryInitialize
 /// event (`riscv_memory/event.rs`), so a matching init/final pair is not there to bump. Lives in
 /// the example, not the library, so the shipping driver stays env-free.
 fn corrupt_cross_chunk_memory(records: &mut [EmulationRecord]) {
@@ -1016,12 +1036,12 @@ fn corrupt_cross_chunk_memory(records: &mut [EmulationRecord]) {
         }
     }
     // No tamperable cell ⇒ the negative test would otherwise run on untampered records and the
-    // gcs==0 assertion would pass, falsely reporting success. Fail loudly instead.
+    // global LogUp would balance, falsely reporting success. Fail loudly instead.
     panic!("CORRUPT_MEMORY: no finalize event found to tamper; negative test could not run");
 }
 
 /// Fresh-verdict negative tests: invert the fresh verdict of one first-touch MemoryLocal entry
-/// and require the cross-chunk GCS check to reject. A fresh entry (`is_fresh_local_mem`: a
+/// and require the global LogUp to reject. A fresh entry (`is_fresh_local_mem`: a
 /// main-memory word
 /// outside the image that starts at zero) declares its initial state on the AIR instead of
 /// receiving it from the Global bus (`has_initial = 0`). The hook inverts that verdict for one
@@ -1071,13 +1091,13 @@ fn reject_fresh_verdict_flip(
             riscv::air_id::PROGRAM,
             riscv::riscv_program_commit(&bundle.vk),
         )],
-        program.initial_global_cumulative_sum(),
+        &riscv::ProgramIdentity::new(&program, &bundle.vk.inner.params).expect("the image fits"),
     );
     match outcome {
-        Err(VerifyRiscvError::CrossChunkMemoryInconsistency) => {
+        Err(VerifyRiscvError::GlobalLogUp(GlobalLogUpError::Unbalanced)) => {
             info!(
-                "{what} at {addr:#x} with its fresh verdict inverted rejected by the cross-chunk \
-                 GCS check ✓"
+                "{what} at {addr:#x} with its fresh verdict inverted rejected by the global \
+                 LogUp ✓"
             );
         }
         Err(other) => panic!(
@@ -1129,9 +1149,9 @@ fn bucket_shapes() -> bool {
 }
 
 /// Negative-test path (env-gated): prove then verify with the honest vk but tampered inputs, so the
-/// cross-chunk GCS check must reject. `CORRUPT_MEMORY` tampers `records` before proving;
-/// `SKIP_INITIAL_GCS` passes a zero initial GCS (→ the cross-chunk sum no longer cancels). A correct
-/// backend panics on `verify_riscv`'s typed error; reaching the end means the check failed to fire.
+/// global LogUp must reject. `CORRUPT_MEMORY` tampers `records` before proving; `WRONG_IMAGE`
+/// verifies against another memory image than the program's. A correct backend panics on
+/// `verify_riscv`'s typed error; reaching the end means the check failed to fire.
 fn run_negative_test(program: Arc<Program>, records: &[EmulationRecord]) {
     let tampered;
     let records: &[EmulationRecord] = if env::var("CORRUPT_MEMORY").is_ok() {
@@ -1151,12 +1171,12 @@ fn run_negative_test(program: Arc<Program>, records: &[EmulationRecord]) {
     )
     .expect("riscv prove");
 
-    let initial_gcs: SepticDigest<riscv::Kb> = if env::var("SKIP_INITIAL_GCS").is_ok() {
-        warn!("SKIP_INITIAL_GCS set: omitting initial GCS (negative test)");
-        SepticDigest::zero()
-    } else {
-        program.initial_global_cumulative_sum()
-    };
+    let mut identity =
+        riscv::ProgramIdentity::new(&program, &bundle.vk.inner.params).expect("the image fits");
+    if env::var("WRONG_IMAGE").is_ok() {
+        warn!("WRONG_IMAGE set: verifying against another image commitment (negative test)");
+        identity.image.commit[0] += riscv::Kb::ONE;
+    }
 
     riscv::verify_riscv(
         &bundle,
@@ -1165,7 +1185,7 @@ fn run_negative_test(program: Arc<Program>, records: &[EmulationRecord]) {
             riscv::air_id::PROGRAM,
             riscv::riscv_program_commit(&bundle.vk),
         )],
-        initial_gcs,
+        &identity,
     )
     .expect("cross-chunk verification failed");
     info!("negative-test path completed without the expected failure");
@@ -1205,13 +1225,13 @@ fn main() {
     reject_pc_carry_off_table(program.clone(), &records);
 
     // The fresh-verdict arms prove the whole run twice more: their rejection is a cross-chunk
-    // one, which only the GCS sum over real proofs can show.
+    // one, which only the global LogUp over real proofs can show.
     reject_image_first_touch_declared_fresh(program.clone(), &records);
     reject_fresh_entry_declared_inherited(program.clone(), &records);
 
-    // The CORRUPT_MEMORY / SKIP_INITIAL_GCS negative-test env hooks live in this driver (not the
+    // The CORRUPT_MEMORY / WRONG_IMAGE negative-test env hooks live in this driver (not the
     // library), so those runs still fail loudly (a correct backend panics on the typed verify error).
-    if env::var("CORRUPT_MEMORY").is_ok() || env::var("SKIP_INITIAL_GCS").is_ok() {
+    if env::var("CORRUPT_MEMORY").is_ok() || env::var("WRONG_IMAGE").is_ok() {
         run_negative_test(program, &records);
         return;
     }
@@ -1241,6 +1261,7 @@ fn main() {
     let bundle = RiscvProof {
         vk: bundle.vk,
         chunk_proofs,
+        global: bundle.global,
     };
     info!("round-tripped all chunk proofs through the versioned codec ✓");
 
@@ -1248,12 +1269,11 @@ fn main() {
     // covers machine+shape only, so the program commitment is pinned explicitly alongside).
     let expected_vk_pre_hash = bundle.vk.pre_hash;
     let expected_program_commit = riscv::riscv_program_commit(&bundle.vk);
-    let initial_gcs = program.initial_global_cumulative_sum();
     riscv::verify_riscv(
         &bundle,
         expected_vk_pre_hash,
         &[(riscv::air_id::PROGRAM, expected_program_commit)],
-        initial_gcs,
+        &riscv::ProgramIdentity::new(&program, &bundle.vk.inner.params).expect("the image fits"),
     )
     .expect("verify_riscv failed");
     info!("all chunks verified on the MLE/WHIR backend ✓");

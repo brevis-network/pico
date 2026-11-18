@@ -26,15 +26,10 @@
 #include "tracegen/riscv/sr.cuh"
 
 // Global
-#include "tracegen/common/global_accumulation.cuh"
-#include "tracegen/common/global_interaction.cuh"
 #include "tracegen/riscv/riscv_global.cuh"
 
 // Memory_read_write
 #include "tracegen/riscv/memory_read_write.cuh"
-
-// Riscv_Poseidon2
-#include "tracegen/riscv/riscv_poseidon2.cuh"
 
 #include "tracegen/common/selectors_on_coset.cuh"
 
@@ -314,35 +309,11 @@ namespace pico_gpu {
       const GlobalInteractionEvent* events,
       field_t* trace,
       cudaStream_t stream,
-      field_t* byte_trace,
-      Poseidon2Event* poseidon2_events,
-      size_t poseidon2_events_start_index,
-      const field_t* round_constants,
-      StepEvents* steps)
+      field_t* byte_trace)
     {
-      return generate_extra_record_and_main(
-        num_cols, event_size, trace_size, events, trace, stream, byte_trace, poseidon2_events,
-        poseidon2_events_start_index, round_constants, steps);
+      return generate_extra_record_and_main(num_cols, event_size, trace_size, events, trace, stream, byte_trace);
     }
   } // namespace riscv_global
-
-  namespace riscv_poseidon2 {
-    PICO_FFI
-    RustError::by_value cuda_riscv_poseidon2_generate_main(
-      size_t num_cols,
-      size_t event_size,
-      size_t trace_size,
-      const Poseidon2Event* events,
-      field_t* trace,
-      field_t* dummy_row,
-      const field_t* round_constants,
-      cudaStream_t stream,
-      StepEvents* steps)
-    {
-      return generate_main(
-        num_cols, event_size, trace_size, events, trace, dummy_row, round_constants, stream, steps);
-    } // cuda_riscv_poseidon2_generate_main
-  } // namespace riscv_poseidon2
 
   PICO_FFI
   RustError::by_value cuda_selectors_on_coset(

@@ -387,8 +387,8 @@ pub(crate) mod test_programs {
     use crate::{
         compiler::recursion::{
             instruction::{
-                base_alu, commit_public_values, ext_alu, mem, poseidon2, HintAddCurveInstr,
-                HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
+                base_alu, commit_public_values, ext_alu, mem, poseidon2, HintBitsInstr,
+                HintExt2FeltsInstr, HintInstr, Instruction,
             },
             types::{
                 Address, AssertZeroExtInstr, BinaryFoldStepInstr, DigestSelectInstr,
@@ -450,14 +450,6 @@ pub(crate) mod test_programs {
                 output_addrs_mults: [(a, Kb::ONE); EXTENSION_DEGREE],
                 input_addr: a,
             }));
-            instructions.push(Instruction::HintAddCurve(Box::new(HintAddCurveInstr {
-                output_x_addrs_mults: vec![(a, Kb::ONE); 2],
-                output_y_addrs_mults: vec![(a, Kb::ONE); 2],
-                input1_x_addrs: vec![a; 2],
-                input1_y_addrs: vec![a; 2],
-                input2_x_addrs: vec![a; 2],
-                input2_y_addrs: vec![a; 2],
-            })));
             instructions.push(Instruction::ExtDotProduct(Box::new(ExtDotProductInstr {
                 mu_addrs: vec![a; 8],
                 val_addrs: vec![a; 2],

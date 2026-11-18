@@ -232,7 +232,7 @@ How much a verified proof says depends on what was verified:
 
 | proof | what it binds | exit code |
 |---|---|---|
-| a raw `verify_riscv` bundle | each chunk is valid, and the chunks' global cumulative sums cancel. Nothing ties them into one run that started at the entry point and ended at `HALT`. | not checked |
+| a raw `verify_riscv` bundle | each chunk is valid, and the chunks' cross-chunk events balance against the program's memory image. Nothing ties them into one run that started at the entry point and ended at `HALT`. | not checked |
 | an SDK `Phase::Riscv` artifact | as the raw bundle | 0 in every chunk; anything else fails with `NonZeroExitCode`. |
 | an SDK proof from `Phase::Combine` on | one whole run: starts at chunk 1, ends with `next_pc == 0` (a `HALT`), memory closed | 0 in every chunk, asserted in the circuit |
 

@@ -105,6 +105,28 @@ impl SystemParams {
         self.logup.pow_bits
     }
 
+    /// Whether the first WHIR round's proximity radius is within the unique-decoding radius
+    /// `(1 - rho) / 2` of the initial code, the endpoint included.
+    ///
+    /// Two proofs that open one commitment read the same table only under this condition: within
+    /// the radius the committed word has a single nearby codeword, so both openings are openings
+    /// of it. The global LogUp rests on that (a chunk proof and a group proof open the same
+    /// Global table), so the machines involved assert it at keygen. It is a statement about the
+    /// radius, not about the `UniqueDecoding` label: at rate 1/4, `ListDecoding { m: 2 }` has
+    /// exactly the unique-decoding radius and passes.
+    pub fn first_whir_round_within_unique_decoding(&self) -> bool {
+        match self.whir.proximity.initial_round() {
+            ProximityRegime::UniqueDecoding => true,
+            // Agreement `sqrt(rho) (1 + 1/(2m)) >= (1 + rho) / 2`, squared and cleared of
+            // denominators with `rho = 2^-log_blowup`, so the endpoint is compared exactly.
+            ProximityRegime::ListDecoding { m } => {
+                let m = m.max(1) as u128;
+                let inv_rate = 1u128 << self.log_blowup;
+                (2 * m + 1).pow(2) * inv_rate >= m.pow(2) * (inv_rate + 1).pow(2)
+            }
+        }
+    }
+
     pub fn k_whir(&self) -> usize {
         self.whir.k
     }

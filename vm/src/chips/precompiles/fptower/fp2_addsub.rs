@@ -926,8 +926,6 @@ mod tests {
             .insert(chip.name(), 5);
 
         let mut event_counter = precompute_event_size::<F>(&mut counted_record);
-        // Ignore Poseidon2 event counting
-        event_counter.num_poseidon2_events = complete_record.poseidon2_events.len();
         // Ignore Global lookup event counting
         event_counter.num_global_lookup_events = complete_record.global_lookup_events.len();
         // Assert that the event counts are the same.
@@ -1069,7 +1067,6 @@ mod tests {
                 .inner
                 .insert(chip.name(), log_rows);
             let mut event_counter = precompute_event_size::<F>(&mut counted_record);
-            event_counter.num_poseidon2_events = record.poseidon2_events.len();
             event_counter.num_global_lookup_events = record.global_lookup_events.len();
             let prepared_gpu_events = PreparedGpuEvents::new(&counted_record, event_counter);
 

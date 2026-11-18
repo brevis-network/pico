@@ -1,10 +1,8 @@
 use super::memory::VALUES_SIZE;
 use crate::{
     compiler::riscv::opcode::Opcode,
-    mle::machine::shape::MLE_MEMORY_UNALIGNED_LOG_HEIGHT,
-    primitives::consts::{
-        CHUNK_CLK_START, DIGEST_SIZE, LOCAL_MEMORY_DATAPAR, RISCV_POSEIDON2_DATAPAR,
-    },
+    mle::machine::shape::{MLE_GLOBAL_LOG_HEIGHT, MLE_MEMORY_UNALIGNED_LOG_HEIGHT},
+    primitives::consts::{CHUNK_CLK_START, DIGEST_SIZE, LOCAL_MEMORY_DATAPAR},
 };
 
 /// Number of u64 words needed to cover the full VALUES_SIZE address space as a dword bitmap.
@@ -31,6 +29,9 @@ pub struct ChunkSplitConfig {
     /// every core shape fixes. A hard limit of the circuit, unlike the event arm, so
     /// neither `CHUNK_EVENT_LIMITS_OFF` nor a commit tail in flight lifts it.
     pub misaligned_threshold: usize,
+    /// The cross-chunk events a chunk may hold: the rows of its `Global` table, which has one
+    /// fixed height. A hard limit of the circuit like the one above, and lifted by nothing.
+    pub global_event_cap: usize,
 }
 
 /// Default [`ChunkSplitConfig::leaf_cap`]: 1.5 * 2^28 leaves, which at 40 B a KB5 leaf bounds the
@@ -98,6 +99,7 @@ impl ChunkSplitConfig {
             commit_tail_overrun: 0,
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
+            global_event_cap: usize::MAX,
         }
     }
 
@@ -110,14 +112,13 @@ impl ChunkSplitConfig {
     /// The chunk-clk bit budget baked into the AIRs: the CPU chip decomposes clk into
     /// a 16-bit limb plus a 9-bit limb (`riscv_cpu/chunk_clk`; the limbs are a representation,
     /// the AIR bounds clk through the row chain), and the Global chip range-checks the leading
-    /// slot of the syscall message -- the clk -- to 25 bits and packs its interaction kind above
-    /// it. A chunk whose clk exceeds
+    /// slot of the syscall message -- the clk -- to 25 bits. A chunk whose clk exceeds
     /// this budget would get its limbs truncated during trace generation — the resulting
     /// proof is UNSOUND and only fails at verify time (SumClaimMismatch); trace generation
     /// also asserts, but this guard fails earliest. History: the budget was 24 bits (the
     /// long-lost rationale for the CHUNK_SIZE=2^22 default), widened to 25 to admit
-    /// CHUNK_SIZE=2^23. 25 is now a hard ceiling: the syscall Global message leads with `clk`
-    /// and the digest packs `kind` above bit 25, so a wider clk would overflow that packing.
+    /// CHUNK_SIZE=2^23. 25 is a hard ceiling: the syscall Global message leads with `clk`,
+    /// and the Global chip's range check of that slot is 25 bits wide.
     pub const MAX_CHUNK_CLK_BITS: u32 = 25;
 
     #[inline(always)]
@@ -172,6 +173,7 @@ impl ChunkSplitConfig {
             commit_tail_overrun,
             leaf_cap: leaf_cap(),
             misaligned_threshold: 1 << MLE_MEMORY_UNALIGNED_LOG_HEIGHT,
+            global_event_cap: 1 << MLE_GLOBAL_LOG_HEIGHT,
         };
         // One-shot effective-config snapshot so every bench log records the split conditions
         // it actually ran with (debug reference for OOM/chunk-count attribution).
@@ -180,7 +182,7 @@ impl ChunkSplitConfig {
             tracing::info!(
                 "[chunk-split] config: chunk_size={} clk_threshold={} memory_rw_threshold={} \
                  global_lookup_base_threshold={} event_limits_off={} commit_tail_reserve={} \
-                 commit_tail_overrun={} leaf_cap={} misaligned_threshold={}",
+                 commit_tail_overrun={} leaf_cap={} misaligned_threshold={} global_event_cap={}",
                 cfg.chunk_size,
                 cfg.clk_threshold,
                 cfg.memory_rw_threshold,
@@ -190,6 +192,7 @@ impl ChunkSplitConfig {
                 cfg.commit_tail_overrun,
                 cfg.leaf_cap,
                 cfg.misaligned_threshold,
+                cfg.global_event_cap,
             );
         });
         cfg
@@ -279,7 +282,7 @@ pub fn maybe_debug_split_snapshot(
 // The clk limit bounds instructions, not leaves, and an instruction costs anywhere from the 17
 // leaves of a Cpu row alone to 148 for a signed division, so the leaf count is a split condition
 // of its own. The estimate never under-counts: every chip is charged as present, derived rows
-// are charged at their most, and global lookups at two per base entry.
+// are charged at their most, and the Global table at its fixed height.
 
 /// The chips an instruction adds rows to one at a time, as indices into
 /// [`ChunkSplitState::leaf_rows`].
@@ -305,18 +308,20 @@ pub const LEAF_INSN_INTERACTIONS: [u64; LEAF_INSN_CHIPS] =
 /// counts its store's code-range check: the Program table's lookup and two u16 checks.
 pub const LEAF_MEMORY_RW_INTERACTIONS: u64 = 13;
 pub const LEAF_MEMORY_LOCAL_INTERACTIONS: u64 = 44;
-pub const LEAF_GLOBAL_INTERACTIONS: u64 = 10;
-pub const LEAF_POSEIDON2_INTERACTIONS: u64 = 4;
 pub const LEAF_SYSCALL_INTERACTIONS: u64 = 4;
+/// Interactions per row of `Global`, whose table has one fixed height in every chunk.
+pub const LEAF_GLOBAL_INTERACTIONS: u64 = 6;
 /// Interactions per row of `MemoryUnaligned`.
 pub const LEAF_MEMORY_UNALIGNED_INTERACTIONS: u64 = 28;
 /// The tables charged as a constant: the preprocessed Program (two interactions, the fetch and
 /// the code range a store checks, one row an instruction, up to 2^21 rows) and Byte (ten
-/// interactions, 2^17 rows), and `MemoryUnaligned` at its most rows, the cap on a chunk's
-/// misaligned accesses.
+/// interactions, 2^17 rows), `MemoryUnaligned` at its most rows, the cap on a chunk's
+/// misaligned accesses, and `Global` at the height its table has in every chunk at the
+/// production stacked height (under it the table is shorter, and this over-counts).
 const LEAF_FIXED_ALLOWANCE: u64 = 2 * (1 << 21)
     + 10 * (1 << 17)
-    + LEAF_MEMORY_UNALIGNED_INTERACTIONS * (1 << MLE_MEMORY_UNALIGNED_LOG_HEIGHT);
+    + LEAF_MEMORY_UNALIGNED_INTERACTIONS * (1 << MLE_MEMORY_UNALIGNED_LOG_HEIGHT)
+    + LEAF_GLOBAL_INTERACTIONS * (1 << MLE_GLOBAL_LOG_HEIGHT);
 /// Rows below 2^l_skip (l_skip = 4) are lifted to it.
 const LEAF_MIN_ROWS: u64 = 16;
 /// Growth one instruction can add to a chip: its own four rows, four memory events and two
@@ -637,7 +642,9 @@ pub struct ChunkSplitState {
 }
 
 /// Whether the chunk may be at a split point, a cheap test that skips `should_split` far from
-/// every threshold. The misaligned cap has no margin: it is the exact limit `should_split` tests.
+/// every threshold. The misaligned and Global caps have no margin: they are the exact limits
+/// `should_split` tests, the Global one as for a chunk with no commit tail in flight, which is
+/// the earlier of its two.
 #[inline(always)]
 pub fn should_check_fast(clk: u32, state: &ChunkSplitState, cfg: &ChunkSplitConfig) -> bool {
     clk >= cfg.clk_fast_threshold
@@ -645,6 +652,7 @@ pub fn should_check_fast(clk: u32, state: &ChunkSplitState, cfg: &ChunkSplitConf
         || (cfg.leaf_cap != 0
             && state.leaf_growth.get() + LEAF_STEP_GROWTH > state.leaf_allowance.get())
         || at_misaligned_cap(state, cfg)
+        || at_global_cap(state, cfg, false)
 }
 
 /// The event arm: the chunk's memory events and global lookups have both reached their
@@ -661,6 +669,40 @@ fn over_event_limit(state: &ChunkSplitState, cfg: &ChunkSplitConfig) -> bool {
 #[inline(always)]
 fn at_misaligned_cap(state: &ChunkSplitState, cfg: &ChunkSplitConfig) -> bool {
     state.num_misaligned >= cfg.misaligned_threshold
+}
+
+/// Cross-chunk events one more step may add to a chunk, for the cap on them: an instruction
+/// touches a few registers and dwords, two events for each, and a precompile call sends one
+/// syscall event and closes the chunk's window on each dword of its operands that has one open
+/// (the dwords themselves travel with the precompile's own record). A step that added more
+/// than this would overrun the cap by the excess, and the prover refuses such a chunk where it
+/// commits the table.
+pub const GLOBAL_STEP_EVENTS: usize = 1 << 10;
+
+/// Cross-chunk events a commit tail may add once its first word is written: its ecalls, an
+/// event each, and the few registers and dwords their arguments touch, two events for each.
+/// Sixteen ecalls come to well under this.
+///
+/// A chunk with no tail in flight closes this much earlier, so that a tail that starts in it
+/// finishes in it: the hold of a tail in flight spends the room, as it spends the clk reserve.
+pub const GLOBAL_TAIL_EVENTS: usize = 1 << 8;
+
+/// The chunk's cross-chunk events leave no room in its `Global` table for another step. The
+/// count is the split state's, two events per base entry, which is never below the events the
+/// chunk's record carries when it is replayed in one piece. A replay cut into segments folds
+/// to a record with two more events for every address live across a cut, and a fold past the
+/// table has those rejoined (`record_merge`).
+///
+/// `hold` is a commit tail in flight, which may spend the room kept for one
+/// ([`GLOBAL_TAIL_EVENTS`]); the room for the next step is never spent.
+#[inline(always)]
+fn at_global_cap(state: &ChunkSplitState, cfg: &ChunkSplitConfig, hold: bool) -> bool {
+    let room = if hold {
+        GLOBAL_STEP_EVENTS
+    } else {
+        GLOBAL_STEP_EVENTS + GLOBAL_TAIL_EVENTS
+    };
+    state.num_global_lookup_events().saturating_add(room) > cfg.global_event_cap
 }
 
 /// Whether the commit tail is mid-way: the chunk has run some but not all of the eight words of a
@@ -705,28 +747,36 @@ pub fn should_split(
     // The chunk's misaligned accesses fill its `MemoryUnaligned` trace: no hold lifts that. Each
     // instruction makes at most one, so a chunk closed here holds exactly the cap.
     let misaligned_full = at_misaligned_cap(state, cfg);
+    // The chunk's cross-chunk events fill its `Global` table: no event-limit switch lifts that,
+    // and a hold only spends the room kept for a commit tail.
+    let global_full = at_global_cap(state, cfg, hold);
     // A half-written digest holds the event arm too: a cut between two COMMIT ecalls splits the
     // digest whatever triggered it. The hold ends when the digest is whole or at the ceiling,
     // which is where a chunk closed before the reserve existed, so no chunk outgrows its old
     // bound; a chunk that does reach the ceiling still split is the case this cannot fix, and so
     // is a commit tail whose own misaligned accesses fill the chunk, which the SDK's never makes.
     if hold {
-        if is_max_chunk_size || misaligned_full {
+        if is_max_chunk_size || misaligned_full || global_full {
             tracing::warn!(
                 "[chunk-split] closing a chunk at clk {clk} with its commit tail in flight: it \
-                 outran the {} clk the hold may spend or made its {}th misaligned access, and the \
-                 recursion will reject the split (a partial run of either digest at convert)",
+                 outran the {} clk the hold may spend, made its {}th misaligned access or filled \
+                 its Global table, and the recursion will reject the split (a partial run of \
+                 either digest at convert)",
                 cfg.commit_tail_reserve.max(cfg.commit_tail_overrun),
                 cfg.misaligned_threshold,
             );
         }
-        return is_max_chunk_size || misaligned_full;
+        return is_max_chunk_size || misaligned_full || global_full;
     }
     // Checked after a step, the cap has to hold for the next one too: the estimate can jump by
     // a whole chip's leaves when its rows pass a power of two.
     let over_leaf_cap = !state.leaf_room(LEAF_STEP_GROWTH, cfg);
 
-    is_max_chunk_size || over_event_limit(state, cfg) || over_leaf_cap || misaligned_full
+    is_max_chunk_size
+        || over_event_limit(state, cfg)
+        || over_leaf_cap
+        || misaligned_full
+        || global_full
 }
 
 /// Whether a compiled block can run whole without reaching a split point, so that the cut after it
@@ -772,6 +822,22 @@ pub fn can_fit_block(
         return false;
     }
 
+    // The most base entries the chunk holds after the block, for the Global cap and the event
+    // arm alike.
+    let new_reg_writes = (reg_write_mask & !state.reg_write_mask).count_ones() as usize;
+    let projected_global = state
+        .num_global_lookup_base
+        .saturating_add(non_register_global_lookup_base_max)
+        .saturating_add(memory_insns)
+        .saturating_add(new_reg_writes);
+    // As for a chunk with no commit tail in flight: a block that runs a tail's ecalls stops at
+    // each of them, and one refused here is stepped through under `should_split`.
+    if (projected_global << 1).saturating_add(GLOBAL_STEP_EVENTS + GLOBAL_TAIL_EVENTS)
+        > cfg.global_event_cap
+    {
+        return false;
+    }
+
     let projected_memory = state
         .num_memory_read_write_events
         .saturating_add(mem_rw_exact)
@@ -779,13 +845,6 @@ pub fn can_fit_block(
     if projected_memory < cfg.memory_rw_threshold {
         return true;
     }
-
-    let new_reg_writes = (reg_write_mask & !state.reg_write_mask).count_ones() as usize;
-    let projected_global = state
-        .num_global_lookup_base
-        .saturating_add(non_register_global_lookup_base_max)
-        .saturating_add(memory_insns)
-        .saturating_add(new_reg_writes);
 
     !((projected_memory > cfg.memory_rw_threshold
         && projected_global >= cfg.global_lookup_base_threshold)
@@ -908,14 +967,10 @@ impl ChunkSplitState {
         }
         let memory_rw = self.num_memory_read_write_events as u64;
         let local = (self.unique_address_count() + self.reopened_windows) as u64;
-        let global = self.num_global_lookup_events() as u64;
         leaves += LEAF_MEMORY_RW_INTERACTIONS
             * lifted_rows((memory_rw + growth).min(max_memory_rw.max(memory_rw)));
         leaves += LEAF_MEMORY_LOCAL_INTERACTIONS
             * lifted_rows(local.div_ceil(LOCAL_MEMORY_DATAPAR as u64) + growth);
-        leaves += LEAF_GLOBAL_INTERACTIONS * lifted_rows(global + growth);
-        leaves += LEAF_POSEIDON2_INTERACTIONS
-            * lifted_rows(global.div_ceil(RISCV_POSEIDON2_DATAPAR as u64) + growth);
         leaves += LEAF_SYSCALL_INTERACTIONS * lifted_rows(self.num_syscall_events as u64 + growth);
         leaves
     }
@@ -1048,15 +1103,15 @@ mod tests {
     use super::{
         add_insn_leaf_rows, can_fit_block, commit_tail_in_flight, should_check_fast, should_split,
         ChunkSplitConfig, ChunkSplitState, Opcode, SimpleBitSet, BITMAP_WORDS, CHUNK_CLK_START,
-        LEAF_ADD, LEAF_ADDW, LEAF_BITWISE, LEAF_CPU, LEAF_DIVREM, LEAF_ECALL,
-        LEAF_GLOBAL_INTERACTIONS, LEAF_INSN_CHIPS, LEAF_INSN_INTERACTIONS, LEAF_LT,
-        LEAF_MEMORY_LOCAL_INTERACTIONS, LEAF_MEMORY_RW_INTERACTIONS,
-        LEAF_MEMORY_UNALIGNED_INTERACTIONS, LEAF_MUL, LEAF_POSEIDON2_INTERACTIONS, LEAF_SLL,
-        LEAF_SR, LEAF_SUB, LEAF_SUBW, LEAF_SYSCALL_INTERACTIONS,
+        GLOBAL_STEP_EVENTS, GLOBAL_TAIL_EVENTS, LEAF_ADD, LEAF_ADDW, LEAF_BITWISE, LEAF_CPU,
+        LEAF_DIVREM, LEAF_ECALL, LEAF_GLOBAL_INTERACTIONS, LEAF_INSN_CHIPS, LEAF_INSN_INTERACTIONS,
+        LEAF_LT, LEAF_MEMORY_LOCAL_INTERACTIONS, LEAF_MEMORY_RW_INTERACTIONS,
+        LEAF_MEMORY_UNALIGNED_INTERACTIONS, LEAF_MUL, LEAF_SLL, LEAF_SR, LEAF_SUB, LEAF_SUBW,
+        LEAF_SYSCALL_INTERACTIONS,
     };
     use crate::{
         chips::chips::riscv_memory::event::MemoryAccessPosition,
-        mle::machine::shape::MLE_MEMORY_UNALIGNED_LOG_HEIGHT,
+        mle::machine::shape::{MLE_GLOBAL_LOG_HEIGHT, MLE_MEMORY_UNALIGNED_LOG_HEIGHT},
         primitives::consts::BENCH_MAX_CHUNK_SIZE,
     };
 
@@ -1192,6 +1247,7 @@ mod tests {
             commit_tail_overrun: 0,
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
+            global_event_cap: usize::MAX,
         };
         let mut state = ChunkSplitState::default();
 
@@ -1223,6 +1279,7 @@ mod tests {
             commit_tail_overrun: 0,
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
+            global_event_cap: usize::MAX,
         };
         let state = ChunkSplitState {
             num_memory_read_write_events: 3,
@@ -1247,6 +1304,7 @@ mod tests {
             commit_tail_overrun: 0,
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
+            global_event_cap: usize::MAX,
         };
         let mut state = ChunkSplitState {
             num_memory_read_write_events: 3,
@@ -1271,6 +1329,7 @@ mod tests {
             commit_tail_overrun: 0,
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
+            global_event_cap: usize::MAX,
         };
         let mut state = ChunkSplitState::default();
         assert!(!should_check_fast(128, &state, &cfg));
@@ -1341,6 +1400,7 @@ mod tests {
             commit_tail_overrun: 0,
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
+            global_event_cap: usize::MAX,
         }
     }
 
@@ -1530,7 +1590,7 @@ mod tests {
             air::symbolic::get_symbolic_builder_with_public_values, keygen::types::TraceWidth,
         };
 
-        let expected: [(&str, u64); LEAF_INSN_CHIPS + 6] = [
+        let expected: [(&str, u64); LEAF_INSN_CHIPS + 5] = [
             ("Cpu", LEAF_INSN_INTERACTIONS[LEAF_CPU]),
             ("Add", LEAF_INSN_INTERACTIONS[LEAF_ADD]),
             ("Sub", LEAF_INSN_INTERACTIONS[LEAF_SUB]),
@@ -1546,7 +1606,6 @@ mod tests {
             ("MemoryReadWrite", LEAF_MEMORY_RW_INTERACTIONS),
             ("MemoryLocal", LEAF_MEMORY_LOCAL_INTERACTIONS),
             ("Global", LEAF_GLOBAL_INTERACTIONS),
-            ("RiscvKoalaBearPoseidon2", LEAF_POSEIDON2_INTERACTIONS),
             ("SyscallRiscv", LEAF_SYSCALL_INTERACTIONS),
             ("MemoryUnaligned", LEAF_MEMORY_UNALIGNED_INTERACTIONS),
         ];
@@ -1646,6 +1705,91 @@ mod tests {
         assert!(!can_fit_block(0, 4, 3, 3, 0b1110, 3, &state, &cfg));
     }
 
+    /// The event thresholds off, as `CHUNK_EVENT_LIMITS_OFF` sets them, and a `Global` table of
+    /// `cap` rows.
+    fn global_cap_cfg(cap: usize) -> ChunkSplitConfig {
+        ChunkSplitConfig {
+            memory_rw_threshold: usize::MAX,
+            global_lookup_base_threshold: usize::MAX >> 2,
+            event_fast_threshold: usize::MAX - ChunkSplitConfig::FAST_PATH_EVENT_MARGIN,
+            global_event_cap: cap,
+            ..reserve_cfg(0)
+        }
+    }
+
+    /// The most base entries (two events each) a chunk with no commit tail in flight may hold
+    /// and still take another step under a `Global` table of `cap` rows.
+    fn base_room(cap: usize) -> usize {
+        (cap - GLOBAL_STEP_EVENTS - GLOBAL_TAIL_EVENTS) / 2
+    }
+
+    /// The chunk closes while its `Global` table still has room for one more step, with the
+    /// event arm switched off.
+    #[test]
+    fn a_chunk_closes_before_its_global_table_is_full() {
+        let cap = 4 * GLOBAL_STEP_EVENTS;
+        let cfg = global_cap_cfg(cap);
+        let mut state = ChunkSplitState {
+            num_global_lookup_base: base_room(cap),
+            ..Default::default()
+        };
+        assert!(!should_check_fast(128, &state, &cfg));
+        assert!(!should_split(128, 0, &state, &cfg));
+        state.num_global_lookup_base += 1;
+        assert!(should_check_fast(128, &state, &cfg));
+        assert!(should_split(128, 0, &state, &cfg));
+    }
+
+    /// A commit tail in flight spends the room kept for it and no more: the hold cannot make
+    /// room in a table whose height is fixed, so the room for the next step stays.
+    #[test]
+    fn a_commit_tail_in_flight_spends_its_room_under_the_global_cap() {
+        let cap = 4 * GLOBAL_STEP_EVENTS;
+        let cfg = ChunkSplitConfig {
+            global_event_cap: cap,
+            ..reserve_cfg(32)
+        };
+        let mut state = ChunkSplitState {
+            num_global_lookup_base: base_room(cap) + 1,
+            ..Default::default()
+        };
+        // No tail in flight: the chunk closes, with the tail's room still free.
+        assert!(should_split(128, 0, &state, &cfg));
+        // A tail in flight runs on through that room, up to the room of a step.
+        state.commit_in_flight = true;
+        assert!(!should_split(128, 0, &state, &cfg));
+        state.num_global_lookup_base = (cap - GLOBAL_STEP_EVENTS) / 2;
+        assert!(!should_split(128, 0, &state, &cfg));
+        state.num_global_lookup_base += 1;
+        assert!(should_split(128, 0, &state, &cfg));
+    }
+
+    #[test]
+    fn a_block_runs_whole_only_if_the_global_table_has_room_for_it() {
+        let cap = 4 * GLOBAL_STEP_EVENTS;
+        let cfg = global_cap_cfg(cap);
+        let state = ChunkSplitState {
+            num_global_lookup_base: base_room(cap) - 4,
+            ..Default::default()
+        };
+        // At most four new base entries: two addresses, one more for a load or store that runs
+        // into the next dword, and one register.
+        assert!(can_fit_block(0, 2, 2, 2, 0b10, 1, &state, &cfg));
+        // A fifth could take the room the next step needs.
+        assert!(!can_fit_block(0, 2, 2, 3, 0b10, 1, &state, &cfg));
+    }
+
+    /// The production cap is the height of the `Global` table, whatever the event-limit switch
+    /// says; only a config that never cuts has none.
+    #[test]
+    fn the_global_cap_is_the_table_height() {
+        assert_eq!(
+            ChunkSplitConfig::for_chunk_size(1 << 23, 48).global_event_cap,
+            1 << MLE_GLOBAL_LOG_HEIGHT
+        );
+        assert_eq!(ChunkSplitConfig::disabled(48).global_event_cap, usize::MAX);
+    }
+
     /// A misaligned load or store that runs into the next dword touches that one too, beyond the
     /// block's aligned counts.
     #[test]
@@ -1661,6 +1805,7 @@ mod tests {
             commit_tail_overrun: 0,
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
+            global_event_cap: usize::MAX,
         };
         let state = ChunkSplitState {
             num_memory_read_write_events: 2,

@@ -1,9 +1,10 @@
 //! The in-memory export a verifier outside this crate takes: the VK bundle and the v3 envelope,
 //! checked by `pico_verifier::verify`.
 
+use pico_mle_core::codec::Encode;
 use pico_verifier::VerifyError;
 use pico_vm::mle::machine::{
-    vk_bundle::{encode_vk_bundle_v2, riscv_vm_vk_for_elf},
+    vk_bundle::{encode_vk_bundle_v3, riscv_vm_vk_for_elf},
     vk_map::MleVkMap,
 };
 
@@ -122,7 +123,7 @@ fn a_shipped_whitelist_root_verifies_with_pico_verifier() {
     let err = pico_verifier::verify(&bundle, &envelope, &[]).unwrap_err();
     assert!(matches!(err, VerifyError::CommittedValuesUnbound), "{err}");
 
-    let from_elf = encode_vk_bundle_v2(
+    let from_elf = encode_vk_bundle_v3(
         &riscv_vm_vk_for_elf(FIB_ELF).expect("riscv vm vk"),
         &MleVkMap::shipped().expect("shipped whitelist"),
     )
@@ -137,14 +138,14 @@ fn a_shipped_whitelist_root_verifies_with_pico_verifier() {
 #[test]
 fn only_a_whitelist_mode_compress_proof_exports_as_one() {
     let err = proof(false, Phase::Compress, Payload::Convert(Vec::new()))
-        .export_compress_v4()
+        .export_compress_v5()
         .unwrap_err();
     assert!(
         matches!(err, ProveError::WhitelistModeRequired { .. }),
         "{err}"
     );
     let err = proof(true, Phase::Combine, Payload::Convert(Vec::new()))
-        .export_compress_v4()
+        .export_compress_v5()
         .unwrap_err();
     assert!(
         matches!(
@@ -177,12 +178,22 @@ fn a_shipped_whitelist_compress_proof_verifies_with_pico_verifier() {
     println!("[export] prove to compress {:.1?}", proving.elapsed());
 
     let bundle = prover.vk_bundle().expect("vk bundle");
-    let (envelope, committed) = proof.export_compress_v4().expect("compress export");
+    let (envelope, committed) = proof.export_compress_v5().expect("compress export");
     assert_is_fib_output(&committed, N);
+    let body = pico_verifier::envelope::decode_compress_v5(&envelope).expect("compress body");
+    let Payload::Compress(compress) = &proof.payload else {
+        panic!("a compress proof");
+    };
+    let flat = compress.0.encode_to_vec().expect("flat encoding");
     println!(
-        "[export] compress envelope {} B ({:.1} KiB)",
+        "[export] compress envelope {} B ({:.1} KiB) | body {} B ({:.1} KiB), flat proof {} B: \
+         {:+.2}%",
         envelope.len(),
-        envelope.len() as f64 / 1024.0
+        envelope.len() as f64 / 1024.0,
+        body.proof.len(),
+        body.proof.len() as f64 / 1024.0,
+        flat.len(),
+        100.0 * (body.proof.len() as f64 / flat.len() as f64 - 1.0)
     );
     pico_verifier::verify_compress(&bundle, &envelope, &committed).expect("compress verifies");
 
@@ -200,7 +211,7 @@ fn a_shipped_whitelist_compress_proof_verifies_with_pico_verifier() {
     assert!(matches!(err, VerifyError::Envelope(_)), "{err}");
     // The compress proof and the shipped compress key, as a root envelope.
     let relabelled = {
-        let proof = pico_verifier::envelope::decode_compress_proof_v4(&envelope).expect("decodes");
+        let proof = pico_verifier::envelope::decode_compress_proof_v5(&envelope).expect("decodes");
         let body = pico_verifier::envelope::MleRootProofV3::from_root(&(
             proof,
             pico_verifier::shipped_compress_vk(),

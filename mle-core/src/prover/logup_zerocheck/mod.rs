@@ -27,6 +27,7 @@ use p3_util::log2_strict_usize;
 use tracing::{debug, info_span, instrument};
 
 use crate::{
+    interaction::{LogUpChallengeMode, LogUpSecurityParameters},
     poly::{
         eq_sharp_uni_poly, eq_uni_poly,
         matrix::{ColMajorMatrix, MatrixDimensions, MatrixView},
@@ -37,7 +38,7 @@ use crate::{
     protocol::stacking::{calculate_n_logup, lifted_log_height, StackedColumn, StackedLayout},
     prover::{
         error::LogupZerocheckError,
-        fractional_sumcheck_gkr::{fractional_sumcheck, Frac},
+        fractional_sumcheck_gkr::{fractional_sumcheck, Frac, FracSumcheckProof},
         sumcheck::sumcheck_round0_deg,
         DeviceMultiStarkProvingKey, ProverBackend, ProvingContext, ReferenceColMajorBackend,
     },
@@ -67,6 +68,69 @@ pub struct ZerocheckLogupProof<SC: StarkProtocolConfig> {
     pub eval_point: Vec<SC::EF>,
 }
 
+/// A proof's LogUp challenges, obtained the way its key's [`LogUpChallengeMode`] says. Shared by
+/// every prover backend so that the two modes are told apart in one place.
+pub struct LogupChallenges<SC: StarkProtocolConfig> {
+    /// The LogUp proof-of-work witness. Zero in external mode, which has none.
+    pub pow_witness: SC::F,
+    pub alpha: SC::EF,
+    pub beta: SC::EF,
+    /// The key is in external mode: the GKR root numerator is sent instead of asserted zero.
+    pub external: bool,
+}
+
+impl<SC: StarkProtocolConfig> LogupChallenges<SC> {
+    /// Internal mode: grind, then sample `alpha` and `beta`. External mode: absorb the caller's
+    /// `alpha` and `beta`; nothing is ground and nothing sampled.
+    ///
+    /// `external` is the caller's pair. It must be given exactly when `logup` says external
+    /// mode: the mode is the key's, and a caller that disagrees with it gets an error, not the
+    /// other mode.
+    pub fn obtain<TS: FiatShamirTranscript<SC>>(
+        transcript: &mut TS,
+        logup: &LogUpSecurityParameters,
+        external: Option<[SC::EF; 2]>,
+    ) -> Result<Self, LogupZerocheckError> {
+        match (logup.challenge_mode, external) {
+            (LogUpChallengeMode::Internal, None) => {
+                // Grind to increase soundness of random sampling for LogUp
+                let pow_witness = transcript.grind(logup.pow_bits);
+                let alpha = transcript.sample_ext();
+                let beta = transcript.sample_ext();
+                Ok(Self {
+                    pow_witness,
+                    alpha,
+                    beta,
+                    external: false,
+                })
+            }
+            (LogUpChallengeMode::External, Some([alpha, beta])) => {
+                transcript.observe_ext(alpha);
+                transcript.observe_ext(beta);
+                Ok(Self {
+                    pow_witness: SC::F::ZERO,
+                    alpha,
+                    beta,
+                    external: true,
+                })
+            }
+            _ => Err(LogupZerocheckError::LogUpChallengeModeMismatch),
+        }
+    }
+
+    /// The GKR proof of a fractional sumcheck run under these challenges with
+    /// `assert_zero = !self.external`.
+    pub fn gkr_proof(&self, frac_sum_proof: FracSumcheckProof<SC>) -> GkrProof<SC> {
+        GkrProof {
+            logup_pow_witness: self.pow_witness,
+            p0_claim: self.external.then_some(frac_sum_proof.fractional_sum.0),
+            q0_claim: frac_sum_proof.fractional_sum.1,
+            claims_per_layer: frac_sum_proof.claims_per_layer,
+            sumcheck_polys: frac_sum_proof.sumcheck_polys,
+        }
+    }
+}
+
 #[instrument(level = "info", skip_all)]
 pub fn prove_zerocheck_and_logup<SC: StarkProtocolConfig, TS>(
     transcript: &mut TS,
@@ -79,6 +143,7 @@ where
     SC::EF: TwoAdicField + ExtensionField<SC::F>,
     ReferenceColMajorBackend<SC>: ProverBackend<
         Val = SC::F,
+        Challenge = SC::EF,
         Matrix = ColMajorMatrix<SC::F>,
         OtherAirData = evaluator::InteractionEvalPlan<SC::F>,
     >,
@@ -113,10 +178,12 @@ where
     // GKR
     let interactions_layout = StackedLayout::new(0, l_skip + n_logup, interactions_meta)?;
 
-    // Grind to increase soundness of random sampling for LogUp
-    let logup_pow_witness = transcript.grind(mpk.params.logup.pow_bits);
-    let alpha_logup = transcript.sample_ext();
-    let beta_logup = transcript.sample_ext();
+    let challenges = LogupChallenges::<SC>::obtain(
+        transcript,
+        &mpk.params.logup,
+        ctx.external_logup_challenges,
+    )?;
+    let (alpha_logup, beta_logup) = (challenges.alpha, challenges.beta);
     debug!(%alpha_logup, %beta_logup);
 
     let mut prover =
@@ -125,6 +192,9 @@ where
     // Compute logup input layer: these are the evaluations of \hat{p}, \hat{q} on the hypercube
     // `H_{l_skip + n_logup}`
     let has_interactions = !prover.interactions_layout.sorted_cols.is_empty();
+    if challenges.external && !has_interactions {
+        return Err(LogupZerocheckError::ExternalModeWithoutInteractions);
+    }
     let gkr_input_evals = if !has_interactions {
         vec![]
     } else {
@@ -200,7 +270,7 @@ where
     };
 
     let (frac_sum_proof, mut xi) =
-        fractional_sumcheck::<SC, _>(transcript, &gkr_input_evals, true)?;
+        fractional_sumcheck::<SC, _>(transcript, &gkr_input_evals, !challenges.external)?;
 
     // Sample more for `\xi` in the edge case that some AIRs don't have interactions
     let n_global = max(n_max, n_logup);
@@ -460,12 +530,7 @@ where
         sumcheck_round_polys,
         column_openings,
     };
-    let gkr_proof = GkrProof::<SC> {
-        logup_pow_witness,
-        q0_claim: frac_sum_proof.fractional_sum.1,
-        claims_per_layer: frac_sum_proof.claims_per_layer,
-        sumcheck_polys: frac_sum_proof.sumcheck_polys,
-    };
+    let gkr_proof = challenges.gkr_proof(frac_sum_proof);
     Ok(ZerocheckLogupProof {
         gkr: gkr_proof,
         batch: batch_constraint_proof,

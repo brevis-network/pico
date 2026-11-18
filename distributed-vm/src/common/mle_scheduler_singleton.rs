@@ -13,9 +13,10 @@
 
 use crate::{
     common::{
+        global_logup_exchange::{ChainNews, ChunkTableReport},
         global_scheduler::{AcquireResult, CombineTask, GlobalScheduler, SchedulerTask},
         machine_role::{get_runtime_mode, RuntimeMode},
-        scheduler_service::{ClientAcquireResult, SchedulerClientWrapper},
+        scheduler_service::{ClientAcquireResult, ExchangeError, SchedulerClientWrapper},
     },
     gateway::handler::proof_tree::IndexedProof,
 };
@@ -43,8 +44,7 @@ pub fn get_mle_scheduler_client() -> Option<Arc<SchedulerClientWrapper<MleSchedu
     MLE_SCHEDULER_CLIENT.get().map(Arc::clone)
 }
 
-/// Connect the MLE secondary's scheduler client. Unused until MLE has a two-machine launch
-/// shape; present so the singleton and its client stay together.
+/// Connect the MLE secondary's scheduler client.
 pub async fn init_mle_scheduler_client(addr: &str) -> anyhow::Result<()> {
     let client = SchedulerClientWrapper::<MleSchedulerProof>::connect(addr).await?;
     MLE_SCHEDULER_CLIENT
@@ -145,6 +145,19 @@ pub fn mle_abort_run() {
     get_mle_scheduler().abort();
 }
 
+/// Declare that this block's tree has a prefix (`GlobalScheduler::expect_prefix`): the global
+/// LogUp's nodes, proved outside the chunk queue. The primary owns the tree.
+pub fn mle_expect_prefix() {
+    if !is_mle_secondary() {
+        get_mle_scheduler().expect_prefix();
+    }
+}
+
+/// Hand in the proof over the tree's prefix (`GlobalScheduler::report_prefix`).
+pub fn mle_report_prefix(proof: MleSchedulerProof) {
+    get_mle_scheduler().report_prefix(proof);
+}
+
 /// Report a finished convert proof into the proof tree.
 pub fn mle_report_proof(proof: IndexedProof<MleSchedulerProof>, worker_id: &str) {
     if is_mle_secondary() {
@@ -161,16 +174,77 @@ pub fn mle_report_proof(proof: IndexedProof<MleSchedulerProof>, worker_id: &str)
     }
 }
 
-/// Send this machine's partial cross-chunk GCS digest to the primary, which closes the sum.
-pub fn mle_report_gcs_digest(worker_id: &str, digest: Vec<u8>) {
-    let (client, handle) = remote();
-    let worker_id = worker_id.to_string();
-    handle.block_on(async move {
-        if let Err(e) = client.report_gcs_digest(&worker_id, digest).await {
-            // Loud: without this partial the primary cannot close the sum, and it would otherwise
-            // fail there as a bogus memory-inconsistency panic pointing at the wrong machine.
-            tracing::error!("secondary failed to report its GCS digest: {e}");
+// === The global LogUp across the two machines (see `global_logup_exchange`) ===
+//
+// The secondary's side of the three messages. The primary's pipeline reads and fills the
+// exchange directly: it is in the same process as the service.
+
+/// How often a report to the primary is sent before it is given up, and the pause between two
+/// sends. A report that is lost leaves the block's chain or its tree short for good, so a call
+/// that fails on the transport is worth sending again.
+const REPORT_ATTEMPTS: usize = 3;
+const REPORT_PAUSE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Sends a report to the primary, again when the call fails. A refusal ends this machine's run
+/// of the block: the primary is on another one.
+async fn deliver<Fut>(what: &str, send: impl Fn() -> Fut)
+where
+    Fut: std::future::Future<Output = Result<(), ExchangeError>>,
+{
+    for attempt in 1..=REPORT_ATTEMPTS {
+        match send().await {
+            Ok(()) => return,
+            Err(ExchangeError::OtherBlock(why)) => {
+                tracing::error!("the primary refused {what}: {why}; this block's run is stopped");
+                mle_abort_run();
+                return;
+            }
+            Err(ExchangeError::Failed(why)) if attempt < REPORT_ATTEMPTS => {
+                tracing::warn!("secondary failed to report {what} (attempt {attempt}): {why}");
+                tokio::time::sleep(REPORT_PAUSE).await;
+            }
+            Err(ExchangeError::Failed(why)) => {
+                tracing::error!("secondary failed to report {what}: {why}");
+            }
         }
+    }
+}
+
+/// Report the Global table commitment of a chunk this machine traced, with the chunk's share
+/// of the block's real-row count. **Secondary only.** Does not wait for the primary: the caller
+/// is a prover lane in the middle of the chunk's proof.
+pub fn mle_report_chunk_table(report: ChunkTableReport) {
+    let (client, handle) = remote();
+    let block = get_mle_scheduler().get_block_num();
+    handle.spawn(async move {
+        let what = format!("chunk {}'s Global table commitment", report.chunk_idx);
+        deliver(&what, || client.report_chunk_table(block, report.clone())).await;
+    });
+}
+
+/// The commitments the primary holds from chunk `from_chunk` on, and the block's chunk count
+/// once the primary knows it. **Secondary only.** Returns within the primary's poll time, with
+/// nothing if nothing came.
+pub fn mle_await_chunk_tables(from_chunk: usize) -> Result<ChainNews, ExchangeError> {
+    let (client, handle) = remote();
+    let block = get_mle_scheduler().get_block_num();
+    handle.block_on(async move { client.await_chunk_tables(block, from_chunk).await })
+}
+
+/// Hand the primary the node over the group of `chunks` chunks from `first_chunk` on.
+/// **Secondary only.**
+pub fn mle_report_group_node(first_chunk: usize, chunks: usize, node: &MleSchedulerProof) {
+    let (client, handle) = remote();
+    let block = get_mle_scheduler().get_block_num();
+    handle.block_on(async move {
+        let what = format!(
+            "the node over chunks {first_chunk}..{}",
+            first_chunk + chunks
+        );
+        deliver(&what, || {
+            client.report_group_node(block, first_chunk, chunks, node)
+        })
+        .await;
     });
 }
 

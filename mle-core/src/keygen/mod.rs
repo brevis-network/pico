@@ -20,6 +20,7 @@ use crate::{
     canonical_serde::CanonicalDigest,
     config::check_field_admissible,
     hasher::MerkleHasher,
+    interaction::LogUpChallengeMode,
     keygen::types::{
         KeygenError, LinearConstraint, MultiStarkProvingKey, MultiStarkVerifyingKeyInner,
         StarkProvingKey, StarkVerifyingKey, StarkVerifyingParams, TraceWidth,
@@ -178,15 +179,21 @@ impl<SC: StarkProtocolConfig> MultiStarkKeygenBuilder<SC> {
         self.add_air_impl(air, false)
     }
 
-    /// [`Self::add_air`] with the preprocessed table already committed by an earlier keygen of
-    /// the same AIR under the same config (see [`CommittedPrep`]). Per-air mode only.
-    pub fn add_air_with_prep(&mut self, air: AirRef<SC>, prep: CommittedPrep<SC>) -> usize {
+    /// [`Self::add_air`] (or, when `is_required`, [`Self::add_required_air`]) with the
+    /// preprocessed table already committed by an earlier keygen of the same AIR under the same
+    /// config (see [`CommittedPrep`]). Per-air mode only.
+    pub fn add_air_with_prep(
+        &mut self,
+        air: AirRef<SC>,
+        prep: CommittedPrep<SC>,
+        is_required: bool,
+    ) -> usize {
         assert!(
             !self.merge_preprocessed,
             "a reused preprocessed commitment is per-air; merged mode commits all tables together"
         );
         self.partitioned_airs.push(AirKeygenBuilder {
-            is_required: false,
+            is_required,
             air,
             prep: PrepStage::Committed(PrepKeygenData {
                 verifier_data: prep.verifier_data,
@@ -286,20 +293,13 @@ impl<SC: StarkProtocolConfig> MultiStarkKeygenBuilder<SC> {
     fn fill_merged_prep_vdata(&mut self, prep_dims: &[(usize, Dimensions)], commit: SC::Digest) {
         let params = self.config.params().clone();
         for (air_idx, dims) in prep_dims {
-            // `stacking_width` is informational in merged mode: the width the matrix would
-            // occupy if stacked alone (no in-tree reader depends on it).
             let log_height = log2_strict_usize(dims.height);
-            let solo_width = StackedLayout::new(
-                params.l_skip,
-                params.n_stack + params.l_skip,
-                vec![(dims.width, log_height)],
-            )
-            .unwrap()
-            .width();
+            let (hypercube_dim, stacking_width) =
+                merged_prep_geometry(&params, dims.width, log_height);
             let vdata = VerifierSinglePreprocessedData {
                 commit,
-                hypercube_dim: log_height as isize - params.l_skip as isize,
-                stacking_width: solo_width,
+                hypercube_dim,
+                stacking_width,
             };
             match &mut self.partitioned_airs[*air_idx].prep {
                 PrepStage::Deferred { vdata: slot, .. } => *slot = Some(vdata),
@@ -448,6 +448,16 @@ impl<SC: StarkProtocolConfig> MultiStarkKeygenBuilder<SC> {
                     .absolute(pk.vk.symbolic_constraints.constraints.constraint_idx.len() as u64);
                 metrics::counter!("interactions", &labels)
                     .absolute(pk.vk.symbolic_constraints.interactions.len() as u64);
+            }
+        }
+        if params.logup.challenge_mode == LogUpChallengeMode::External {
+            assert!(
+                params.first_whir_round_within_unique_decoding(),
+                "a machine in the external LogUp challenge mode re-opens commitments made by \
+                 other proofs, which needs a first WHIR round within the unique-decoding radius"
+            );
+            for pk in pk_per_air.iter() {
+                assert_external_logup_air(&pk.air_name, &pk.vk);
             }
         }
         if max_constraint_degree != air_max_constraint_degree as usize {
@@ -954,6 +964,136 @@ fn hash_lean_vk_preimage<SC: StarkProtocolConfig>(
             .map(|&b| SC::F::from_u8(b))
             .collect_vec(),
     )
+}
+
+/// The geometry merged-mode keygen records for a preprocessed trace of `width` columns and
+/// `2^log_height` rows: its hypercube dimension, and the width it would occupy stacked alone
+/// (informational in merged mode, where the traces are stacked together; it is in the key and so
+/// in its pre-hash).
+fn merged_prep_geometry(params: &SystemParams, width: usize, log_height: usize) -> (isize, usize) {
+    let solo_width = StackedLayout::new(
+        params.l_skip,
+        params.n_stack + params.l_skip,
+        vec![(width, log_height)],
+    )
+    .unwrap()
+    .width();
+    (log_height as isize - params.l_skip as isize, solo_width)
+}
+
+/// The lean pre-hash of a merged-preprocessed key of `inner`'s machine whose traces have the
+/// log heights `log_heights`, one per AIR: [`compute_vk_pre_hash`] with every AIR's preprocessed
+/// geometry as keygen records it at that height (a merged-mode preprocessed trace is as tall as
+/// its AIR's trace).
+///
+/// The lean pre-hash leaves the preprocessed commitment out, so every key of the machine padded
+/// to the same heights has the same one, whatever its program. This is that value, from any key
+/// of the machine and without a keygen at those heights: what a verifier that fixes a child's
+/// heights expects the child's key to hash to.
+pub fn compute_vk_pre_hash_at_heights<SC: StarkProtocolConfig>(
+    config: &SC,
+    inner: &MultiStarkVerifyingKeyInner<SC>,
+    log_heights: &[usize],
+) -> SC::Digest {
+    assert!(
+        inner.merged_preprocessed_commit.is_some(),
+        "only a merged-preprocessed key's pre-hash is a function of its heights"
+    );
+    assert_eq!(
+        log_heights.len(),
+        inner.per_air.len(),
+        "one height per AIR of the machine"
+    );
+    let mut at_heights = inner.clone();
+    for (avk, &log_height) in at_heights.per_air.iter_mut().zip(log_heights) {
+        let width = avk.params.width.preprocessed;
+        if let Some(prep) = &mut avk.preprocessed_data {
+            let width = width.expect("an AIR with preprocessed data has a preprocessed width");
+            (prep.hypercube_dim, prep.stacking_width) =
+                merged_prep_geometry(&inner.params, width, log_height);
+        }
+    }
+    compute_vk_pre_hash(config, &at_heights, &[])
+}
+
+/// What keygen requires of each AIR of a machine in the external LogUp challenge mode
+/// ([`LogUpChallengeMode::External`]). Panics otherwise.
+///
+/// In that mode the prover holds `(alpha, beta)` before it commits the common main trace and
+/// before it fixes the public values, so either one in an interaction would let it steer the
+/// fractional sum the proof hands back. The AIR's interactions therefore read cached main
+/// columns only: those are commitments the proof takes as given, made before the challenges
+/// existed. The AIR is required, has at least one interaction (a proof with none has no sum to
+/// hand back, and the verifier refuses it), and has no constraints: an external-mode machine
+/// only re-reads tables whose constraints another proof has checked.
+pub fn assert_external_logup_air<F: Field, Digest>(
+    air_name: &str,
+    vk: &StarkVerifyingKey<F, Digest>,
+) {
+    let dag = &vk.symbolic_constraints;
+    assert!(
+        vk.is_required,
+        "{air_name}: an AIR of an external-LogUp machine must be required"
+    );
+    assert!(
+        dag.constraints.constraint_idx.is_empty(),
+        "{air_name}: an AIR of an external-LogUp machine must have no constraints"
+    );
+    assert!(
+        !dag.interactions.is_empty(),
+        "{air_name}: an AIR of an external-LogUp machine must have an interaction"
+    );
+    assert_eq!(
+        vk.params.num_public_values, 0,
+        "{air_name}: an AIR of an external-LogUp machine must have no public values"
+    );
+    let num_cached = vk.params.width.cached_mains.len();
+    // Every node an interaction reaches, walked down from its message and its count.
+    let mut reached = vec![false; dag.constraints.nodes.len()];
+    let mut stack: Vec<usize> = dag
+        .interactions
+        .iter()
+        .flat_map(|interaction| {
+            interaction
+                .message
+                .iter()
+                .copied()
+                .chain([interaction.count])
+        })
+        .collect();
+    while let Some(idx) = stack.pop() {
+        if std::mem::replace(&mut reached[idx], true) {
+            continue;
+        }
+        match &dag.constraints.nodes[idx] {
+            SymbolicExpressionNode::Variable(var) => assert!(
+                matches!(var.entry, Entry::Main { part_index, .. } if part_index < num_cached),
+                "{air_name}: an interaction of an external-LogUp machine reads {:?}, which is \
+                 not a cached main column",
+                var.entry
+            ),
+            SymbolicExpressionNode::IsFirstRow
+            | SymbolicExpressionNode::IsLastRow
+            | SymbolicExpressionNode::IsTransition
+            | SymbolicExpressionNode::Constant(_) => {}
+            SymbolicExpressionNode::Add {
+                left_idx,
+                right_idx,
+                ..
+            }
+            | SymbolicExpressionNode::Sub {
+                left_idx,
+                right_idx,
+                ..
+            }
+            | SymbolicExpressionNode::Mul {
+                left_idx,
+                right_idx,
+                ..
+            } => stack.extend([*left_idx, *right_idx]),
+            SymbolicExpressionNode::Neg { idx, .. } => stack.push(*idx),
+        }
+    }
 }
 
 /// Domain separator for the **params-free constraint digest**. Distinct from
