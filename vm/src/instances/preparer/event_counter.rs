@@ -27,6 +27,7 @@ use crate::{
             syscalls::{precompiles::PrecompileLocalMemory, SyscallCode},
         },
     },
+    instances::compiler::shapes::riscv_shape::precompile_kind_units,
     machine::chip::GpuChipBehavior,
 };
 use p3_field::PrimeField32;
@@ -75,6 +76,9 @@ struct PrecompileCounts {
     bls381_double: usize,
     bls381_g2_add: usize,
     bls381_g2_double: usize,
+    blake2b_rounds: usize,
+    /// The rounds of the BLAKE2b calls: the `Blake2bRound` chip's rows.
+    blake2b_round_rows: usize,
     bls381_decompress: usize,
 
     // Field operations
@@ -116,6 +120,7 @@ struct PrecompileLocalMemCounts {
     bls381_double: usize,
     bls381_g2_add: usize,
     bls381_g2_double: usize,
+    blake2b_rounds: usize,
     bls381_decompress: usize,
 
     // Field operations
@@ -205,6 +210,7 @@ impl EventCounter {
             SyscallCode::BLS12381_DOUBLE => self.precompile_counts.bls381_double,
             SyscallCode::BLS12381_G2_ADD => self.precompile_counts.bls381_g2_add,
             SyscallCode::BLS12381_G2_DOUBLE => self.precompile_counts.bls381_g2_double,
+            SyscallCode::BLAKE2B_ROUNDS => self.precompile_counts.blake2b_rounds,
             SyscallCode::BLS12381_DECOMPRESS => self.precompile_counts.bls381_decompress,
             SyscallCode::BN254_FP_ADD => self.precompile_counts.fp_bn254,
             SyscallCode::BLS12381_FP_ADD => self.precompile_counts.fp_bls381,
@@ -245,6 +251,7 @@ impl EventCounter {
             SyscallCode::BLS12381_DOUBLE => self.precompile_local_mem_counts.bls381_double,
             SyscallCode::BLS12381_G2_ADD => self.precompile_local_mem_counts.bls381_g2_add,
             SyscallCode::BLS12381_G2_DOUBLE => self.precompile_local_mem_counts.bls381_g2_double,
+            SyscallCode::BLAKE2B_ROUNDS => self.precompile_local_mem_counts.blake2b_rounds,
             SyscallCode::BLS12381_DECOMPRESS => self.precompile_local_mem_counts.bls381_decompress,
             SyscallCode::BN254_FP_ADD => self.precompile_local_mem_counts.fp_bn254,
             SyscallCode::BLS12381_FP_ADD => self.precompile_local_mem_counts.fp_bls381,
@@ -256,6 +263,15 @@ impl EventCounter {
             _ => {
                 panic!("Unsupported syscall code: {:?}", syscall_code);
             }
+        }
+    }
+
+    /// The rows a precompile kind's trace takes: its events, or for the `Blake2bRound` chip the
+    /// rounds of its calls (`precompile_kind_units`).
+    pub fn get_precompile_kind_units(&self, kind: &str, syscall_code: SyscallCode) -> usize {
+        match kind {
+            "Blake2bRound" => self.precompile_counts.blake2b_round_rows,
+            _ => self.get_precompile_event_num(syscall_code),
         }
     }
 
@@ -284,6 +300,7 @@ impl EventCounter {
             + counts.bls381_double
             + counts.bls381_g2_add
             + counts.bls381_g2_double
+            + counts.blake2b_rounds
             + counts.bls381_decompress
             + counts.fp_bn254
             + counts.fp_bls381
@@ -317,6 +334,7 @@ const SUPPORTED_PRECOMPILE_CODES: &[SyscallCode] = &[
     SyscallCode::BLS12381_DECOMPRESS,
     SyscallCode::BLS12381_G2_ADD,
     SyscallCode::BLS12381_G2_DOUBLE,
+    SyscallCode::BLAKE2B_ROUNDS,
     SyscallCode::BN254_FP_ADD,
     SyscallCode::BLS12381_FP_ADD,
     SyscallCode::SECP256K1_FP_ADD,
@@ -431,6 +449,14 @@ fn count_all_precompile_events(
             SyscallCode::BLS12381_G2_DOUBLE => {
                 precompile_counts.bls381_g2_double = event_count;
                 local_mem_counts.bls381_g2_double = local_mem_count;
+            }
+            SyscallCode::BLAKE2B_ROUNDS => {
+                precompile_counts.blake2b_rounds = event_count;
+                local_mem_counts.blake2b_rounds = local_mem_count;
+                precompile_counts.blake2b_round_rows = record
+                    .precompile_events
+                    .get_events(code)
+                    .map_or(0, |events| precompile_kind_units("Blake2bRound", events));
             }
             SyscallCode::BLS12381_DECOMPRESS => {
                 precompile_counts.bls381_decompress = event_count;

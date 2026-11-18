@@ -1,4 +1,5 @@
 mod bigint;
+mod blake2b;
 mod bls12381;
 mod bn254;
 mod ed25519;
@@ -24,6 +25,8 @@ pub(crate) use memory::sbrk;
 pub use sys::*;
 pub use uint256_mul::*;
 // For the accelerators' hashes.
+#[cfg(target_os = "zkvm")]
+pub(crate) use blake2b::syscall_blake2b_rounds;
 #[cfg(target_os = "zkvm")]
 pub(crate) use keccak_permute::syscall_keccak_permute;
 #[cfg(target_os = "zkvm")]
@@ -85,6 +88,9 @@ pub const BLS12381_G2_ADD: u32 = 0x00_01_01_33;
 
 /// Executes the `BLS12381_G2_DOUBLE` precompile.
 pub const BLS12381_G2_DOUBLE: u32 = 0x00_00_01_34;
+
+/// Executes the `BLAKE2B_ROUNDS` precompile.
+pub const BLAKE2B_ROUNDS: u32 = 0x00_00_01_35;
 
 /// Executes `BN254_ADD`.
 pub const BN254_ADD: u32 = 0x00_01_01_0E;

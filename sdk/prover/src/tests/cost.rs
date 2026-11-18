@@ -101,6 +101,8 @@ fn every_air_has_its_component() {
         ("KeccakTables", Precompile),
         ("Bls12381G2AddAssign", Precompile),
         ("Bls12381G2DoubleAssign", Precompile),
+        ("Blake2bControl", Precompile),
+        ("Blake2bRound", Precompile),
     ];
     let actual: Vec<_> = (0..)
         .map_while(|id| Some((air_name(id)?, CostComponent::of_air(id))))

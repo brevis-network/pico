@@ -121,6 +121,9 @@ where
         // The BLS12-381 G2 add and double precompiles: host tracegen, appended last.
         const G2_CHIP_INDICES: RangeInclusive<usize> = 52..=53;
 
+        // The BLAKE2b rounds precompile's control and round chips: host tracegen, appended last.
+        const BLAKE2B_CHIP_INDICES: RangeInclusive<usize> = 54..=55;
+
         let durations = DashMap::new();
         let mut chip_names_traces = Vec::new();
         let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
@@ -306,6 +309,7 @@ where
         for chip_index in HOST_TRACEGEN_PRECOMPILE_INDICES
             .chain([MEMORY_UNALIGNED_CHIP_INDEX, KECCAK_TABLES_CHIP_INDEX])
             .chain(G2_CHIP_INDICES)
+            .chain(BLAKE2B_CHIP_INDICES)
         {
             run_chip(chip_index, &mut preallocated_gpu_memory);
             snap_after!(chip_index);

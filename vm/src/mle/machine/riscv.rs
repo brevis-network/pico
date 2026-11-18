@@ -62,6 +62,7 @@ use crate::{
             field::secp256k1::Secp256k1BaseField,
         },
         precompiles::{
+            blake2b::{Blake2bControlChip, Blake2bRoundChip},
             bls12381_g2::{add::Bls12381G2AddChip, double::Bls12381G2DoubleChip},
             edwards::{EdAddAssignChip, EdDecompressChip},
             fptower::{fp::FpOpChip, fp2_addsub::Fp2AddSubChip, fp2_mul::Fp2MulChip},
@@ -444,6 +445,10 @@ pub mod air_id {
     /// The BLS12-381 G2 add and double precompiles, appended last so the ids above stay put.
     pub const BLS12381_G2_ADD: usize = 52;
     pub const BLS12381_G2_DOUBLE: usize = 53;
+    /// The BLAKE2b rounds precompile: its control chip (syscall + memory, one row per call) and
+    /// its round chip (one row per round), appended last so the ids above stay put.
+    pub const BLAKE2B_CONTROL: usize = 54;
+    pub const BLAKE2B_ROUND: usize = 55;
 }
 
 /// Maps brevis chip `name()` → AIR id for the core set. Chips not listed are excluded from both
@@ -505,6 +510,8 @@ const INCLUDED: &[(&str, usize)] = &[
     ("KeccakTables", air_id::KECCAK_TABLES),
     ("Bls12381G2AddAssign", air_id::BLS12381_G2_ADD),
     ("Bls12381G2DoubleAssign", air_id::BLS12381_G2_DOUBLE),
+    ("Blake2bControl", air_id::BLAKE2B_CONTROL),
+    ("Blake2bRound", air_id::BLAKE2B_ROUND),
 ];
 
 /// Chips whose padding rows differ from each other: the sliced KeccakPermute pads with dummy
@@ -872,6 +879,8 @@ pub fn mle_riscv_air_refs(program: Arc<Program>, bucket: bool) -> Vec<AirRef<Sc>
         Arc::new(crate::chips::precompiles::keccak256::KeccakTables::<Kb>::default()), // 51
         Arc::new(Bls12381G2AddChip::<Kb>::default()),                   // 52
         Arc::new(Bls12381G2DoubleChip::<Kb>::default()),                // 53
+        Arc::new(Blake2bControlChip::<Kb>::default()),                  // 54
+        Arc::new(Blake2bRoundChip::<Kb>::default()),                    // 55
     ]
 }
 
@@ -3536,7 +3545,8 @@ mod tests {
         );
 
         // `BYTE_CHIP_INDEX`, `ECALL_CHIP_INDEX`, `HOST_TRACEGEN_PRECOMPILE_INDICES` and
-        // `MEMORY_UNALIGNED_CHIP_INDEX`, `KECCAK_TABLES_CHIP_INDEX` and `G2_CHIP_INDICES`.
+        // `MEMORY_UNALIGNED_CHIP_INDEX`, `KECCAK_TABLES_CHIP_INDEX`, `G2_CHIP_INDICES` and
+        // `BLAKE2B_CHIP_INDICES`.
         assert_eq!(
             listed[45..],
             [
@@ -3548,7 +3558,9 @@ mod tests {
                 "MemoryUnaligned",
                 "KeccakTables",
                 "Bls12381G2AddAssign",
-                "Bls12381G2DoubleAssign"
+                "Bls12381G2DoubleAssign",
+                "Blake2bControl",
+                "Blake2bRound"
             ],
             "the orchestrator's positional tail moved"
         );

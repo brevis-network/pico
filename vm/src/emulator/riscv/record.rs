@@ -20,6 +20,7 @@ use crate::{
             EllipticCurveParameters,
         },
         precompiles::{
+            blake2b,
             fptower::{
                 fp::num_fp_cols, fp2_addsub::num_fp2_addsub_cols, fp2_mul::num_fp2_mul_cols,
             },
@@ -949,7 +950,18 @@ impl EmulationRecord {
                     .iter()
                     .filter(|e| e.0.chunk <= committed_chunk)
                     .count();
-                if n_committed < threshold && !last {
+                let can_emit = if *syscall_code == SyscallCode::BLAKE2B_ROUNDS {
+                    let rounds: usize = events
+                        .iter()
+                        .filter(|e| e.0.chunk <= committed_chunk)
+                        .map(|(_, e)| blake2b_rounds_of(e))
+                        .sum();
+                    rounds >= 1 << blake2b::ROUNDS_PER_BLOCK_LOG
+                        || n_committed >= 1 << blake2b::CALLS_PER_BLOCK_LOG
+                } else {
+                    n_committed >= threshold
+                };
+                if !can_emit && !last {
                     return (local_records, None);
                 }
 
@@ -981,14 +993,18 @@ impl EmulationRecord {
 
                 // 3. Split by threshold
                 let t_records = phases.mark();
-                let mut committed_iter = committed.into_iter();
-                loop {
+                let (full_blocks, remainder) = if *syscall_code == SyscallCode::BLAKE2B_ROUNDS {
+                    blake2b_blocks(committed)
+                } else {
+                    let mut committed_iter = committed.into_iter();
+                    let mut blocks = Vec::new();
                     // Check if we have enough for a full chunk
-                    if ExactSizeIterator::len(&committed_iter) < threshold {
-                        break;
+                    while ExactSizeIterator::len(&committed_iter) >= threshold {
+                        blocks.push(committed_iter.by_ref().take(threshold).collect::<Vec<_>>());
                     }
-
-                    let chunk: Vec<_> = committed_iter.by_ref().take(threshold).collect();
+                    (blocks, committed_iter.collect::<Vec<_>>())
+                };
+                for chunk in full_blocks {
                     let mut rec = EmulationRecord::new(program.clone());
                     rec.is_cpu_chunk = false;
                     rec.precompile_events.insert(*syscall_code, chunk);
@@ -998,7 +1014,6 @@ impl EmulationRecord {
 
                 // 4. Remainder: hand back for its own tail record (last) or put back for next batch
                 let mut remainder_out = None;
-                let remainder: Vec<_> = committed_iter.collect();
                 if !remainder.is_empty() {
                     if last {
                         if deferred_tail_merge() {
@@ -1282,6 +1297,55 @@ impl EmulationRecord {
     }
 }
 
+/// The rounds a `BLAKE2B_ROUNDS` event runs.
+fn blake2b_rounds_of(event: &PrecompileEvent) -> usize {
+    match event {
+        PrecompileEvent::Blake2bRounds(e) => e.rounds as usize,
+        _ => unreachable!("a BLAKE2B_ROUNDS group holds another event"),
+    }
+}
+
+/// `BLAKE2B_ROUNDS` calls, `(chunk, clk)`-sorted, packed into full blocks and a remainder. Its
+/// round chip takes a row per round and a call runs a caller-chosen number of them, so a block is
+/// counted in rounds: it closes once it holds `2^ROUNDS_PER_BLOCK_LOG` rounds or
+/// `2^CALLS_PER_BLOCK_LOG` calls, or when the next call would take it past the rounds. So a run of
+/// calls that reaches either cap emits a block, which is what `split` waits for. The calls left
+/// over are the remainder, which the caller treats as every kind's: a tail record of its own, or
+/// back for the next batch.
+#[allow(clippy::type_complexity)]
+fn blake2b_blocks(
+    committed: Vec<(SyscallEvent, PrecompileEvent)>,
+) -> (
+    Vec<Vec<(SyscallEvent, PrecompileEvent)>>,
+    Vec<(SyscallEvent, PrecompileEvent)>,
+) {
+    let (max_rounds, max_calls) = (
+        1usize << blake2b::ROUNDS_PER_BLOCK_LOG,
+        1usize << blake2b::CALLS_PER_BLOCK_LOG,
+    );
+    let mut blocks = Vec::new();
+    let mut block = Vec::new();
+    let mut rounds = 0;
+    for event in committed {
+        let n = blake2b_rounds_of(&event.1);
+        assert!(
+            n <= max_rounds,
+            "a BLAKE2b call of {n} rounds outgrows a block"
+        );
+        if rounds + n > max_rounds {
+            blocks.push(take(&mut block));
+            rounds = 0;
+        }
+        rounds += n;
+        block.push(event);
+        if rounds == max_rounds || block.len() == max_calls {
+            blocks.push(take(&mut block));
+            rounds = 0;
+        }
+    }
+    (blocks, block)
+}
+
 /// The local-memory entries one precompile event carries: the per-event view of
 /// [`PrecompileLocalMemory`], which only flattens a whole group and so loses which syscall an
 /// entry belongs to.
@@ -1315,6 +1379,7 @@ fn precompile_local_mem(event: &PrecompileEvent) -> &[MemoryLocalEvent] {
         PrecompileEvent::Bn254Fp2Mul(e) | PrecompileEvent::Bls12381Fp2Mul(e) => &e.local_mem_access,
         PrecompileEvent::Uint256Mul(e) => &e.local_mem_access,
         PrecompileEvent::Poseidon2Permute(e) => &e.local_mem_access,
+        PrecompileEvent::Blake2bRounds(e) => &e.local_mem_access,
     }
 }
 
@@ -1352,6 +1417,7 @@ fn precompile_local_mem_mut(event: &mut PrecompileEvent) -> &mut Vec<MemoryLocal
         }
         PrecompileEvent::Uint256Mul(e) => &mut e.local_mem_access,
         PrecompileEvent::Poseidon2Permute(e) => &mut e.local_mem_access,
+        PrecompileEvent::Blake2bRounds(e) => &mut e.local_mem_access,
     }
 }
 
@@ -1663,6 +1729,55 @@ mod tests {
     };
     use hashbrown::HashMap;
     use std::sync::Arc;
+
+    /// BLAKE2b blocks close at either cap: on the rounds, before a call that would overflow them
+    /// and as soon as they are reached exactly; and on the calls. What is left is the remainder.
+    #[test]
+    fn blake2b_blocks_close_at_either_cap() {
+        use super::{blake2b, blake2b_blocks};
+        use crate::emulator::riscv::syscalls::{
+            precompiles::{Blake2bRoundsEvent, PrecompileEvent},
+            SyscallEvent,
+        };
+        let calls = |rounds: &[u32]| -> Vec<(SyscallEvent, PrecompileEvent)> {
+            rounds
+                .iter()
+                .map(|&rounds| {
+                    (
+                        SyscallEvent::default(),
+                        PrecompileEvent::Blake2bRounds(Blake2bRoundsEvent {
+                            rounds,
+                            ..Default::default()
+                        }),
+                    )
+                })
+                .collect()
+        };
+        let shape = |(blocks, rest): (Vec<Vec<_>>, Vec<_>)| {
+            (blocks.iter().map(Vec::len).collect::<Vec<_>>(), rest.len())
+        };
+        let max_rounds = 1u32 << blake2b::ROUNDS_PER_BLOCK_LOG;
+        let max_calls = 1usize << blake2b::CALLS_PER_BLOCK_LOG;
+
+        // 524 calls of 1000 rounds fit; the 525th would not, so it starts the next block.
+        assert_eq!(
+            shape(blake2b_blocks(calls(&[1000; 1100]))),
+            (vec![524, 524], 52)
+        );
+        // Exactly the round cap closes the block at once.
+        let exact = [max_rounds / 2, max_rounds / 2, 7];
+        assert_eq!(shape(blake2b_blocks(calls(&exact))), (vec![2], 1));
+        // So does the call cap, and a run of calls that only reaches a cap leaves no remainder.
+        assert_eq!(
+            shape(blake2b_blocks(calls(&vec![1; max_calls + 3]))),
+            (vec![max_calls], 3)
+        );
+        assert_eq!(
+            shape(blake2b_blocks(calls(&vec![1; max_calls]))),
+            (vec![max_calls], 0)
+        );
+        assert_eq!(shape(blake2b_blocks(calls(&[12, 12]))), (vec![], 2));
+    }
 
     #[test]
     fn wide_alu_opcodes_select_their_chip() {

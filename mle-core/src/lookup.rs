@@ -69,6 +69,12 @@ pub enum LookupType {
     /// Sliced Keccak theta column parities (`[key, c0..c3]`) against the xor5 table
     /// (`KeccakTables`).
     KeccakXor5 = 16,
+
+    /// The chain of one `BLAKE2B_ROUNDS` call between `Blake2bControl` (syscall + memory, one row
+    /// per call) and `Blake2bRound` (one row per round): `[chunk, clk, tag, k, s, 64 limbs]`, the
+    /// working vector entering round `k` (tag 0) or the message block in schedule order `s`
+    /// (tag 1).
+    Blake2bRound = 17,
 }
 
 impl LookupType {
@@ -261,6 +267,7 @@ mod tests {
             (LookupType::KeccakPermute, 14),
             (LookupType::KeccakChi, 15),
             (LookupType::KeccakXor5, 16),
+            (LookupType::Blake2bRound, 17),
         ] {
             assert_eq!(kind as u16, value);
         }
@@ -295,6 +302,7 @@ mod tests {
             LookupType::KeccakPermute,
             LookupType::KeccakChi,
             LookupType::KeccakXor5,
+            LookupType::Blake2bRound,
         ];
         for kind in all {
             // Exhaustiveness guard: adding a variant breaks this `match` until it is listed above.
@@ -314,7 +322,8 @@ mod tests {
                 | LookupType::Ecall
                 | LookupType::KeccakPermute
                 | LookupType::KeccakChi
-                | LookupType::KeccakXor5 => {}
+                | LookupType::KeccakXor5
+                | LookupType::Blake2bRound => {}
             }
             assert!(
                 (kind as u32) < KIND_LIMIT,

@@ -106,8 +106,8 @@ keygen of the riscv, convert, combine, deferred, compress and embed machines log
 fields, `vk_pre_hash` and `bits`, for example:
 
 ```text
-INFO keygen soundness machine="riscv" backend="cpu" num_airs=54 max_constraints_per_air=4292
-  max_interactions_per_air=4966 num_trace_columns=45823 log_stacked_height=23 vk_pre_hash=[...]
+INFO keygen soundness machine="riscv" backend="cpu" num_airs=56 max_constraints_per_air=4292
+  max_interactions_per_air=4966 num_trace_columns=46961 log_stacked_height=23 vk_pre_hash=[...]
   bits=128.32
 ```
 
@@ -181,7 +181,7 @@ by hand. These records are for EF's soundcalc to score Pico's soundness and proo
 
 ## 3. Results
 
-Measured shapes: riscv 54 AIRs, per-AIR maxima of 4292 constraints and 4966 interactions, 45823
+Measured shapes: riscv 56 AIRs, per-AIR maxima of 4292 constraints and 4966 interactions, 46961
 columns; convert, combine, deferred, compress and embed share 21 recursion AIRs, per-AIR maxima of
 170 constraints and 34 interactions, 1409 columns, compress and embed at their own stacked height
 (over `KoalaBear^4`
@@ -201,7 +201,7 @@ same AIR set and preset and score the same. The shipped whitelist artifact
 
 | Machine / preset | LogUp | GKR sumcheck | GKR batching | ZeroCheck | Constraint batching | Stacked reduction | WHIR | **Total** |
 |---|---|---|---|---|---|---|---|---|
-| riscv (h = 23), measured | 133.95 | 152.94 | 153.94 | 149.04 | 142.86 | 138.46 | 128.32 | **128.32** |
+| riscv (h = 23), measured | 133.95 | 152.94 | 153.94 | 149.04 | 142.86 | 138.42 | 128.32 | **128.32** |
 | convert / combine / deferred, measured (dev set) | 133.95 | 152.94 | 153.94 | 148.71 | 147.29 | 143.48 | 128.39 | **128.39** |
 | compress (m = 2), measured (dev set) | 130.63 | 152.94 | 153.94 | 145.39 | 143.98 | 140.16 | 128.05 | **128.05** |
 | embed (m = 2), measured (dev set) | 130.63 | 152.94 | 153.94 | 145.39 | 143.98 | 140.16 | 128.05 | **128.05** |
