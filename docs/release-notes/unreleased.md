@@ -138,6 +138,17 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
 
 ## Fixed
 
+- Under the whitelist a guest's instruction mix no longer leaves a CPU chunk without a shape. A
+  whitelist prover has the chunk split close a chunk while a row of the core ladder still holds it
+  (`EmulatorOpts::ladder_fit`, which the SDK sets with `verify_keys` and `distributed-vm` in
+  whitelist mode; a caller that builds `EmulatorOpts` field by field states it). The split did not
+  look at the rows of the arithmetic tables, and a chunk no row held ended the prove with
+  `ProveError::CatchAllShape`, or with a panic when it had outgrown the catch-all too, as a chunk
+  more than half of whose instructions are comparisons and branches has. A program whose chunks
+  all take a ladder row is cut where it was. One whose mix leaves the ladder proves, cut into more
+  chunks than without the whitelist: Fibonacci, whose loop has four Add rows in every six
+  instructions, closes a chunk at 2^22 Add rows, after 6.3 M instructions, where the clk limit
+  closes it at 8.4 M. Without the whitelist nothing changes.
 - `build_pure_library` builds the generated crates against the lockfile of the Pico checkout
   `pico-prover` was compiled from, rather than whatever versions the registry has that day. The
   lockfile is version 4, so the build needs cargo 1.78 or later; the lockfile joins the library

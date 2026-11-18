@@ -4029,9 +4029,12 @@ fn run_pipeline(
     // thread (crossbeam Sender is Send+Sync, which the pipeline's handler requires); the event
     // precompute in `prepare_chunk_shaped` stays off this thread.
     // The embedded entry states its replay engine with its options; the CLI's is `replay`.
+    // In whitelist mode a CPU chunk needs a row of the core ladder, so the split is asked to
+    // close chunks to it; an embedded entry is a whitelist prover and states it with its options.
     let emulator_opts = embedded
         .map(|e| e.emulator_opts)
-        .unwrap_or_else(|| EmulatorOpts::bench_riscv_ops().with_replay_workers(replay));
+        .unwrap_or_else(|| EmulatorOpts::bench_riscv_ops().with_replay_workers(replay))
+        .with_ladder_fit(vk_on);
     let emulation_workers = embedded.map(|e| e.emulation_workers);
     // `MLE_PREWARM=1`: pay the process's first-touch page-fault cost HERE, before the `e2e=` window
     // opens, instead of inside the first chunk's emulate/prepare where it lands on the pipeline's
