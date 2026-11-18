@@ -40,7 +40,7 @@ The first command (every 50th shape) is a timing run; the second is the measurem
 minutes on a many-core host. Its log carries, at `RUST_LOG=info`:
 
 - `probe_columns: label <chip ×21>`, once: the chip order of every line below;
-- `probe_natural: convert <label> <log2 ×21>`, one per riscv shape (4,413 for the shipped
+- `probe_natural: convert <label> <log2 ×21>`, one per riscv shape (4,598 for the shipped
   whitelist), and
   `<label>: no convert row holds it` for each shape the current ladder cannot hold;
 - `probe_natural: group_node <tables> <log2 ×21>`, one per group size (15), and

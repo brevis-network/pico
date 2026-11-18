@@ -292,6 +292,33 @@ fn keccak_refuses_to_write_the_code() {
     check(KeccakControlChip::<F>::default(), keccak_case());
 }
 
+fn blake2b_case() -> Case {
+    let mut image = BTreeMap::new();
+    put(
+        &mut image,
+        A,
+        &(1..=32)
+            .map(|i| i * 0x0123_4567_89ab_cdef)
+            .collect::<Vec<_>>(),
+    );
+    Case {
+        name: "BLAKE2B_ROUNDS",
+        syscall: SyscallCode::BLAKE2B_ROUNDS,
+        arg1: A,
+        arg2: 12,
+        image,
+        // `v` is written back in place; `m`, after it, is only read.
+        written: A..A + 128,
+        read_only: A + 128..A + 256,
+    }
+}
+
+#[test]
+fn blake2b_refuses_to_write_the_code() {
+    use crate::chips::precompiles::blake2b::Blake2bControlChip;
+    check(Blake2bControlChip::<F>::default(), blake2b_case());
+}
+
 fn uint256_case() -> Case {
     let mut image = BTreeMap::new();
     put(&mut image, A, &dwords_of(&BigUint::from(12_345u32), 32));

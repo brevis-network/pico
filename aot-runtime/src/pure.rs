@@ -776,7 +776,8 @@ impl PureHost {
             | SyscallCode::SECP256R1_DOUBLE
             | SyscallCode::SECP256R1_DECOMPRESS
             | SyscallCode::BLS12381_G2_ADD
-            | SyscallCode::BLS12381_G2_DOUBLE => {
+            | SyscallCode::BLS12381_G2_DOUBLE
+            | SyscallCode::BLAKE2B_ROUNDS => {
                 if !dispatch_precompile(&mut self.mem, id, arg1, arg2)? {
                     return Err(EmulationError::UnsupportedSyscall(id).into());
                 }

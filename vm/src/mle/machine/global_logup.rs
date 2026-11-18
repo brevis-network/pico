@@ -1137,6 +1137,9 @@ mod tests {
                 "{} chunks: the block is meant to need more than one group",
                 records.len()
             );
+            let _keygen = crate::mle::machine::riscv::KEYGEN_REUSE_TEST_LOCK
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
             let machine = RiscvMachine::new(program.clone(), LOG_STACKED_HEIGHT, false)
                 .expect("riscv keygen");
             let proof = machine.prove(&records).expect("the block proves");
@@ -1234,6 +1237,9 @@ mod tests {
             program, records, ..
         } = block();
         // A machine of its own: the block's is shared with the tests that prove on it.
+        let _keygen = crate::mle::machine::riscv::KEYGEN_REUSE_TEST_LOCK
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
         let machine = RiscvMachine::new(program.clone(), LOG_STACKED_HEIGHT, false)
             .expect("riscv keygen")
             .with_concurrency(std::num::NonZeroUsize::MIN);

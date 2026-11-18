@@ -114,6 +114,10 @@ pub const MLE_RISCV_MAIN_LOG_HEIGHTS: &[(&str, usize)] = &[
     ("EdDecompress", 12),
     ("Bls12381G2AddAssign", 12),
     ("Bls12381G2DoubleAssign", 12),
+    // A row per round, the split's full block (`blake2b::ROUNDS_PER_BLOCK_LOG`); the control
+    // sibling a row per call, its own cap (`blake2b::CALLS_PER_BLOCK_LOG`).
+    ("Blake2bRound", 19),
+    ("Blake2bControl", 14),
 ];
 
 /// The `MemoryUnaligned` height in every core shape, the catch-all included: the chunk split closes
@@ -1049,8 +1053,22 @@ fn precompile_control_sibling(kind: &str) -> Option<&'static str> {
         "ShaCompress" => Some("ShaCompressControl"),
         "ShaExtend" => Some("ShaExtendControl"),
         "KeccakPermute" => Some("KeccakControl"),
+        "Blake2bRound" => Some("Blake2bControl"),
         _ => None,
     }
+}
+
+/// The height the BLAKE2b control chip and the precompile syscall table pad to beside a round
+/// chip of `2^round_log`: `2^min(round_log, CALLS_PER_BLOCK_LOG)`, which holds the record's calls
+/// (each runs at least one round, and the split closes a block at `2^CALLS_PER_BLOCK_LOG`
+/// calls). A call runs a caller-chosen number of rounds, so the calls are a second free variable
+/// beside the rounds; pinning their height to the rounds' keeps the whitelist to one control
+/// height per round height, at the cost of padding a record of few long calls.
+pub fn blake2b_call_log_height(round_log: usize) -> usize {
+    round_log.clamp(
+        MLE_MIN_LOG_HEIGHT,
+        crate::chips::precompiles::blake2b::CALLS_PER_BLOCK_LOG,
+    )
 }
 
 /// Memory+Regional lookups a chip's air declares per row, counted off the air itself.
@@ -1162,6 +1180,10 @@ pub fn mle_precompile_shapes() -> Vec<MlePrecompileShape> {
         .into_iter()
         .filter(|(kind, _)| super::riscv::air_id_for(kind).is_some())
     {
+        if kind == "Blake2bRound" {
+            out.extend(blake2b_precompile_shapes());
+            continue;
+        }
         let rows_per_event = precompile_rows_per_event(&kind) as u128;
         let control = precompile_control_sibling(&kind);
         // The most memory lookups one event can raise: its rows on the compute air, plus the one
@@ -1233,6 +1255,54 @@ pub fn mle_precompile_shapes() -> Vec<MlePrecompileShape> {
     }
     out.sort();
     out.dedup();
+    out
+}
+
+/// The BLAKE2b family's shapes. The round chip's rows are the record's rounds and its control
+/// sibling's the calls, and a call runs a caller-chosen number of rounds, so the two heights are
+/// independent: the control chip and the syscall table take [`blake2b_call_log_height`] of the
+/// round height, which `select_riscv_shape` pads them to, and MemoryLocal is swept as for every
+/// kind, up to what `2^calls` calls can touch. Global is at [`MLE_GLOBAL_LOG_HEIGHT`] here too, so
+/// it only rules out the points whose fewest events do not fit the table.
+fn blake2b_precompile_shapes() -> Vec<MlePrecompileShape> {
+    use crate::primitives::consts::LOCAL_MEMORY_DATAPAR;
+    const KIND: &str = "Blake2bRound";
+    const CONTROL: &str = "Blake2bControl";
+    // The round chip raises no memory lookups; a call's are its control row's, which bound the
+    // local entries it adds.
+    let mem_per_call = memory_lookups_per_row(CONTROL) as u128;
+    let memory_local_cap = bucket_log_height("MemoryLocal", false);
+    let global_rows = 1u128 << bucket_log_height("Global", false);
+    let mut out = Vec::new();
+    for kind_log_height in MLE_MIN_LOG_HEIGHT..=bucket_log_height(KIND, false) {
+        let calls_log = blake2b_call_log_height(kind_log_height);
+        if calls_log > bucket_log_height("SyscallPrecompile", false)
+            || calls_log > bucket_log_height(CONTROL, false)
+        {
+            continue;
+        }
+        let local_hi = (1u128 << calls_log) * mem_per_call;
+        for memory_local in MLE_MIN_LOG_HEIGHT..=memory_local_cap {
+            let l_hi = ((1u128 << memory_local) * LOCAL_MEMORY_DATAPAR as u128).min(local_hi);
+            let l_lo = if memory_local == MLE_MIN_LOG_HEIGHT {
+                1
+            } else {
+                (1u128 << (memory_local - 1)) * LOCAL_MEMORY_DATAPAR as u128 + 1
+            };
+            // The fewest cross-chunk events the point raises, one call's and one per local entry
+            // (every entry a first touch), must fit the Global table.
+            if l_hi < l_lo || l_lo + 1 > global_rows {
+                continue;
+            }
+            out.push(MlePrecompileShape {
+                kind: KIND.to_string(),
+                kind_log_height,
+                control: Some((CONTROL.to_string(), calls_log)),
+                syscall_precompile: calls_log,
+                memory_local,
+            });
+        }
+    }
     out
 }
 
@@ -1518,7 +1588,10 @@ pub fn mle_natural_heights_from_counter(
                 for (table, log) in precompile_tables(kind) {
                     out.insert(table.to_string(), 1 << log);
                 }
-                out.insert(kind.clone(), precompile_kind_rows(kind, events));
+                out.insert(
+                    kind.clone(),
+                    precompile_kind_rows(kind, counter.get_precompile_kind_units(kind, code)),
+                );
                 out.insert("SyscallPrecompile".to_string(), events);
                 out.insert(
                     "MemoryLocal".to_string(),
@@ -1668,7 +1741,7 @@ pub fn select_riscv_shape(
         "deferred chunk takes its natural heights ({} airs)",
         present.len()
     );
-    let shape: Vec<(String, usize)> = present
+    let mut shape: Vec<(String, usize)> = present
         .iter()
         .map(|name| {
             if name == "Byte" || name == "Program" {
@@ -1697,8 +1770,33 @@ pub fn select_riscv_shape(
             (name.clone(), log)
         })
         .collect();
+    pad_blake2b_calls_under_rounds(&mut shape);
     assert_whitelist_shape(&shape, natural);
     shape
+}
+
+/// Pad a BLAKE2b chunk's control chip and syscall table to [`blake2b_call_log_height`] of its
+/// round chip, the one call height the enumeration lists per round height. The calls fit under
+/// it (each runs a round or more, and the split caps them), so this only ever pads.
+fn pad_blake2b_calls_under_rounds(shape: &mut [(String, usize)]) {
+    let Some(rounds) = shape
+        .iter()
+        .find(|(name, _)| name == "Blake2bRound")
+        .map(|(_, log)| *log)
+    else {
+        return;
+    };
+    let calls = blake2b_call_log_height(rounds);
+    for (name, log) in shape.iter_mut() {
+        if name == "Blake2bControl" || name == "SyscallPrecompile" {
+            assert!(
+                *log <= calls,
+                "a BLAKE2b chunk's {name} needs 2^{log}, above the 2^{calls} its 2^{rounds} rounds \
+                 allow: a call ran no rounds, or the split let the calls past their cap"
+            );
+            *log = calls;
+        }
+    }
 }
 
 /// Every riscv shape the whitelist admits, each sorted by chip name, built once per process.
@@ -1853,6 +1951,8 @@ pub enum RecursionTier {
 /// 80-block p99 corpus 4,256 take row 0, 457 row 1 and none row 2, and the padding costs 2.3%
 /// over the natural heights. The global LogUp's image node pads to row 0 at every tier of its
 /// table.
+/// The 185 BLAKE2b shapes, added since, all take row 0 (`MLE_TIER_PROBE_LABEL=Blake2bRound`,
+/// 2026-11-18).
 ///
 /// Fitted (2026-11-13) over that corpus, with the natural riscv heights of the same day under
 /// the 33-row core ladder and the convert heights `examples/mle_tier_probe.rs` measured over the
@@ -2127,7 +2227,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(seen, 53, "the machine's air list changed size");
+        assert_eq!(seen, 55, "the machine's air list changed size");
     }
 
     /// The three kinds the split sizes by the hardware-tier threshold rather than by cells: their
@@ -2330,6 +2430,8 @@ mod tests {
         for (kind, _) in RiscvChipType::<Kb>::get_all_precompile_chips()
             .into_iter()
             .filter(|(kind, _)| crate::mle::machine::riscv::air_id_for(kind).is_some())
+            // Its rounds and calls are independent; `every_blake2b_chunk_selects_a_whitelist_shape`.
+            .filter(|(kind, _)| kind != "Blake2bRound")
         {
             let rows_per_event = precompile_rows_per_event(&kind);
             let control = precompile_control_sibling(&kind);
@@ -2390,6 +2492,55 @@ mod tests {
         assert!(chunks > 0, "the sweep selected no chunk");
     }
 
+    /// Every BLAKE2b chunk the split can form selects a whitelist shape: `rounds` up to the full
+    /// block, `calls` from one up to the fewer of the rounds and the call cap, `local` up to what
+    /// the calls can touch and the Global table can hold, each walked over its height boundaries,
+    /// and the global event count `2 * local + calls` put on each power of two it reaches.
+    #[test]
+    fn every_blake2b_chunk_selects_a_whitelist_shape() {
+        use crate::{
+            chips::precompiles::blake2b::{CALLS_PER_BLOCK_LOG, ROUNDS_PER_BLOCK_LOG},
+            primitives::consts::LOCAL_MEMORY_DATAPAR,
+        };
+        let global_rows_cap = 1usize << bucket_log_height("Global", false);
+        let local_cap = (1usize << bucket_log_height("MemoryLocal", false)) * LOCAL_MEMORY_DATAPAR;
+        let mem_per_call = memory_lookups_per_row("Blake2bControl");
+        let mut checked = 0usize;
+        for rounds in edges(1 << ROUNDS_PER_BLOCK_LOG) {
+            for calls in edges(rounds.min(1 << CALLS_PER_BLOCK_LOG)) {
+                let local_max = (calls * mem_per_call)
+                    .min(local_cap)
+                    .min((global_rows_cap - calls) / 2);
+                let mut locals = edges(local_max);
+                locals.extend(
+                    edges(local_max.div_ceil(LOCAL_MEMORY_DATAPAR))
+                        .into_iter()
+                        .map(|rows| rows * LOCAL_MEMORY_DATAPAR)
+                        .flat_map(|l| [l, l + 1]),
+                );
+                locals.extend(
+                    (0..usize::BITS)
+                        .map(|k| 1usize << k)
+                        .flat_map(|p| [p - 1, p, p + 1])
+                        .filter(|e| *e > calls && (e - calls) % 2 == 0)
+                        .map(|e| (e - calls) / 2),
+                );
+                for local in locals.into_iter().filter(|l| (1..=local_max).contains(l)) {
+                    let shape = select_deferred(&[
+                        ("Blake2bRound", rounds),
+                        ("Blake2bControl", calls),
+                        ("SyscallPrecompile", calls),
+                        ("MemoryLocal", local.div_ceil(LOCAL_MEMORY_DATAPAR)),
+                        ("Global", 2 * local + calls),
+                    ]);
+                    assert_eq!(shape["Global"], MLE_GLOBAL_LOG_HEIGHT);
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 0, "the sweep checked nothing");
+    }
+
     /// Every memory chunk under the caps selects a whitelist shape. MemoryInitialize and
     /// MemoryFinalize take a row per event and Global `init + fin`; the sweep puts `init + fin`
     /// on each power of two, the full Global table among them, as well as walking each side's
@@ -2435,7 +2586,7 @@ mod tests {
     /// shipped-artifact test derives the same count from the config and holds the artifact to it.
     #[test]
     fn the_whitelist_shape_count_is_pinned() {
-        assert_eq!(mle_riscv_shapes().len(), 4_413, "riscv whitelist shapes");
+        assert_eq!(mle_riscv_shapes().len(), 4_598, "riscv whitelist shapes");
     }
 
     /// The global LogUp reads every chunk's event table at one height, the production operating

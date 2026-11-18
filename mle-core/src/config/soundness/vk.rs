@@ -359,7 +359,7 @@ mod tests {
         // (riscv and the recursion machines on KoalaBear^5).
         let shapes = [
             (5000, 100, 50_000),
-            (4292, 53, 45_193),
+            (4292, 55, 46_331),
             (1000, 50, 2000),
             (170, 21, 1409),
         ];

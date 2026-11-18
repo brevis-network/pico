@@ -42,7 +42,9 @@ impl CostComponent {
             | air_id::ED_DECOMPRESS
             | air_id::KECCAK_TABLES
             | air_id::BLS12381_G2_ADD
-            | air_id::BLS12381_G2_DOUBLE => Self::Precompile,
+            | air_id::BLS12381_G2_DOUBLE
+            | air_id::BLAKE2B_CONTROL
+            | air_id::BLAKE2B_ROUND => Self::Precompile,
             _ => Self::Rv64,
         }
     }

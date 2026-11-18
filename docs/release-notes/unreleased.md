@@ -113,6 +113,12 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
 - **`cargo pico execute` serves a test harness.** `--public-output <file>` writes the committed
   bytes, `--exit-code-file <file>` the guest's exit code, and `--pure` runs the guest without
   chunking it, in constant memory.
+- **A BLAKE2b rounds precompile.** `BLAKE2B_ROUNDS` runs up to 1,000 rounds of BLAKE2b's schedule
+  on a working vector in guest memory, proved at a row a round (`syscall_blake2b_rounds` in
+  `pico-sdk`), and `zkvm_blake2f` runs EIP-152's F on it inside the zkVM. In software a round is
+  about 253 instructions and F's round count is the caller's: mainnet block 26426155, whose one F
+  call runs 10.5 M rounds, goes from 2.89 billion cycles to 234 M in a reth guest that calls the
+  precompile.
 - The `zkvm_accelerators.h` functions in `libpico_zkvm.a` (`examples/c-accelerators`).
 - `malloc` for C guests on newlib, through the runtime's `sbrk`, which shares its heap with the Rust
   allocator (`examples/c-guest/malloc.c`).
