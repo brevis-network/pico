@@ -1,8 +1,8 @@
 {
   "generated_by": "cargo run --release -p pico-vm --example mle_soundness_manifest",
-  "commit": "20a6d4a48fce6c447d5d202efa0a6062d934d4c5",
-  "dirty": true,
-  "dirty_paths": ["perf/bench_data/rv64/reth-elf", "vm/examples/mle_tier_probe.rs", "vm/src/chips/precompiles/blake2b/control.rs", "vm/src/chips/precompiles/blake2b/mod.rs", "vm/src/chips/precompiles/blake2b/round.rs", "vm/src/chips/precompiles/blake2b/tests.rs", "vm/src/chips/precompiles/code_range_tests.rs", "vm/src/emulator/riscv/record.rs", "vm/src/emulator/riscv/syscalls/precompiles/blake2b.rs", "vm/src/instances/compiler/shapes/riscv_shape.rs", "vm/src/mle/machine/shape.rs", "vm/src/mle/shape_vk_bins/mle_vk_map_kb.bin", "vm/src/mle/shape_vk_bins/mle_vk_root.txt", "vm/tests/riscv_constraint_dump.txt", "vm/tests/unreached_syscalls.txt"],
+  "commit": "a6d5ea4468bf05a0e545ea6b4d740e4883bbbdcf",
+  "dirty": false,
+  "dirty_paths": [],
   "calculator": "closed-form",
   "program": "perf/bench_data/rv64/fib-elf, n = 10",
   "shipped_whitelist": "vm/src/mle/shape_vk_bins/mle_vk_map_kb.bin",
