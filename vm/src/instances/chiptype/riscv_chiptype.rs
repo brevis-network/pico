@@ -1,5 +1,6 @@
 use crate::{
     chips::precompiles::{
+        blake2b::{Blake2bControlChip, Blake2bRoundChip},
         bls12381_g2::{add::Bls12381G2AddChip, double::Bls12381G2DoubleChip},
         poseidon2::FieldSpecificPrecompilePoseidon2Chip,
     },
@@ -67,7 +68,9 @@ use crate::{
         record::{AluStream, EmulationRecord},
         syscalls::precompiles::PrecompileLocalMemory,
     },
-    instances::compiler::shapes::riscv_shape::{precompile_kind_rows, precompile_syscall_code},
+    instances::compiler::shapes::riscv_shape::{
+        precompile_kind_rows, precompile_kind_units, precompile_syscall_code,
+    },
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
@@ -123,6 +126,8 @@ define_chip_type!(
         (WsDoubleSecp256r1, WsDoubleSecp256r1),
         (Bls381G2Add, Bls12381G2AddChip),
         (Bls381G2Double, Bls12381G2DoubleChip),
+        (Blake2bControl, Blake2bControlChip),
+        (Blake2bRound, Blake2bRoundChip),
         (ShaExtend, ShaExtendChip),
         (ShaExtendControl, ShaExtendControlChip),
         (MemoryInitialize, MemoryInitializeFinalizeChip),
@@ -214,6 +219,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::WsDoubleSecp256r1(Default::default()),
             Self::Bls381G2Add(Default::default()),
             Self::Bls381G2Double(Default::default()),
+            Self::Blake2bControl(Default::default()),
+            Self::Blake2bRound(Default::default()),
             Self::ShaExtend(Default::default()),
             Self::ShaExtendControl(Default::default()),
             Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
@@ -342,6 +349,10 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             // indices above stay put.
             Self::Bls381G2Add(Default::default()),
             Self::Bls381G2Double(Default::default()),
+            // The BLAKE2b rounds precompile's two chips: host tracegen, appended last for the
+            // same reason.
+            Self::Blake2bControl(Default::default()),
+            Self::Blake2bRound(Default::default()),
         ]
         .map(MetaChip::<F, RiscvChipType<F>>::new)
         .into()
@@ -475,7 +486,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             .filter(|events| !events.is_empty())
             .map(|events| {
                 (
-                    precompile_kind_rows(chip_name, events.len()),
+                    precompile_kind_rows(chip_name, precompile_kind_units(chip_name, events)),
                     events.get_local_mem_events().into_iter().count(),
                     record.global_lookup_events.len(),
                 )
@@ -569,6 +580,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::WsDoubleSecp256r1(Default::default()),
             Self::Bls381G2Add(Default::default()),
             Self::Bls381G2Double(Default::default()),
+            Self::Blake2bControl(Default::default()),
+            Self::Blake2bRound(Default::default()),
             Self::ShaExtendControl(Default::default()),
             Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
                 MemoryChipType::Initialize,
@@ -641,6 +654,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
         excluded_chip_names.insert(Self::ShaExtendControl(Default::default()).name());
         excluded_chip_names.insert(Self::KeccakControl(Default::default()).name());
         excluded_chip_names.insert(Self::KeccakTab(Default::default()).name());
+        excluded_chip_names.insert(Self::Blake2bControl(Default::default()).name());
 
         all_chips
             .into_iter()

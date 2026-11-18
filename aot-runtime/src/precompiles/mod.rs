@@ -1,3 +1,4 @@
+pub mod blake2b;
 pub mod ec;
 pub mod fptower;
 pub mod keccak256;

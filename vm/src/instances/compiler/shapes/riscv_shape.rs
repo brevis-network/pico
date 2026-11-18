@@ -197,6 +197,9 @@ pub fn precompile_rows_per_event(chip_name: &str) -> usize {
 /// into 27-row slots and pads to a power of two that avoids one wrap (`sliced_height`), so its
 /// count is already the padded height. The MLE shapes key on this, not on the rounded
 /// `precompile_rows_per_event`, so a whitelist shape is exactly what tracegen produces.
+///
+/// Blake2bRound's unit is a round, not a call: a call runs a caller-chosen number of rounds, one
+/// row each, so its callers pass the round count ([`precompile_kind_units`]).
 pub fn precompile_kind_rows(chip_name: &str, n: usize) -> usize {
     match chip_name {
         "KeccakPermute" => crate::chips::precompiles::keccak256::sliced::sliced_height(n),
@@ -213,9 +216,33 @@ pub fn precompile_tables(chip_name: &str) -> &'static [(&'static str, usize)] {
     }
 }
 
+/// What [`precompile_kind_rows`] counts for a kind over a record's events: the events, or for
+/// Blake2bRound the rounds of its calls.
+pub fn precompile_kind_units(
+    chip_name: &str,
+    events: &[(
+        crate::emulator::riscv::syscalls::SyscallEvent,
+        crate::emulator::riscv::syscalls::precompiles::PrecompileEvent,
+    )],
+) -> usize {
+    use crate::emulator::riscv::syscalls::precompiles::PrecompileEvent;
+    match chip_name {
+        "Blake2bRound" => events
+            .iter()
+            .map(|(_, event)| match event {
+                PrecompileEvent::Blake2bRounds(e) => e.rounds as usize,
+                _ => unreachable!("a BLAKE2B_ROUNDS group holds another event"),
+            })
+            .sum(),
+        _ => events.len(),
+    }
+}
+
 // TODO: remove hardcode chip_names here
 pub(crate) fn precompile_syscall_code(chip_name: &str) -> SyscallCode {
     match chip_name {
+        "Blake2bControl" => SyscallCode::BLAKE2B_ROUNDS,
+        "Blake2bRound" => SyscallCode::BLAKE2B_ROUNDS,
         "Bls12381AddAssign" => SyscallCode::BLS12381_ADD,
         "Bls12381Decompress" => SyscallCode::BLS12381_DECOMPRESS,
         "Bls12381DoubleAssign" => SyscallCode::BLS12381_DOUBLE,

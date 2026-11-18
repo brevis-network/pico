@@ -14,9 +14,10 @@ use crate::{
     Kb, Sc,
 };
 
-/// Fixed Merkle depth: 2^15 = 32,768 whitelist slots. The whitelist holds 4,487 leaves (4,413
+/// Fixed Merkle depth: 2^15 = 32,768 whitelist slots. The whitelist holds 4,672 leaves (4,598
 /// riscv shapes, 50 combine node shapes, the 22 nodes of the global LogUp, the deferred node and
-/// the compress node), about a seventh of them. A new precompile kind sweeps a few hundred shapes.
+/// the compress node), about a seventh of them. A new precompile kind sweeps a few hundred shapes
+/// (BLAKE2b's took 185).
 /// The depth is baked into the membership circuit, so changing it changes every combine VK and
 /// the root.
 pub const MLE_VK_MERKLE_DEPTH: usize = 15;

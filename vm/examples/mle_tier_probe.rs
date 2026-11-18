@@ -40,6 +40,8 @@
 //!
 //! Environment:
 //!   `MLE_TIER_PROBE_STRIDE=n`: walk every n-th riscv shape (a quick pass);
+//!   `MLE_TIER_PROBE_LABEL=s`: walk only the riscv shapes whose label contains `s`, such as a new
+//!     precompile kind's (`Blake2bRound`), before the stride;
 //!   `MLE_TIER_PROBE_REPORT_ONLY=1`: report, do not assert. A shape no convert row holds is
 //!     counted as "no row" and the walk goes on; nothing panics on tables the circuits have
 //!     outgrown, which is the state the tables are re-measured from. The three keygens (the
@@ -148,10 +150,16 @@ fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1);
+    let label = std::env::var("MLE_TIER_PROBE_LABEL").unwrap_or_default();
     let all = pico_vm::mle::machine::shape::mle_riscv_shapes();
-    let shapes: Vec<_> = all.iter().step_by(stride.max(1)).cloned().collect();
+    let shapes: Vec<_> = all
+        .iter()
+        .filter(|(l, _)| l.contains(label.as_str()))
+        .step_by(stride.max(1))
+        .cloned()
+        .collect();
     info!(
-        "whitelist riscv shapes: {} of {} (stride {stride})",
+        "whitelist riscv shapes: {} of {} (stride {stride}, label {label:?})",
         shapes.len(),
         all.len()
     );
