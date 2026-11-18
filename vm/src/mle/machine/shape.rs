@@ -12,14 +12,13 @@
 //! maxima —
 //!
 //!   - no height exceeds `log_stacked_height` (23): a taller trace does not pack;
-//!   - `Global == Poseidon2 + 2`, because the Global chip raises one Poseidon2 event per global
-//!     event and the Poseidon2 chip packs `RISCV_POSEIDON2_DATAPAR = 4` of them per row;
+//!   - `Global` is the same in every shape of every family, [`MLE_GLOBAL_LOG_HEIGHT`]: the
+//!     Global AIR proves at one fixed height whatever the chunk's event count;
 //!   - `MemoryInitialize` and `MemoryFinalize` are each at most 2^22 in a deferred memory chunk
 //!     because the emulator buckets each stream in `DEFERRED_MEMORY_BUCKET = 2^20 - 1` events
 //!     (`record.rs`) and closes every memory record under the 2^22 event cap: at most four
 //!     finalize buckets (2^22 - 4 events) per record, the initialize buckets riding on the last
-//!     one under the same cap. Global, one row per memory event plus the padding row, then
-//!     reaches 2^22;
+//!     one under the same cap. Global, one row per memory event, holds them;
 //!   - the precompile heights are `max(full-block threshold, tail-merge cap)` per kind, and their
 //!     companions follow `get_precompile_shapes`' derivations.
 //!
@@ -62,10 +61,8 @@ pub const MLE_RISCV_MAIN_LOG_HEIGHTS: &[(&str, usize)] = &[
     ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
     ("SyscallRiscv", 22),
     ("Ecall", 22),
-    // Global carries every chunk kind and is the tallest chip in all three families;
-    // Poseidon2 sits exactly 2 below it (RISCV_POSEIDON2_DATAPAR = 4).
-    ("Global", 23),
-    ("RiscvKoalaBearPoseidon2", 21),
+    // Global carries every chunk kind, at one height in all three families.
+    ("Global", MLE_GLOBAL_LOG_HEIGHT),
     ("Byte", 17), // fixed-height table; the entry documents (and must equal) its natural 2^17
     // The program table's main multiplicity trace must match its preprocessed height, so it
     // takes the constant rather than a literal.
@@ -131,9 +128,17 @@ pub const MLE_MIN_LOG_HEIGHT: usize = 4;
 /// `MemoryLocal` in a CPU chunk: its local-memory traffic scales with the instruction count.
 pub const MEMORY_LOCAL_CPU_LOG_HEIGHT: usize = 22;
 
-/// `MemoryLocal` in a deferred chunk: the ceiling `get_precompile_shapes` derives from
-/// Global's own 2^23 cap, `ceil((2^23 / 2) / LOCAL_MEMORY_DATAPAR)`.
-pub const MEMORY_LOCAL_DEFERRED_LOG_HEIGHT: usize = 20;
+/// The log2 height of the Global AIR in every shape: the tables describe the production stacked
+/// height (2^23), where the machine proves the Global AIR at
+/// `pico_mle_core::global_logup::global_log_height` = 2^22 whatever the chunk's event count. At
+/// another stacked height the machine pads the Global AIR to that height's own fixed value,
+/// regardless of the entry a shape carries.
+pub const MLE_GLOBAL_LOG_HEIGHT: usize = pico_mle_core::global_logup::MAX_GLOBAL_LOG_HEIGHT;
+
+/// `MemoryLocal` in a deferred chunk: the ceiling the Global table puts on it. A local entry
+/// raises up to two cross-chunk events and a row holds `LOCAL_MEMORY_DATAPAR = 4` entries, so
+/// `ceil((2^MLE_GLOBAL_LOG_HEIGHT / 2) / LOCAL_MEMORY_DATAPAR)` rows.
+pub const MEMORY_LOCAL_DEFERRED_LOG_HEIGHT: usize = MLE_GLOBAL_LOG_HEIGHT - 3;
 
 /// Bucketed log2 height of the program's preprocessed table (and its main multiplicity trace —
 /// the two must agree). Bucketing it makes the RISC-V vk's preprocessed GEOMETRY app-independent,
@@ -179,7 +184,6 @@ pub const MLE_CORE_CANONICAL_PRESENCE: &[&str] = &[
     "SyscallRiscv",
     "Ecall",
     "Global",
-    "RiscvKoalaBearPoseidon2",
     "Byte",
     "Program",
 ];
@@ -209,56 +213,71 @@ pub fn bucket_log_height(chip_name: &str, is_cpu_chunk: bool) -> usize {
         })
 }
 
-/// The core family's height ladder, fitted to the CPU chunks of the reth guest on 107 blocks: the
-/// 80-block p99 corpus, the 9 bench blocks outside it and 18 recent ethproofs blocks
-/// (26.16 M-26.17 M), every fourth block by number held out. 24 classes by agglomerative clustering
-/// (a class is the componentwise maximum of its members) and three envelope rows (a coarse 3-class
-/// clustering of the same chunks, with headroom on the cheap chips). Subw, Addw and DivRem sit at
-/// 2^10 or more in every row: a recent block can carry 2^7 Subw rows in one chunk where the corpus
-/// has none. Of the previous ladder's six envelope rows three are kept, and each of the other three
-/// lies under a new envelope row, so this ladder holds every chunk that one held (its last row was
-/// raised for a G1MSM chunk of block 26180455). The rows from [`MLE_CORE_FITTED_ROWS`] on were
-/// added after the fit, for chunks of EF guests and word-op heavy programs that no fitted row holds.
+/// The core family's height ladder, fitted to the CPU chunks of the reth guest on the 80-block
+/// p99 corpus (3,047 chunks, probed 2026-11-13), every fourth block by number held out: 24
+/// classes by agglomerative clustering (a class is the componentwise maximum of its members)
+/// and nine envelope rows, which are no fitted class. Three of them come from a coarse 3-class
+/// clustering of the same chunks, with headroom on the cheap chips; the other six are wider
+/// still, for chunks beyond the corpus (row 30 holds a G1MSM chunk of block 26180455). No chip
+/// sits below a floor in any row: Subw, Addw and DivRem stay at 2^10 or more, since a recent
+/// block can carry 2^7 Subw rows in one chunk where the corpus has none.
+/// The rows from [`MLE_CORE_FITTED_ROWS`] on were added after the fit, for chunks of EF guests
+/// and word-op heavy programs that no fitted row holds.
 ///
-/// Refitted for the code-range check, which adds three interactions to every MemoryReadWrite row
-/// and one to every Program row. Under those counts six rows of the previous fit crossed TI = 2^28,
-/// and 43% of the fit set's CPU chunks would have proved at GKR size m = 29 (12% before the
-/// check); on this ladder 25% do, where 23% cross the line on their natural heights alone (4%
-/// before it). The natural heights are the previous fit's, probed again with the check in place:
-/// no chunk moved.
-///
-/// The clustering minimizes the GPU price of a chunk on its row, from a one-card regression over
-/// 254 CPU chunks in natural and whitelist mode (a KoalaBear⁴ calibration): 0.273 ms per million
-/// cells and 0.182 ms per million GKR leaves (2^m, m the bit length of TI, so a row past TI = 2^28
-/// pays ~49 ms more), with the interaction counts and widths of a real keygen. On the 26 held-out
-/// blocks a CPU chunk costs +3.0% over its natural heights (the previous ladder, under the same
-/// counts: +4.9%); on 18 more recent blocks the fit never saw, +4.1% (+7.4%).
+/// The rows are priced by what a chunk costs to prove on them, regressed on the same probe:
+/// 0.344 ms per million cells and 0.026 ms per million GKR leaves (2^m, m the bit length of
+/// TI = sum(interactions x height)), with the interaction counts and widths of a real keygen.
+/// The Global AIR is at 2^22 rows in every chunk, which alone puts 70% of the corpus's CPU
+/// chunks past TI = 2^28 at their natural heights. Under this price a CPU chunk costs +1.8%
+/// over its natural heights, on the fit set and on the held-out blocks alike.
 ///
 /// A chunk takes the FIRST entry that dominates it componentwise, and the rows sit
 /// cheapest-first by that price, so the first dominating row is the cheapest one. The rows added
 /// after the fit sit last, so they take only chunks no other row holds. The catch-all
-/// (not listed here, it is [`MLE_RISCV_MAIN_LOG_HEIGHTS`]) comes last. Every row keeps TI =
-/// sum(interactions x height) under 2^29: at 2^29 the GKR size m goes from 29 to 30 and the leaf
-/// buffer no longer fits a card, so a row past it would be CPU-only
-/// (`core_ladder_rows_stay_under_the_gpu_line`).
+/// (not listed here, it is [`MLE_RISCV_MAIN_LOG_HEIGHTS`]) comes last. Every row keeps TI under
+/// 2^29: at 2^29 the GKR size m goes from 29 to 30 and the leaf buffer no longer fits a card,
+/// so a row past it would be CPU-only (`core_ladder_rows_stay_under_the_gpu_line`).
 ///
 /// Under canonical presence a class is one whole height vector, hence one whitelist entry -- K
 /// is bounded by keygen time, not by the whitelist budget.
 ///
-/// Byte is a fixed-height table and Program is machine-wide, so both are the same in every row.
+/// Byte is a fixed-height table, Program is machine-wide and Global proves at one fixed height,
+/// so all three are the same in every row.
 ///
 /// The envelope rows sit at [`MLE_CORE_ENVELOPE_ROWS`]; sorted by price they land between the
 /// classes, so a chunk a class holds can still take an envelope row that is cheaper and also
-/// holds it.
+/// holds it. The fitting tools and the corpus are not part of this repository.
 pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
-    // row 0: 32 fit-set chunks; 188 ms; TI 0.25 x 2^29
+    // row 0: 21 fit-set chunks; 27 corpus chunks; 168 ms; TI 0.25 x 2^29
+    &[
+        ("Cpu", 22),
+        ("MemoryReadWrite", 20),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 20),
+        ("Sub", 15),
+        ("LessThan", 19),
+        ("Bitwise", 19),
+        ("ShiftLeft", 18),
+        ("ShiftRight", 17),
+        ("Mul", 13),
+        ("Addw", 12),
+        ("Subw", 10),
+        ("DivRem", 10),
+        ("SyscallRiscv", 12),
+        ("Ecall", 12),
+        ("MemoryLocal", 16),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 1: 12 fit-set chunks; 12 corpus chunks; 206 ms; TI 0.30 x 2^29
     &[
         ("Cpu", 22),
         ("MemoryReadWrite", 21),
         ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 20),
+        ("Add", 21),
         ("Sub", 16),
-        ("LessThan", 19),
+        ("LessThan", 20),
         ("Bitwise", 19),
         ("ShiftLeft", 18),
         ("ShiftRight", 18),
@@ -269,35 +288,11 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("SyscallRiscv", 13),
         ("Ecall", 13),
         ("MemoryLocal", 17),
-        ("Global", 19),
-        ("RiscvKoalaBearPoseidon2", 17),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 1: 79 fit-set chunks; 277 ms; TI 0.39 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 20),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 21),
-        ("Sub", 17),
-        ("LessThan", 20),
-        ("Bitwise", 20),
-        ("ShiftLeft", 18),
-        ("ShiftRight", 18),
-        ("Mul", 17),
-        ("Addw", 17),
-        ("Subw", 10),
-        ("DivRem", 10),
-        ("SyscallRiscv", 17),
-        ("Ecall", 17),
-        ("MemoryLocal", 16),
-        ("Global", 19),
-        ("RiscvKoalaBearPoseidon2", 17),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 2: 17 fit-set chunks; 290 ms; TI 0.46 x 2^29
+    // row 2: 140 fit-set chunks; 201 corpus chunks; 320 ms; TI 0.48 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 21),
@@ -307,232 +302,46 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("LessThan", 21),
         ("Bitwise", 20),
         ("ShiftLeft", 19),
-        ("ShiftRight", 19),
-        ("Mul", 19),
-        ("Addw", 14),
-        ("Subw", 10),
-        ("DivRem", 10),
-        ("SyscallRiscv", 5),
-        ("Ecall", 5),
-        ("MemoryLocal", 11),
-        ("Global", 14),
-        ("RiscvKoalaBearPoseidon2", 12),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 3: 336 fit-set chunks; 310 ms; TI 0.45 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 21),
-        ("Sub", 17),
-        ("LessThan", 21),
-        ("Bitwise", 20),
-        ("ShiftLeft", 19),
         ("ShiftRight", 18),
-        ("Mul", 16),
-        ("Addw", 12),
+        ("Mul", 14),
+        ("Addw", 16),
         ("Subw", 10),
         ("DivRem", 10),
-        ("SyscallRiscv", 11),
-        ("Ecall", 11),
-        ("MemoryLocal", 15),
-        ("Global", 17),
-        ("RiscvKoalaBearPoseidon2", 15),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 4: 442 fit-set chunks; 323 ms; TI 0.48 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 21),
-        ("Sub", 18),
-        ("LessThan", 21),
-        ("Bitwise", 20),
-        ("ShiftLeft", 19),
-        ("ShiftRight", 18),
-        ("Mul", 18),
-        ("Addw", 15),
-        ("Subw", 10),
-        ("DivRem", 13),
-        ("SyscallRiscv", 15),
-        ("Ecall", 15),
-        ("MemoryLocal", 16),
-        ("Global", 18),
-        ("RiscvKoalaBearPoseidon2", 16),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 5: 94 fit-set chunks; 330 ms; TI 0.43 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 21),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 21),
-        ("Sub", 17),
-        ("LessThan", 20),
-        ("Bitwise", 20),
-        ("ShiftLeft", 19),
-        ("ShiftRight", 19),
-        ("Mul", 16),
-        ("Addw", 17),
-        ("Subw", 10),
-        ("DivRem", 10),
-        ("SyscallRiscv", 17),
-        ("Ecall", 17),
-        ("MemoryLocal", 17),
-        ("Global", 20),
-        ("RiscvKoalaBearPoseidon2", 18),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 6: 163 fit-set chunks; 331 ms; TI 0.49 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 21),
-        ("Sub", 18),
-        ("LessThan", 21),
-        ("Bitwise", 20),
-        ("ShiftLeft", 20),
-        ("ShiftRight", 19),
-        ("Mul", 18),
-        ("Addw", 14),
-        ("Subw", 10),
-        ("DivRem", 13),
         ("SyscallRiscv", 14),
         ("Ecall", 14),
-        ("MemoryLocal", 16),
-        ("Global", 18),
-        ("RiscvKoalaBearPoseidon2", 16),
+        ("MemoryLocal", 17),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 7: 44 fit-set chunks; 340 ms; TI 0.50 x 2^29
+    // row 3: 60 fit-set chunks; 77 corpus chunks; 338 ms; TI 0.50 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
         ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 21),
-        ("Sub", 17),
+        ("Sub", 16),
         ("LessThan", 20),
-        ("Bitwise", 20),
-        ("ShiftLeft", 20),
-        ("ShiftRight", 19),
-        ("Mul", 18),
+        ("Bitwise", 19),
+        ("ShiftLeft", 17),
+        ("ShiftRight", 16),
+        ("Mul", 16),
         ("Addw", 15),
         ("Subw", 10),
-        ("DivRem", 12),
-        ("SyscallRiscv", 15),
-        ("Ecall", 15),
-        ("MemoryLocal", 17),
-        ("Global", 19),
-        ("RiscvKoalaBearPoseidon2", 17),
+        ("DivRem", 10),
+        ("SyscallRiscv", 18),
+        ("Ecall", 18),
+        ("MemoryLocal", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 8: 193 fit-set chunks; 345 ms; TI 0.50 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 21),
-        ("Sub", 18),
-        ("LessThan", 21),
-        ("Bitwise", 20),
-        ("ShiftLeft", 19),
-        ("ShiftRight", 19),
-        ("Mul", 18),
-        ("Addw", 16),
-        ("Subw", 10),
-        ("DivRem", 14),
-        ("SyscallRiscv", 17),
-        ("Ecall", 17),
-        ("MemoryLocal", 17),
-        ("Global", 19),
-        ("RiscvKoalaBearPoseidon2", 17),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 9: 35 fit-set chunks; 345 ms; TI 0.49 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 21),
-        ("Sub", 17),
-        ("LessThan", 21),
-        ("Bitwise", 20),
-        ("ShiftLeft", 20),
-        ("ShiftRight", 19),
-        ("Mul", 17),
-        ("Addw", 15),
-        ("Subw", 10),
-        ("DivRem", 12),
-        ("SyscallRiscv", 15),
-        ("Ecall", 15),
-        ("MemoryLocal", 17),
-        ("Global", 19),
-        ("RiscvKoalaBearPoseidon2", 17),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 10: 181 fit-set chunks; 353 ms; TI 0.48 x 2^29
+    // row 4: 52 fit-set chunks; 73 corpus chunks; 346 ms; TI 0.50 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 21),
         ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 22),
-        ("Sub", 19),
-        ("LessThan", 21),
-        ("Bitwise", 20),
-        ("ShiftLeft", 20),
-        ("ShiftRight", 19),
-        ("Mul", 15),
-        ("Addw", 16),
-        ("Subw", 10),
-        ("DivRem", 10),
-        ("SyscallRiscv", 16),
-        ("Ecall", 16),
-        ("MemoryLocal", 18),
-        ("Global", 20),
-        ("RiscvKoalaBearPoseidon2", 18),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 11: 75 fit-set chunks; 365 ms; TI 0.50 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 21),
-        ("Sub", 17),
-        ("LessThan", 20),
-        ("Bitwise", 20),
-        ("ShiftLeft", 19),
-        ("ShiftRight", 19),
-        ("Mul", 17),
-        ("Addw", 15),
-        ("Subw", 10),
-        ("DivRem", 10),
-        ("SyscallRiscv", 15),
-        ("Ecall", 15),
-        ("MemoryLocal", 18),
-        ("Global", 20),
-        ("RiscvKoalaBearPoseidon2", 18),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 12: 78 fit-set chunks; 368 ms; TI 0.49 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 21),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 22),
         ("Sub", 18),
         ("LessThan", 22),
         ("Bitwise", 20),
@@ -545,12 +354,231 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("SyscallRiscv", 13),
         ("Ecall", 13),
         ("MemoryLocal", 17),
-        ("Global", 20),
-        ("RiscvKoalaBearPoseidon2", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 13: 131 fit-set chunks; 371 ms; TI 0.50 x 2^29
+    // row 5: 304 fit-set chunks; 420 corpus chunks; 347 ms; TI 0.50 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 17),
+        ("LessThan", 21),
+        ("Bitwise", 20),
+        ("ShiftLeft", 19),
+        ("ShiftRight", 18),
+        ("Mul", 16),
+        ("Addw", 13),
+        ("Subw", 10),
+        ("DivRem", 12),
+        ("SyscallRiscv", 12),
+        ("Ecall", 12),
+        ("MemoryLocal", 15),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 6: 35 fit-set chunks; 48 corpus chunks; 349 ms; TI 0.52 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 21),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
+        ("Sub", 18),
+        ("LessThan", 21),
+        ("Bitwise", 21),
+        ("ShiftLeft", 19),
+        ("ShiftRight", 19),
+        ("Mul", 17),
+        ("Addw", 18),
+        ("Subw", 10),
+        ("DivRem", 10),
+        ("SyscallRiscv", 18),
+        ("Ecall", 18),
+        ("MemoryLocal", 17),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 7: 39 fit-set chunks; 50 corpus chunks; 353 ms; TI 0.54 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 21),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
+        ("Sub", 19),
+        ("LessThan", 21),
+        ("Bitwise", 20),
+        ("ShiftLeft", 20),
+        ("ShiftRight", 19),
+        ("Mul", 19),
+        ("Addw", 16),
+        ("Subw", 10),
+        ("DivRem", 10),
+        ("SyscallRiscv", 14),
+        ("Ecall", 14),
+        ("MemoryLocal", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 8: 295 fit-set chunks; 380 corpus chunks; 357 ms; TI 0.51 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 17),
+        ("LessThan", 21),
+        ("Bitwise", 20),
+        ("ShiftLeft", 19),
+        ("ShiftRight", 18),
+        ("Mul", 17),
+        ("Addw", 15),
+        ("Subw", 10),
+        ("DivRem", 12),
+        ("SyscallRiscv", 15),
+        ("Ecall", 15),
+        ("MemoryLocal", 16),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 9: 141 fit-set chunks; 210 corpus chunks; 361 ms; TI 0.52 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 18),
+        ("LessThan", 21),
+        ("Bitwise", 20),
+        ("ShiftLeft", 19),
+        ("ShiftRight", 18),
+        ("Mul", 18),
+        ("Addw", 15),
+        ("Subw", 10),
+        ("DivRem", 13),
+        ("SyscallRiscv", 14),
+        ("Ecall", 14),
+        ("MemoryLocal", 16),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 10: 238 fit-set chunks; 331 corpus chunks; 362 ms; TI 0.53 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 17),
+        ("LessThan", 20),
+        ("Bitwise", 20),
+        ("ShiftLeft", 19),
+        ("ShiftRight", 19),
+        ("Mul", 17),
+        ("Addw", 16),
+        ("Subw", 10),
+        ("DivRem", 12),
+        ("SyscallRiscv", 17),
+        ("Ecall", 17),
+        ("MemoryLocal", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 11: 28 fit-set chunks; 31 corpus chunks; 362 ms; TI 0.53 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 16),
+        ("LessThan", 20),
+        ("Bitwise", 20),
+        ("ShiftLeft", 18),
+        ("ShiftRight", 17),
+        ("Mul", 16),
+        ("Addw", 16),
+        ("Subw", 10),
+        ("DivRem", 10),
+        ("SyscallRiscv", 18),
+        ("Ecall", 18),
+        ("MemoryLocal", 19),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 12: 147 fit-set chunks; 237 corpus chunks; 364 ms; TI 0.52 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 17),
+        ("LessThan", 21),
+        ("Bitwise", 20),
+        ("ShiftLeft", 20),
+        ("ShiftRight", 18),
+        ("Mul", 17),
+        ("Addw", 14),
+        ("Subw", 10),
+        ("DivRem", 13),
+        ("SyscallRiscv", 14),
+        ("Ecall", 14),
+        ("MemoryLocal", 16),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 13: 103 fit-set chunks; 137 corpus chunks; 368 ms; TI 0.53 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
+        ("Sub", 19),
+        ("LessThan", 21),
+        ("Bitwise", 20),
+        ("ShiftLeft", 19),
+        ("ShiftRight", 18),
+        ("Mul", 15),
+        ("Addw", 16),
+        ("Subw", 10),
+        ("DivRem", 10),
+        ("SyscallRiscv", 14),
+        ("Ecall", 14),
+        ("MemoryLocal", 17),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 14: 36 fit-set chunks; 35 corpus chunks; 372 ms; TI 0.55 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 18),
+        ("LessThan", 20),
+        ("Bitwise", 20),
+        ("ShiftLeft", 20),
+        ("ShiftRight", 19),
+        ("Mul", 18),
+        ("Addw", 15),
+        ("Subw", 10),
+        ("DivRem", 11),
+        ("SyscallRiscv", 17),
+        ("Ecall", 17),
+        ("MemoryLocal", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 15: 117 fit-set chunks; 144 corpus chunks; 374 ms; TI 0.54 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
@@ -561,88 +589,40 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Bitwise", 20),
         ("ShiftLeft", 19),
         ("ShiftRight", 19),
-        ("Mul", 17),
+        ("Mul", 18),
         ("Addw", 16),
         ("Subw", 10),
-        ("DivRem", 12),
+        ("DivRem", 13),
         ("SyscallRiscv", 17),
         ("Ecall", 17),
-        ("MemoryLocal", 17),
-        ("Global", 20),
-        ("RiscvKoalaBearPoseidon2", 18),
+        ("MemoryLocal", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 14: 129 fit-set chunks; 388 ms; TI 0.46 x 2^29
+    // row 16: 122 fit-set chunks; 167 corpus chunks; 376 ms; TI 0.54 x 2^29
     &[
         ("Cpu", 23),
-        ("MemoryReadWrite", 21),
+        ("MemoryReadWrite", 22),
         ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 21),
+        ("Add", 22),
         ("Sub", 18),
-        ("LessThan", 20),
+        ("LessThan", 21),
         ("Bitwise", 20),
-        ("ShiftLeft", 18),
-        ("ShiftRight", 18),
-        ("Mul", 16),
-        ("Addw", 16),
-        ("Subw", 10),
-        ("DivRem", 10),
-        ("SyscallRiscv", 18),
-        ("Ecall", 18),
-        ("MemoryLocal", 18),
-        ("Global", 21),
-        ("RiscvKoalaBearPoseidon2", 19),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 15: 46 fit-set chunks; 412 ms; TI 0.49 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 21),
-        ("Sub", 15),
-        ("LessThan", 20),
-        ("Bitwise", 19),
-        ("ShiftLeft", 17),
-        ("ShiftRight", 16),
+        ("ShiftLeft", 19),
+        ("ShiftRight", 19),
         ("Mul", 15),
-        ("Addw", 14),
-        ("Subw", 10),
-        ("DivRem", 10),
-        ("SyscallRiscv", 18),
-        ("Ecall", 18),
-        ("MemoryLocal", 18),
-        ("Global", 21),
-        ("RiscvKoalaBearPoseidon2", 19),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 16: 78 fit-set chunks; 414 ms; TI 0.50 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 21),
-        ("Sub", 17),
-        ("LessThan", 20),
-        ("Bitwise", 19),
-        ("ShiftLeft", 18),
-        ("ShiftRight", 17),
-        ("Mul", 17),
         ("Addw", 16),
         ("Subw", 10),
         ("DivRem", 10),
-        ("SyscallRiscv", 17),
-        ("Ecall", 17),
+        ("SyscallRiscv", 14),
+        ("Ecall", 14),
         ("MemoryLocal", 18),
-        ("Global", 21),
-        ("RiscvKoalaBearPoseidon2", 19),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 17: 84 fit-set chunks; 430 ms; TI 0.51 x 2^29
+    // row 17: 69 fit-set chunks; 89 corpus chunks; 379 ms; TI 0.54 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 21),
@@ -660,12 +640,77 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("SyscallRiscv", 10),
         ("Ecall", 10),
         ("MemoryLocal", 17),
-        ("Global", 20),
-        ("RiscvKoalaBearPoseidon2", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 18: 303 fit-set chunks; 431 ms; TI 0.53 x 2^29
+    // row 18: 113 fit-set chunks; 129 corpus chunks; 380 ms; TI 0.55 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
+        ("Sub", 18),
+        ("LessThan", 21),
+        ("Bitwise", 20),
+        ("ShiftLeft", 19),
+        ("ShiftRight", 18),
+        ("Mul", 17),
+        ("Addw", 17),
+        ("Subw", 10),
+        ("DivRem", 10),
+        ("SyscallRiscv", 18),
+        ("Ecall", 18),
+        ("MemoryLocal", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 19: 49 fit-set chunks; 62 corpus chunks; 384 ms; TI 0.56 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 18),
+        ("LessThan", 21),
+        ("Bitwise", 20),
+        ("ShiftLeft", 20),
+        ("ShiftRight", 20),
+        ("Mul", 18),
+        ("Addw", 15),
+        ("Subw", 10),
+        ("DivRem", 14),
+        ("SyscallRiscv", 15),
+        ("Ecall", 15),
+        ("MemoryLocal", 17),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 20: 36 fit-set chunks; 54 corpus chunks; 385 ms; TI 0.56 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 18),
+        ("LessThan", 21),
+        ("Bitwise", 21),
+        ("ShiftLeft", 19),
+        ("ShiftRight", 19),
+        ("Mul", 17),
+        ("Addw", 17),
+        ("Subw", 10),
+        ("DivRem", 14),
+        ("SyscallRiscv", 18),
+        ("Ecall", 18),
+        ("MemoryLocal", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 21: 27 fit-set chunks; 39 corpus chunks; 396 ms; TI 0.59 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
@@ -674,21 +719,20 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Sub", 19),
         ("LessThan", 21),
         ("Bitwise", 20),
-        ("ShiftLeft", 19),
+        ("ShiftLeft", 20),
         ("ShiftRight", 19),
-        ("Mul", 17),
-        ("Addw", 16),
+        ("Mul", 19),
+        ("Addw", 17),
         ("Subw", 10),
-        ("DivRem", 11),
+        ("DivRem", 10),
         ("SyscallRiscv", 16),
         ("Ecall", 16),
         ("MemoryLocal", 18),
-        ("Global", 20),
-        ("RiscvKoalaBearPoseidon2", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 19: an envelope row kept from the previous ladder (row 14 of the one before); 433 ms; TI 0.62 x 2^29
+    // row 22: envelope row for chunks beyond the corpus; 0 corpus chunks; 419 ms; TI 0.66 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
@@ -706,12 +750,33 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("SyscallRiscv", 19),
         ("Ecall", 18),
         ("MemoryLocal", 16),
-        ("Global", 19),
-        ("RiscvKoalaBearPoseidon2", 17),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 20: envelope row; 466 ms; TI 0.64 x 2^29
+    // row 23: envelope row; 1 corpus chunks; 422 ms; TI 0.65 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
+        ("Sub", 20),
+        ("LessThan", 21),
+        ("Bitwise", 20),
+        ("ShiftLeft", 20),
+        ("ShiftRight", 19),
+        ("Mul", 19),
+        ("Addw", 18),
+        ("Subw", 12),
+        ("DivRem", 17),
+        ("SyscallRiscv", 20),
+        ("Ecall", 19),
+        ("MemoryLocal", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 24: envelope row for chunks beyond the corpus; 0 corpus chunks; 425 ms; TI 0.67 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
@@ -729,81 +794,33 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("SyscallRiscv", 19),
         ("Ecall", 18),
         ("MemoryLocal", 18),
-        ("Global", 20),
-        ("RiscvKoalaBearPoseidon2", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 21: 101 fit-set chunks; 477 ms; TI 0.63 x 2^29
+    // row 25: 28 fit-set chunks; 33 corpus chunks; 435 ms; TI 0.64 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
         ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
         ("Add", 22),
-        ("Sub", 19),
+        ("Sub", 18),
         ("LessThan", 22),
         ("Bitwise", 21),
         ("ShiftLeft", 20),
         ("ShiftRight", 20),
-        ("Mul", 19),
+        ("Mul", 18),
         ("Addw", 17),
         ("Subw", 10),
         ("DivRem", 16),
-        ("SyscallRiscv", 17),
-        ("Ecall", 17),
+        ("SyscallRiscv", 18),
+        ("Ecall", 18),
         ("MemoryLocal", 18),
-        ("Global", 20),
-        ("RiscvKoalaBearPoseidon2", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 22: 146 fit-set chunks; 482 ms; TI 0.53 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 21),
-        ("Sub", 18),
-        ("LessThan", 21),
-        ("Bitwise", 20),
-        ("ShiftLeft", 19),
-        ("ShiftRight", 19),
-        ("Mul", 17),
-        ("Addw", 16),
-        ("Subw", 10),
-        ("DivRem", 11),
-        ("SyscallRiscv", 17),
-        ("Ecall", 17),
-        ("MemoryLocal", 18),
-        ("Global", 21),
-        ("RiscvKoalaBearPoseidon2", 19),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 23: 39 fit-set chunks; 517 ms; TI 0.62 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 22),
-        ("Sub", 19),
-        ("LessThan", 21),
-        ("Bitwise", 21),
-        ("ShiftLeft", 20),
-        ("ShiftRight", 20),
-        ("Mul", 19),
-        ("Addw", 16),
-        ("Subw", 10),
-        ("DivRem", 10),
-        ("SyscallRiscv", 17),
-        ("Ecall", 17),
-        ("MemoryLocal", 18),
-        ("Global", 21),
-        ("RiscvKoalaBearPoseidon2", 19),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 24: 36 fit-set chunks; 536 ms; TI 0.62 x 2^29
+    // row 26: 47 fit-set chunks; 60 corpus chunks; 443 ms; TI 0.63 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 23),
@@ -818,15 +835,14 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("Addw", 16),
         ("Subw", 10),
         ("DivRem", 10),
-        ("SyscallRiscv", 17),
-        ("Ecall", 17),
+        ("SyscallRiscv", 18),
+        ("Ecall", 18),
         ("MemoryLocal", 18),
-        ("Global", 21),
-        ("RiscvKoalaBearPoseidon2", 19),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 25: an envelope row kept from the previous ladder (row 24 of the one before); 572 ms; TI 0.74 x 2^29
+    // row 27: envelope row for chunks beyond the corpus; 0 corpus chunks; 484 ms; TI 0.74 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
@@ -844,58 +860,11 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("SyscallRiscv", 19),
         ("Ecall", 18),
         ("MemoryLocal", 18),
-        ("Global", 21),
-        ("RiscvKoalaBearPoseidon2", 19),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 26: 14 fit-set chunks; 581 ms; TI 0.55 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 20),
-        ("Sub", 16),
-        ("LessThan", 19),
-        ("Bitwise", 20),
-        ("ShiftLeft", 18),
-        ("ShiftRight", 17),
-        ("Mul", 15),
-        ("Addw", 15),
-        ("Subw", 10),
-        ("DivRem", 10),
-        ("SyscallRiscv", 17),
-        ("Ecall", 17),
-        ("MemoryLocal", 19),
-        ("Global", 22),
-        ("RiscvKoalaBearPoseidon2", 20),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 27: envelope row; 641 ms; TI 0.98 x 2^29
-    &[
-        ("Cpu", 23),
-        ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
-        ("Add", 22),
-        ("Sub", 20),
-        ("LessThan", 22),
-        ("Bitwise", 21),
-        ("ShiftLeft", 21),
-        ("ShiftRight", 21),
-        ("Mul", 20),
-        ("Addw", 18),
-        ("Subw", 10),
-        ("DivRem", 20),
-        ("SyscallRiscv", 20),
-        ("Ecall", 19),
-        ("MemoryLocal", 18),
-        ("Global", 21),
-        ("RiscvKoalaBearPoseidon2", 19),
-        ("Byte", 17),
-        ("Program", 20),
-    ],
-    // row 28: envelope row; 722 ms; TI 0.84 x 2^29
+    // row 28: envelope row for chunks beyond the corpus; 0 corpus chunks; 526 ms; TI 0.80 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 23),
@@ -913,14 +882,33 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("SyscallRiscv", 19),
         ("Ecall", 18),
         ("MemoryLocal", 19),
-        ("Global", 22),
-        ("RiscvKoalaBearPoseidon2", 20),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 29: an envelope row kept from the previous ladder (row 26 of the one before); 731 ms; TI 0.83 x 2^29. Ecall is at
-    // 2^18 because a G1MSM chunk (block 26180455, 139,646 ecalls) fits no other row and was past
-    // 2^17 here.
+    // row 29: envelope row; 0 corpus chunks; 535 ms; TI 0.75 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 23),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 21),
+        ("Sub", 19),
+        ("LessThan", 22),
+        ("Bitwise", 20),
+        ("ShiftLeft", 21),
+        ("ShiftRight", 21),
+        ("Mul", 18),
+        ("Addw", 17),
+        ("Subw", 12),
+        ("DivRem", 14),
+        ("SyscallRiscv", 20),
+        ("Ecall", 19),
+        ("MemoryLocal", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 30: envelope row for chunks beyond the corpus; 0 corpus chunks; 537 ms; TI 0.79 x 2^29
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 23),
@@ -938,13 +926,56 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("SyscallRiscv", 19),
         ("Ecall", 18),
         ("MemoryLocal", 19),
-        ("Global", 22),
-        ("RiscvKoalaBearPoseidon2", 20),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 30 (added): row 25 with Bitwise at 2^22, for hash-table-heavy guests (EF ethrex);
-    // TI 0.79 x 2^29.
+    // row 31: envelope row; 0 corpus chunks; 551 ms; TI 0.96 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
+        ("Sub", 20),
+        ("LessThan", 22),
+        ("Bitwise", 21),
+        ("ShiftLeft", 20),
+        ("ShiftRight", 20),
+        ("Mul", 20),
+        ("Addw", 19),
+        ("Subw", 12),
+        ("DivRem", 20),
+        ("SyscallRiscv", 20),
+        ("Ecall", 19),
+        ("MemoryLocal", 19),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 32: envelope row for chunks beyond the corpus; 0 corpus chunks; 572 ms; TI 0.98 x 2^29
+    &[
+        ("Cpu", 23),
+        ("MemoryReadWrite", 22),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("Add", 22),
+        ("Sub", 20),
+        ("LessThan", 22),
+        ("Bitwise", 21),
+        ("ShiftLeft", 21),
+        ("ShiftRight", 21),
+        ("Mul", 20),
+        ("Addw", 18),
+        ("Subw", 10),
+        ("DivRem", 20),
+        ("SyscallRiscv", 20),
+        ("Ecall", 19),
+        ("MemoryLocal", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
+        ("Byte", 17),
+        ("Program", 20),
+    ],
+    // row 33 (added): row 27 with Bitwise at 2^22, for hash-table-heavy guests (EF ethrex);
+    // TI under 2^29.
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
@@ -962,13 +993,12 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("SyscallRiscv", 19),
         ("Ecall", 18),
         ("MemoryLocal", 18),
-        ("Global", 21),
-        ("RiscvKoalaBearPoseidon2", 19),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
-    // row 31 (added): row 18 with Addw at 2^21 and Subw at 2^19, for word-op heavy programs
-    // (byte-offset memcpy-style loops); TI 0.55 x 2^29.
+    // row 34 (added): Addw at 2^21 and Subw at 2^19, for word-op heavy programs (byte-offset
+    // memcpy-style loops); TI under 2^29.
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
@@ -986,8 +1016,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
         ("SyscallRiscv", 16),
         ("Ecall", 16),
         ("MemoryLocal", 18),
-        ("Global", 20),
-        ("RiscvKoalaBearPoseidon2", 18),
+        ("Global", MLE_GLOBAL_LOG_HEIGHT),
         ("Byte", 17),
         ("Program", 20),
     ],
@@ -995,12 +1024,12 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
 
 /// The number of [`MLE_CORE_LADDER`] rows from the fit; the rows after them were added for chunks
 /// the fit never saw.
-pub const MLE_CORE_FITTED_ROWS: usize = 30;
+pub const MLE_CORE_FITTED_ROWS: usize = 33;
 
-/// The fitted rows of [`MLE_CORE_LADDER`] that are envelope rows (the coarse 3-class clustering
-/// with headroom, and the three kept from the previous ladder) rather than classes; the run log
-/// names them so a run's cost can be attributed to them.
-pub const MLE_CORE_ENVELOPE_ROWS: &[usize] = &[19, 20, 25, 27, 28, 29];
+/// The rows of [`MLE_CORE_LADDER`] that are envelope rows (three from the coarse 3-class
+/// clustering with headroom, six for chunks beyond the corpus) rather than fitted classes; the
+/// run log names them so a run's cost can be attributed to them.
+pub const MLE_CORE_ENVELOPE_ROWS: &[usize] = &[22, 23, 24, 27, 28, 29, 30, 31, 32];
 
 /// One precompile-family shape: the compute kind at a log height, its control sibling if it has
 /// one, and the companions the kind's event count drives. Byte and Program are pinned
@@ -1012,8 +1041,6 @@ pub struct MlePrecompileShape {
     pub control: Option<(String, usize)>,
     pub syscall_precompile: usize,
     pub memory_local: usize,
-    pub global: usize,
-    pub poseidon2: usize,
 }
 
 /// The control sibling a compute kind emits alongside itself, one row per parent event.
@@ -1108,13 +1135,9 @@ pub(crate) fn kind_event_window(kind: &str, kind_log_height: usize) -> Option<(u
 /// above by what the airs can possibly raise -- `n * (rows_per_event * lookups_per_row +
 /// control_lookups_per_row)` -- and below by the `2^l_skip` floor.
 ///
-/// Everything else follows. Global counts `2 * local + n` bus events plus the one padding row
-/// its accumulation constraints need, so given the two swept heights it takes exactly two
-/// consecutive log values: the interval the raw count can land in spans a factor of two. And
-/// Poseidon2 packs `RISCV_POSEIDON2_DATAPAR` global events per row, so it sits two below Global
-/// whenever that leaves it above the floor -- three when the event count is exactly a power of
-/// two, where Global's padding row alone takes it to the next power. `select_riscv_shape` pads
-/// Poseidon2 back up to two below in that case, so the three-below vector is not listed.
+/// Everything else follows. Global holds the chunk's cross-chunk events, one or two per local
+/// entry and one per syscall, at [`MLE_GLOBAL_LOG_HEIGHT`] in every shape, so it adds no axis:
+/// it only rules out the points whose fewest events do not fit the table.
 ///
 /// Heights are capped by the family catch-all, which bounds every reachable chunk; a point above
 /// it is unreachable and is dropped rather than clamped, so nothing here exceeds it.
@@ -1124,7 +1147,7 @@ pub fn mle_precompile_shapes() -> Vec<MlePrecompileShape> {
             chiptype::riscv_chiptype::RiscvChipType,
             compiler::shapes::riscv_shape::precompile_rows_per_event,
         },
-        primitives::consts::{LOCAL_MEMORY_DATAPAR, RISCV_POSEIDON2_DATAPAR},
+        primitives::consts::LOCAL_MEMORY_DATAPAR,
     };
 
     let log2_ceil = |n: u128| -> usize {
@@ -1149,8 +1172,7 @@ pub fn mle_precompile_shapes() -> Vec<MlePrecompileShape> {
         let kind_cap = bucket_log_height(&kind, false);
         let syscall_cap = bucket_log_height("SyscallPrecompile", false);
         let memory_local_cap = bucket_log_height("MemoryLocal", false);
-        let global_cap = bucket_log_height("Global", false);
-        let poseidon2_cap = bucket_log_height("RiscvKoalaBearPoseidon2", false);
+        let global_rows = 1u128 << bucket_log_height("Global", false);
         let control_cap = control.map(|c| bucket_log_height(c, false));
 
         for kind_log_height in MLE_MIN_LOG_HEIGHT..=kind_cap {
@@ -1192,28 +1214,19 @@ pub fn mle_precompile_shapes() -> Vec<MlePrecompileShape> {
                     if l_hi < l_lo {
                         continue;
                     }
-                    // `+ 1`: the Global trace always ends with one padding row. Away from the
-                    // floor the raw count spans a factor of two and this is two values; at the
-                    // floor both windows are wider, so the whole range is walked.
-                    let g_lo = log2_ceil(2 * l_lo + s_lo + 1);
-                    let g_hi = log2_ceil(2 * l_hi + s_hi + 1);
-                    for global in g_lo..=g_hi {
-                        let poseidon2 = global
-                            .saturating_sub(RISCV_POSEIDON2_DATAPAR.ilog2() as usize)
-                            .max(MLE_MIN_LOG_HEIGHT);
-                        if global > global_cap || poseidon2 > poseidon2_cap {
-                            continue;
-                        }
-                        out.push(MlePrecompileShape {
-                            kind: kind.clone(),
-                            kind_log_height,
-                            control: control.map(|c| (c.to_string(), syscall)),
-                            syscall_precompile: syscall,
-                            memory_local,
-                            global,
-                            poseidon2,
-                        });
+                    // The fewest cross-chunk events the point raises: one per syscall, and
+                    // one per local entry when every entry is a first touch (any other raises
+                    // two). A point that cannot fit the Global table is unreachable.
+                    if l_lo + s_lo > global_rows {
+                        continue;
                     }
+                    out.push(MlePrecompileShape {
+                        kind: kind.clone(),
+                        kind_log_height,
+                        control: control.map(|c| (c.to_string(), syscall)),
+                        syscall_precompile: syscall,
+                        memory_local,
+                    });
                 }
             }
         }
@@ -1227,11 +1240,12 @@ pub fn mle_precompile_shapes() -> Vec<MlePrecompileShape> {
 ///
 /// This is the enumeration `build_vk_map` keys the whitelist on and the tier probe walks: the
 /// core ladder with its catch-all behind it, the memory family's free product, and the
-/// precompile family's per-kind sweep. Byte and Program are pinned machine-wide and appear in
-/// every shape.
+/// precompile family's per-kind sweep. Byte, Program and Global are pinned machine-wide and
+/// appear in every shape.
 pub fn mle_riscv_shapes() -> Vec<(String, Vec<(String, usize)>)> {
     let byte = ("Byte".to_string(), bucket_log_height("Byte", false));
     let program = ("Program".to_string(), bucket_log_height("Program", false));
+    let global = ("Global".to_string(), bucket_log_height("Global", false));
     let mut out = Vec::new();
 
     for (i, class) in MLE_CORE_LADDER.iter().enumerate() {
@@ -1248,39 +1262,31 @@ pub fn mle_riscv_shapes() -> Vec<(String, Vec<(String, usize)>)> {
             .collect(),
     ));
 
-    // Memory: MemoryInitialize and MemoryFinalize each absent or anywhere in range, Global free
-    // over its own, Poseidon2 pinned under it. Both absent is not a memory shape at all.
-    let gap = crate::primitives::consts::RISCV_POSEIDON2_DATAPAR.ilog2() as usize;
+    // Memory: MemoryInitialize and MemoryFinalize each absent or anywhere in range. Both absent
+    // is not a memory shape at all.
     let init_cap = bucket_log_height("MemoryInitialize", false);
     let final_cap = bucket_log_height("MemoryFinalize", false);
-    let global_cap = bucket_log_height("Global", false);
     for init in (MLE_MIN_LOG_HEIGHT..=init_cap).map(Some).chain([None]) {
         for fin in (MLE_MIN_LOG_HEIGHT..=final_cap).map(Some).chain([None]) {
             if init.is_none() && fin.is_none() {
                 continue;
             }
-            for global in MLE_MIN_LOG_HEIGHT..=global_cap {
-                let mut shape = vec![byte.clone(), program.clone()];
-                if let Some(h) = init {
-                    shape.push(("MemoryInitialize".to_string(), h));
-                }
-                if let Some(h) = fin {
-                    shape.push(("MemoryFinalize".to_string(), h));
-                }
-                shape.push(("Global".to_string(), global));
-                shape.push((
-                    "RiscvKoalaBearPoseidon2".to_string(),
-                    global.saturating_sub(gap).max(MLE_MIN_LOG_HEIGHT),
-                ));
-                out.push((
-                    format!(
-                        "memory:{}/{}/{global}",
-                        init.map_or("-".to_string(), |h| h.to_string()),
-                        fin.map_or("-".to_string(), |h| h.to_string())
-                    ),
-                    shape,
-                ));
+            let mut shape = vec![byte.clone(), program.clone()];
+            if let Some(h) = init {
+                shape.push(("MemoryInitialize".to_string(), h));
             }
+            if let Some(h) = fin {
+                shape.push(("MemoryFinalize".to_string(), h));
+            }
+            shape.push(global.clone());
+            out.push((
+                format!(
+                    "memory:{}/{}",
+                    init.map_or("-".to_string(), |h| h.to_string()),
+                    fin.map_or("-".to_string(), |h| h.to_string())
+                ),
+                shape,
+            ));
         }
     }
 
@@ -1291,8 +1297,7 @@ pub fn mle_riscv_shapes() -> Vec<(String, Vec<(String, usize)>)> {
             (s.kind.clone(), s.kind_log_height),
             ("SyscallPrecompile".to_string(), s.syscall_precompile),
             ("MemoryLocal".to_string(), s.memory_local),
-            ("Global".to_string(), s.global),
-            ("RiscvKoalaBearPoseidon2".to_string(), s.poseidon2),
+            global.clone(),
         ];
         if let Some((name, h)) = s.control.clone() {
             shape.push((name, h));
@@ -1304,8 +1309,8 @@ pub fn mle_riscv_shapes() -> Vec<(String, Vec<(String, usize)>)> {
         );
         out.push((
             format!(
-                "precompile:{}:{}/{}/{}/{}",
-                s.kind, s.kind_log_height, s.syscall_precompile, s.memory_local, s.global
+                "precompile:{}:{}/{}/{}",
+                s.kind, s.kind_log_height, s.syscall_precompile, s.memory_local
             ),
             shape,
         ));
@@ -1314,20 +1319,29 @@ pub fn mle_riscv_shapes() -> Vec<(String, Vec<(String, usize)>)> {
 }
 
 /// A digest of the shape config that shapes the whitelist's leaves: every riscv shape the whitelist
-/// admits, the convert ladder rows, the combine and compress tier tables, and the Merkle depth. The
-/// vk-map artifact carries it, and loading an artifact under a binary whose config digests
-/// differently is refused -- a whitelist built from one shape config must not be used to prove
-/// under another, since the enumeration order, these tables and the depth all shape the leaves.
+/// admits, the convert ladder rows, the group nodes' row, the combine and compress tier tables,
+/// the largest group and the image tiers of the global LogUp (its nodes' leaves), and the Merkle
+/// depth. The vk-map artifact carries it, and loading an artifact under a binary whose
+/// config digests differently is refused -- a whitelist built from one shape config must not be
+/// used to prove under another, since the enumeration order, these tables and the depth all shape
+/// the leaves.
 ///
 /// The embed row is left out: the embed key is no leaf, so its row moves only the embed
 /// key, which the soundness manifest records and the artifact unit test holds against this binary.
 ///
+/// The stacked height the riscv machine runs at is left out too, though the image tiers in use
+/// and the group nodes' table follow it: an artifact is built at the height the prover ships
+/// with (`mle_build_vk_map` warns otherwise). One built at another height digests the same and
+/// loads, and then lists none of the keys a prover derives: its proofs stop at the first key
+/// check, and the artifact unit test fails on it.
+///
 /// Field-native: each shape is its `(air id, log height)` pairs sorted by air id, length-prefixed;
 /// then the convert row count and each tier table's heights in table order, length-prefixed;
-/// then the depth. Sponge-hashed
+/// then the largest group, the lowest and the highest image tier, and the depth. Sponge-hashed
 /// with the same padding-free sponge the leaves use.
 pub fn mle_shape_config_digest() -> [Kb; 8] {
     use crate::mle::machine::{exe::sponge_hash, riscv::air_name, vk_map::MLE_VK_MERKLE_DEPTH};
+    use pico_mle_core::global_logup;
     // The riscv air table is position-indexed and contiguous, so walking ids until the first
     // gap covers exactly the machine's airs.
     let ids: BTreeMap<&str, u32> = (0u32..)
@@ -1350,12 +1364,18 @@ pub fn mle_shape_config_digest() -> [Kb; 8] {
     }
     pre.push(Kb::from_u32(MLE_RECURSION_CONVERT_LADDER.len() as u32));
     for table in MLE_RECURSION_CONVERT_LADDER.iter().copied().chain([
+        MLE_RECURSION_GROUP_NODE_LOG_HEIGHTS,
         MLE_RECURSION_COMBINE_LOG_HEIGHTS,
         MLE_RECURSION_COMPRESS_LOG_HEIGHTS,
     ]) {
         pre.push(Kb::from_u32(table.len() as u32));
         pre.extend(table.iter().map(|(_, h)| Kb::from_u32(*h as u32)));
     }
+    // The global LogUp's nodes: a group node for every group size, an image node for every
+    // image tier. Another largest group or another range of tiers is another set of leaves.
+    pre.push(Kb::from_u32(global_logup::MAX_GROUP_LEN as u32));
+    pre.push(Kb::from_u32(global_logup::MIN_IMAGE_LOG_HEIGHT as u32));
+    pre.push(Kb::from_u32(global_logup::MAX_GLOBAL_LOG_HEIGHT as u32));
     pre.push(Kb::from_u32(MLE_VK_MERKLE_DEPTH as u32));
     sponge_hash(&pre)
 }
@@ -1369,17 +1389,15 @@ pub fn mle_shape_config_digest() -> [Kb; 8] {
 /// extras carry ALU events, not only byte lookups, and the emulator's raw counts fall short.
 ///
 /// The per-chip counts come from the helpers the FRI shape system uses, plus `Ecall`, which
-/// postdates them and carries one row per ecall instruction. Global and Poseidon2 are then
-/// overridden with the event vectors their generators actually read, `global_lookup_events`
-/// and `poseidon2_events`, rather than the derivations those helpers make of them.
+/// postdates them and carries one row per ecall instruction. Global is then overridden with
+/// the event vector its generator actually reads, `global_lookup_events`, rather than the
+/// derivation those helpers make of it: one row per event. The Global AIR proves at one fixed
+/// height whatever this count, so the count only has to fit that height.
 ///
 /// Byte and Program are left out: both are pinned machine-wide, so they never take part in a
 /// match.
 pub fn mle_natural_heights(record: &EmulationRecord) -> BTreeMap<String, usize> {
-    use crate::{
-        instances::chiptype::riscv_chiptype::RiscvChipType,
-        primitives::consts::RISCV_POSEIDON2_DATAPAR,
-    };
+    use crate::instances::chiptype::riscv_chiptype::RiscvChipType;
 
     let mut out: BTreeMap<String, usize> = BTreeMap::new();
     if record.is_cpu_chunk {
@@ -1428,26 +1446,12 @@ pub fn mle_natural_heights(record: &EmulationRecord) -> BTreeMap<String, usize> 
                 "MemoryLocal".to_string(),
                 local_mem_events.div_ceil(LOCAL_MEMORY_DATAPAR),
             );
-            // `+ 1`: the Global trace always ends with one padding row.
-            let global = 2 * local_mem_events + events + 1;
-            out.insert("Global".to_string(), global);
-            out.insert(
-                "RiscvKoalaBearPoseidon2".to_string(),
-                global.div_ceil(RISCV_POSEIDON2_DATAPAR),
-            );
+            out.insert("Global".to_string(), 2 * local_mem_events + events);
         }
     }
-    // What the two generators read, whichever family: Global pads `events + 1` (its last row
-    // must be padding), Poseidon2 packs `RISCV_POSEIDON2_DATAPAR` events per row.
+    // What the generator reads, whichever family: one Global row per event.
     if out.contains_key("Global") {
-        out.insert("Global".to_string(), record.global_lookup_events.len() + 1);
-        out.insert(
-            "RiscvKoalaBearPoseidon2".to_string(),
-            record
-                .poseidon2_events
-                .len()
-                .div_ceil(RISCV_POSEIDON2_DATAPAR),
-        );
+        out.insert("Global".to_string(), record.global_lookup_events.len());
     }
     out
 }
@@ -1457,8 +1461,8 @@ pub fn mle_natural_heights(record: &EmulationRecord) -> BTreeMap<String, usize> 
 /// row what `mle_natural_heights` returns on the augmented record, without that path's record
 /// clone and host extra-record pass, and without its walks over the events: a core chunk's table
 /// is rebuilt from the counter and the history's ecall list; a memory chunk's from the two event vectors' lengths; a precompile chunk's from the counter's
-/// per-kind event and local-memory counts; Global and Poseidon2, the two heights extra-record
-/// output feeds, come from the counter in every family. `MLE_SHAPE_CROSSCHECK=1` asserts the
+/// per-kind event and local-memory counts; Global, the height extra-record output feeds, comes
+/// from the counter in every family. `MLE_SHAPE_CROSSCHECK=1` asserts the
 /// equality on every chunk (`prepare_chunk_shaped`).
 #[cfg(feature = "cuda")]
 pub fn mle_natural_heights_from_counter(
@@ -1467,8 +1471,7 @@ pub fn mle_natural_heights_from_counter(
 ) -> BTreeMap<String, usize> {
     use crate::primitives::consts::{
         ADD_DATAPAR, BITWISE_DATAPAR, DIVREM_DATAPAR, LOCAL_MEMORY_DATAPAR, LT_DATAPAR,
-        MEMORY_RW_DATAPAR, MUL_DATAPAR, RISCV_POSEIDON2_DATAPAR, SLL_DATAPAR, SR_DATAPAR,
-        SUB_DATAPAR,
+        MEMORY_RW_DATAPAR, MUL_DATAPAR, SLL_DATAPAR, SR_DATAPAR, SUB_DATAPAR,
     };
     if !record.is_cpu_chunk {
         // The deferred families, off the counter: `mle_natural_heights` walks every precompile
@@ -1523,15 +1526,8 @@ pub fn mle_natural_heights_from_counter(
                 );
             }
         }
-        // What the two generators read, whichever family: Global pads `events + 1` (its last
-        // row must be padding), Poseidon2 packs `RISCV_POSEIDON2_DATAPAR` events per row.
-        out.insert("Global".to_string(), counter.num_global_lookup_events + 1);
-        out.insert(
-            "RiscvKoalaBearPoseidon2".to_string(),
-            counter
-                .num_poseidon2_events
-                .div_ceil(RISCV_POSEIDON2_DATAPAR),
-        );
+        // What the generator reads, whichever family: one Global row per event.
+        out.insert("Global".to_string(), counter.num_global_lookup_events);
         return out;
     }
     // One row per ecall instruction: the history's ecall list.
@@ -1566,14 +1562,7 @@ pub fn mle_natural_heights_from_counter(
             counter.num_memory_read_writes.div_ceil(MEMORY_RW_DATAPAR),
         ),
         ("MemoryUnaligned", counter.num_memory_unaligned),
-        // `+ 1`: the Global trace always ends with one padding row.
-        ("Global", counter.num_global_lookup_events + 1),
-        (
-            "RiscvKoalaBearPoseidon2",
-            counter
-                .num_poseidon2_events
-                .div_ceil(RISCV_POSEIDON2_DATAPAR),
-        ),
+        ("Global", counter.num_global_lookup_events),
         ("SyscallRiscv", counter.num_syscall_events),
         ("Ecall", ecalls),
     ]
@@ -1639,9 +1628,8 @@ pub fn is_core_catch_all(shape: &[(String, usize)]) -> bool {
 /// A CPU chunk takes a [`MLE_CORE_LADDER`] class, so the core family pads to one of a handful of
 /// whole height vectors. The other two families take their natural heights: their enumerations
 /// carry every integer height in range, so there is nothing to round up to beyond the power of
-/// two a trace pads to anyway. The one exception is Poseidon2, which the enumerations pin two
-/// below Global, and which [`pad_poseidon2_under_global`] lifts there when it falls three below.
-/// Byte and Program are pinned machine-wide in all three.
+/// two a trace pads to anyway. Byte, Program and Global are pinned machine-wide in all three:
+/// Global takes [`MLE_GLOBAL_LOG_HEIGHT`] whatever its event count.
 ///
 /// Panics when nothing fits. The production config carries the catch-all, so a miss can only
 /// mean the chunk is genuinely out of bounds, and padding it into a shape it overflows would
@@ -1680,7 +1668,7 @@ pub fn select_riscv_shape(
         "deferred chunk takes its natural heights ({} airs)",
         present.len()
     );
-    let mut shape: Vec<(String, usize)> = present
+    let shape: Vec<(String, usize)> = present
         .iter()
         .map(|name| {
             if name == "Byte" || name == "Program" {
@@ -1703,39 +1691,14 @@ pub fn select_riscv_shape(
                 "no MLE shape holds this chunk: {name} needs 2^{log} ({rows} rows) but its \
                  catch-all is 2^{cap}"
             );
+            if name == "Global" {
+                return (name.clone(), MLE_GLOBAL_LOG_HEIGHT);
+            }
             (name.clone(), log)
         })
         .collect();
-    pad_poseidon2_under_global(&mut shape);
     assert_whitelist_shape(&shape, natural);
     shape
-}
-
-/// Pad a deferred chunk's Poseidon2 up to two below its Global, the height the memory and
-/// precompile enumerations give it.
-///
-/// Global has a row per global event plus one padding row; Poseidon2 has a row per
-/// `RISCV_POSEIDON2_DATAPAR` events and no padding row. So Poseidon2 sits two below Global,
-/// except when the event count is exactly a power of two: then the padding row alone lifts Global
-/// to the next power, and Poseidon2 sits three below. No enumeration lists that height vector, so
-/// its convert key is not in the whitelist, and the chunk's parent combine finds a child key it
-/// cannot prove membership of. A taller trace is always admissible, and the cost is one
-/// Poseidon2 table of twice the height in the rare chunk this applies to.
-fn pad_poseidon2_under_global(shape: &mut [(String, usize)]) {
-    let gap = crate::primitives::consts::RISCV_POSEIDON2_DATAPAR.ilog2() as usize;
-    let Some(global) = shape
-        .iter()
-        .find(|(name, _)| name == "Global")
-        .map(|(_, log)| *log)
-    else {
-        return;
-    };
-    if let Some((_, poseidon2)) = shape
-        .iter_mut()
-        .find(|(name, _)| name == "RiscvKoalaBearPoseidon2")
-    {
-        *poseidon2 = (*poseidon2).max(global.saturating_sub(gap).max(MLE_MIN_LOG_HEIGHT));
-    }
 }
 
 /// Every riscv shape the whitelist admits, each sorted by chip name, built once per process.
@@ -1839,16 +1802,20 @@ pub fn with_mle_preprocessed_shape(program: Arc<Program>) -> Arc<Program> {
 /// Node role in the recursion tree — the tree grammar is fixed (converts verify bucketed
 /// RISC-V proofs; combines verify convert-/combine-tier proofs), so shapes are selected by
 /// role rather than closest-fit matching: role selection is data-independent, which pins the
-/// child-shape base to exactly {C0, C1, C2, B} and keeps the whitelist's shape product at 36
-/// combine entries (the ordered pairs at both completeness flags plus the four single-child
-/// roots). (FRI's closest-fit over a multi-shape allowed set is data-dependent, so its
+/// child-shape base to exactly {C0, C1, C2, G, B} and keeps the whitelist's shape product at 50
+/// combine entries (the ordered pairs at both completeness flags). (FRI's closest-fit over a
+/// multi-shape allowed set is data-dependent, so its
 /// whole cartesian product must be preregistered — see `get_all_shape_combinations`.)
 /// The root is NOT a tier: it is just the last combine round with `is_complete = true`,
 /// exactly as in the FRI path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecursionTier {
-    /// A convert node, padded to this row of [`MLE_RECURSION_CONVERT_LADDER`].
+    /// A convert node, padded to this row of [`MLE_RECURSION_CONVERT_LADDER`]. The global
+    /// LogUp's image node takes row 0.
     Convert(usize),
+    /// A group node of the global LogUp, whatever the number of tables in its group
+    /// ([`MLE_RECURSION_GROUP_NODE_LOG_HEIGHTS`]).
+    GroupNode,
     Combine,
     /// The embed node, which re-proves the compress proof under the outer BN254-hashed config.
     /// Its table is the program's natural heights in whitelist mode, over the compress
@@ -1871,38 +1838,34 @@ pub enum RecursionTier {
 /// follows (~154 + 1.45 W ms on one card, a KoalaBear⁴ calibration).
 ///
 /// One tier for every child would be the componentwise maximum over the whole enumeration,
-/// W = 74 on KoalaBear⁵, set by the core catch-all (Poseidon2Packed, ExtDotProduct, MemoryVar)
-/// and by keccak at its cap (ExtAlu, MleOpen, MemoryConst), while the children the corpus
-/// actually produces need W = 15..42. With rows, each child pads to the nearest row above it
-/// and the combine machine learns one child layout per row (`preregister_standard_shapes`).
+/// W = 68, set by the last core rows and the catch-all (Poseidon2Packed, ExtDotProduct,
+/// MemoryVar), by keccak (MemoryConst) and by the BLS12-381 G2 precompiles (ExtAlu, MleOpen),
+/// while the children the corpus actually produces need W = 14..29. With rows, each child pads to
+/// the nearest row above it and the combine machine learns one child layout per row
+/// (`preregister_standard_shapes`).
 ///
-/// Of the 15,606 whitelist shapes since the sliced Keccak (with PackBlock one notch up in
-/// rows 1 and 2), row 0 holds 14,085, row 1 1,505 and row 2 16 (`mle_tier_probe`, 2026-11-11).
-/// Before it, row 0 (W 19) held 14,085 of the 15,646 whitelist shapes: core classes 0 to 3, 7,539 of
-/// the 7,980 memory shapes and the small shapes of every precompile kind but keccak (all 284
-/// shapes of the two Ed25519 precompiles among them); row 1 (W 42) 1,482: core classes 4 to 27,
-/// where the corpus's core chunks sit on KoalaBear⁵ (Poseidon2Packed at 2^18), the keccak
-/// children and the large precompile children; row 2 (W 74) the catch-all, core classes 28 and
-/// 29 and 76 precompile shapes, 67 of them keccak's (with the code-range check). Under
-/// the 27-row core ladder, of the corpus's 5,183 chunks 859 took row 0, 4,290 row 1 and 34 row 2,
-/// and the padding cost 6.5% over the natural heights (3.6% on KoalaBear⁴). Fitted over the 80-block p99 corpus (natural
-/// riscv heights of 2026-09-23) with the KoalaBear⁵ chip widths and the convert heights
-/// `examples/mle_tier_probe.rs` measured over the whole enumeration (2026-10-27) under the 27-row
-/// core ladder; re-measured over the 15,646 shapes of the 30-row core ladder (2026-10-28), where
-/// the refit reproduced the same three rows and the combine and compress rows below (the embed row
-/// was re-measured later, over the compress proof); and over the 15,646 shapes of the circuit with
-/// misaligned-access and code-store checks and its refitted core ladder (2026-11-05), all of which
-/// these rows still hold, where the p99 corpus's CPU chunks take row 0 more often (597 of 3,382,
-/// against 111 under the previous core ladder) and row 2 never. The fitting tools and the runs'
-/// records are not part of this repository (`docs/tier-tables.md`). The probe walks every
-/// whitelist shape and reports which row it takes and the slack it leaves.
+/// Of the 4,413 whitelist shapes, row 0 (W 21) holds 3,901: core classes 0 to 20, the 399
+/// memory shapes and every precompile shape but keccak's, the two BLS12-381 G2 kinds' and 47 of
+/// Bls12381DoubleAssign's; row 1 (W 35) 334: core classes 21 to 27, the 279 keccak shapes, those
+/// 47 and core row 34; row 2 (W 68) the 178 left, core classes 28 to 32, core row 33, the
+/// catch-all and the 171 G2 shapes, which set its ExtAlu and MleOpen heights. Row 2 sits over
+/// row 1 on every chip (`convert_ladder_rows_close_under_the_last`). Of the 4,713 chunks of the
+/// 80-block p99 corpus 4,256 take row 0, 457 row 1 and none row 2, and the padding costs 2.3%
+/// over the natural heights. The global LogUp's image node pads to row 0 at every tier of its
+/// table.
+///
+/// Fitted (2026-11-13) over that corpus, with the natural riscv heights of the same day under
+/// the 33-row core ladder and the convert heights `examples/mle_tier_probe.rs` measured over the
+/// whole enumeration. The fitting tools and the runs' records are not part of this repository
+/// (`docs/tier-tables.md`). The probe walks every whitelist shape and reports which row it
+/// takes and the slack it leaves.
 ///
 /// Converts have no fixpoint concern: their children are RISC-V proofs, not recursion proofs.
 pub const MLE_RECURSION_CONVERT_LADDER: &[&[(&str, usize)]] = &[
-    // row 0: W = 19
+    // row 0: W = 21
     &[
         ("ExtAlu", 17),
-        ("ExtDotProduct", 16),
+        ("ExtDotProduct", 17),
         ("Poseidon2Packed", 17),
         ("MemoryVar", 16),
         ("HornerEval", 15),
@@ -1923,23 +1886,21 @@ pub const MLE_RECURSION_CONVERT_LADDER: &[&[(&str, usize)]] = &[
         ("PublicValues", 4),
         ("UnivariateFold", 4),
     ],
-    // row 1: W = 42
+    // row 1: W = 35
     &[
-        ("ExtAlu", 19),
+        ("ExtAlu", 18),
         ("ExtDotProduct", 17),
         ("Poseidon2Packed", 18),
-        ("MemoryVar", 17),
+        ("MemoryVar", 16),
         ("HornerEval", 15),
         ("MemoryConst", 14),
         ("BaseAlu", 14),
         ("AssertZeroExt", 14),
-        ("UnpackBlock", 15),
+        ("UnpackBlock", 16),
         ("ExpBitsLen", 15),
         ("MleOpen", 12),
         ("DigestSelect", 15),
         ("BinaryFoldStep", 14),
-        // One notch over the fit for the sliced Keccak children, whose table AIR's own
-        // preprocessed commitment adds ~1k PackBlock rows the other children do not have.
         ("PackBlock", 14),
         ("GkrSumcheckRound", 9),
         ("FracFold", 5),
@@ -1949,26 +1910,22 @@ pub const MLE_RECURSION_CONVERT_LADDER: &[&[(&str, usize)]] = &[
         ("PublicValues", 4),
         ("UnivariateFold", 4),
     ],
-    // row 2: W = 74, the componentwise maximum over every whitelist shape. The peak is not
-    // always the core child: ExtAlu, MleOpen and MemoryConst are set by keccak shapes,
-    // ExtDotProduct, MemoryVar and Poseidon2Packed by the core catch-all, UnpackBlock by the core
-    // classes that reach 2^15 (twenty of the 27, and the catch-all; the other seven stop at 2^14);
-    // the remaining chips are flat across the core classes.
+    // row 2: W = 68
     &[
         ("ExtAlu", 19),
-        ("ExtDotProduct", 19),
+        ("ExtDotProduct", 18),
         ("Poseidon2Packed", 19),
         ("MemoryVar", 18),
         ("HornerEval", 15),
         ("MemoryConst", 14),
         ("BaseAlu", 14),
         ("AssertZeroExt", 14),
-        ("UnpackBlock", 15),
+        ("UnpackBlock", 16),
         ("ExpBitsLen", 15),
         ("MleOpen", 13),
         ("DigestSelect", 15),
         ("BinaryFoldStep", 14),
-        ("PackBlock", 14), // as in row 1 (sliced Keccak children)
+        ("PackBlock", 14),
         ("GkrSumcheckRound", 9),
         ("FracFold", 5),
         ("LagrangeEvalD2", 6),
@@ -1979,21 +1936,51 @@ pub const MLE_RECURSION_CONVERT_LADDER: &[&[(&str, usize)]] = &[
     ],
 ];
 
+/// The row every group node of the global LogUp pads to: the per-chip maximum of the natural
+/// heights of the group-node programs over 1 to `MAX_GROUP_LEN` tables, measured by
+/// `examples/mle_tier_probe.rs`, no slack. A row of its own, not a ladder row: it is above the
+/// last convert row on the chips that follow the number of tables a group proof opens
+/// (DigestSelect, UnpackBlock, AssertZeroExt, PackBlock) and at or below it on the rest, so
+/// neither holds the other. To a combine node a group node is one more child kind, G.
+pub const MLE_RECURSION_GROUP_NODE_LOG_HEIGHTS: &[(&str, usize)] = &[
+    ("ExtAlu", 15),
+    ("HornerEval", 15),
+    ("Poseidon2Packed", 18),
+    ("MemoryVar", 17),
+    ("ExtDotProduct", 17),
+    ("ExpBitsLen", 15),
+    ("BaseAlu", 14),
+    ("AssertZeroExt", 15),
+    ("BinaryFoldStep", 14),
+    ("UnpackBlock", 17),
+    ("MemoryConst", 10),
+    ("DigestSelect", 17),
+    ("PackBlock", 15),
+    ("MleOpen", 8),
+    ("GkrSumcheckRound", 9),
+    ("FracFold", 5),
+    ("LagrangeEvalD2", 6),
+    ("Select", 4),
+    ("Poseidon2", 4),
+    ("PublicValues", 4),
+    ("UnivariateFold", 4),
+];
+
 /// Combine-tier log2 heights, shared by EVERY combine node including the root (the last,
-/// `is_complete = true` round): the per-chip maximum over the 36 node shapes
-/// `preregister_standard_shapes` builds (the ordered pairs over {C0, C1, C2, B} at both
-/// completeness flags plus the four single-child roots), measured by `examples/mle_tier_probe.rs`
-/// over the KoalaBear⁵ convert rows (2026-10-27), no slack. The peaks:
-/// Poseidon2Packed at [C2,C2], ExtDotProduct and MemoryVar at [C0,C2], UnpackBlock and
-/// GkrSumcheckRound at [C0,C1], the rest at [C0,C0]. The deferred node pads to this row too and
-/// sits under it on every chip. Tier-padded children and the membership circuit are what the
-/// measurement covers; an overflow fails loudly with the chip's row width in the panic.
+/// `is_complete = true` round): the per-chip maximum over the 50 node shapes
+/// `preregister_standard_shapes` builds (the ordered pairs over {C0, C1, C2, G, B} at both
+/// completeness flags), measured by `examples/mle_tier_probe.rs` over the convert rows and the
+/// group nodes' row above (2026-11-13), no slack. The peaks: ExtDotProduct and MemoryVar at
+/// [C0,C2], UnpackBlock and GkrSumcheckRound at [C0,C1], the rest at [C0,C0]; no pair with a G
+/// child sets one. The deferred node pads to this row too and sits under it on every chip.
+/// Tier-padded children and the membership circuit are what the measurement covers; an overflow
+/// fails loudly with the chip's row width in the panic.
 ///
 /// The root is a combine node on this table too; a root-specific table would reclaim what the
 /// root leaves under it, at the cost of a whitelist REBUILD rather than more whitelist entries
-/// (role-based selection keeps the child-shape base at {C0, C1, C2, B}; the root is never a
-/// child). The root's grammar-worst case (verifying two convert-tier children in a 2-chunk tree)
-/// matches a combine node's, so the shared table is the conservative choice.
+/// (role-based selection keeps the child-shape base at {C0, C1, C2, G, B}; the root is never a
+/// child). The row is taken over the complete and the non-complete pairs alike, so the shared
+/// table is the conservative choice.
 pub const MLE_RECURSION_COMBINE_LOG_HEIGHTS: &[(&str, usize)] = &[
     ("ExtAlu", 17),
     ("HornerEval", 17),
@@ -2001,7 +1988,7 @@ pub const MLE_RECURSION_COMBINE_LOG_HEIGHTS: &[(&str, usize)] = &[
     ("MemoryVar", 16),
     ("ExtDotProduct", 16),
     ("ExpBitsLen", 15),
-    ("BaseAlu", 15),
+    ("BaseAlu", 14),
     ("AssertZeroExt", 15),
     ("BinaryFoldStep", 14),
     ("UnpackBlock", 16),
@@ -2055,7 +2042,7 @@ pub const MLE_RECURSION_EMBED_LOG_HEIGHTS: &[(&str, usize)] = &[
 /// (`recursion_heights[compress]` of a `--step compress` run on fib-10 and reth 18884864 /
 /// 24600825, when the compress layer was introduced) is this row (PackBlock sits one notch under it
 /// on the two reth blocks), and the whitelist-mode proof measured on the same three inputs has the
-/// dev-mode figures: every chip at its row (slack 0), stacked width 20 + 5 = 25, 299,179 bytes,
+/// dev-mode figures: every chip at its row (slack 0), stacked width 20 + 5 = 25, 299,231 bytes,
 /// 128.05 bits.
 pub const MLE_RECURSION_COMPRESS_LOG_HEIGHTS: &[(&str, usize)] = &[
     ("ExtAlu", 16),
@@ -2087,6 +2074,7 @@ pub fn mle_recursion_pad_shape_for(
 ) -> crate::instances::compiler::shapes::recursion_shape::RecursionPadShape {
     let table = match tier {
         RecursionTier::Convert(row) => MLE_RECURSION_CONVERT_LADDER[row],
+        RecursionTier::GroupNode => MLE_RECURSION_GROUP_NODE_LOG_HEIGHTS,
         RecursionTier::Combine => MLE_RECURSION_COMBINE_LOG_HEIGHTS,
         RecursionTier::Embed => MLE_RECURSION_EMBED_LOG_HEIGHTS,
         RecursionTier::Compress => MLE_RECURSION_COMPRESS_LOG_HEIGHTS,
@@ -2139,7 +2127,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(seen, 54, "the machine's air list changed size");
+        assert_eq!(seen, 53, "the machine's air list changed size");
     }
 
     /// The three kinds the split sizes by the hardware-tier threshold rather than by cells: their
@@ -2226,18 +2214,6 @@ mod tests {
         );
     }
 
-    /// The Global chip raises one Poseidon2 event per global event and the Poseidon2 chip packs
-    /// `RISCV_POSEIDON2_DATAPAR` of them per row, so the catch-all must keep that gap.
-    #[test]
-    fn poseidon2_sits_datapar_below_global() {
-        let gap =
-            bucket_log_height("Global", true) - bucket_log_height("RiscvKoalaBearPoseidon2", true);
-        assert_eq!(
-            1usize << gap,
-            crate::primitives::consts::RISCV_POSEIDON2_DATAPAR
-        );
-    }
-
     /// Every ladder class must sit under the catch-all componentwise, or the catch-all stops
     /// being the last rung, and must carry exactly the core family -- a class that named a chip
     /// the family does not have, or missed one, would not be a whole height vector.
@@ -2264,28 +2240,6 @@ mod tests {
         }
     }
 
-    /// The ladder must keep the Global / Poseidon2 relation the catch-all rests on. A class is
-    /// the componentwise maximum of real chunks, which does not preserve a relation in general,
-    /// so it is checked rather than assumed.
-    #[test]
-    fn core_ladder_keeps_the_poseidon2_gap() {
-        let gap = crate::primitives::consts::RISCV_POSEIDON2_DATAPAR.ilog2() as usize;
-        for (i, class) in MLE_CORE_LADDER.iter().enumerate() {
-            let get = |n: &str| {
-                class
-                    .iter()
-                    .find(|(m, _)| *m == n)
-                    .map(|(_, h)| *h)
-                    .unwrap()
-            };
-            assert_eq!(
-                get("RiscvKoalaBearPoseidon2"),
-                get("Global") - gap,
-                "class {i}: Poseidon2 does not sit {gap} under Global"
-            );
-        }
-    }
-
     /// Nothing the precompile generator emits may exceed the family catch-all: the ladder is
     /// only usable if the catch-all is still the last rung.
     #[test]
@@ -2303,30 +2257,17 @@ mod tests {
             check(&s.kind, s.kind_log_height);
             check("SyscallPrecompile", s.syscall_precompile);
             check("MemoryLocal", s.memory_local);
-            check("Global", s.global);
-            check("RiscvKoalaBearPoseidon2", s.poseidon2);
             if let Some((name, h)) = &s.control {
                 check(name, *h);
             }
         }
     }
 
-    /// The generator must keep the two relations the catch-all is built on: Poseidon2 sits
-    /// `log2(RISCV_POSEIDON2_DATAPAR)` below Global, and a control sibling emits one row per
-    /// parent event, exactly as the syscall chip does.
+    /// The generator must keep the relation the catch-all is built on: a control sibling emits
+    /// one row per parent event, exactly as the syscall chip does.
     #[test]
     fn precompile_shapes_keep_the_structural_relations() {
-        let gap = crate::primitives::consts::RISCV_POSEIDON2_DATAPAR.ilog2() as usize;
         for s in mle_precompile_shapes() {
-            assert_eq!(
-                s.poseidon2,
-                s.global.saturating_sub(gap).max(MLE_MIN_LOG_HEIGHT),
-                "{} 2^{}: Poseidon2 2^{} does not sit under Global 2^{}",
-                s.kind,
-                s.kind_log_height,
-                s.poseidon2,
-                s.global
-            );
             if let Some((name, h)) = &s.control {
                 assert_eq!(
                     *h, s.syscall_precompile,
@@ -2355,38 +2296,6 @@ mod tests {
             .collect()
     }
 
-    /// Block 26200332, chunk 22: 8192 Secp256k1DoubleAssign events
-    /// over 28,672 local addresses raise 2 * 28,672 + 8192 = 2^16 global events. Global's padding
-    /// row takes it to 2^17 while Poseidon2 needs only 2^14, three below. No enumeration lists
-    /// that vector, so the chunk's convert key was not in the whitelist and its parent combine
-    /// panicked. Poseidon2 pads to 2^15, and the shape is a member.
-    #[test]
-    fn a_power_of_two_global_count_pads_poseidon2() {
-        let shape = select_deferred(&[
-            ("Secp256k1DoubleAssign", 8192),
-            ("SyscallPrecompile", 8192),
-            ("MemoryLocal", 7168),
-            ("Global", 65_537),
-            ("RiscvKoalaBearPoseidon2", 16_384),
-        ]);
-        assert_eq!(shape["Secp256k1DoubleAssign"], 13);
-        assert_eq!(shape["SyscallPrecompile"], 13);
-        assert_eq!(shape["MemoryLocal"], 13);
-        assert_eq!(shape["Global"], 17);
-        assert_eq!(shape["RiscvKoalaBearPoseidon2"], 15);
-        let unpadded: Vec<(String, usize)> = shape
-            .iter()
-            .map(|(name, log)| match name.as_str() {
-                "RiscvKoalaBearPoseidon2" => (name.clone(), 14),
-                _ => (name.clone(), *log),
-            })
-            .collect();
-        assert!(
-            !whitelist_shapes().contains(&unpadded),
-            "the natural vector is a whitelist shape after all, so the pad is no longer needed"
-        );
-    }
-
     /// Bottom of the range, each power of two up to `max`, and one either side of each.
     fn edges(max: usize) -> std::collections::BTreeSet<usize> {
         (0..usize::BITS)
@@ -2400,10 +2309,10 @@ mod tests {
 
     /// Every precompile chunk the airs can raise selects a whitelist shape. The natural rows are
     /// what the generators read: `n * rows_per_event` on the kind, `n` on its syscall and control
-    /// siblings, `ceil(local / LOCAL_MEMORY_DATAPAR)` on MemoryLocal, `2 * local + n + 1` on
-    /// Global and `ceil((2 * local + n) / RISCV_POSEIDON2_DATAPAR)` on Poseidon2, for `local` up
-    /// to what `n` events can touch. The sweep walks every height boundary and puts the global
-    /// event count on each power of two it reaches, where Poseidon2 falls three below Global.
+    /// siblings, `ceil(local / LOCAL_MEMORY_DATAPAR)` on MemoryLocal and `2 * local + n` on
+    /// Global, for `local` up to what `n` events can touch and the Global table can hold. The
+    /// sweep walks every height boundary and puts the global event count on each power of two
+    /// it reaches, the full table among them.
     #[test]
     fn every_precompile_chunk_selects_a_whitelist_shape() {
         use crate::{
@@ -2413,11 +2322,11 @@ mod tests {
                     precompile_kind_rows, precompile_rows_per_event, precompile_tables,
                 },
             },
-            primitives::consts::{LOCAL_MEMORY_DATAPAR, RISCV_POSEIDON2_DATAPAR},
+            primitives::consts::LOCAL_MEMORY_DATAPAR,
         };
         let global_rows_cap = 1usize << bucket_log_height("Global", false);
         let local_cap = (1usize << bucket_log_height("MemoryLocal", false)) * LOCAL_MEMORY_DATAPAR;
-        let mut power_of_two_counts = 0usize;
+        let mut chunks = 0usize;
         for (kind, _) in RiscvChipType::<Kb>::get_all_precompile_chips()
             .into_iter()
             .filter(|(kind, _)| crate::mle::machine::riscv::air_id_for(kind).is_some())
@@ -2445,7 +2354,7 @@ mod tests {
             for n in ns {
                 let local_max = (n * mem_per_event)
                     .min(local_cap)
-                    .min((global_rows_cap - n - 1) / 2);
+                    .min((global_rows_cap - n) / 2);
                 // Where MemoryLocal's height turns over.
                 let mut locals = edges(local_max);
                 locals.extend(
@@ -2468,32 +2377,25 @@ mod tests {
                         (kind.as_str(), precompile_kind_rows(&kind, n)),
                         ("SyscallPrecompile", n),
                         ("MemoryLocal", local.div_ceil(LOCAL_MEMORY_DATAPAR)),
-                        ("Global", events + 1),
-                        (
-                            "RiscvKoalaBearPoseidon2",
-                            events.div_ceil(RISCV_POSEIDON2_DATAPAR),
-                        ),
+                        ("Global", events),
                     ];
                     natural.extend(control.map(|c| (c, n)));
                     natural.extend(precompile_tables(&kind).iter().map(|(t, h)| (*t, 1 << h)));
-                    select_deferred(&natural);
-                    power_of_two_counts += usize::from(events.is_power_of_two());
+                    let shape = select_deferred(&natural);
+                    assert_eq!(shape["Global"], MLE_GLOBAL_LOG_HEIGHT);
+                    chunks += 1;
                 }
             }
         }
-        assert!(
-            power_of_two_counts > 0,
-            "the sweep never put the global event count on a power of two"
-        );
+        assert!(chunks > 0, "the sweep selected no chunk");
     }
 
     /// Every memory chunk under the caps selects a whitelist shape. MemoryInitialize and
-    /// MemoryFinalize take a row per event, Global `init + fin + 1` and Poseidon2
-    /// `ceil((init + fin) / RISCV_POSEIDON2_DATAPAR)`; the sweep puts `init + fin` on each power
-    /// of two as well as walking each side's boundaries.
+    /// MemoryFinalize take a row per event and Global `init + fin`; the sweep puts `init + fin`
+    /// on each power of two, the full Global table among them, as well as walking each side's
+    /// boundaries.
     #[test]
     fn every_memory_chunk_selects_a_whitelist_shape() {
-        use crate::primitives::consts::RISCV_POSEIDON2_DATAPAR;
         let side_cap = 1usize
             << bucket_log_height("MemoryInitialize", false)
                 .min(bucket_log_height("MemoryFinalize", false));
@@ -2512,28 +2414,20 @@ mod tests {
                     .map(|&init| (init, p - init)),
             );
         }
-        let mut power_of_two_counts = 0usize;
+        let mut full_tables = 0usize;
         for (init, fin) in pairs {
             let events = init + fin;
-            if events == 0 || init > side_cap || fin > side_cap || events + 1 > global_rows_cap {
+            if events == 0 || init > side_cap || fin > side_cap || events > global_rows_cap {
                 continue;
             }
-            let mut natural = vec![
-                ("Global", events + 1),
-                (
-                    "RiscvKoalaBearPoseidon2",
-                    events.div_ceil(RISCV_POSEIDON2_DATAPAR),
-                ),
-            ];
+            let mut natural = vec![("Global", events)];
             natural.extend((init > 0).then_some(("MemoryInitialize", init)));
             natural.extend((fin > 0).then_some(("MemoryFinalize", fin)));
-            select_deferred(&natural);
-            power_of_two_counts += usize::from(events.is_power_of_two());
+            let shape = select_deferred(&natural);
+            assert_eq!(shape["Global"], MLE_GLOBAL_LOG_HEIGHT);
+            full_tables += usize::from(events == global_rows_cap);
         }
-        assert!(
-            power_of_two_counts > 0,
-            "the sweep never put the event count on a power of two"
-        );
+        assert!(full_tables > 0, "the sweep never filled the Global table");
     }
 
     /// The whitelist's size, pinned where no artifact is needed: a shape-table change moves this
@@ -2541,7 +2435,25 @@ mod tests {
     /// shipped-artifact test derives the same count from the config and holds the artifact to it.
     #[test]
     fn the_whitelist_shape_count_is_pinned() {
-        assert_eq!(mle_riscv_shapes().len(), 15_944, "riscv whitelist shapes");
+        assert_eq!(mle_riscv_shapes().len(), 4_413, "riscv whitelist shapes");
+    }
+
+    /// The global LogUp reads every chunk's event table at one height, the production operating
+    /// point's: every shape the whitelist admits carries the Global AIR once, at that height.
+    /// (The convert program does not build over any other, so a shape off it could have no leaf.)
+    #[test]
+    fn every_whitelist_shape_has_the_global_table_at_its_height() {
+        let height = pico_mle_core::global_logup::global_log_height_at(
+            crate::mle::machine::riscv::DEFAULT_LOG_STACKED_HEIGHT,
+        );
+        for (label, shape) in mle_riscv_shapes() {
+            let global: Vec<usize> = shape
+                .iter()
+                .filter(|(name, _)| name == "Global")
+                .map(|(_, log)| *log)
+                .collect();
+            assert_eq!(global, [height], "shape `{label}`");
+        }
     }
 
     /// The whitelist builder checkpoints keygens by shape CONTENT, so two admitted shapes must
@@ -2570,7 +2482,7 @@ mod tests {
     /// chips must stay under 2^29, where the GKR size m goes from 29 to 30 and the leaf buffer
     /// outgrows the card. The interaction counts come off a real keygen, so a chip that gains an
     /// interaction moves the rows here rather than at proving time. The heaviest row, row
-    /// 27, is at 0.977 x 2^29.
+    /// 32, is at 0.98 x 2^29.
     #[test]
     fn core_ladder_rows_stay_under_the_gpu_line() {
         use crate::mle::machine::riscv::{
@@ -2595,7 +2507,11 @@ mod tests {
             profiled_functions: Default::default(),
         };
         let airs = mle_riscv_air_refs(Arc::new(program), true);
-        let (_, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
+        let (_, vk) = engine.keygen_with_app_prep_and_required(
+            &airs,
+            RISCV_APP_PREP_AIR_IDS,
+            crate::mle::machine::riscv::RISCV_REQUIRED_AIR_IDS,
+        );
         for (r, row) in MLE_CORE_LADDER.iter().enumerate() {
             let ti: u64 = row
                 .iter()
@@ -2667,13 +2583,14 @@ mod tests {
         assert_eq!(mle_shape_config_digest(), mle_shape_config_digest());
     }
 
-    /// Under the 2^22 memory-event cap a memory chunk's finalize side holds at most 2^22 - 4
-    /// events (four buckets) and its initialize side at most the same, so each sits one notch under
-    /// Global's ceiling (one row per memory event, plus the padding row).
+    /// A memory chunk raises one cross-chunk event per memory event, so neither side's ceiling
+    /// may stand above the Global table: under the 2^22 memory-event cap the finalize side holds
+    /// at most 2^22 - 4 events (four buckets) and the initialize side at most the same.
     #[test]
     fn memory_pair_fits_under_global() {
         let global = bucket_log_height("Global", false);
-        assert_eq!(bucket_log_height("MemoryInitialize", false), global - 1);
-        assert_eq!(bucket_log_height("MemoryFinalize", false), global - 1);
+        assert_eq!(global, MLE_GLOBAL_LOG_HEIGHT);
+        assert!(bucket_log_height("MemoryInitialize", false) <= global);
+        assert!(bucket_log_height("MemoryFinalize", false) <= global);
     }
 }

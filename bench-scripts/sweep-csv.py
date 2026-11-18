@@ -41,7 +41,11 @@ DELIM = re.compile(r"MLE block: (?P<epoch>\d+)/(?P<n>\d+) block=(?P<block>\d+) (
 SHAPES = re.compile(
     r"MLE combine shapes: block keygens=(?P<keygens>\d+) hits=(?P<hits>\d+) evictions=(?P<evictions>\d+)"
 )
-GCS_OK = re.compile(r"cross-chunk global cumulative sum == 0")
+# The cross-chunk check, as a prover of either argument states it once per block: the cumulative
+# sum's host-side check, or the global LogUp's sum the accepted root asserts.
+# TODO(global-logup-transition): the cumulative sum's alternative goes once no arm of a comparison is a
+# prover from before the global LogUp.
+GCS_OK = re.compile(r"cross-chunk global cumulative sum == 0|cross-chunk global LogUp sum == 0")
 CONVERT_OK = re.compile(r"all \d+ chunk\(s\) .*convert|convert .*complete", re.I)
 COMBINE_OK = re.compile(r"combine \[\d+,\d+\]: OK")
 COMPILE_S = re.compile(r"MLE program compile done in ([\d.]+)s")
@@ -215,7 +219,8 @@ def main():
         "gcs_ok", "convert_ok", "combine_ok",
         # Span-side, as an independent cross-check on the log-side figures above.
         "span_e2e", "e2e_vs_span_pct", "gpu_work", "prove_total",
-        "prove_riscv", "prove_convert", "prove_combine", "span_keygen", "spans", "span_lanes",
+        "prove_riscv", "prove_convert", "prove_combine", "prove_global_logup", "span_keygen",
+        "spans", "span_lanes",
     ]
     with open(os.path.join(args.outdir, "summary.csv"), "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n")

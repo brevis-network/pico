@@ -44,10 +44,7 @@ use pico_mle_core::{
     StarkEngine,
 };
 use pico_vm::{
-    compiler::{
-        program::ProgramBehavior,
-        riscv::{instruction::Instruction, opcode::Opcode, program::Program},
-    },
+    compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program},
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
         record::RecordBehavior,
@@ -58,12 +55,12 @@ use pico_vm::{
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::logger::setup_logger,
     mle::machine::{
-        air::GCS_DIGEST_LEN,
         combine::CombineMachine,
         convert::ConvertMachine,
         exe::RiscvVmVk,
+        global_logup_nodes::prove_global_logup_nodes,
         riscv::{
-            self, air_id, build_ctx, ctx_to_engine, mle_riscv_air_refs, Engine, Kb, RiscvProof,
+            self, air_id, build_ctx, mle_riscv_air_refs, Engine, Kb, RiscvProof,
             RISCV_APP_PREP_AIR_IDS,
         },
     },
@@ -138,8 +135,9 @@ impl Case {
 /// layer ties them together, so doctoring fewer would be caught for the wrong reason.
 fn digest_base(air: usize) -> Option<usize> {
     match air {
-        air_id::CPU | air_id::ECALL | air_id::MEM_INIT | air_id::MEM_FINAL => Some(0),
-        air_id::GLOBAL => Some(GCS_DIGEST_LEN),
+        air_id::CPU | air_id::ECALL | air_id::MEM_INIT | air_id::MEM_FINAL | air_id::GLOBAL => {
+            Some(0)
+        }
         _ => None,
     }
 }
@@ -165,6 +163,7 @@ fn run_case(
     vm_vk: &RiscvVmVk,
     chips: &[pico_vm::machine::chip::MetaChip<Kb, RiscvChipType<Kb>>],
 ) -> Outcome {
+    let mut tables = Vec::new();
     let proofs: Vec<_> = records
         .iter()
         .map(|record| {
@@ -174,20 +173,19 @@ fn run_case(
                     case.doctor(&mut air_ctx.public_values[base..base + NUM_DIGEST_LIMBS]);
                 }
             }
-            engine
-                .prove(d_pk, ctx_to_engine(ctx))
-                .expect("riscv prove failed")
+            riscv::prove_host_ctx(engine, d_pk, ctx, &mut tables).expect("riscv prove failed")
         })
         .collect();
     let bundle = RiscvProof {
         vk: Arc::clone(vk),
         chunk_proofs: proofs,
+        global: riscv::prove_global_logup(program, vk, &tables).expect("global LogUp"),
     };
     if let Err(e) = riscv::verify_riscv(
         &bundle,
         bundle.vk.pre_hash,
         &[(air_id::PROGRAM, riscv::riscv_program_commit(&bundle.vk))],
-        program.initial_global_cumulative_sum(),
+        &riscv::ProgramIdentity::new(program, &bundle.vk.inner.params).expect("the image fits"),
     ) {
         return Outcome::RiscvRejected(format!("{e}"));
     }
@@ -201,9 +199,13 @@ fn run_case(
             false,
         )
         .map_err(|e| format!("{e:?}"))?;
-        let children = convert
-            .prove_with_vks(&bundle.chunk_proofs)
+        let mut children = prove_global_logup_nodes(&bundle, vm_vk, Default::default())
             .map_err(|e| format!("{e}"))?;
+        children.extend(
+            convert
+                .prove_with_vks(&bundle.chunk_proofs)
+                .map_err(|e| format!("{e}"))?,
+        );
         let mut combine = CombineMachine::new(
             recursion_params_with_128_bits_security(),
             vm_vk.clone(),
@@ -298,7 +300,11 @@ fn main() {
         );
 
         let airs = mle_riscv_air_refs(Arc::clone(&program), BUCKET);
-        let (pk, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
+        let (pk, vk) = engine.keygen_with_app_prep_and_required(
+            &airs,
+            RISCV_APP_PREP_AIR_IDS,
+            pico_vm::mle::machine::riscv::RISCV_REQUIRED_AIR_IDS,
+        );
         let d_pk = engine.device().transport_pk_to_device(&pk);
         let vk = Arc::new(vk);
         let vm_vk = RiscvVmVk::from_program_and_vk(&program, &vk);

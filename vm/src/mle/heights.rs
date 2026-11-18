@@ -11,7 +11,7 @@
 //! read where it reads them and never off the variables: one unset variable means different values
 //! to different drivers, and `EmulatorOpts` holds only the chunk size while the rest are cached
 //! where they are read. The segmentation moves heights: each segment of a split replay writes its
-//! own local-memory row, and the Global and Poseidon2 rows that go with it, for an address more
+//! own local-memory row, and the Global rows that go with it, for an address more
 //! than one segment touches, so a split run pins heights of its own. The engines of the snapshot
 //! thread and the replay workers, the cycle tracker, the cost estimate, the batch size and the
 //! cycle cap move no height and stay out, so an AOT run must hit the entry an interpreter run
@@ -604,6 +604,7 @@ mod tests {
         "MEM_POOL_MAX_SIZE",
         "MEM_POOL_RESERVE_SIZE",
         "MLE_EVENT_POOL_SIZE",
+        "MLE_GLOBAL_LOGUP_GROUP_LEN",
         "MLE_HISTORY_SLOTS",
         "MLE_DEFERRED_RECORDS",
         "PICO_HOST_MEM",
@@ -626,7 +627,6 @@ mod tests {
         "VK_VERIFICATION",
         "MLE_VK_MAP",
         "MLE_VK_ROOT",
-        "SKIP_INITIAL_GCS",
         "MLE_VERIFY",
         // Negative tests that tamper with values, not counts.
         "CVD_FORGE_K",

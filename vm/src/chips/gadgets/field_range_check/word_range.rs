@@ -197,7 +197,7 @@ mod tests {
     use crate::{
         chips::chips::byte::event::ByteLookupEvent,
         configs::{config::StarkGenericConfig, stark_config::KoalaBearPoseidon2},
-        machine::{debug_folder::DebugConstraintFolder, septic::SepticDigest},
+        machine::debug_folder::DebugConstraintFolder,
     };
     use p3_air::RowWindow;
     use p3_field::PrimeField32;
@@ -227,7 +227,6 @@ mod tests {
         let mut builder = DebugConstraintFolder::<F, EF> {
             preprocessed: RowWindow::from_two_rows(&empty_f, &empty_f),
             main: RowWindow::from_two_rows(&empty_f, &empty_f),
-            global_cumulative_sum: SepticDigest::<F>::zero(),
             is_first_row: F::ZERO,
             is_last_row: F::ZERO,
             is_transition: F::ONE,

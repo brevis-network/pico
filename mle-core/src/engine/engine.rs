@@ -88,33 +88,61 @@ where
         MultiStarkProvingKey<Self::SC>,
         MultiStarkVerifyingKey<Self::SC>,
     ) {
-        self.keygen_with_app_prep_reusing(airs, app_prep_air_ids, &vec![None; airs.len()], None)
+        self.keygen_with_app_prep_and_required(airs, app_prep_air_ids, &[])
     }
 
-    /// [`Self::keygen_with_app_prep`] reusing work from an earlier keygen of the same AIRs under
-    /// the same config: `reuse[i]`, when `Some`, is AIR `i`'s committed preprocessed table (taken
-    /// from that keygen's key), and `memo` holds earlier pre-hashes. The keys are the ones a fresh
-    /// keygen makes; only the generation and commit of the reused tables and a repeated pre-hash
-    /// are skipped.
+    /// [`Self::keygen_with_app_prep`] with the AIRs at `required_air_ids` registered as required:
+    /// a proof under the key must carry each of them, the verifier refuses one that does not,
+    /// and a required AIR's presence is not absorbed into the transcript.
+    fn keygen_with_app_prep_and_required(
+        &self,
+        airs: &[AirRef<Self::SC>],
+        app_prep_air_ids: &[usize],
+        required_air_ids: &[usize],
+    ) -> (
+        MultiStarkProvingKey<Self::SC>,
+        MultiStarkVerifyingKey<Self::SC>,
+    ) {
+        self.keygen_with_app_prep_reusing(
+            airs,
+            app_prep_air_ids,
+            required_air_ids,
+            &vec![None; airs.len()],
+            None,
+        )
+    }
+
+    /// [`Self::keygen_with_app_prep_and_required`] reusing work from an earlier keygen of the
+    /// same AIRs under the same config: `reuse[i]`, when `Some`, is AIR `i`'s committed
+    /// preprocessed table (taken from that keygen's key), and `memo` holds earlier pre-hashes.
+    /// The keys are the ones a fresh keygen makes; only the generation and commit of the reused
+    /// tables and a repeated pre-hash are skipped.
     fn keygen_with_app_prep_reusing(
         &self,
         airs: &[AirRef<Self::SC>],
         app_prep_air_ids: &[usize],
+        required_air_ids: &[usize],
         reuse: &[Option<crate::keygen::CommittedPrep<Self::SC>>],
         memo: Option<crate::keygen::PreHashMemo<Self::SC>>,
     ) -> (
         MultiStarkProvingKey<Self::SC>,
         MultiStarkVerifyingKey<Self::SC>,
     ) {
+        assert!(
+            required_air_ids.iter().all(|&air_id| air_id < airs.len()),
+            "a required AIR id is out of range"
+        );
         assert_eq!(airs.len(), reuse.len(), "one reuse entry per AIR");
         let mut keygen_builder = MultiStarkKeygenBuilder::new(self.config().clone());
         if let Some(memo) = memo {
             keygen_builder = keygen_builder.with_pre_hash_memo(memo);
         }
         let t_add = std::time::Instant::now();
-        for (air, prep) in airs.iter().zip(reuse) {
+        for (air_id, (air, prep)) in airs.iter().zip(reuse).enumerate() {
+            let required = required_air_ids.contains(&air_id);
             match prep {
-                Some(prep) => keygen_builder.add_air_with_prep(air.clone(), prep.clone()),
+                Some(prep) => keygen_builder.add_air_with_prep(air.clone(), prep.clone(), required),
+                None if required => keygen_builder.add_required_air(air.clone()),
                 None => keygen_builder.add_air(air.clone()),
             };
         }

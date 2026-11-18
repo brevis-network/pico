@@ -27,10 +27,7 @@ use alloy_sol_types::SolType;
 use eyre::{ensure, eyre, WrapErr};
 use fibonacci_lib::{fibonacci, PublicValuesStruct};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
-use pico_mle_core::{
-    config::recursion_params_with_128_bits_security, keygen::types::MultiStarkVerifyingKey,
-    protocol::proof::Proof,
-};
+use pico_mle_core::config::recursion_params_with_128_bits_security;
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
@@ -85,9 +82,9 @@ fn main() -> eyre::Result<()> {
 
 /// One proved program: its chunk proofs and keys, and what its guest committed.
 struct Proved {
-    riscv_vk: Arc<MultiStarkVerifyingKey<riscv::Sc>>,
+    /// The chunk proofs and the global LogUp over them.
+    riscv: riscv::RiscvProof,
     vm_vk: RiscvVmVk,
-    proofs: Vec<Proof<riscv::Sc>>,
     emulated: EmulationOutput,
 }
 
@@ -103,14 +100,8 @@ fn prove() -> eyre::Result<()> {
     for n in FIBONACCI_NS {
         let fib = prove_riscv(&fibonacci_elf, |stdin| stdin.write(&n))?;
         let values = check_fibonacci(&fib.emulated.committed_bytes, n)?;
-        let root = build_tree(
-            &fib.riscv_vk,
-            &fib.vm_vk,
-            &fib.proofs,
-            [Kb::ZERO; DIGEST_SIZE],
-            &[],
-        )
-        .wrap_err_with(|| format!("fibonacci({n}) root"))?;
+        let root = build_tree(&fib.riscv, &fib.vm_vk, [Kb::ZERO; DIGEST_SIZE], &[])
+            .wrap_err_with(|| format!("fibonacci({n}) root"))?;
         check_committed(&root, &fib.emulated.committed_bytes)?;
 
         // The id a deferred node publishes for its sub-proof, and the one the guest has to claim.
@@ -141,7 +132,10 @@ fn prove() -> eyre::Result<()> {
         agg.emulated.committed_bytes == expected,
         "the aggregator did not commit the program ids and outputs it was given"
     );
-    info!("aggregator: {} chunk proof(s)", agg.proofs.len());
+    info!(
+        "aggregator: {} chunk proof(s)",
+        agg.riscv.chunk_proofs.len()
+    );
 
     // One node per claim, in the order the guest claimed them. A node publishes the identity of
     // the MAIN program, so the machine is keyed to the aggregator, not to fibonacci.
@@ -156,8 +150,7 @@ fn prove() -> eyre::Result<()> {
     info!("{} deferred node(s) proved", nodes.len());
 
     // The nodes lead the tree, ahead of the aggregator's leaves, which carry the chain's end.
-    let root = build_tree(&agg.riscv_vk, &agg.vm_vk, &agg.proofs, chain_end, &nodes)
-        .wrap_err("aggregator root")?;
+    let root = build_tree(&agg.riscv, &agg.vm_vk, chain_end, &nodes).wrap_err("aggregator root")?;
     // The guest's claims, folded here the way its `verify_pico_proof` folds them, must be what
     // the root closed over.
     let claimed = vk_digests.iter().zip(&public_values).fold(
@@ -212,18 +205,16 @@ fn prove_riscv(
         opts.chunk_size
     );
     let emulated = riscv::emulate_with_opts(Arc::clone(&program), &stdin.finalize(), opts)?;
-    let (riscv_vk, proofs) = riscv::prove_riscv(
+    let riscv = riscv::prove_riscv(
         Arc::clone(&program),
         &emulated.records,
         LOG_STACKED_HEIGHT,
         false,
-    )?
-    .into_parts();
-    let vm_vk = RiscvVmVk::from_program_and_vk(&program, &riscv_vk);
+    )?;
+    let vm_vk = RiscvVmVk::from_program_and_vk(&program, &riscv.vk);
     Ok(Proved {
-        riscv_vk,
+        riscv,
         vm_vk,
-        proofs,
         emulated,
     })
 }

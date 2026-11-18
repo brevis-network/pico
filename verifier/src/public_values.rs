@@ -1,8 +1,8 @@
 //! The recursion public values a verifier reads, and the checks every complete root must pass.
 //!
-//! The layout itself is `pico-vm`'s `RecursionPublicValues` (it holds a septic type, which needs
-//! nightly); this module hard-codes the offsets the checks read, and `pico-vm` asserts at
-//! compile time that each one equals its `RECURSION_PUBLIC_VALUES_COL_MAP` entry.
+//! The layout itself is `pico-vm`'s `RecursionPublicValues`; this module hard-codes the offsets
+//! the checks read, and `pico-vm` asserts at compile time that each one equals its
+//! `RECURSION_PUBLIC_VALUES_COL_MAP` entry.
 
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use sha2::{Digest, Sha256};
@@ -10,9 +10,9 @@ use sha2::{Digest, Sha256};
 use crate::{hash::sponge_hash, Kb, VerifyError};
 
 /// Length of the recursion public-value vector.
-pub const RECURSION_NUM_PVS: usize = 119;
+pub const RECURSION_NUM_PVS: usize = 132;
 /// Every element before `digest` is hashed into it.
-pub const NUM_PV_ELMS_TO_HASH: usize = 110;
+pub const NUM_PV_ELMS_TO_HASH: usize = 123;
 
 /// Offsets into the recursion public-value vector of the values the verifier reads (not trace
 /// columns).
@@ -41,8 +41,8 @@ pub const RECURSION_PV_OFFSETS: RecursionPvOffsets = RecursionPvOffsets {
     committed_value_digest: range(0),
     riscv_vk_digest: range(78),
     vk_root: range(86),
-    flag_complete: 108,
-    digest: range(110),
+    flag_complete: 121,
+    digest: range(123),
 };
 
 /// The recursion public-value vector among a proof's per-AIR ones: the only one of length

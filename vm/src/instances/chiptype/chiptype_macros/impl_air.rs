@@ -5,7 +5,6 @@ macro_rules! impl_air {
         where
             $F: PrimeField32 + $crate::machine::field::FieldSpecificPoseidon2Config,
             CB: ChipBuilder<$F> + $crate::machine::builder::ScopedBuilder,
-            FieldSpecificPoseidon2Chip<$F>: Air<CB>,
             FieldSpecificPrecompilePoseidon2Chip<$F>: Air<CB>,
             CB::Expr: std::any::Any,
         {

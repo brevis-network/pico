@@ -200,8 +200,8 @@ impl PrecompileEvents {
     /// `events` is a `HashMap` with a randomly-seeded hasher, so its iteration order differs from
     /// run to run. A merged catch-all record holds several syscalls at once, so any consumer that
     /// flattened the map directly would let that order reach the trace rows, and the commitment
-    /// with them — proofs would stop being reproducible across machines. (Lookup balance and the
-    /// global cumulative sum are order-invariant, so this would pass verification.) Flatten
+    /// with them — proofs would stop being reproducible across machines. (Lookup balance, within a
+    /// chunk and across chunks, is order-invariant, so this would pass verification.) Flatten
     /// through here instead of iterating `events`.
     pub fn sorted_groups(&self) -> Vec<(&SyscallCode, &Vec<(SyscallEvent, PrecompileEvent)>)> {
         let mut groups: Vec<_> = self.events.iter().filter(|(_, v)| !v.is_empty()).collect();

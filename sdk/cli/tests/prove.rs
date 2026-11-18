@@ -680,10 +680,13 @@ fn execute_prints_the_precompile_calls_the_prover_counts() {
     assert_eq!(printed.into_iter().collect::<BTreeMap<_, _>>(), expected);
 }
 
-/// The RISC-V file verifies from the ELF at the same height and mode. A combine file made outside
-/// whitelist mode is refused by name: the recursion key is not a function of the ELF, and this
-/// process keygen'd none; a compress file likewise. The program id printed is the one this
-/// process derives for the same ELF, height and mode.
+/// The RISC-V file verifies from the ELF at the same height and mode. A compress file made
+/// outside whitelist mode is refused by name: the recursion key is not a function of the ELF, and
+/// this process keygen'd none. A combine file is refused the same way, before anything is
+/// verified; `pico-prover`'s `tests::chain` checks that in a fresh process, and
+/// `what_a_phase_cannot_be_used_for_is_said_before_keygen` checks the note `prove` prints for
+/// it, so `--phase combine`, the default phase, is not proved here. The program id printed is the
+/// one this process derives for the same ELF, height and mode.
 #[test]
 fn what_prove_writes_is_answered_for_in_a_fresh_process() {
     let dir = scratch_dir("prove");
@@ -693,7 +696,7 @@ fn what_prove_writes_is_answered_for_in_a_fresh_process() {
         .build()
         .expect("verifier");
 
-    for phase in [Phase::Riscv, Phase::Combine, Phase::Compress] {
+    for phase in [Phase::Riscv, Phase::Compress] {
         let (out, stdout, stderr) = run(cargo_pico(&[
             "prove",
             "--elf",
@@ -717,15 +720,11 @@ fn what_prove_writes_is_answered_for_in_a_fresh_process() {
             stderr.contains("prover: emulation snapshot pipeline, interpreter snapshot thread, "),
             "{phase}: the prover line does not name the default emulation path:\n{stderr}"
         );
+        assert!(
+            !stderr.contains("note: no other process can verify a combine proof"),
+            "{phase}: noted about combine:\n{stderr}"
+        );
         // Known from the options alone, so said before keygen: the `prover:` line follows keygen.
-        let note = stderr.find("note: no other process can verify a combine proof");
-        if phase == Phase::Combine {
-            let noted_at = note.expect("no note for a combine proof outside whitelist mode");
-            let keygen_done_at = stderr.find("prover: ").expect("the prover line");
-            assert!(noted_at < keygen_done_at, "noted after keygen:\n{stderr}");
-        } else {
-            assert!(note.is_none(), "{phase}: noted about combine:\n{stderr}");
-        }
         let compress_note = stderr
             .find("note: outside whitelist mode only the process that wrote a compress proof");
         if phase == Phase::Compress {
@@ -757,9 +756,6 @@ fn what_prove_writes_is_answered_for_in_a_fresh_process() {
         match (phase, verifier.verify_artifact(artifact)) {
             (Phase::Riscv, Ok(proof)) => {
                 assert_eq!(proof.committed().as_bytes(), fib_commit(10));
-            }
-            (Phase::Combine, Err(ProveError::WhitelistRequired { phase })) => {
-                assert_eq!(phase, Phase::Combine);
             }
             (Phase::Compress, Err(ProveError::WhitelistRequired { phase })) => {
                 assert_eq!(phase, Phase::Compress);
@@ -863,12 +859,37 @@ fn evm_proves_to_groth16_and_writes_what_the_verifier_is_called_with() {
             .arg(keys.join("vk"))
             .arg("-proof")
             .arg(&proof)
+            .arg("-inputs")
+            .arg(output.join("inputs.json"))
             .output()
             .expect("run gnark verify");
         assert!(
             verified.status.success(),
             "{label}: gnark does not verify the proof `prove` wrote:\n{}",
             String::from_utf8_lossy(&verified.stdout)
+        );
+        // gnark computes the public inputs from `inputs.json` and never reads them off the proof,
+        // so changed public values are refused with `proof.data` untouched.
+        let tampered = output.join("inputs-tampered.json");
+        let mut json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(output.join("inputs.json")).unwrap())
+                .unwrap();
+        let pv = json["publicValues"].as_str().unwrap().to_string();
+        let last = u8::from_str_radix(&pv[pv.len() - 2..], 16).unwrap() ^ 1;
+        json["publicValues"] = format!("{}{last:02x}", &pv[..pv.len() - 2]).into();
+        std::fs::write(&tampered, json.to_string()).unwrap();
+        let refused = Command::new(&gnark)
+            .args(["-cmd", "verify", "-vk"])
+            .arg(keys.join("vk"))
+            .arg("-proof")
+            .arg(&proof)
+            .arg("-inputs")
+            .arg(&tampered)
+            .output()
+            .expect("run gnark verify");
+        assert!(
+            !refused.status.success(),
+            "{label}: gnark verifies the proof against changed public values"
         );
 
         let words: Vec<String> = std::fs::read_to_string(&proof)

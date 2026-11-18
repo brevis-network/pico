@@ -119,7 +119,6 @@ impl MleVariant {
             | Instruction::Hint(_)
             | Instruction::HintBits(_)
             | Instruction::HintExt2Felts(_)
-            | Instruction::HintAddCurve(_)
             | Instruction::Print(_) => None,
         }
     }

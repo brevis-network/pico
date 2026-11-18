@@ -66,7 +66,6 @@ fn every_air_has_its_component() {
         ("MemoryInitialize", System),
         ("MemoryFinalize", System),
         ("Global", System),
-        ("RiscvKoalaBearPoseidon2", System),
         ("KeccakPermute", Precompile),
         ("ShaExtend", Precompile),
         ("ShaExtendControl", Precompile),

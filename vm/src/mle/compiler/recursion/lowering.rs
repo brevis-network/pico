@@ -3,10 +3,69 @@
 
 use super::*;
 
-impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
+impl<F: PrimeField32 + TwoAdicField> Builder<F> {
     // ─── verify_one: verify a single STARK proof (no Deferred (PVs) / finish) ─────────────
 
     pub(super) fn verify_one(&mut self, vk: &RecursionVkLayout) -> ProofPvAddrs {
+        self.verify_one_in_mode(vk, None, false).0
+    }
+
+    /// [`Self::verify_one`] for a recursion child of a parent in whitelist mode: the child's vk
+    /// pre-hash is a baked constant, the one every key at the layout's heights has
+    /// (`extract_recursion_vk_layout_from_heights`), where `verify_one` takes it as a witness.
+    ///
+    /// The parent reads the child under one row's layout and checks its key against the
+    /// whitelist, whose leaf is hashed from the pre-hash and the merged commitment
+    /// (`assert_children_whitelisted`). With the pre-hash a witness, a key of any row is a member,
+    /// and nothing but the Merkle hash of its commitment's rows keeps it from being read under
+    /// this row's layout, which does not hold between rows whose commitments are equally wide or
+    /// both at most a sponge block wide. With it baked, the leaf is that of a key of this row or
+    /// the membership check fails.
+    pub(super) fn verify_one_of_row(&mut self, vk: &RecursionVkLayout) -> ProofPvAddrs {
+        assert!(
+            vk.merged_preprocessed_commit.is_some(),
+            "a row is what a merged-preprocessed (recursion) key is padded to"
+        );
+        self.verify_one_in_mode(vk, None, true).0
+    }
+
+    /// [`Self::verify_one`] for a child in the external LogUp challenge mode: a group proof of
+    /// the global LogUp. The challenges `alpha` and `beta` are the caller's, as base-field
+    /// coefficients; the verifier absorbs them where an internal-mode child grinds and samples.
+    /// Returns the proof's fractional sum `(p, q)` beside the addresses, as coefficients: the
+    /// numerator the proof claims, which the GKR root is held to, and the denominator.
+    ///
+    /// The child's vk pre-hash is a baked constant here, where `verify_one` takes it as a
+    /// witness: a group proof has no whitelist membership to pin its key, and the key is what
+    /// says the table's rows are summed and nothing else.
+    pub(super) fn verify_one_external(
+        &mut self,
+        vk: &RecursionVkLayout,
+        alpha: [u32; EXTENSION_DEGREE],
+        beta: [u32; EXTENSION_DEGREE],
+    ) -> (ProofPvAddrs, GlobalSum) {
+        let (pvs, sum) = self.verify_one_in_mode(vk, Some((alpha, beta)), true);
+        (pvs, sum.expect("an external-mode child hands back its sum"))
+    }
+
+    /// `baked_pre_hash`: the child's vk pre-hash is the layout's, a constant of the program
+    /// (an external-mode child's always; an internal-mode one's under [`Self::verify_one_of_row`]),
+    /// instead of a witness.
+    fn verify_one_in_mode(
+        &mut self,
+        vk: &RecursionVkLayout,
+        external: Option<([u32; EXTENSION_DEGREE], [u32; EXTENSION_DEGREE])>,
+        baked_pre_hash: bool,
+    ) -> (ProofPvAddrs, Option<GlobalSum>) {
+        assert!(
+            baked_pre_hash || external.is_none(),
+            "an external-mode child's pre-hash is baked"
+        );
+        assert_eq!(
+            external.is_some(),
+            vk.external_logup,
+            "the child's LogUp challenge mode and the verifier's entry point disagree"
+        );
         let addr_zero = self.addr_zero;
         let addr_one = self.addr_one;
 
@@ -55,13 +114,23 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         }
 
         // ── Phase 1: observe VK hash + common_main_commit ─────────────────────
-        // The vk pre-hash travels on the witness stream rather than being baked, and seeds the
-        // Fiat-Shamir transcript exactly as on the host. It covers machine + shape only (see
-        // `compute_vk_pre_hash`), so it is no application anchor and the observed value is
-        // discarded here; it is still Fiat-Shamir-bound to the baked layout — a wrong value
-        // diverges the transcript. Application identity travels separately: the witnessed
-        // program-table commitment feeds the `riscv_vk_digest` exe anchor (convert layer).
-        let vk_pre_hash_addrs = self.observe_digest_addrs(); // vk_pre_hash from witness
+        // The vk pre-hash seeds the Fiat-Shamir transcript exactly as on the host. It covers
+        // machine + shape only (see `compute_vk_pre_hash`), so it is no application anchor.
+        // Application identity travels separately: the witnessed program-table commitment feeds
+        // the `riscv_vk_digest` exe anchor (convert layer).
+        //
+        // Where the caller asks, it is baked: an external-mode child's (`verify_one_external`),
+        // and a recursion child's in whitelist mode (`verify_one_of_row`), whose whitelist leaf
+        // is hashed from these addresses. Otherwise it travels on the witness stream, and the
+        // program takes what it is given: the layout's heights and constraints are baked
+        // either way.
+        let vk_pre_hash_addrs = if baked_pre_hash {
+            let baked = vk.vk_pre_hash.map(|limb| self.const_f(limb));
+            self.observe_const_digest(baked);
+            baked
+        } else {
+            self.observe_digest_addrs() // vk_pre_hash from witness
+        };
         let common_main_commit_addrs = self.observe_digest_addrs(); // common_main_commit
                                                                     // Merged-preprocessed commitment (the recursion child's program identity): WITNESSED
                                                                     // (hint + absorb) at the same transcript position the host observes it, with the same
@@ -71,7 +140,8 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                                                                     //
                                                                     // BINDING CONTRACT: in whitelist mode (vk_verification), the witnessed commitment is
                                                                     // pinned in-circuit by the VK-whitelist membership check below (its leaf hashes this
-                                                                    // value); with vk_verification OFF it is NOT pinned — a parent then attests "some
+                                                                    // value and the vk pre-hash, which that mode bakes: the key is a member, and of this
+                                                                    // layout's row); with vk_verification OFF it is NOT pinned — a parent then attests "some
                                                                     // child verified under some merged commitment" (fail-open dev mode), and only the
                                                                     // apex's verify-under-the-honest-root-VK covers the root node itself.
         let merged_prep_addrs: Option<[u32; 8]> = vk
@@ -81,9 +151,6 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
 
         // ── Phase 2: per-AIR preamble ─────────────────────────────────────────
         let mut riscv_pv_f_addrs: Option<Vec<u32>> = None;
-        // RISCV children only: the Global air's [gcs || riscv PublicValues copy] pv split.
-        let mut gcs_pv_addrs: Option<[u32; GCS_DIGEST_LEN]> = None;
-        let mut riscv_copy_addrs: Option<Vec<u32>> = None;
         let mut per_air_cached_commit_addrs: Vec<Vec<[u32; 8]>> = vec![vec![]; vk.per_air.len()];
         // per_air_pv_addrs[air_idx]: F-element addresses for this AIR's public values.
         // Saved for all present AIRs that use public values in their EvalDag constraints.
@@ -124,31 +191,25 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                     per_air_cached_commit_addrs[air_idx].push(caddrs);
                 }
                 // Save PV addresses: for Deferred (PVs) (recursion children's pvs), for the
-                // RISCV→recursion PV translation (Global-air gcs + riscv PublicValues copy),
-                // and for BC final assertion.
+                // RISCV→recursion PV translation, and for BC final assertion.
                 let save_for_bc = air.uses_public_values;
                 let save_for_d6 =
                     air.num_public_values == RECURSION_NUM_PVS && riscv_pv_f_addrs.is_none();
-                // The RISCV Global air (present in EVERY chunk — unlike CPU / MemInit, absent
-                // in memory-only or precompile-table chunks) carries
-                // [gcs (GCS_DIGEST_LEN) || riscv PublicValues copy].
-                let save_global =
-                    air.num_public_values == GCS_DIGEST_LEN + MAX_NUM_PVS && gcs_pv_addrs.is_none();
-                // The carrier binding ties the Global carrier copy to the Cpu / Ecall / MemInit /
-                // MemFinal pv slices — always capture their addresses, independent of whether
-                // their constraints read pvs.
+                // A RISCV child's Global air (present in EVERY chunk — unlike CPU / MemInit,
+                // absent in memory-only or precompile-table chunks) carries the riscv
+                // PublicValues copy, and the carrier binding ties it to the Cpu / Ecall /
+                // MemInit / MemFinal pv slices — always capture all of their addresses,
+                // independent of whether their constraints read pvs. Which air is which is the
+                // caller's to say, by air id: Global, MemInit and MemFinal carry the same number
+                // of public values.
                 let save_for_tie =
                     air.num_public_values == RISCV_NUM_PVS || air.num_public_values == MAX_NUM_PVS;
-                if save_for_d6 || save_for_bc || save_global || save_for_tie {
+                if save_for_d6 || save_for_bc || save_for_tie {
                     let addrs: Vec<u32> = (0..air.num_public_values)
                         .map(|_| self.observe_f_for_chip())
                         .collect();
                     if save_for_d6 {
                         riscv_pv_f_addrs = Some(addrs.clone());
-                    }
-                    if save_global {
-                        gcs_pv_addrs = Some(std::array::from_fn(|j| addrs[j]));
-                        riscv_copy_addrs = Some(addrs[GCS_DIGEST_LEN..].to_vec());
                     }
                     per_air_pv_addrs[air_idx] = addrs;
                 } else {
@@ -168,7 +229,14 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         if let Some(addrs) = merged_prep_addrs {
             stacking_commit_blocks.push(self.pack_digest(addrs));
         }
+        // The roots are matched to `vk.stacking_widths` by position where the queries are
+        // checked, and that list has the present AIRs' commitments only. An absent AIR's baked
+        // root is packed here all the same, so each has to come after the
+        // last root of a present AIR: `trace_ordering` puts the absent AIRs last.
+        let mut matched_roots = stacking_commit_blocks.len();
+        let mut past_the_present = false;
         for &air_id in &vk.trace_ordering {
+            let before = stacking_commit_blocks.len();
             // Preprocessed stacking root: baked const for machine tables (byte), witnessed addrs
             // for the app-identity table (program). Exactly one of the two is Some per AIR.
             if let Some(preproc) = preproc_const_addrs[air_id] {
@@ -179,18 +247,51 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             for &caddrs in &per_air_cached_commit_addrs[air_id] {
                 stacking_commit_blocks.push(self.pack_digest(caddrs));
             }
+            let roots = stacking_commit_blocks.len() - before;
+            if vk.per_air[air_id].is_present {
+                assert!(
+                    !past_the_present || roots == 0,
+                    "AIR {air_id}'s stacked commitment follows an absent AIR's: it would be \
+                     checked against another commitment's width"
+                );
+                matched_roots += roots;
+            } else {
+                past_the_present |= roots > 0;
+            }
         }
+        assert_eq!(
+            matched_roots,
+            vk.stacking_widths.len(),
+            "the stacked commitments of the present AIRs are not the ones the layout sized"
+        );
 
         // ── Phase 3: GKR (fractional sumcheck) ───────────────────────────────
         let n_logup = vk.n_logup;
         let total_gkr_rounds = vk.l_skip + n_logup;
 
-        self.check_witness(vk.logup_pow_bits);
-
-        // alpha_logup saved for Deferred (GKR/BC) GKR final-claim consistency check.
-        let alpha_logup_addr = self.sample_ef_for_chip();
-        // beta_logup saved for BC final assertion (interaction denom computation).
-        let beta_logup_addr = self.sample_ef_for_chip();
+        // alpha_logup is saved for the GKR final-claim consistency check, beta_logup for the BC
+        // final assertion (interaction denominators). Internal mode: grind, then sample both.
+        // External mode: absorb the caller's, at the same transcript position.
+        let (alpha_logup_addr, beta_logup_addr) = match external {
+            None => {
+                self.check_witness(vk.logup_pow_bits);
+                let alpha = self.sample_ef_for_chip();
+                let beta = self.sample_ef_for_chip();
+                (alpha, beta)
+            }
+            Some((alpha, beta)) => {
+                for lane in alpha.into_iter().chain(beta) {
+                    self.absorb_f(lane);
+                }
+                (self.pack_ef(alpha), self.pack_ef(beta))
+            }
+        };
+        // The fractional sum an external-mode child hands back.
+        let mut logup_sum: Option<GlobalSum> = None;
+        assert!(
+            external.is_none() || n_logup > 0,
+            "an external-mode child without interactions has no sum to hand back"
+        );
 
         // Deferred (GKR/BC): hold GKR final claims until after Phase 4.
         let mut gkr_numer: Option<u32> = None;
@@ -200,8 +301,10 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         let mut xi_addrs: Vec<u32> = Vec::new();
 
         if n_logup > 0 {
-            // Round 0: observe q0_claim + layer_claims[0], FracFold, sample mu.
-            let q0_claim_addr = self.observe_ef_for_chip();
+            // Round 0: observe q0_claim + layer_claims[0], FracFold, sample mu. An external-mode
+            // proof carries its numerator claim too, ahead of q0_claim.
+            let p0_claim = external.map(|_| self.observe_ef_full_for_chip());
+            let (q0_claim_addr, q0_claim_lanes) = self.observe_ef_full_for_chip();
 
             let p0 = self.observe_ef_for_chip();
             let q0 = self.observe_ef_for_chip();
@@ -209,8 +312,15 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             let q1 = self.observe_ef_for_chip();
             let (out_p0, out_q0) = self.frac_fold(p0, q0, p1, q1);
 
-            // (a) Numerator product must be zero (LogUp zero-sum check).
-            self.assert_ext_eq(out_p0, addr_zero);
+            // (a) Numerator product: zero (the LogUp zero-sum check), or in external mode the
+            // claim the proof hands back for its caller to add up.
+            match p0_claim {
+                None => self.assert_ext_eq(out_p0, addr_zero),
+                Some((p0_claim_addr, p0_claim_lanes)) => {
+                    self.assert_ext_eq(out_p0, p0_claim_addr);
+                    logup_sum = Some((p0_claim_lanes, q0_claim_lanes));
+                }
+            }
             // (b) Denominator product must equal q0_claim.
             self.assert_ext_eq(out_q0, q0_claim_addr);
 
@@ -1056,23 +1166,23 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         let app_prep_commit = app_prep_commit_addrs.into_iter().flatten().next();
 
         // Return ProofPvAddrs (Deferred (PVs) is done by the caller).
-        ProofPvAddrs {
+        let pvs = ProofPvAddrs {
             pv: riscv_pv_f_addrs.unwrap_or_else(|| vec![self.addr_zero; RECURSION_NUM_PVS]),
             app_prep_commit,
             vk_pre_hash: vk_pre_hash_addrs,
             merged_commit: merged_prep_addrs,
-            gcs_pv: gcs_pv_addrs,
-            riscv_pv: riscv_copy_addrs,
             per_air_pv: per_air_pv_addrs,
-        }
+            cached_commits: per_air_cached_commit_addrs,
+        };
+        (pvs, logup_sum)
     }
 
     // ─── Aggregation primitives (used by build_verify_n_program_multi) ──────────
     //
     // These operate on the per-child `ProofPvAddrs` returned by `verify_one` and on the
     // node's public-value address array `pv_arr`. They are the backend-independent
-    // aggregation logic (continuity / merge / GCS fold / completeness); the STARK
-    // verification itself is `verify_one`.
+    // aggregation logic (continuity / merge / completeness); the STARK verification itself is
+    // `verify_one`. The global LogUp's part of it is in `builder_global_logup`.
 
     /// Cross-child continuity: each `proof[i]`'s exit values must equal `proof[i+1]`'s entry
     /// values (next_pc→start_pc, next_chunk→start_chunk, last_*_addr→previous_*_addr,
@@ -1114,6 +1224,16 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                 self.assert_f_eq(
                     all_pvs[i].pv[col.end_reconstruct_deferred_digest[j]],
                     all_pvs[i + 1].pv[col.start_reconstruct_deferred_digest[j]],
+                );
+            }
+            // The global LogUp's chain: each child ends where the next one starts. Chunk leaves
+            // carry the chain over the Global table commitments; the group and image nodes ahead
+            // of chunk 1 carry wrapped values of it, so this is also the link that holds them to
+            // one set of challenges and to the chunks they cover (`assert_global_logup_closed`).
+            for j in 0..DIGEST_SIZE {
+                self.assert_f_eq(
+                    all_pvs[i].pv[col.global_chain_end[j]],
+                    all_pvs[i + 1].pv[col.global_chain_start[j]],
                 );
             }
             // riscv_vk_digest must be consistent across all proofs
@@ -1207,8 +1327,8 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
     /// cursors on chunks lacking the relevant air; asserts `exit_code == 0` per chunk, a nonzero
     /// pc limb SUM on CPU chunks, `chunk != 1` on non-CPU chunks and the chunk range check (both
     /// FRI convert parity); makes the leaf a transparent segment of the deferred-proof chain; and
-    /// copies the derived recursion fields (next_chunk, next_execution_chunk, GCS, …). Returns the
-    /// freshly-built recursion `pv_arr`.
+    /// copies the derived recursion fields (next_chunk, next_execution_chunk, …). The global
+    /// LogUp's fields are the caller's to write. Returns the freshly-built recursion `pv_arr`.
     pub(super) fn translate_riscv_child_pvs(
         &mut self,
         vk: &RecursionVkLayout,
@@ -1223,10 +1343,15 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             .per_air
             .iter()
             .any(|a| a.is_present && a.num_public_values == RISCV_NUM_PVS);
-        let src = pvs
-            .riscv_pv
-            .as_ref()
-            .expect("RISCV child carries no Global-air riscv PublicValues copy");
+        // The carrier is the Global air's, named by its air id: MemInit and MemFinal carry as
+        // many public values, so the count does not tell the three apart.
+        let global = &vk.per_air[air_id::GLOBAL];
+        assert!(
+            global.is_required && global.is_present && global.num_public_values == MAX_NUM_PVS,
+            "RISCV child: the Global air must be required and carry the riscv PublicValues copy"
+        );
+        let src = &pvs.per_air_pv[air_id::GLOBAL];
+        assert_eq!(src.len(), MAX_NUM_PVS, "Global pv slice not captured");
         let riscv: &RiscvPublicValues<Word<u32>, u32> = src[..RISCV_NUM_PVS].borrow();
         let mut arr = vec![addr_zero; RECURSION_NUM_PVS];
         let next_chunk_addr = self.base_add(riscv.chunk, self.addr_one);
@@ -1237,9 +1362,6 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         } else {
             riscv.execution_chunk
         };
-        let gcs = pvs
-            .gcs_pv
-            .expect("RISCV child carries no Global-air GCS public values");
 
         // Carrier binding: the Global-air copy is an unconstrained carrier; TIE it to every
         // present constrained pv air so it inherits their trace bindings (Cpu: execution chunk
@@ -1280,9 +1402,10 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                 }
             }
         }
-        // MemInit / MemFinal: the two MAX_NUM_PVS-pv airs; the air list declares Init before
-        // Final (relative order is the machine-wide air-id contract).
-        let mem_idxs: Vec<usize> = vk
+        // MemInit / MemFinal, by air id: with the Global carrier they are the three
+        // MAX_NUM_PVS-pv airs.
+        let mem_idxs = [air_id::MEM_INIT, air_id::MEM_FINAL];
+        let max_pv_airs: Vec<usize> = vk
             .per_air
             .iter()
             .enumerate()
@@ -1290,9 +1413,9 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             .map(|(i, _)| i)
             .collect();
         assert_eq!(
-            mem_idxs.len(),
-            2,
-            "riscv machine must declare exactly MemInit + MemFinal with MAX_NUM_PVS pvs"
+            max_pv_airs,
+            [air_id::MEM_INIT, air_id::MEM_FINAL, air_id::GLOBAL],
+            "riscv machine must declare exactly MemInit, MemFinal and Global with MAX_NUM_PVS pvs"
         );
         let has_init = vk.per_air[mem_idxs[0]].is_present;
         let has_final = vk.per_air[mem_idxs[1]].is_present;
@@ -1403,11 +1526,11 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             self.assert_f_eq(prod, self.addr_one);
         }
 
-        // chunk fits in MAX_LOG_NUMBER_OF_CHUNKS bits (FRI convert parity, defense-in-depth:
-        // start_chunk == 1 + next_chunk = chunk + 1 continuity already bounds chunk to the
-        // tree size, so a field wrap is unreachable — this makes the bound local and
-        // explicit). Hint the bits LSB-first, boolean-constrain each, assert the
-        // recomposition equals the carrier's chunk.
+        // chunk fits in MAX_LOG_NUMBER_OF_CHUNKS bits. With `start_chunk == 1` and
+        // `next_chunk = chunk + 1` continuity this bounds the number of leaves of a tree, and
+        // the root's real-row assertion relies on it: the tree's count, a share per leaf, has to
+        // stay clear of the field's order (`assert_global_logup_closed`). Hint the bits LSB-first,
+        // boolean-constrain each, assert the recomposition equals the carrier's chunk.
         {
             let two = self.write_const(Block::from(F::from_u32(2)));
             let max_bits = crate::primitives::consts::MAX_LOG_NUMBER_OF_CHUNKS;
@@ -1483,11 +1606,8 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             // using it here would break continuity at that boundary.
             rec.start_reconstruct_deferred_digest = deferred_digest;
             rec.end_reconstruct_deferred_digest = deferred_digest;
-            // GCS comes from the RISCV Global air's own public values (x then y).
-            rec.global_cumulative_sum.0.x.0.copy_from_slice(&gcs[..7]);
-            rec.global_cumulative_sum.0.y.0.copy_from_slice(&gcs[7..14]);
-            // vk_root / sponge fields stay zero; riscv_vk_digest is overridden by the caller;
-            // flag_complete and digest are set later.
+            // vk_root / sponge fields stay zero; riscv_vk_digest and the global LogUp's fields
+            // are written by the caller; flag_complete and digest are set later.
         }
         arr
     }
@@ -1496,8 +1616,8 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
     /// end-of-tree values from the last child; contains_execution_chunk OR (with a per-child
     /// boolean assert); a running-counter merge of start/next_execution_chunk that also asserts
     /// execution-chunk continuity; the sums of the children's committed_value_digest and
-    /// deferred_proofs_digest; and all children agree on vk_root. Does NOT fold GCS
-    /// (see `fold_global_cumulative_sum`).
+    /// deferred_proofs_digest; the global LogUp's chain end, fractional sum and real-row count;
+    /// and all children agree on vk_root.
     pub(super) fn merge_child_pvs(&mut self, pv_arr: &mut [u32], all_pvs: &[ProofPvAddrs]) {
         let col = RECURSION_PUBLIC_VALUES_COL_MAP;
         let addr_zero = self.addr_zero;
@@ -1525,6 +1645,22 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
             pv_arr[col.end_reconstruct_deferred_digest[j]] =
                 last.pv[col.end_reconstruct_deferred_digest[j]];
         }
+
+        // The global LogUp: the chain ends where the last child's does (its start is child 0's,
+        // already in `pv_arr`); the fractional sums add as fractions; the real-row counts add.
+        for j in 0..DIGEST_SIZE {
+            pv_arr[col.global_chain_end[j]] = last.pv[col.global_chain_end[j]];
+        }
+        let mut frac = col.global_sum.map(|i| all_pvs[0].pv[i]);
+        let mut count = all_pvs[0].pv[col.global_row_count];
+        for child in &all_pvs[1..] {
+            frac = self.add_global_sums(frac, col.global_sum.map(|i| child.pv[i]));
+            count = self.base_add(count, child.pv[col.global_row_count]);
+        }
+        for (slot, addr) in col.global_sum.into_iter().zip(frac) {
+            pv_arr[slot] = addr;
+        }
+        pv_arr[col.global_row_count] = count;
 
         // Each child's contains_execution_chunk is boolean (FRI combine parity); the OR
         // recurrence and the running-counter selects below assume it.
@@ -1617,135 +1753,24 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
         }
     }
 
-    /// Fold the children's global-cumulative-sum septic points into this node's, using the
-    /// SepticDigest sum scheme: `result = Σ d_i − (n−1)·zero`, computed as
-    /// `acc = start; for each d_i { acc += d_i; if not last { acc -= zero } }; acc -= start`.
-    /// Each `curve_add_septic` hints its result and verifies the chord law in-circuit; the host
-    /// replays the same sequence. Writes the result back into `pv_arr`'s GCS slots.
-    pub(super) fn fold_global_cumulative_sum(
-        &mut self,
-        pv_arr: &mut [u32],
-        all_pvs: &[ProofPvAddrs],
-    ) {
-        let col = RECURSION_PUBLIC_VALUES_COL_MAP;
-        let n = all_pvs.len();
-        // Write starting_digest and zero (CURVE_CUMULATIVE_SUM_START) as constants.
-        let start_x: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block::from(F::from_u32(F::DIGEST_SUM_START_X[i])))
-        });
-        let start_y: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block::from(F::from_u32(F::DIGEST_SUM_START_Y[i])))
-        });
-        let zero_x: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_X[i])))
-        });
-        let zero_y: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_Y[i])))
-        });
-
-        // Get GCS coords for each proof.
-        let digests: Vec<([u32; 7], [u32; 7])> = (0..n)
-            .map(|i| {
-                let gx = std::array::from_fn(|j| all_pvs[i].pv[col.global_cumulative_sum.0.x.0[j]]);
-                let gy = std::array::from_fn(|j| all_pvs[i].pv[col.global_cumulative_sum.0.y.0[j]]);
-                (gx, gy)
-            })
-            .collect();
-
-        // Compute sum: acc starts at starting_digest, fold in each d_i.
-        let (mut acc_x, mut acc_y) = (start_x, start_y);
-        let neg_zero_y = self.f7_neg(zero_y);
-        let neg_start_y = self.f7_neg(start_y);
-        for (i, &(dx, dy)) in digests.iter().enumerate() {
-            // acc += d_i
-            (acc_x, acc_y) = self.curve_add_septic(acc_x, acc_y, dx, dy);
-            // if not last iteration: acc -= zero
-            if i != n - 1 {
-                (acc_x, acc_y) = self.curve_add_septic(acc_x, acc_y, zero_x, neg_zero_y);
-            }
-        }
-        // result = acc - start
-        (acc_x, acc_y) = self.curve_add_septic(acc_x, acc_y, start_x, neg_start_y);
-
-        // Store result in pv_arr.
-        for j in 0..7 {
-            pv_arr[col.global_cumulative_sum.0.x.0[j]] = acc_x[j];
-            pv_arr[col.global_cumulative_sum.0.y.0[j]] = acc_y[j];
-        }
-    }
-
-    /// Convert-layer GCS injection: replace the chunk's exposed GCS with
-    /// `sel + chunk_gcs − zero`, where `sel = is_first ? initial_gcs : zero` (limb-wise
-    /// arithmetic select — sel = zero + is_first·(init − zero)). For non-first chunks this is
-    /// the identity (zero + chunk − zero = chunk); for the chunk-1 leaf it folds the witnessed
-    /// initial GCS in, so a full tree's fold telescopes to the UNIVERSAL zero point at the root.
-    ///
-    /// Computed with the same schedule as `fold_global_cumulative_sum` —
-    /// `start + sel − zero + chunk_gcs − start` — so no addition ever pairs two small-set
-    /// points (`start` is an independent fixed point), keeping the incomplete-addition chord
-    /// law satisfiable for honest inputs. The host replays the exact sequence
-    /// (`setup_for_convert_with_program`), each add hinting [x(7), y(7), inv(dx)(7)].
-    pub(super) fn inject_initial_gcs(
-        &mut self,
-        pv_arr: &mut [u32],
-        is_first: u32,
-        init_x: [u32; 7],
-        init_y: [u32; 7],
-    ) {
-        let col = RECURSION_PUBLIC_VALUES_COL_MAP;
-        let start_x: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block::from(F::from_u32(F::DIGEST_SUM_START_X[i])))
-        });
-        let start_y: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block::from(F::from_u32(F::DIGEST_SUM_START_Y[i])))
-        });
-        let zero_x: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_X[i])))
-        });
-        let zero_y: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_Y[i])))
-        });
-        // sel = zero + is_first·(init − zero), limb-wise.
-        let sel_x: [u32; 7] = std::array::from_fn(|j| {
-            let d = self.base_sub(init_x[j], zero_x[j]);
-            let t = self.base_mul(is_first, d);
-            self.base_add(zero_x[j], t)
-        });
-        let sel_y: [u32; 7] = std::array::from_fn(|j| {
-            let d = self.base_sub(init_y[j], zero_y[j]);
-            let t = self.base_mul(is_first, d);
-            self.base_add(zero_y[j], t)
-        });
-        let chunk_x: [u32; 7] = std::array::from_fn(|j| pv_arr[col.global_cumulative_sum.0.x.0[j]]);
-        let chunk_y: [u32; 7] = std::array::from_fn(|j| pv_arr[col.global_cumulative_sum.0.y.0[j]]);
-        let neg_zero_y = self.f7_neg(zero_y);
-        let neg_start_y = self.f7_neg(start_y);
-        let (mut acc_x, mut acc_y) = (start_x, start_y);
-        (acc_x, acc_y) = self.curve_add_septic(acc_x, acc_y, sel_x, sel_y);
-        (acc_x, acc_y) = self.curve_add_septic(acc_x, acc_y, zero_x, neg_zero_y);
-        (acc_x, acc_y) = self.curve_add_septic(acc_x, acc_y, chunk_x, chunk_y);
-        (acc_x, acc_y) = self.curve_add_septic(acc_x, acc_y, start_x, neg_start_y);
-        for j in 0..7 {
-            pv_arr[col.global_cumulative_sum.0.x.0[j]] = acc_x[j];
-            pv_arr[col.global_cumulative_sum.0.y.0[j]] = acc_y[j];
-        }
-    }
-
-    /// Root-only completeness assertions, all against UNIVERSAL constants (0/1) so the root circuit
+    /// Root-only completeness assertions, all against UNIVERSAL constants so the root circuit
     /// stays program-agnostic: the tree covers a full, successful execution — next_pc==0,
     /// start_chunk==1, memory cursors==0, exit_code==0, at-least-one execution chunk starting at 1,
-    /// non-empty tree, deferred digest chain. Emitted only for the aggregation tree root.
+    /// non-empty tree, deferred digest chain, and the global LogUp closed over all of its chunks
+    /// (`assert_global_logup_closed`, with `max_global_row_count` as the real-row limit). Emitted only for the
+    /// aggregation tree root.
     ///
-    /// The two program-specific facts are bound WITHOUT baking per-program constants (which
-    /// would make the root VK per-program): the guest entry pc via the convert layer's chunk-1
-    /// gate (`start_chunk == 1 ⇒ start_pc == witnessed pc_start`), and the cross-chunk
-    /// global-cumulative-sum closure via the convert layer's initial-GCS injection, which makes
-    /// a full honest tree's folded GCS telescope to the UNIVERSAL zero point — asserted below
-    /// against program-independent constants. The witnessed identity itself is pinned by the
-    /// apex through the in-circuit `riscv_vk_digest = H(program_commit ‖ pc_start ‖ initial_gcs)`
+    /// The program-specific facts are bound WITHOUT baking per-program constants (which would
+    /// make the root VK per-program): the guest entry pc via the convert layer's chunk-1 gate
+    /// (`start_chunk == 1 ⇒ start_pc == witnessed pc_start`), and the initial memory via the
+    /// image node, which opens the image table whose commitment and tier it hashes into the
+    /// identity it publishes. The witnessed identity itself is pinned by the apex through the
+    /// in-circuit `riscv_vk_digest = H(program_commit ‖ pc_start ‖ image_commit ‖ image_tier)`
     /// anchor. The circuit therefore stays app-agnostic (its VK depends only on the node shape),
     /// hence VK-allowlist-able.
-    pub(super) fn assert_root_complete(&mut self, pv_arr: &[u32]) {
+    ///
+    /// Hints, in order: `inv(next_chunk − 1)`, then those of `assert_global_logup_closed`.
+    pub(super) fn assert_root_complete(&mut self, pv_arr: &[u32], max_global_row_count: u64) {
         let col = RECURSION_PUBLIC_VALUES_COL_MAP;
         let addr_zero = self.addr_zero;
         // Program execution finished: next_pc == 0.
@@ -1782,20 +1807,8 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
                 pv_arr[col.deferred_proofs_digest[j]],
             );
         }
-        // Cross-chunk global-cumulative-sum closure: with the witnessed initial GCS injected at
-        // the chunk-1 leaf (`inject_initial_gcs`), a full honest execution's folded GCS
-        // telescopes to the UNIVERSAL zero point — a program-independent constant. (No witness
-        // hints here, so this block does not move the inverse hinted above.)
-        let zero_x: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_X[i])))
-        });
-        let zero_y: [u32; 7] = std::array::from_fn(|i| {
-            self.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_Y[i])))
-        });
-        for j in 0..7 {
-            self.assert_f_eq(pv_arr[col.global_cumulative_sum.0.x.0[j]], zero_x[j]);
-            self.assert_f_eq(pv_arr[col.global_cumulative_sum.0.y.0[j]], zero_y[j]);
-        }
+        // Cross-chunk consistency: the global LogUp, closed over every chunk of the tree.
+        self.assert_global_logup_closed(pv_arr, max_global_row_count);
     }
 
     /// Compute the public-values Poseidon2 digest over `pv_arr[..NUM_PV_ELMS_TO_HASH]`, write it
@@ -1805,7 +1818,7 @@ impl<F: PrimeField32 + TwoAdicField + FieldSepticCurve> Builder<F> {
     /// public values and asserts equality with the child's committed `digest` field; this path
     /// does the same — see `assert_child_pv_digests`, called for every combine child in
     /// `build_verify_n_program_multi`. The aggregation itself consumes only the child's
-    /// SUBSTANTIVE fields (start_pc, next_pc, chunk, GCS, committed_value_digest, …), each bound
+    /// SUBSTANTIVE fields (start_pc, next_pc, chunk, committed_value_digest, …), each bound
     /// to the child proof by `verify_one`, and never a child's `digest`; the `digest` slot
     /// inherited when `pv_arr` is cloned from child 0 is overwritten here with this node's fresh
     /// recompute, and the root's digest is re-checked host-side in `CombineMachine::verify` /
@@ -1983,25 +1996,45 @@ impl ConvertVerifierCircuit {
     ///
     /// `is_convert_layer`: true when verifying RISCV proofs (convert layer) — `riscv_vk_digest`
     /// is SET to the in-circuit exe-identity digest `H(DOMAIN ‖ program_commit ‖ pc_start ‖
-    /// initial_gcs)` over the witnessed identity. false for the combine layer (verifying
-    /// recursion proofs) — `riscv_vk_digest` is PROPAGATED from the child's PV unchanged.
+    /// image_commit ‖ image_tier)` over the witnessed identity. false for the combine layer
+    /// (verifying recursion proofs) — `riscv_vk_digest` is PROPAGATED from the child's PV
+    /// unchanged.
     ///
     /// `is_complete`: true ONLY for the aggregation tree root. The root program sets
     /// `flag_complete = 1` in its public values and emits the completeness assertions — all
     /// against UNIVERSAL constants (next_pc == 0, start_chunk == 1, cursors-start-at-zero,
-    /// exit_code == 0, execution start/end conditions, deferred chain, and the GCS closure to
-    /// the universal zero point); non-root programs set 0 and emit none. No per-program constant
-    /// is ever baked, so every node VK depends only on the node shape (app-agnostic, hence
-    /// VK-allowlist-able). The two program-specific facts are bound instead by the convert
-    /// layer's chunk-1 gate (entry pc) and initial-GCS injection (memory closure; see
-    /// `inject_initial_gcs` for the telescoping argument, which is tree-shape independent and
-    /// holds for the n=1 single-chunk root), each pinned to trusted values through the apex's
-    /// single `riscv_vk_digest` comparison.
-    pub fn build_verify_n_program_multi<F: PrimeField32 + TwoAdicField + FieldSepticCurve>(
+    /// exit_code == 0, execution start/end conditions, deferred chain, and the global LogUp
+    /// closed over the tree's chunks); non-root programs set 0 and emit none. No per-program
+    /// constant is ever baked, so every node VK depends only on the node shape (app-agnostic,
+    /// hence VK-allowlist-able). The program-specific facts are bound instead by the convert
+    /// layer's chunk-1 gate (entry pc) and by the image node (initial memory: it opens the
+    /// image table whose commitment and tier it hashes into `riscv_vk_digest`), each pinned to
+    /// trusted values through the apex's single `riscv_vk_digest` comparison.
+    pub fn build_verify_n_program_multi<F: PrimeField32 + TwoAdicField>(
         vks: &[&RecursionVkLayout],
         is_convert_layer: bool,
         is_complete: bool,
         vk_verification: bool,
+    ) -> RecursionProgram<F> {
+        Self::build_verify_n_program_multi_within(
+            vks,
+            is_convert_layer,
+            is_complete,
+            vk_verification,
+            global_logup::MAX_COUNT,
+        )
+    }
+
+    /// [`Self::build_verify_n_program_multi`] with the real-row limit a complete root asserts
+    /// as a parameter. The limit is `MAX_COUNT`; a smaller one is still sound, and lets a
+    /// negative test put it below a block's count.
+    #[doc(hidden)]
+    pub fn build_verify_n_program_multi_within<F: PrimeField32 + TwoAdicField>(
+        vks: &[&RecursionVkLayout],
+        is_convert_layer: bool,
+        is_complete: bool,
+        vk_verification: bool,
+        max_global_row_count: u64,
     ) -> RecursionProgram<F> {
         let n = vks.len();
         assert!(n >= 1);
@@ -2027,7 +2060,14 @@ impl ConvertVerifierCircuit {
                 b.reset_sponge();
             }
             let start = b.instructions.len();
-            let pvs = b.verify_one(vks[i]);
+            // In whitelist mode a recursion child's key is held to the row of its layout. A
+            // RISC-V child has no row: its layout bakes its constraints and heights, and its
+            // program travels in the exe identity.
+            let pvs = if vk_verification && !is_convert_layer {
+                b.verify_one_of_row(vks[i])
+            } else {
+                b.verify_one(vks[i])
+            };
             child_spans.push((start, b.instructions.len()));
             all_pvs.push(pvs);
         }
@@ -2046,7 +2086,7 @@ impl ConvertVerifierCircuit {
             // Build the merged pv_arr. Start from proof[0]'s PVs.
             // Convert layer (child = RISCV proof): TRANSLATE the child's RISCV `PublicValues`
             // layout into the `RecursionPublicValues` layout — the whole tree above speaks
-            // recursion offsets (continuity, GCS merge, completeness asserts all index them).
+            // recursion offsets (continuity, merge, completeness asserts all index them).
             // Combine layer (child = recursion proof): the child pvs are already in recursion
             // layout — start from a copy.
             let mut pv_arr: Vec<u32> = if is_convert_layer {
@@ -2057,50 +2097,48 @@ impl ConvertVerifierCircuit {
             // riscv_vk_digest: convert layer (child = RISCV proof) computes the VM-layer exe
             // identity anchor IN-CIRCUIT (mirroring the FRI convert's hash of its RiscvVmVk):
             //
-            //   riscv_vk_digest = H(DOMAIN ‖ program_commit ‖ pc_start ‖ initial_gcs)
+            //   riscv_vk_digest = H(DOMAIN ‖ program_commit ‖ pc_start ‖ image_commit ‖ image_tier)
             //
             // program_commit is the witnessed program-table commitment (Merkle-hard-bound as the
-            // program table's WHIR stacking root — see `verify_one`); pc_start (3) and
-            // initial_gcs (14) are raw witness hints (not absorbed — they are not part of the
-            // child's STARK transcript). The hash is the exact in-circuit mirror of
-            // `RiscvVmVk::digest` (same padding-free rate-8 overwrite sponge, same 26-element
-            // preimage order), so the apex compares this PV against the trusted
-            // `RiscvVmVk::digest()` — a single self-attested anchor.
+            // program table's WHIR stacking root — see `verify_one`); pc_start (3), the image
+            // table's commitment (8) and its height tier (1) are raw witness hints (not
+            // absorbed — they are not part of the child's STARK transcript). The hash is the
+            // exact in-circuit mirror of `RiscvVmVk::digest` (same padding-free rate-8 overwrite
+            // sponge, same 21-element preimage order), so the apex compares this PV against the
+            // trusted `RiscvVmVk::digest()` — a single self-attested anchor.
             //
-            // Trace binding of the hinted fields (mirrors the FRI convert):
+            // Binding of the hinted fields:
             //   - chunk-1 gating: is_first = (start_chunk == 1) ⇒ start_pc == pc_start;
-            //   - GCS injection: the exposed GCS becomes sel + chunk_gcs − zero with
-            //     sel = is_first ? initial_gcs : zero, so a full tree's fold telescopes to the
-            //     UNIVERSAL zero point, asserted at the root (`assert_root_complete`).
+            //   - the image commitment and tier only enter the hash here. The image node opens
+            //     the table under that commitment at that tier and publishes the same digest,
+            //     and continuity holds every node of the tree to one digest.
             // start_chunk itself is chain-bound: continuity links every child's next_chunk to
             // its sibling's start_chunk and the root asserts start_chunk == 1, so exactly the
-            // leftmost leaf gates on. `merge_child_pvs` forces every sibling to carry the same
-            // digest, so one tree = one (program, pc, gcs) triple.
+            // leftmost leaf gates on. `assert_child_continuity` forces every sibling to carry
+            // the same digest, so one tree = one (program, pc, image) triple.
             //
             // Combine layer (child = recursion proof) PROPAGATES the child's
             // pv[riscv_vk_digest] (already in pv_arr from clone) unchanged.
             if is_convert_layer {
+                let child = vks[0];
                 let program_commit = all_pvs[0]
                     .app_prep_commit
                     .expect("convert layer verifies a RISCV proof, which has a program table");
-                // Witness the VM-layer identity: pc_start (3 limbs) then initial_gcs (x 7, y 7).
+                // Witness the chain value before this chunk (8), then the VM-layer identity:
+                // pc_start (3 limbs), the image table's commitment (8) and its height tier (1).
+                let chain_in: [u32; DIGEST_SIZE] = std::array::from_fn(|_| b.hint_f());
                 let pc_w: [u32; 3] = std::array::from_fn(|_| b.hint_f());
-                let gcs_w: [u32; 14] = std::array::from_fn(|_| b.hint_f());
-                let dom = b.write_const(Block::from(F::from_u32(RISCV_VK_DIGEST_DOMAIN)));
-                let mut preimage = Vec::with_capacity(26);
-                preimage.push(dom);
+                let image_w: [u32; DIGEST_SIZE] = std::array::from_fn(|_| b.hint_f());
+                let tier_w = b.hint_f();
+                let mut preimage = Vec::with_capacity(21);
+                preimage.push(b.const_f(RISCV_VK_DIGEST_DOMAIN));
                 preimage.extend_from_slice(&program_commit);
                 preimage.extend_from_slice(&pc_w);
-                preimage.extend_from_slice(&gcs_w);
-                let digest_blocks = b.hash_poseidon2_fresh(&preimage);
-                let lo = b.unpack_lanes(digest_blocks[0]);
-                let hi = b.unpack_lanes(digest_blocks[1]);
-                for (i, &idx) in col.riscv_vk_digest.iter().enumerate() {
-                    pv_arr[idx] = if i < PACK_LANES {
-                        lo[i]
-                    } else {
-                        hi[i - PACK_LANES]
-                    };
+                preimage.extend_from_slice(&image_w);
+                preimage.push(tier_w);
+                let digest = b.hash_to_felts(&preimage);
+                for (slot, addr) in col.riscv_vk_digest.into_iter().zip(digest) {
+                    pv_arr[slot] = addr;
                 }
 
                 // ── chunk-1 gating: is_first = (start_chunk == 1) ──
@@ -2122,15 +2160,61 @@ impl ConvertVerifierCircuit {
                     let g = b.base_mul(is_first, d);
                     b.assert_f_eq(g, addr_zero);
                 }
-                // ── GCS injection (FRI-style) ──
-                let init_x: [u32; 7] = std::array::from_fn(|j| gcs_w[j]);
-                let init_y: [u32; 7] = std::array::from_fn(|j| gcs_w[7 + j]);
-                b.inject_initial_gcs(&mut pv_arr, is_first, init_x, init_y);
+
+                // ── The global LogUp: this chunk's step of the chain, and its row count ──
+                // The Global air's event table is the one cached main `verify_one` opened, at
+                // the one height this layout bakes. A reader at another height would see other
+                // columns under the same commitment, so the height is asserted here and goes
+                // into the chain with the width.
+                let global = &child.per_air[air_id::GLOBAL];
+                let log_height = global.log_height.expect("the Global air is present");
+                assert!(
+                    global.cached_main_widths == [global_logup::TABLE_WIDTH]
+                        && log_height
+                            == global_logup::global_log_height_at(child.l_skip + child.n_stack),
+                    "RISCV child: the Global air must commit one event table of {} columns at \
+                     the operating point's height",
+                    global_logup::TABLE_WIDTH
+                );
+                let commit = match all_pvs[0].cached_commits[air_id::GLOBAL][..] {
+                    [commit] => commit,
+                    _ => unreachable!("one cached main, one commitment"),
+                };
+                // The chain starts at IV before chunk 1; before any other chunk it is a free
+                // witness, which continuity ties to the chunk on the left.
+                let iv = b.global_chain_iv();
+                for j in 0..DIGEST_SIZE {
+                    let d = b.base_sub(chain_in[j], iv[j]);
+                    let g = b.base_mul(is_first, d);
+                    b.assert_f_eq(g, addr_zero);
+                }
+                let chain_out =
+                    b.global_chain_step(chain_in, pv_arr[col.start_chunk], log_height, commit);
+                // The chunk's share of the real-row bound: a constant of the layout, from the
+                // heights of the airs that send on the Global bus.
+                let count = global_logup::chunk_count(
+                    log_height,
+                    GLOBAL_SENDERS.iter().filter_map(|&(air, sends, receives)| {
+                        let air = &child.per_air[air];
+                        air.is_present.then(|| {
+                            let log_height = air.log_height.expect("a present air has a height");
+                            (sends, receives, log_height)
+                        })
+                    }),
+                );
+                let count = b.const_f(u32::try_from(count).expect("a chunk's share is small"));
+                let frac = b.zero_global_sum();
+                {
+                    let rec: &mut RecursionPublicValues<u32> = pv_arr.as_mut_slice().borrow_mut();
+                    rec.global_chain_start = chain_in;
+                    rec.global_chain_end = chain_out;
+                    rec.global_sum = frac;
+                    rec.global_row_count = count;
+                }
             }
 
             if n > 1 {
                 b.merge_child_pvs(&mut pv_arr, &all_pvs);
-                b.fold_global_cumulative_sum(&mut pv_arr, &all_pvs);
             }
 
             // ── VK whitelist (vk_verification mode) ──
@@ -2158,10 +2242,10 @@ impl ConvertVerifierCircuit {
             // Completeness assertions — emitted at BUILD time only for the tree root
             // (`is_complete` is a baked constant, so no in-circuit flag gating is needed:
             // root programs get the universal asserts, non-root programs get nothing). All
-            // asserts are against universal constants — including the GCS closure to the zero
-            // point (see assert_root_complete) — keeping this circuit app-agnostic.
+            // asserts are against universal constants — including the closure of the global
+            // LogUp (see assert_root_complete) — keeping this circuit app-agnostic.
             if is_complete {
-                b.assert_root_complete(&pv_arr);
+                b.assert_root_complete(&pv_arr, max_global_row_count);
             }
 
             // digest + commit.
@@ -2175,7 +2259,7 @@ impl ConvertVerifierCircuit {
 
     /// Build the verification program for a single proof (wrapper around
     /// build_verify_n_program_multi with n=1).
-    pub fn build_verify_program<F: PrimeField32 + TwoAdicField + FieldSepticCurve>(
+    pub fn build_verify_program<F: PrimeField32 + TwoAdicField>(
         input: &ConvertProgramInput,
     ) -> RecursionProgram<F> {
         // Convert layer: child is a RISCV proof, so riscv_vk_digest is set to the in-circuit
@@ -2190,8 +2274,8 @@ impl ConvertVerifierCircuit {
     /// guest's claimed digest and this chain comparable at the root.
     ///
     /// The node it emits is transparent in every dimension the tree chains EXCEPT that digest:
-    /// chunk and execution-chunk cursors sit at 1, it contains no execution chunk, its GCS is
-    /// the neutral point, and its pc is the witnessed entry pc of the MAIN program. Chunk
+    /// chunk and execution-chunk cursors sit at 1, it contains no execution chunk, the global
+    /// LogUp passes through it, and its pc is the witnessed entry pc of the MAIN program. Chunk
     /// continuity then admits it only as a tree PREFIX: a riscv leaf sets `next_chunk = chunk + 1`,
     /// and since the root pins `start_chunk == 1` and continuity numbers the leaves up from there,
     /// no leaf in a tree that can close leaves the cursor at 1 for a node to follow.
@@ -2208,34 +2292,50 @@ impl ConvertVerifierCircuit {
     /// chain, not by this node's public values.
     ///
     /// Witness contract, after `verify_one`'s own hints and in this order:
-    ///   1. `inv(child.next_chunk − 1)` — consumed by the child's completeness block;
+    ///   1. the hints of the child's completeness block (`assert_root_complete`):
+    ///      `inv(child.next_chunk − 1)`, the inverse of the child's global-LogUp denominator
+    ///      (5), the 21 bits of the child's slack under the real-row limit;
     ///   2. the start digest (8) — where this step's chain segment begins;
-    ///   3. `riscv_vk_digest` (8) and `end_pc` (3) — the MAIN program's exe identity and entry pc;
-    ///   4. whitelist mode only: `vk_root` (8), then the child's `DEPTH × (bit, sibling (8))`.
-    pub fn build_deferred_program<F: PrimeField32 + TwoAdicField + FieldSepticCurve>(
+    ///   3. the global LogUp's chain value (8) this node passes through;
+    ///   4. `riscv_vk_digest` (8) and `end_pc` (3) — the MAIN program's exe identity and entry pc;
+    ///   5. whitelist mode only: `vk_root` (8), then the child's `DEPTH × (bit, sibling (8))`.
+    pub fn build_deferred_program<F: PrimeField32 + TwoAdicField>(
         child: &RecursionVkLayout,
         vk_verification: bool,
     ) -> RecursionProgram<F> {
-        Self::deferred_program(child, vk_verification, true)
+        Self::deferred_program(child, vk_verification, true, false)
     }
 
     /// Negative tests only: [`Self::build_deferred_program`] without the requirement that the
     /// child's own deferred digest is zero. A node built from it is the control that shows a
     /// sub-proof which defers is refused by that requirement and by nothing else.
     #[doc(hidden)]
-    pub fn build_deferred_program_admitting_nested_for_testing<
-        F: PrimeField32 + TwoAdicField + FieldSepticCurve,
+    pub fn build_deferred_program_admitting_nested_for_testing<F: PrimeField32 + TwoAdicField>(
+        child: &RecursionVkLayout,
+        vk_verification: bool,
+    ) -> RecursionProgram<F> {
+        Self::deferred_program(child, vk_verification, false, false)
+    }
+
+    /// Negative tests only: [`Self::build_deferred_program`] with the node's own fraction of the
+    /// global LogUp at `(0, 0)` instead of `(0, 1)`. Added into a tree's sum it takes the
+    /// numerator to zero whatever the groups add up to; the root's assertion that the
+    /// denominator has an inverse is what has to refuse the tree.
+    #[doc(hidden)]
+    pub fn build_deferred_program_with_zero_denominator_for_testing<
+        F: PrimeField32 + TwoAdicField,
     >(
         child: &RecursionVkLayout,
         vk_verification: bool,
     ) -> RecursionProgram<F> {
-        Self::deferred_program(child, vk_verification, false)
+        Self::deferred_program(child, vk_verification, true, true)
     }
 
-    fn deferred_program<F: PrimeField32 + TwoAdicField + FieldSepticCurve>(
+    fn deferred_program<F: PrimeField32 + TwoAdicField>(
         child: &RecursionVkLayout,
         vk_verification: bool,
         refuse_nested: bool,
+        zero_denominator: bool,
     ) -> RecursionProgram<F> {
         // Every check below reads the child's recursion public values; without that air
         // `verify_one` hands back a zero vector and the checks turn into assertions about
@@ -2256,7 +2356,13 @@ impl ConvertVerifierCircuit {
         let addr_one = b.addr_one;
 
         let span_start = b.instructions.len();
-        let child_pvs = b.verify_one(child);
+        // The sub-proof is a complete root, a key of the combine tier: in whitelist mode it is
+        // held to that row, as a node's children are.
+        let child_pvs = if vk_verification {
+            b.verify_one_of_row(child)
+        } else {
+            b.verify_one(child)
+        };
         let child_spans = vec![(span_start, b.instructions.len())];
 
         // ── The child must be a COMPLETE root of its own program ──
@@ -2264,7 +2370,7 @@ impl ConvertVerifierCircuit {
         // relations here is what actually binds them, since they are relations over public
         // values `verify_one` has already tied to the verified proof.
         b.assert_f_eq(child_pvs.pv[col.flag_complete], addr_one);
-        b.assert_root_complete(&child_pvs.pv);
+        b.assert_root_complete(&child_pvs.pv, global_logup::MAX_COUNT);
         // No nested deferred proofs: a sub-proof that itself defers would ride its own unverified
         // claims into this chain, and nothing below would ever check them.
         if refuse_nested {
@@ -2299,17 +2405,15 @@ impl ConvertVerifierCircuit {
         });
 
         // ── This node's own public values ──
-        // Both are free witnesses here and pinned by cross-child continuity: the digest against
-        // the execution leaves' in-circuit exe anchor, the pc against the chunk-1 leaf's
-        // trace-bound `start_pc`.
+        // All free witnesses here and pinned by cross-child continuity: the global LogUp's
+        // chain value against the neighbours', the digest against the execution leaves'
+        // in-circuit exe anchor, the pc against the chunk-1 leaf's trace-bound `start_pc`.
+        let global_chain: [u32; DIGEST_SIZE] = std::array::from_fn(|_| b.hint_f());
         let riscv_vk_digest: [u32; DIGEST_SIZE] = std::array::from_fn(|_| b.hint_f());
         let end_pc: [u32; 3] = std::array::from_fn(|_| b.hint_f());
-        let zero_x: [u32; 7] = std::array::from_fn(|i| {
-            b.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_X[i])))
-        });
-        let zero_y: [u32; 7] = std::array::from_fn(|i| {
-            b.write_const(Block::from(F::from_u32(F::CURVE_CUMULATIVE_SUM_START_Y[i])))
-        });
+        let global_sum = b
+            .zero_global_sum()
+            .map(|slot| if zero_denominator { addr_zero } else { slot });
         let mut pv_arr = vec![addr_zero; RECURSION_NUM_PVS];
         {
             let rec: &mut RecursionPublicValues<u32> = pv_arr.as_mut_slice().borrow_mut();
@@ -2322,14 +2426,15 @@ impl ConvertVerifierCircuit {
             rec.start_execution_chunk = addr_one;
             rec.next_execution_chunk = addr_one;
             rec.riscv_vk_digest = riscv_vk_digest;
-            // The neutral point: the GCS fold is `Σ d_i − (n−1)·zero`, so a node contributing
-            // exactly `zero` leaves the tree's sum untouched.
-            rec.global_cumulative_sum.0.x.0.copy_from_slice(&zero_x);
-            rec.global_cumulative_sum.0.y.0.copy_from_slice(&zero_y);
+            // Transparent in the global LogUp: the chain passes through, the fraction is
+            // `(0, 1)`, which adds nothing, and the node has no rows to count.
+            rec.global_chain_start = global_chain;
+            rec.global_chain_end = global_chain;
+            rec.global_sum = global_sum;
             // Left at zero: committed_value_digest and deferred_proofs_digest (this node makes no
             // claim about either, and the merge sums both, so a zero adds nothing), the
-            // four address cursors, exit_code, flag_complete (a deferred node can never be a
-            // complete root) and contains_execution_chunk.
+            // four address cursors, exit_code, global_row_count, flag_complete (a deferred node can
+            // never be a complete root) and contains_execution_chunk.
         }
         // ── Whitelist mode: the child is a whitelisted complete root under this tree's root ──
         // Same check combine runs on its children. Membership plus `flag_complete == 1` above

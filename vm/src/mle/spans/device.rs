@@ -68,7 +68,7 @@ pub struct Readout {
 
 /// The chips whose kernels a stream pool could overlap with the CPU chip's: their summed kernel time
 /// bounds what such overlap can hide on a CPU chunk.
-pub const OVERLAPPABLE_CHIPS: [&str; 3] = ["Global", "RiscvKoalaBearPoseidon2", "MemoryLocal"];
+pub const OVERLAPPABLE_CHIPS: [&str; 2] = ["Global", "MemoryLocal"];
 
 /// Copies above this size are counted apart: from pageable memory, `cudaMemcpyAsync` can hold the
 /// calling thread until the driver has staged the whole source.

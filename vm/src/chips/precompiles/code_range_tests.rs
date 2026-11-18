@@ -45,7 +45,7 @@ use crate::{
         riscv::{record::EmulationRecord, syscalls::SyscallCode},
         stdin::EmulatorStdin,
     },
-    machine::{chip::ChipBehavior, debug_folder::DebugConstraintFolder, septic::SepticDigest},
+    machine::{chip::ChipBehavior, debug_folder::DebugConstraintFolder},
 };
 use core::ops::Range;
 use num::BigUint;
@@ -123,7 +123,6 @@ where
     let mut folder = DebugConstraintFolder::<F, EF> {
         preprocessed: RowWindow::from_two_rows(&dummy, &dummy),
         main: RowWindow::from_two_rows(row, row),
-        global_cumulative_sum: SepticDigest::<F>::zero(),
         is_first_row: F::ZERO,
         is_last_row: F::ZERO,
         is_transition: F::ONE,

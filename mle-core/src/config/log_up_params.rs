@@ -67,6 +67,7 @@ pub fn log_up_security_params_koala_bear_128_bits(
         max_interaction_count,
         log_max_message_length,
         pow_bits,
+        challenge_mode: Default::default(),
     }
 }
 

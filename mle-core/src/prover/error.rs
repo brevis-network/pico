@@ -42,6 +42,12 @@ pub enum LogupZerocheckError {
     #[error("fractional_sumcheck: non-zero root sum in assert_zero mode")]
     NonZeroRootSum,
     #[error(
+        "external LogUp challenges must be supplied exactly when the key is in the external challenge mode"
+    )]
+    LogUpChallengeModeMismatch,
+    #[error("a proof in the external LogUp challenge mode has no interactions")]
+    ExternalModeWithoutInteractions,
+    #[error(
         "LogupZerocheckColMajor::new: preprocessed trace index {index} out of bounds for width {width}"
     )]
     PreprocessedIndexOutOfBounds { index: usize, width: usize },

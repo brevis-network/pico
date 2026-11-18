@@ -20,15 +20,17 @@
 //! whitelist mode its circuit also checks the root's key against the whitelist. The embed proof
 //! asserts "there exists a valid child with these public values, of the child layout baked into
 //! this program", and in whitelist mode checks the child's key against the whitelist in-circuit.
-//! That layout is the compress proof's, and the compress key is the one whitelist leaf with it: a
+//! That layout is the compress proof's, and the compress key is the one whitelist leaf with it,
+//! on two counts. The program bakes the compress row's lean pre-hash and hashes the child's leaf
+//! over it, and no other leaf has that pre-hash: a key of another row is no member here. And a
 //! child verifies under the baked layout only with a merged-preprocessed commitment that is a
-//! Merkle root over that layout's RS domain, and every other leaf's commitment is built over the
-//! recursion preset's domain, a different Merkle depth, so opening one here would take a hash
-//! collision. In whitelist mode the two therefore compose to "there exists a valid combine root
-//! with these public values". With vk_verification off they do not: the child's commitment is not
-//! pinned (the BINDING CONTRACT in `lowering.rs`), and dev mode is for testing. The public values
-//! pass down unchanged, so the host acceptance checks are literally the combine root's checks —
-//! [`check_complete_root_public_values`], shared, not copied.
+//! Merkle root over that layout's RS domain, while every other leaf's commitment is built over
+//! the recursion preset's domain, a different Merkle depth, so opening one here would take a
+//! hash collision. In whitelist mode the two therefore compose to "there exists a valid combine
+//! root with these public values". With vk_verification off they do not: the child's commitment
+//! is not pinned (the BINDING CONTRACT in `lowering.rs`), and dev mode is for testing. The public
+//! values pass down unchanged, so the host acceptance checks are literally the combine root's
+//! checks — [`check_complete_root_public_values`], shared, not copied.
 //!
 //! # The child is checked to be a compress proof
 //!

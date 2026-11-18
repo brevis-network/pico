@@ -33,9 +33,8 @@ pub struct Poseidon2PreprocessedValueCols<T: Copy> {
 /*
 Main columns
 
-The riscv wrapper's rate-8 layout (`RiscvPoseidon2Cols` / `RiscvPoseidon2ValueCols`) lives in
-`chips::chips::riscv_poseidon2::columns`; the full-width `Poseidon2ValueCols` below is shared by the
-recursion Poseidon2 chips and the riscv Poseidon2 precompile.
+The full-width `Poseidon2ValueCols` below is shared by the recursion Poseidon2 chips and the riscv
+Poseidon2 precompile.
 */
 
 pub const NUM_POSEIDON2_COLS<Config: Poseidon2Config>: usize =

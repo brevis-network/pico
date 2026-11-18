@@ -184,6 +184,14 @@ impl<P, EmbedP> ProofTree<P, EmbedP> {
         }
     }
 
+    /// The proof of the one proved node, when the tree has collapsed to exactly that.
+    pub fn single_proved(&self) -> Option<IndexedProof<P>> {
+        if self.tree.len() != 1 {
+            return None;
+        }
+        self.tree.values().next().and_then(ProofNode::proof)
+    }
+
     pub fn complete(&self, done_until_combine: bool) -> bool {
         if !done_until_combine {
             // wait for embed when this flag is false

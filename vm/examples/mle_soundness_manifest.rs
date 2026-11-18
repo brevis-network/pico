@@ -8,22 +8,30 @@
 //! Two key sets, one per whitelist mode:
 //!
 //!   dev        whitelist off: natural heights, the way `test_mle_e2e` runs by default. The riscv
-//!              key, the convert key of each riscv record, the combine root, the compress key and
-//!              a deferred node over the root, and the embed key over the compress proof. Outside
-//!              the whitelist a recursion key is keyed to the heights of the proof it verifies, so
-//!              fib-10 is proved through the combine root -- its two records make a one-node tree
-//!              -- and on to the compress proof (a few seconds), since embed's key is keyed to the
-//!              compress proof's heights; the deferred node is keygen'd over the root's
-//!              layout, not proved.
+//!              key, the convert key of each riscv record, the keys of the global LogUp's image
+//!              node and group node, the three combine keys of the tree (the node over the
+//!              global LogUp's nodes, the node over the convert leaves, the root over the two),
+//!              the compress key and a deferred node over the root, and the embed key over the
+//!              compress proof. Outside the whitelist a recursion key is keyed to the heights of
+//!              the proof it verifies, so fib-10 is proved through the combine root -- its two
+//!              records make one group -- and on to the compress proof (a few seconds), since
+//!              embed's key is keyed to the compress proof's heights; the deferred node is
+//!              keygen'd over the root's layout, not proved.
 //!   whitelist  bucketed shapes, the keys a whitelisted deployment proves with. The riscv key, one
 //!              convert key per convert ladder row (the first whitelist shape that pads to it; the
-//!              whitelist holds one per riscv shape, too many to keygen here), every standard
-//!              combine node over the child kinds C0..C2 and B, the deferred and compress nodes
-//!              over the B child, and the embed node over the compress proof's layout
+//!              whitelist holds one per riscv shape, too many to keygen here), the global
+//!              LogUp's image and group nodes, every standard combine node over the child kinds
+//!              C0..C2, G and B, the deferred and compress nodes over the B child, and the embed
+//!              node over the compress proof's layout
 //!              (`compress_proof_layout`). Nothing is proved: under the whitelist a key is a
 //!              function of its shape. Each of its recursion keys records whether the shipped
 //!              whitelist holds it; embed is scored but is no member: its key is BN254-hashed, so
 //!              it has no KoalaBear identity to be a leaf, and no apex verifies an embed proof.
+//!
+//! The group machines of the global LogUp (`machine: "group"`, one key per group size) depend on
+//! the riscv operating point alone, so they are written once, with `mode: "any"`. A group proof
+//! is in the external challenge mode: its row has no `logup_bits`, and the round it leaves out is
+//! the block's, scored once in the header's `global_logup` with the inputs it rests on.
 //!
 //! `MLE_SOUNDNESS_MANIFEST_RISCV_ONLY=1` writes a riscv-only manifest: both sets stop after the riscv
 //! key, `proof_shapes` holds riscv only, and the header lists the machines not generated (a
@@ -39,13 +47,15 @@
 //! shipped whitelist must load, since membership is recorded against it.
 //!
 //! It also records, per machine, the shapes a whitelist-mode proof takes at that layer
-//! (`proof_shapes`), enumerated over each riscv shape, each convert ladder row, each combine node,
-//! the deferred node, and compress and embed at their rows: `shapes`, the number of distinct proof
+//! (`proof_shapes`), enumerated over each riscv shape, each convert ladder row, the image and
+//! group nodes, each combine node, the deferred node, and compress and embed at their rows:
+//! `shapes`, the number of distinct proof
 //! shapes; `max`, each per-proof shape input soundcalc scores at its largest over them (present
 //! AIRs, constraints and interactions of a present AIR, present columns, tallest trace, stacked
 //! width), unlike a row's `shape`, which counts every AIR of the key; and `largest`, the shape and
 //! wire size of the largest proof (`pico_mle_core::protocol::proof_size`), named after the first
-//! enumerated shape that gives it. Nothing is proved: a whitelist-mode proof's heights are its
+//! enumerated shape that gives it, with `multiproof_bytes`, its expected size in the multiproof
+//! form (`pico_mle_core::protocol::multiproof`, the v5 compress envelope's body). Nothing is proved: a whitelist-mode proof's heights are its
 //! shape's. These are what EF's soundcalc scores Pico's soundness and proof sizes from.
 //!
 //! It also records the on-chain test keys (`contracts/test/dev/manifest.json`): the wrap circuit's
@@ -78,6 +88,8 @@ use pico_mle_core::{
         soundness::{SoundnessCalculator, VkShape, DEGREE_BOUND},
         StarkProtocolConfig,
     },
+    global_logup::{self, GroupMachines},
+    interaction::LogUpChallengeMode,
     keygen::types::MultiStarkVerifyingKey,
     protocol::{codec::EncodableConfig, proof_size::ProofShape},
     StarkEngine, SystemParams,
@@ -96,6 +108,7 @@ use pico_vm::{
             deferred::DeferredMachine,
             embed::{EmbedMachine, EmbedSc},
             exe::RiscvVmVk,
+            global_logup_nodes::GlobalLogUpNodeMachine,
             recursion::{
                 compress_proof_layout, extract_recursion_vk_layout, recursion_natural_rows,
                 recursion_tier_log_heights, select_convert_row, Engine,
@@ -119,6 +132,13 @@ const SHIPPED_WHITELIST: &str = "vm/src/mle/shape_vk_bins/mle_vk_map_kb.bin";
 const RISCV_ONLY_REASON: &str =
     "riscv-only manifest (MLE_SOUNDNESS_MANIFEST_RISCV_ONLY=1): only the \
                                  riscv keys are generated";
+const GLOBAL_LOGUP_NOTE: &str = "the alpha/beta round of a block's global LogUp, which the group \
+                                 proofs share and none of them contains: scored under the group \
+                                 machines' parameters as a proof's own LogUp round is. The \
+                                 tree's root bounds the real rows of each direction below the \
+                                 field's order (the count, in units of count_unit_rows, is at \
+                                 most max_count), and a table is opened under a first WHIR \
+                                 round within the unique-decoding radius";
 const ONCHAIN_TEST_KEYS: &str = "contracts/test/dev/manifest.json";
 const ONCHAIN_NOTE: &str = "test keys from a single-process Groth16 setup (contracts/README.md); \
                             a deployment needs a setup ceremony";
@@ -158,11 +178,12 @@ struct LayerShapes {
     num_trace_columns: usize,
     max_log_height: usize,
     stacked_width: usize,
-    largest: Option<(String, usize, ProofShape)>,
+    /// `(name, bytes, expected multiproof bytes, shape)`.
+    largest: Option<(String, usize, usize, ProofShape)>,
 }
 
 impl LayerShapes {
-    fn add(&mut self, name: String, shape: ProofShape, bytes: usize) {
+    fn add(&mut self, name: String, shape: ProofShape, bytes: usize, multiproof_bytes: usize) {
         self.num_airs_present = self.num_airs_present.max(shape.num_airs_present);
         self.max_constraints_per_air = self
             .max_constraints_per_air
@@ -173,8 +194,8 @@ impl LayerShapes {
         self.num_trace_columns = self.num_trace_columns.max(shape.num_trace_columns);
         self.max_log_height = self.max_log_height.max(shape.max_log_height);
         self.stacked_width = self.stacked_width.max(shape.stacked_width());
-        if self.largest.as_ref().is_none_or(|(_, b, _)| bytes > *b) {
-            self.largest = Some((name, bytes, shape.clone()));
+        if self.largest.as_ref().is_none_or(|(_, b, _, _)| bytes > *b) {
+            self.largest = Some((name, bytes, multiproof_bytes, shape.clone()));
         }
         self.shapes.insert(shape);
     }
@@ -189,12 +210,14 @@ impl LayerShapes {
         let shape = ProofShape::from_heights(&vk.inner, &recursion_tier_log_heights(tier))
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         let bytes = shape.encoded_len::<SC>(&vk.inner.params);
-        self.add(name, shape, bytes);
+        let multiproof_bytes = shape.expected_multiproof_len::<SC>(&vk.inner.params);
+        self.add(name, shape, bytes, multiproof_bytes);
     }
 
     /// One field per line, as a row's.
     fn json(&self) -> String {
-        let (name, bytes, shape) = self.largest.as_ref().expect("a machine with no shapes");
+        let (name, bytes, multiproof_bytes, shape) =
+            self.largest.as_ref().expect("a machine with no shapes");
         let max = object(&[
             ("num_airs_present", j(self.num_airs_present)),
             ("max_constraints_per_air", j(self.max_constraints_per_air)),
@@ -203,7 +226,12 @@ impl LayerShapes {
             ("max_log_height", j(self.max_log_height)),
             ("stacked_width", j(self.stacked_width)),
         ]);
-        let largest = object(&[("name", j(name)), ("bytes", j(bytes)), ("shape", j(shape))]);
+        let largest = object(&[
+            ("name", j(name)),
+            ("bytes", j(bytes)),
+            ("multiproof_bytes", j(multiproof_bytes)),
+            ("shape", j(shape)),
+        ]);
         format!(
             "{{\n      \"shapes\": {},\n      \"max\": {max},\n      \"largest\": {largest}\n    }}",
             self.shapes.len()
@@ -249,7 +277,14 @@ fn scored_row<SC: StarkProtocolConfig>(
     let shape = VkShape::from_vk(vk);
     let s = SoundnessCalculator::calculate_from_vk(vk);
     let p: &SystemParams = &vk.inner.params;
-    let bits = s.components();
+    // A proof in the external challenge mode has no LogUp round of its own: the round is the
+    // block's, written once in the header.
+    let external = p.logup.challenge_mode == LogUpChallengeMode::External;
+    let bits: Vec<(&'static str, f64)> = s
+        .components()
+        .into_iter()
+        .filter(|(name, _)| !(external && *name == "logup_bits"))
+        .collect();
     let whir = s.whir_details.components();
     // JSON has no infinity: serde_json would write `null`, which the test cannot read back as bits.
     for (name, v) in bits.iter().chain(whir.iter()) {
@@ -280,7 +315,15 @@ fn scored_row<SC: StarkProtocolConfig>(
             ]),
         ),
         ("params", j(p)),
-        ("soundness", object(&bits.map(|(name, v)| (name, j(v))))),
+        (
+            "soundness",
+            object(
+                &bits
+                    .iter()
+                    .map(|&(name, v)| (name, j(v)))
+                    .collect::<Vec<_>>(),
+            ),
+        ),
         ("whir_details", object(&whir.map(|(name, v)| (name, j(v))))),
     ]);
     out
@@ -390,10 +433,53 @@ fn main() {
     )
     .expect("emulation failed")
     .records;
-    let (riscv_vk, riscv_proofs) = riscv::prove_riscv(program.clone(), &records, h, false)
-        .expect("riscv prove")
-        .into_parts();
+    let riscv::RiscvProof {
+        vk: riscv_vk,
+        chunk_proofs: riscv_proofs,
+        global: riscv_global,
+    } = riscv::prove_riscv(program.clone(), &records, h, false).expect("riscv prove");
     rows.push(row("riscv", "dev", format!("fib-{FIB_N}"), &riscv_vk, None));
+
+    // The group machines of the riscv operating point: a key per group size, the same in both
+    // sets. The round their proofs leave out is the block's.
+    let riscv_params = riscv_vk.inner.params.clone();
+    let group_machines = GroupMachines::new(&riscv_params);
+    for tables in 1..=global_logup::MAX_GROUP_LEN {
+        let vk = group_machines.vk(tables).expect("a key per group size");
+        rows.push(row(
+            "group",
+            "any",
+            format!("group proof over {tables} table(s)"),
+            vk,
+            None,
+        ));
+    }
+    let group_params = group_machines.config().params();
+    let global_logup = object(&[
+        (
+            "bits",
+            j(SoundnessCalculator::global_logup_bits_for::<Sc>(
+                group_params,
+            )),
+        ),
+        ("riscv_log_stacked_height", j(h)),
+        (
+            "max_interaction_count",
+            j(group_params.logup.max_interaction_count),
+        ),
+        (
+            "log_max_message_length",
+            j(group_params.logup.log_max_message_length),
+        ),
+        ("pow_bits", j(group_params.logup.pow_bits)),
+        (
+            "first_whir_round_within_unique_decoding",
+            j(group_params.first_whir_round_within_unique_decoding()),
+        ),
+        ("count_unit_rows", j(1u64 << global_logup::LOG_COUNT_UNIT)),
+        ("max_count", j(global_logup::MAX_COUNT)),
+        ("note", j(GLOBAL_LOGUP_NOTE)),
+    ]);
 
     if !riscv_only {
         let vm_vk = RiscvVmVk::from_program_and_vk(&program, &riscv_vk);
@@ -429,22 +515,83 @@ fn main() {
             ));
         }
 
-        let n_children = children.len();
+        // The global LogUp's nodes, which lead the tree: the image node, then the group nodes.
+        let mut global_logup_nodes = GlobalLogUpNodeMachine::new(
+            recursion_params_with_128_bits_security(),
+            &riscv_params,
+            false,
+        );
+        let nodes = global_logup_nodes
+            .prove(
+                &vm_vk,
+                &riscv_proofs,
+                &riscv_global,
+                [Default::default(); pico_vm::primitives::consts::DIGEST_SIZE],
+            )
+            .expect("global LogUp nodes prove");
+        assert_eq!(
+            (nodes.len(), riscv_global.group_proofs.len()),
+            (2, 1),
+            "the dev block has more than one group; give each group node's key a row"
+        );
+        rows.push(row(
+            "image_node",
+            "dev",
+            "the global LogUp's image node".to_string(),
+            &nodes[0].1,
+            None,
+        ));
+        rows.push(row(
+            "group_node",
+            "dev",
+            format!(
+                "the global LogUp's node over a group of {} tables",
+                riscv_global.group_proofs[0].trace_vdata.len()
+            ),
+            &nodes[1].1,
+            None,
+        ));
+
+        // The tree `prove_tree` builds over the four leaves, a node at a time, so that each of
+        // its keys gets a row.
+        let (n_nodes, n_children) = (nodes.len(), children.len());
         let mut combine = CombineMachine::new(
             recursion_params_with_128_bits_security(),
             vm_vk.clone(),
             false,
         );
-        let root = combine.prove_tree(children).expect("combine prove");
+        let over_nodes = combine
+            .prove_partial_tree(nodes)
+            .expect("combine prove over the global LogUp's nodes");
+        let over_chunks = combine
+            .prove_partial_tree(children)
+            .expect("combine prove over the convert leaves");
+        rows.push(row(
+            "combine",
+            "dev",
+            format!("non-root node over the global LogUp's {n_nodes} nodes"),
+            &over_nodes.1,
+            None,
+        ));
+        rows.push(row(
+            "combine",
+            "dev",
+            format!("non-root node over {n_children} convert children"),
+            &over_chunks.1,
+            None,
+        ));
+        let root = combine
+            .prove_tree(vec![over_nodes, over_chunks])
+            .expect("combine prove");
         assert_eq!(
             combine.num_distinct_shapes(),
-            1,
-            "the dev tree keyed more than its root; give the other nodes rows"
+            3,
+            "the dev tree keyed other nodes than the three with rows"
         );
         rows.push(row(
             "combine",
             "dev",
-            format!("root over {n_children} convert children"),
+            "root over the two nodes".to_string(),
             &root.1,
             None,
         ));
@@ -510,191 +657,260 @@ fn main() {
 
     // Whitelist set: keygen only.
     let t1 = Instant::now();
-    let shipped = MleVkMap::try_load_bin(SHIPPED_WHITELIST)
-        .unwrap_or_else(|e| panic!("cannot load the shipped whitelist `{SHIPPED_WHITELIST}`: {e}"));
-    let wl_riscv_vk = whitelist_riscv_vk(program.clone()).unwrap_or_else(|e| panic!("{e}"));
-    assert_eq!(wl_riscv_vk.inner.params.log_stacked_height(), h);
-    rows.push(row(
-        "riscv",
-        "whitelist",
-        "bucketed program table".to_string(),
-        &wl_riscv_vk,
-        None,
-    ));
-    // Every riscv shape the whitelist admits, at the heights its convert key bakes.
-    let shapes = mle_riscv_shapes();
-    let mut proof_shapes: Vec<(&str, LayerShapes)> = Vec::new();
-    let mut riscv_shapes = LayerShapes::default();
-    for (label, shape) in &shapes {
-        let heights = synthesize_riscv_child_heights(&wl_riscv_vk, shape);
-        let shape = ProofShape::from_heights(&wl_riscv_vk.inner, &heights)
-            .unwrap_or_else(|e| panic!("riscv shape `{label}`: {e}"));
-        let bytes = shape.encoded_len::<Sc>(&wl_riscv_vk.inner.params);
-        riscv_shapes.add(label.clone(), shape, bytes);
-    }
-    proof_shapes.push(("riscv", riscv_shapes));
-
-    if !riscv_only {
-        // A convert program's row follows from its natural heights, so the first shape of each row is
-        // found by building programs, not keys. The core family leads the enumeration and reaches the
-        // last row with its catch-all.
-        let rows_n = MLE_RECURSION_CONVERT_LADDER.len();
-        let mut first_on_row: Vec<Option<usize>> = vec![None; rows_n];
-        for (i, (_, shape)) in shapes.iter().enumerate() {
-            let program = ConvertVerifierCircuit::build_verify_program(&ConvertProgramInput {
-                vk: synthesized_convert_layout(&wl_riscv_vk, shape),
-                vk_verification: true,
-            });
-            first_on_row[select_convert_row(&recursion_natural_rows(&program))].get_or_insert(i);
-            if first_on_row.iter().all(Option::is_some) {
-                break;
-            }
+    let (apex_root, apex_riscv, proof_shapes) = {
+        let shipped = MleVkMap::try_load_bin(SHIPPED_WHITELIST).unwrap_or_else(|e| {
+            panic!("cannot load the shipped whitelist `{SHIPPED_WHITELIST}`: {e}")
+        });
+        let wl_riscv_vk = whitelist_riscv_vk(program.clone()).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(wl_riscv_vk.inner.params.log_stacked_height(), h);
+        rows.push(row(
+            "riscv",
+            "whitelist",
+            "bucketed program table".to_string(),
+            &wl_riscv_vk,
+            None,
+        ));
+        // Every riscv shape the whitelist admits, at the heights its convert key bakes.
+        let shapes = mle_riscv_shapes();
+        let mut proof_shapes: Vec<(&str, LayerShapes)> = Vec::new();
+        let mut riscv_shapes = LayerShapes::default();
+        for (label, shape) in &shapes {
+            let heights = synthesize_riscv_child_heights(&wl_riscv_vk, shape);
+            let shape = ProofShape::from_heights(&wl_riscv_vk.inner, &heights)
+                .unwrap_or_else(|e| panic!("riscv shape `{label}`: {e}"));
+            let bytes = shape.encoded_len::<Sc>(&wl_riscv_vk.inner.params);
+            let multiproof_bytes = shape.expected_multiproof_len::<Sc>(&wl_riscv_vk.inner.params);
+            riscv_shapes.add(label.clone(), shape, bytes, multiproof_bytes);
         }
-        let engine: Engine = StarkEngine::new(recursion_params_with_128_bits_security());
-        let mut convert_vk_row0 = None;
-        let mut convert_shapes = LayerShapes::default();
-        for (r, first) in first_on_row.iter().enumerate() {
-            let i = first.unwrap_or_else(|| panic!("no whitelist shape pads to convert row {r}"));
-            let (label, shape) = &shapes[i];
-            let vk = whitelist_convert_vk(&engine, &wl_riscv_vk, label, shape)
-                .unwrap_or_else(|e| panic!("{e}"));
-            convert_shapes.add_tier::<Sc>(
-                format!("ladder row {r}"),
-                &vk,
-                RecursionTier::Convert(r),
-            );
-            rows.push(row(
-                "convert",
-                "whitelist",
-                format!("ladder row {r} (C{r}), shape `{label}`"),
-                &vk,
-                Some(&shipped),
-            ));
-            convert_vk_row0.get_or_insert(vk);
-        }
-        let convert_vk_row0 = convert_vk_row0.expect("the convert ladder is empty");
-        proof_shapes.push(("convert", convert_shapes));
+        proof_shapes.push(("riscv", riscv_shapes));
 
-        let wl_vm_vk = RiscvVmVk::from_program_and_vk(&program, &wl_riscv_vk);
-        let mut combine = CombineMachine::new(
-            recursion_params_with_128_bits_security(),
-            wl_vm_vk.clone(),
-            true,
-        );
-        let combine_vks = combine
-            .preregister_standard_shapes(&convert_vk_row0)
-            .unwrap_or_else(|e| panic!("{e}"));
-        // `preregister_standard_shapes`' order, which the whitelist's leaf order also rests on: the
-        // ordered pairs over the child kinds (ladder rows, then the combine tier) non-root and then
-        // root, then the single-child roots.
-        let kinds: Vec<String> = (0..rows_n)
-            .map(|r| format!("C{r}"))
-            .chain(["B".to_string()])
-            .collect();
-        let mut roles = Vec::new();
-        for complete in [false, true] {
-            let node = if complete { "root" } else { "non-root node" };
-            for left in &kinds {
-                for right in &kinds {
-                    roles.push(format!("{node} over [{left}, {right}]"));
+        if !riscv_only {
+            // A convert program's row follows from its natural heights, so the first shape of each row is
+            // found by building programs, not keys. The core family leads the enumeration and reaches the
+            // last row with its catch-all.
+            let rows_n = MLE_RECURSION_CONVERT_LADDER.len();
+            let mut first_on_row: Vec<Option<usize>> = vec![None; rows_n];
+            for (i, (_, shape)) in shapes.iter().enumerate() {
+                let program = ConvertVerifierCircuit::build_verify_program(&ConvertProgramInput {
+                    vk: synthesized_convert_layout(&wl_riscv_vk, shape),
+                    vk_verification: true,
+                });
+                first_on_row[select_convert_row(&recursion_natural_rows(&program))]
+                    .get_or_insert(i);
+                if first_on_row.iter().all(Option::is_some) {
+                    break;
                 }
             }
-        }
-        roles.extend(kinds.iter().map(|k| format!("root over [{k}]")));
-        assert_eq!(roles.len(), combine_vks.len());
-        let mut combine_shapes = LayerShapes::default();
-        for (role, vk) in roles.into_iter().zip(&combine_vks) {
-            combine_shapes.add_tier::<Sc>(role.clone(), vk, RecursionTier::Combine);
-            rows.push(row("combine", "whitelist", role, vk, Some(&shipped)));
-        }
-        proof_shapes.push(("combine", combine_shapes));
+            let engine: Engine = StarkEngine::new(recursion_params_with_128_bits_security());
+            let mut convert_vk_row0 = None;
+            let mut convert_shapes = LayerShapes::default();
+            for (r, first) in first_on_row.iter().enumerate() {
+                let i =
+                    first.unwrap_or_else(|| panic!("no whitelist shape pads to convert row {r}"));
+                let (label, shape) = &shapes[i];
+                let vk = whitelist_convert_vk(&engine, &wl_riscv_vk, label, shape)
+                    .unwrap_or_else(|e| panic!("{e}"));
+                convert_shapes.add_tier::<Sc>(
+                    format!("ladder row {r}"),
+                    &vk,
+                    RecursionTier::Convert(r),
+                );
+                rows.push(row(
+                    "convert",
+                    "whitelist",
+                    format!("ladder row {r} (C{r}), shape `{label}`"),
+                    &vk,
+                    Some(&shipped),
+                ));
+                convert_vk_row0.get_or_insert(vk);
+            }
+            let convert_vk_row0 = convert_vk_row0.expect("the convert ladder is empty");
+            proof_shapes.push(("convert", convert_shapes));
 
-        let mut deferred = DeferredMachine::new(
-            recursion_params_with_128_bits_security(),
-            wl_vm_vk.clone(),
-            true,
-        );
-        let combine_tier = combine
-            .combine_tier_child_layout(&convert_vk_row0)
+            // The global LogUp's nodes, keygen'd in the whitelist's leaf order (a group node per
+            // group size, then an image node per tier of the image table). An image node pads
+            // to the first convert row, a group node to the group nodes' row.
+            let node_vks = GlobalLogUpNodeMachine::new(
+                recursion_params_with_128_bits_security(),
+                &wl_riscv_vk.inner.params,
+                true,
+            )
+            .preregister()
             .unwrap_or_else(|e| panic!("{e}"));
-        let deferred_vk = deferred
-            .preregister(&combine_tier)
-            .unwrap_or_else(|e| panic!("{e}"));
-        rows.push(row(
-            "deferred",
-            "whitelist",
-            "node over a combine-tier (B) child".to_string(),
-            &deferred_vk,
-            Some(&shipped),
-        ));
-        let mut deferred_shapes = LayerShapes::default();
-        deferred_shapes.add_tier::<Sc>("node".to_string(), &deferred_vk, RecursionTier::Combine);
-        proof_shapes.push(("deferred", deferred_shapes));
-        // The compress node over the same child: the whitelist's last leaf.
-        let mut compress = CompressMachine::new(
-            compress_params_with_128_bits_security(),
-            wl_vm_vk.clone(),
-            true,
-        );
-        let compress_vk = compress
-            .preregister(&combine_tier)
-            .unwrap_or_else(|e| panic!("{e}"));
-        // The embed node over the compress proof's layout: scored, no whitelist member (its key
-        // is BN254-hashed and no apex verifies an embed proof), so no membership field.
-        let mut embed = EmbedMachine::new(embed_params_with_128_bits_security(), wl_vm_vk, true);
-        let embed_vk = embed
-            .preregister(&compress_proof_layout(&compress_vk))
-            .unwrap_or_else(|e| panic!("{e}"));
-        let embed_pre_hash: Vec<String> = embed_vk.pre_hash.iter().map(|x| x.to_string()).collect();
-        let embed_commit: Option<Vec<String>> = embed_vk
-            .inner
-            .merged_preprocessed_commit
-            .map(|c| c.iter().map(|x| x.to_string()).collect());
-        let mut embed_identity = vec![("vk_pre_hash", list(&embed_pre_hash))];
-        if let Some(commit) = embed_commit {
-            embed_identity.push(("merged_preprocessed_commit", list(&commit)));
+            let (group_vks, image_vks) = node_vks.split_at(global_logup::MAX_GROUP_LEN);
+            let image_tiers = global_logup::image_log_heights(&wl_riscv_vk.inner.params);
+            assert_eq!(image_vks.len(), image_tiers.clone().count());
+            let mut image_shapes = LayerShapes::default();
+            for (tier, vk) in image_tiers.zip(image_vks) {
+                image_shapes.add_tier::<Sc>(
+                    format!("image table of 2^{tier} rows"),
+                    vk,
+                    RecursionTier::Convert(0),
+                );
+                rows.push(row(
+                    "image_node",
+                    "whitelist",
+                    format!("the global LogUp's image node, image table of 2^{tier} rows"),
+                    vk,
+                    Some(&shipped),
+                ));
+            }
+            proof_shapes.push(("image_node", image_shapes));
+            let mut group_shapes = LayerShapes::default();
+            for (tables, vk) in (1..).zip(group_vks) {
+                group_shapes.add_tier::<Sc>(
+                    format!("group of {tables} table(s)"),
+                    vk,
+                    RecursionTier::GroupNode,
+                );
+                rows.push(row(
+                    "group_node",
+                    "whitelist",
+                    format!("the global LogUp's node over a group of {tables} table(s)"),
+                    vk,
+                    Some(&shipped),
+                ));
+            }
+            proof_shapes.push(("group_node", group_shapes));
+
+            let wl_vm_vk = RiscvVmVk::from_program_and_vk(&program, &wl_riscv_vk);
+            let mut combine = CombineMachine::new(
+                recursion_params_with_128_bits_security(),
+                wl_vm_vk.clone(),
+                true,
+            );
+            let combine_vks = combine
+                .preregister_standard_shapes(&convert_vk_row0)
+                .unwrap_or_else(|e| panic!("{e}"));
+            // `preregister_standard_shapes`' order, which the whitelist's leaf order also rests on: the
+            // ordered pairs over the child kinds (ladder rows, the group nodes' row, the combine
+            // tier), non-root and then root.
+            let kinds: Vec<String> = (0..rows_n)
+                .map(|r| format!("C{r}"))
+                .chain(["G".to_string(), "B".to_string()])
+                .collect();
+            let mut roles = Vec::new();
+            for complete in [false, true] {
+                let node = if complete { "root" } else { "non-root node" };
+                for left in &kinds {
+                    for right in &kinds {
+                        roles.push(format!("{node} over [{left}, {right}]"));
+                    }
+                }
+            }
+            assert_eq!(roles.len(), combine_vks.len());
+            let mut combine_shapes = LayerShapes::default();
+            for (role, vk) in roles.into_iter().zip(&combine_vks) {
+                combine_shapes.add_tier::<Sc>(role.clone(), vk, RecursionTier::Combine);
+                rows.push(row("combine", "whitelist", role, vk, Some(&shipped)));
+            }
+            proof_shapes.push(("combine", combine_shapes));
+
+            let mut deferred = DeferredMachine::new(
+                recursion_params_with_128_bits_security(),
+                wl_vm_vk.clone(),
+                true,
+            );
+            let combine_tier = combine
+                .combine_tier_child_layout(&convert_vk_row0)
+                .unwrap_or_else(|e| panic!("{e}"));
+            let deferred_vk = deferred
+                .preregister(&combine_tier)
+                .unwrap_or_else(|e| panic!("{e}"));
+            rows.push(row(
+                "deferred",
+                "whitelist",
+                "node over a combine-tier (B) child".to_string(),
+                &deferred_vk,
+                Some(&shipped),
+            ));
+            let mut deferred_shapes = LayerShapes::default();
+            deferred_shapes.add_tier::<Sc>(
+                "node".to_string(),
+                &deferred_vk,
+                RecursionTier::Combine,
+            );
+            proof_shapes.push(("deferred", deferred_shapes));
+            // The compress node over the same child: the whitelist's last leaf.
+            let mut compress = CompressMachine::new(
+                compress_params_with_128_bits_security(),
+                wl_vm_vk.clone(),
+                true,
+            );
+            let compress_vk = compress
+                .preregister(&combine_tier)
+                .unwrap_or_else(|e| panic!("{e}"));
+            // The embed node over the compress proof's layout: scored, no whitelist member (its key
+            // is BN254-hashed and no apex verifies an embed proof), so no membership field.
+            let mut embed =
+                EmbedMachine::new(embed_params_with_128_bits_security(), wl_vm_vk, true);
+            let embed_vk = embed
+                .preregister(&compress_proof_layout(&compress_vk))
+                .unwrap_or_else(|e| panic!("{e}"));
+            let embed_pre_hash: Vec<String> =
+                embed_vk.pre_hash.iter().map(|x| x.to_string()).collect();
+            let embed_commit: Option<Vec<String>> = embed_vk
+                .inner
+                .merged_preprocessed_commit
+                .map(|c| c.iter().map(|x| x.to_string()).collect());
+            let mut embed_identity = vec![("vk_pre_hash", list(&embed_pre_hash))];
+            if let Some(commit) = embed_commit {
+                embed_identity.push(("merged_preprocessed_commit", list(&commit)));
+            }
+            rows.push(scored_row(
+                "embed",
+                "whitelist",
+                "node over the compress proof (compress-row layout)".to_string(),
+                &embed_vk,
+                embed_identity,
+            ));
+            rows.push(row(
+                "compress",
+                "whitelist",
+                "node over a combine-tier (B) child".to_string(),
+                &compress_vk,
+                Some(&shipped),
+            ));
+            let mut compress_shapes = LayerShapes::default();
+            compress_shapes.add_tier::<Sc>(
+                "node".to_string(),
+                &compress_vk,
+                RecursionTier::Compress,
+            );
+            proof_shapes.push(("compress", compress_shapes));
+            let mut embed_shapes = LayerShapes::default();
+            embed_shapes.add_tier::<EmbedSc>("node".to_string(), &embed_vk, RecursionTier::Embed);
+            proof_shapes.push(("embed", embed_shapes));
         }
-        rows.push(scored_row(
-            "embed",
-            "whitelist",
-            "node over the compress proof (compress-row layout)".to_string(),
-            &embed_vk,
-            embed_identity,
-        ));
-        rows.push(row(
-            "compress",
-            "whitelist",
-            "node over a combine-tier (B) child".to_string(),
-            &compress_vk,
-            Some(&shipped),
-        ));
-        let mut compress_shapes = LayerShapes::default();
-        compress_shapes.add_tier::<Sc>("node".to_string(), &compress_vk, RecursionTier::Compress);
-        proof_shapes.push(("compress", compress_shapes));
-        let mut embed_shapes = LayerShapes::default();
-        embed_shapes.add_tier::<EmbedSc>("node".to_string(), &embed_vk, RecursionTier::Embed);
-        proof_shapes.push(("embed", embed_shapes));
-    }
+        (
+            shipped.root().map(|f| f.as_canonical_u32()),
+            wl_riscv_vk.pre_hash.map(|f| f.as_canonical_u32()),
+            proof_shapes,
+        )
+    };
     info!("whitelist keys: {:.0} s", t1.elapsed().as_secs_f64());
 
     let mut not_generated = Vec::new();
-    if riscv_only {
-        for (machine, mode) in [
-            ("convert", "dev"),
-            ("combine", "dev"),
-            ("compress", "dev"),
-            ("embed", "dev"),
-            ("deferred", "dev"),
-            ("convert", "whitelist"),
-            ("combine", "whitelist"),
-            ("deferred", "whitelist"),
-            ("embed", "whitelist"),
-            ("compress", "whitelist"),
-        ] {
+    let recursion_machines = [
+        "convert",
+        "image_node",
+        "group_node",
+        "combine",
+        "compress",
+        "embed",
+        "deferred",
+    ];
+    let modes: &[(&str, &str)] = if riscv_only {
+        &[("dev", RISCV_ONLY_REASON), ("whitelist", RISCV_ONLY_REASON)]
+    } else {
+        &[]
+    };
+    for (mode, reason) in modes {
+        for machine in recursion_machines {
             not_generated.push(object(&[
                 ("machine", j(machine)),
                 ("mode", j(mode)),
-                ("reason", j(RISCV_ONLY_REASON)),
+                ("reason", j(reason)),
             ]));
         }
     }
@@ -710,18 +926,13 @@ fn main() {
         ("dirty_paths", list(&dirty_paths)),
         ("calculator", j(DEGREE_BOUND)),
         ("program", j(format!("{FIB_ELF}, n = {FIB_N}"))),
+        ("global_logup", global_logup),
         ("shipped_whitelist", j(SHIPPED_WHITELIST)),
         (
             "apex",
             object(&[
-                (
-                    "vk_root",
-                    list(&shipped.root().map(|f| f.as_canonical_u32())),
-                ),
-                (
-                    "riscv_vk_pre_hash",
-                    list(&wl_riscv_vk.pre_hash.map(|f| f.as_canonical_u32())),
-                ),
+                ("vk_root", list(&apex_root)),
+                ("riscv_vk_pre_hash", list(&apex_riscv)),
             ]),
         ),
         // `onchain_test_keys.vk_root` is the root the Groth16 test keys were set up over

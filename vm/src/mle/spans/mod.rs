@@ -80,6 +80,9 @@ pub enum WorkKind {
     ProveRiscv,
     ProveConvert,
     ProveCombine,
+    /// A piece of the tree's prefix: a group proof of the global LogUp, one of its nodes, or a
+    /// step of the nodes' reduction.
+    ProveGlobalLogUp,
     /// Routing. Its `Busy` is negligible by construction; what matters is its `Wait`, which is
     /// head-of-line blocking on a full downstream lane.
     Dispatch,
@@ -99,7 +102,8 @@ impl WorkKind {
             WorkKind::Keygen
             | WorkKind::ProveRiscv
             | WorkKind::ProveConvert
-            | WorkKind::ProveCombine => true,
+            | WorkKind::ProveCombine
+            | WorkKind::ProveGlobalLogUp => true,
             WorkKind::PrepareRiscv
             | WorkKind::PrepareConvert
             | WorkKind::PrepareCombine
@@ -125,6 +129,7 @@ impl WorkKind {
             WorkKind::ProveRiscv => "prove-riscv",
             WorkKind::ProveConvert => "prove-convert",
             WorkKind::ProveCombine => "prove-combine",
+            WorkKind::ProveGlobalLogUp => "prove-global-logup",
             WorkKind::Dispatch => "dispatch",
             WorkKind::Unattributed => "-",
         }

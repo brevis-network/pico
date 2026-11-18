@@ -12,6 +12,8 @@
 //! - `refuse:<chunk>`: chunk `<chunk>` (1-based) is refused as if it selected the catch-all shape.
 //! - `slow-finalize:<ms>`: every run finalizes its emulation `<ms>` late, as a slow emulation
 //!   teardown does; this one fires on every run.
+//! - `global-row-limit:<count>`: a pipeline refuses a block whose real-row count for the global LogUp
+//!   passes `<count>`, as it refuses one over the limit itself; this one holds on every run.
 
 use std::{
     sync::{
@@ -56,6 +58,9 @@ enum Plan {
     SlowFinalize {
         ms: u64,
     },
+    GlobalRowLimit {
+        count: u64,
+    },
 }
 
 fn parse(value: &str) -> Option<Plan> {
@@ -83,6 +88,9 @@ fn parse(value: &str) -> Option<Plan> {
         ["slow-finalize", ms] => Some(Plan::SlowFinalize {
             ms: ms.parse().ok()?,
         }),
+        ["global-row-limit", count] => Some(Plan::GlobalRowLimit {
+            count: count.parse().ok()?,
+        }),
         _ => None,
     }
 }
@@ -92,7 +100,7 @@ pub fn validate() -> Result<(), String> {
     match std::env::var("MLE_INJECT_FAILURE") {
         Ok(value) if parse(&value).is_none() => Err(format!(
             "MLE_INJECT_FAILURE={value}: expected oom:<stage>:<n>, oom-text:<stage>:<n>, \
-             panic:<stage>:<n>, refuse:<chunk> or slow-finalize:<ms>"
+             panic:<stage>:<n>, refuse:<chunk>, slow-finalize:<ms> or global-row-limit:<count>"
         )),
         _ => Ok(()),
     }
@@ -163,6 +171,14 @@ pub fn finalize_delay() -> Option<Duration> {
     }
 }
 
+/// The real-row count the plan lets a block reach, in place of the global LogUp's limit.
+pub fn global_row_count_limit() -> Option<u64> {
+    match plan() {
+        Some(&Plan::GlobalRowLimit { count }) => Some(count),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,7 +222,18 @@ mod tests {
             parse("slow-finalize:500"),
             Some(Plan::SlowFinalize { ms: 500 })
         );
-        for bad in ["", "oom:prove", "oom:prove:0", "oom:nowhere:1", "refuse:x"] {
+        assert_eq!(
+            parse("global-row-limit:40"),
+            Some(Plan::GlobalRowLimit { count: 40 })
+        );
+        for bad in [
+            "",
+            "oom:prove",
+            "oom:prove:0",
+            "oom:nowhere:1",
+            "refuse:x",
+            "global-row-limit:-1",
+        ] {
             assert_eq!(parse(bad), None, "{bad}");
         }
     }

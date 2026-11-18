@@ -248,7 +248,8 @@ static POISONED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 
 /// Proves `program` on `stdin` to one complete whitelist-mode root on all visible cards, and
 /// verifies it with the apex before returning. One call at a time per process. A guest whose
-/// emulation fails, or with a chunk refused as [`super::GuestFailure::CatchAllShape`], returns
+/// emulation fails, with a chunk refused as [`super::GuestFailure::CatchAllShape`], or past the
+/// global LogUp's real-row limit ([`super::GuestFailure::TooManyGlobalRows`]), returns
 /// [`EmbedError::Guest`] and leaves the process able to prove; so does a run a card ran out of
 /// memory in, as [`EmbedError::OutOfMemory`], once the drain left every card healthy, no history
 /// slot held and the cards' pools where the run found them ([`recoverable`]). After any
@@ -269,6 +270,7 @@ pub fn prove(program: EmbeddedProgram, stdin: EmulatorStdin) -> Result<EmbeddedP
     }
     check_pinned_memory(&program)?;
     super::deferred_records_bound().map_err(EmbedError::BadSetting)?;
+    super::global_logup_group_len_setting().map_err(EmbedError::BadSetting)?;
     host_memory::host_mem_setting().map_err(EmbedError::BadSetting)?;
     pico_vm::mle::inject::validate().map_err(EmbedError::BadSetting)?;
     let gpus = init_memory_tier()?;

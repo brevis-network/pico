@@ -108,19 +108,28 @@ option_probe!(
 
 /// `PROVE_CONCURRENCY` is read only by a machine that was given no concurrency, and `vm`'s
 /// `an_explicit_concurrency_outranks_the_environment` pins that. What this crate owes is that it
-/// always gives one; the machine does not report its concurrency, so the call is checked where it
-/// is made.
+/// always gives one, to the RISC-V machine and to the two that prove the recursion proofs after
+/// it; the machines do not report their concurrency, so the calls are checked where they are made.
 #[test]
-fn the_prover_always_gives_its_machine_a_concurrency() {
-    let in_code = include_str!("../prover.rs")
+fn the_prover_always_gives_its_machines_a_concurrency() {
+    let code: Vec<&str> = include_str!("../prover.rs")
         .lines()
         .filter(|line| !line.trim_start().starts_with("//"))
-        .any(|line| line.contains(".with_concurrency(self.concurrency)"));
-    assert!(
-        in_code,
-        "ProverBuilder::build no longer hands RiscvMachine an explicit concurrency, so \
-         PROVE_CONCURRENCY decides it"
-    );
+        .collect();
+    for (call, machine) in [
+        (".with_concurrency(self.concurrency)", "RiscvMachine"),
+        (
+            "convert.set_concurrency(self.concurrency)",
+            "ConvertMachine",
+        ),
+        ("combine.set_concurrency(concurrency)", "CombineMachine"),
+    ] {
+        assert!(
+            code.iter().any(|line| line.contains(call)),
+            "the prover no longer hands {machine} an explicit concurrency, so PROVE_CONCURRENCY \
+             decides it"
+        );
+    }
 }
 
 /// `name=value` in a child, where `build` and `execute_chunked` must both refuse it by name while

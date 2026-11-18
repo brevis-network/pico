@@ -218,7 +218,10 @@ where
                 (*air_idx, device_ctx)
             })
             .collect();
-        ProvingContext::new(per_trace)
+        ProvingContext {
+            per_trace,
+            external_logup_challenges: ctx.external_logup_challenges,
+        }
     }
 
     // The methods above take the column-major host format; the three below mirror them for a
@@ -277,7 +280,10 @@ where
                 (*air_idx, device_trace_ctx)
             })
             .collect();
-        ProvingContext::new(per_trace)
+        ProvingContext {
+            per_trace,
+            external_logup_challenges: ctx.external_logup_challenges,
+        }
     }
 
     // ==================================================================================

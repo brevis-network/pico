@@ -1,6 +1,6 @@
-# MLE whitelist artifact mle_vk_map_kb.bin: 15944 convert VKs (one per riscv shape) + 36 combine node VKs + 1 deferred node VK + 1 compress node VK = 15982 leaves in a depth-15 Merkle tree,
-# built 2026-11-12 with mle_build_vk_map for the riscv machine whose whitelist-mode vk pre_hash is [1282648228, 1724902664, 1938391418, 1465797027, 1020534270, 1924892950, 781986852, 1108049257] (program table at 2^20).
+# MLE whitelist artifact mle_vk_map_kb.bin: 4413 convert VKs (one per riscv shape) + 50 combine node VKs + 22 global LogUp node VKs + 1 deferred node VK + 1 compress node VK = 4487 leaves in a depth-15 Merkle tree,
+# built 2026-11-17 with mle_build_vk_map for the riscv machine whose whitelist-mode vk pre_hash is [812107379, 592497681, 1541946928, 797752601, 1470313163, 1345961310, 544100383, 729138831] (program table at 2^20).
 # The digest is the shape config the artifact was built for and the root is the verifier's pinned constant; MleVkMap::load re-checks both, and the unit test
 # the_shipped_artifact_matches_this_binary fails when the code no longer matches this file. Rebuild it with the mle_build_vk_map example.
-config digest = [1343979770, 1890107179, 1930555284, 323015383, 1021599992, 25189371, 1488589186, 239627418]
-MLE_VK_ROOT="1110493705 1456808205 1908607925 951955400 1035012299 408051526 2022874829 1282892938"
+config digest = [1225390012, 1654907412, 595989163, 1061328927, 353127103, 1412329136, 299276759, 431620893]
+MLE_VK_ROOT="1069733122 1649987590 1377832549 1819086750 1742187025 1350165823 443186153 1847469094"

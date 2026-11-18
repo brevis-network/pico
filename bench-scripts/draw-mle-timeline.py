@@ -79,6 +79,7 @@ WORK_COLOR = {
     "prove-riscv": "#E45756",
     "prove-convert": "#F58518",
     "prove-combine": "#9D755D",
+    "prove-global-logup": "#EECA3B",
     "dispatch": "#7F7F7F",
     "-": "#BAB0AC",         # WorkKind::Unattributed
 }
@@ -97,7 +98,7 @@ CHUNK_ITEM_WORK = {
     "dispatch",
 }
 # Kinds that never carry an item, so no key space applies.
-ITEMLESS_WORK = {"keygen", "-"}
+ITEMLESS_WORK = {"keygen", "prove-global-logup", "-"}
 BATCH_ITEM_WORK = {"snapshot", "emulate", "emulate-recover", "sequence"}
 NODE_ITEM_WORK = {"prepare-combine", "prove-combine"}
 

@@ -37,8 +37,8 @@
 //! Negative-test hooks (env vars; each run MUST fail — a zero exit is a fail-open bug):
 //!   N1_INCOMPLETE=1   combine a strict prefix of the chunks under a complete root
 //!                     (fails at next_pc == 0; needs >= 3 chunks — use e.g. --n 3000000)
-//!   N1_BAD_GCS=1      bake a wrong global-cumulative-sum target (fails at GCS == E,
-//!                     isolating the cross-chunk closure; any chunk count)
+//!   N1_BAD_IMAGE=1    wrong TRUSTED memory image commitment (fails at the apex exe anchor;
+//!                     any chunk count)
 //!   N2_TAMPER_CHILD=1 corrupt one opened value of a convert child (in a release build witness
 //!                     generation goes through and the root's STARK verify rejects it on the
 //!                     in-circuit WHIR checks; with debug assertions the recursion runtime's
@@ -47,8 +47,12 @@
 //!   N4_WRONG_PROGRAM=1 wrong TRUSTED program commitment (fails at the apex exe anchor)
 //!   N5_BAD_PC_WITNESS=1 wrong PROVER-side pc_start witness (the chunk-1 convert's gated
 //!                     in-circuit assert start_pc == pc_start is unsatisfiable)
-//!   N6_BAD_GCS_WITNESS=1 wrong PROVER-side initial_gcs witness (the root's in-circuit GCS
-//!                     closure to the zero point is unsatisfiable)
+//!   N6_BAD_IMAGE_WITNESS=1 wrong PROVER-side image commitment witness in the convert leaves
+//!                     (their identity digest differs from the image node's, which opens the
+//!                     real image table: continuity is unsatisfiable)
+//!   N18_SKIP_GLOBAL_LOGUP=1 build the tree from the chunks' leaves alone, without the global
+//!                     LogUp's nodes (the root's chain closure is unsatisfiable: the chain
+//!                     starts at its initial value, which is no image node's output)
 //!   N7_BAD_VK_ROOT=1  hand a different whitelist than the tree was proven against (host-side,
 //!                     at `CombineMachine::verify`'s vk_root check; forces whitelist mode on)
 //!   N9_WRONG_PINNED_ROOT=1 pin a root that is not the whitelist's (the deployment constant
@@ -112,17 +116,15 @@ use pico_mle_core::{
 #[cfg(feature = "cuda")]
 use pico_vm::mle::machine::compress::GpuCompressMachine;
 use pico_vm::{
-    compiler::{
-        program::ProgramBehavior,
-        riscv::compiler::{Compiler, SourceType},
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
-    machine::{logger::setup_logger, septic::SepticDigest},
+    machine::logger::setup_logger,
     mle::machine::{
         combine::CombineMachine,
         compress::CompressMachine,
         convert::ConvertMachine,
         exe::RiscvVmVk,
+        global_logup_nodes::GlobalLogUpNodeMachine,
         recursion::Kb,
         riscv,
         vk_map::{vk_identity, MleVkMap},
@@ -223,7 +225,11 @@ fn main() {
         let engine: riscv::Engine =
             StarkEngine::new(riscv_params_with_128_bits_security(dumped_height));
         let airs = riscv::mle_riscv_air_refs(program.clone(), dumped_whitelist);
-        let (_, riscv_vk) = engine.keygen_with_app_prep(&airs, riscv::RISCV_APP_PREP_AIR_IDS);
+        let (_, riscv_vk) = engine.keygen_with_app_prep_and_required(
+            &airs,
+            riscv::RISCV_APP_PREP_AIR_IDS,
+            riscv::RISCV_REQUIRED_AIR_IDS,
+        );
         let trusted = RiscvVmVk::from_program_and_vk(&program, &riscv_vk);
         let mut combine = CombineMachine::new(
             recursion_params_with_128_bits_security(),
@@ -277,7 +283,11 @@ fn main() {
         let engine: riscv::Engine =
             StarkEngine::new(riscv_params_with_128_bits_security(dumped_height));
         let airs = riscv::mle_riscv_air_refs(program.clone(), dumped_whitelist);
-        let (_, riscv_vk) = engine.keygen_with_app_prep(&airs, riscv::RISCV_APP_PREP_AIR_IDS);
+        let (_, riscv_vk) = engine.keygen_with_app_prep_and_required(
+            &airs,
+            riscv::RISCV_APP_PREP_AIR_IDS,
+            riscv::RISCV_REQUIRED_AIR_IDS,
+        );
         let trusted = RiscvVmVk::from_program_and_vk(&program, &riscv_vk);
         let mut compress = CompressMachine::new(
             compress_params_with_128_bits_security(),
@@ -396,7 +406,6 @@ fn main() {
         vk_verification,
     )
     .expect("riscv prove failed");
-    let initial_gcs = program.initial_global_cumulative_sum();
     // Test convenience: the "trusted" pre-hash and program commitment are taken from the
     // bundle's own keygen (same trust stance for both; a real consumer supplies both from an
     // independent trusted source). The lean pre-hash covers machine+shape only, so the program
@@ -408,10 +417,15 @@ fn main() {
             riscv::air_id::PROGRAM,
             riscv::riscv_program_commit(&bundle.vk),
         )],
-        initial_gcs,
+        &riscv::ProgramIdentity::new(&program, &bundle.vk.inner.params).expect("the image fits"),
     )
     .expect("riscv verify failed");
-    let (riscv_vk, riscv_proofs) = bundle.into_parts();
+    let riscv::RiscvProof {
+        vk: riscv_vk,
+        chunk_proofs: riscv_proofs,
+        global: riscv_global,
+    } = bundle;
+    let riscv_params = riscv_vk.inner.params.clone();
     info!(
         "RISCV: {} chunk proof(s) proved + verified ✓",
         riscv_proofs.len()
@@ -424,23 +438,23 @@ fn main() {
     }
 
     // ── Phase 2: Convert ────────────────────────────────────────────────────
-    // VM-layer exe identity (program_commit, pc_start, initial_gcs): witnessed into every
-    // convert proof (prover side) and pinned at the apex (trusted side).
+    // VM-layer exe identity (program_commit, pc_start, memory image commitment and tier):
+    // witnessed into every convert proof (prover side) and pinned at the apex (trusted side).
     let riscv_vm_vk = RiscvVmVk::from_program_and_vk(&program, &riscv_vk);
     // Negative-test hooks N5/N6 perturb the PROVER-side witness (the trusted identity below
     // stays honest), so the in-circuit bindings themselves must reject:
     //   N5_BAD_PC_WITNESS → the chunk-1 convert's gated assert is_first·(start_pc − pc_w) == 0
     //     is unsatisfiable → that convert proof MUST fail;
-    //   N6_BAD_GCS_WITNESS → a wrong point is injected at the chunk-1 leaf → the root's
-    //     in-circuit closure (GCS == zero point) is unsatisfiable → the root MUST fail.
+    //   N6_BAD_IMAGE_WITNESS → the leaves hash a wrong image commitment into their identity
+    //     digest → it differs from the image node's → the tree MUST fail at continuity.
     let mut prover_vm_vk = riscv_vm_vk.clone();
     if std::env::var("N5_BAD_PC_WITNESS").is_ok() {
         tracing::warn!("N5_BAD_PC_WITNESS: wrong pc_start witness — MUST FAIL (chunk-1 gate)");
         prover_vm_vk.pc_start[0] += Kb::ONE;
     }
-    if std::env::var("N6_BAD_GCS_WITNESS").is_ok() {
-        tracing::warn!("N6_BAD_GCS_WITNESS: wrong initial_gcs witness — MUST FAIL (root closure)");
-        prover_vm_vk.initial_gcs = SepticDigest(prover_vm_vk.initial_gcs.0.double());
+    if std::env::var("N6_BAD_IMAGE_WITNESS").is_ok() {
+        tracing::warn!("N6_BAD_IMAGE_WITNESS: wrong image witness — MUST FAIL (continuity)");
+        prover_vm_vk.image_commit[0] += Kb::ONE;
     }
     // The TRUSTED exe identity handed to the apex. Negative hooks N3/N1/N4 perturb one of its
     // fields; the honest proof's in-circuit riscv_vk_digest then cannot match the trusted
@@ -452,11 +466,11 @@ fn main() {
         );
         trusted_vm_vk.pc_start[0] += Kb::ONE;
     }
-    if std::env::var("N1_BAD_GCS").is_ok() {
+    if std::env::var("N1_BAD_IMAGE").is_ok() {
         tracing::warn!(
-            "N1_BAD_GCS: wrong trusted initial GCS — this run MUST FAIL (at the apex exe anchor)"
+            "N1_BAD_IMAGE: wrong trusted image — this run MUST FAIL (at the apex exe anchor)"
         );
-        trusted_vm_vk.initial_gcs = SepticDigest(trusted_vm_vk.initial_gcs.0.double());
+        trusted_vm_vk.image_commit[0] += Kb::ONE;
     }
     if std::env::var("N4_WRONG_PROGRAM").is_ok() {
         tracing::warn!(
@@ -484,10 +498,19 @@ fn main() {
         trusted_vm_vk,
         vk_verification,
     );
+    // The prover of the global LogUp's nodes, which lead the tree.
+    let mut global_logup_nodes = GlobalLogUpNodeMachine::new(
+        recursion_params_with_128_bits_security(),
+        &riscv_params,
+        vk_verification,
+    );
     let vk_map = if vk_verification {
         // The node PKs must exist before proving regardless of the map's source.
         let combine_vks = combine
             .preregister_standard_shapes(&convert.pks[0].3)
+            .unwrap_or_else(|e| panic!("{e}"));
+        let global_logup_node_vks = global_logup_nodes
+            .preregister()
             .unwrap_or_else(|e| panic!("{e}"));
         let map = if let Ok(path) = std::env::var("MLE_VK_MAP") {
             // GLOBAL whitelist artifact (the offline mle_build_vk_map deliverable): this run's
@@ -508,6 +531,7 @@ fn main() {
                 .map(|entry| vk_identity(&entry.3))
                 .collect();
             ids.extend(combine_vks.iter().map(|v| vk_identity(v)));
+            ids.extend(global_logup_node_vks.iter().map(|v| vk_identity(v)));
             // The compress key, over the combine-tier child every complete root takes in
             // whitelist mode: embed checks it in-circuit, so a self-map run that goes on to
             // embed needs it, as the shipped whitelist has it (its last leaf). This couples every
@@ -559,6 +583,7 @@ fn main() {
             map
         };
         convert.set_vk_root(map.root()).expect("set vk root");
+        global_logup_nodes.set_vk_root(map.root());
         combine.set_vk_map(map.clone());
         Some(map)
     } else {
@@ -606,8 +631,8 @@ fn main() {
     // Negative-test hook N1_INCOMPLETE: combine only a strict PREFIX of the chunks while
     // still baking a complete root. The completeness block is armed, so proving MUST fail —
     // but note the FIRST unsatisfiable assertion is next_pc == 0 (the prefix's last chunk is
-    // non-final). This proves the completeness block is WIRED, but does not isolate the GCS
-    // closure; use N6_BAD_GCS_WITNESS for that.
+    // non-final). This proves the completeness block is WIRED, but does not isolate the global
+    // LogUp's closure.
     // Negative-test hook N13_COMPRESS_INCOMPLETE: a non-final chunk's convert proof in place of the
     // complete root. The compress program's completeness block is armed (`is_complete = true`), so
     // this MUST FAIL: in a release build witness generation goes through and the STARK verify
@@ -636,13 +661,42 @@ fn main() {
         );
         return;
     }
-    let mut children = convert_proofs;
+    // The global LogUp's nodes lead the tree: the image node, then the group nodes. They are
+    // proved over the honest identity, whatever the convert leaves were told.
+    let mut children = global_logup_nodes
+        .prove(
+            &riscv_vm_vk,
+            &riscv_proofs,
+            &riscv_global,
+            [Kb::ZERO; pico_vm::primitives::consts::DIGEST_SIZE],
+        )
+        .expect("global LogUp nodes prove failed");
+    for node in &children {
+        global_logup_nodes
+            .verify(node)
+            .expect("global LogUp node verify failed");
+    }
+    info!(
+        "Global LogUp: {} node(s) proved + verified ✓",
+        children.len()
+    );
+    // Negative-test hook N18_SKIP_GLOBAL_LOGUP: leave the second phase out of the tree. Every
+    // other root assertion holds for the chunks alone; the chain closure is what MUST fail.
+    if std::env::var("N18_SKIP_GLOBAL_LOGUP").is_ok() {
+        tracing::warn!(
+            "N18_SKIP_GLOBAL_LOGUP: a tree without the global LogUp's nodes — this run MUST FAIL \
+             (at the root's chain closure)"
+        );
+        children.clear();
+    }
+    let prefix_len = children.len();
+    children.extend(convert_proofs);
     if std::env::var("N1_INCOMPLETE").is_ok() {
         assert!(
-            children.len() >= 3,
+            children.len() >= prefix_len + 3,
             "N1_INCOMPLETE needs >= 3 chunks (use --elf fib with a large --n)"
         );
-        children.truncate(2);
+        children.truncate(prefix_len + 2);
         tracing::warn!(
             "N1_INCOMPLETE: combining only the first 2 chunks — this run MUST FAIL (at next_pc==0)"
         );
@@ -653,7 +707,7 @@ fn main() {
     // does not re-verify the child) — this run MUST FAIL.
     if std::env::var("N2_TAMPER_CHILD").is_ok() {
         tracing::warn!("N2_TAMPER_CHILD: corrupting one convert-child opened value — MUST FAIL");
-        children[0].0.whir_proof.initial_round_opened_rows[0][0][0][0] += Kb::ONE;
+        children[prefix_len].0.whir_proof.initial_round_opened_rows[0][0][0][0] += Kb::ONE;
     }
     // Negative-test hook N8_FORGED_MEMBERSHIP: corrupt every whitelist path (entries + root
     // intact, so host-side lookups succeed and witness generation proceeds) BEFORE proving —

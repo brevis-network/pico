@@ -65,6 +65,7 @@ pub fn verify_whir_opening<SC: StarkProtocolConfig, TS: FiatShamirTranscript<SC>
         commitments,
         u,
         Pass::Verify,
+        &mut Vec::new(),
     )
 }
 
@@ -75,6 +76,9 @@ pub fn verify_whir_opening<SC: StarkProtocolConfig, TS: FiatShamirTranscript<SC>
 /// every transcript operation, the round and sub-round counts, and the per-round
 /// `log_rs_domain_size` decrement — so the query indices this samples are the same ones a full
 /// verification would sample.
+///
+/// Each round's query indices are appended to `query_indices_out` as they are sampled, on both
+/// passes (outer index = WHIR round, inner = query). An early error leaves the rounds reached so far.
 #[allow(clippy::too_many_arguments)]
 #[instrument(name = "verify_whir_opening", level = "debug", skip_all)]
 pub(crate) fn verify_whir_opening_inner<SC: StarkProtocolConfig, TS: FiatShamirTranscript<SC>>(
@@ -85,6 +89,7 @@ pub(crate) fn verify_whir_opening_inner<SC: StarkProtocolConfig, TS: FiatShamirT
     commitments: &[SC::Digest],
     u: &[SC::EF],
     pass: Pass,
+    query_indices_out: &mut Vec<Vec<usize>>,
 ) -> Result<(), WhirVerificationError<SC::EF>> {
     let params = config.params();
     // widths.len() = stacking_openings.len() = layouts.len(), which proof shape constructs to equal
@@ -233,6 +238,7 @@ pub(crate) fn verify_whir_opening_inner<SC: StarkProtocolConfig, TS: FiatShamirT
         let query_indices = (0..num_queries)
             .map(|_| transcript.sample_bits(log_rs_domain_size - k_whir))
             .collect_vec();
+        query_indices_out.push(query_indices.iter().map(|&i| i as usize).collect());
 
         let mut zs_round = Vec::new();
         let mut ys_round = Vec::new();

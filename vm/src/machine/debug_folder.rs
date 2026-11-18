@@ -2,10 +2,7 @@
 //! every violated constraint. Survivor of the removed FRI folders (tag `legacy-fri-last`), ported
 //! to the windowed `AirBuilder` of Plonky3 0.5.
 
-use crate::machine::{
-    builder::{ChipBuilder, EmptyLookupBuilder, ScopedBuilder},
-    septic::SepticDigest,
-};
+use crate::machine::builder::{ChipBuilder, EmptyLookupBuilder, ScopedBuilder};
 use p3_air::{AirBuilder, ExtensionBuilder, RowWindow};
 use p3_field::{ExtensionField, Field};
 
@@ -21,7 +18,6 @@ pub enum DebugConstraintFailure<F, EF> {
 pub struct DebugConstraintFolder<'a, F, EF> {
     pub(crate) preprocessed: RowWindow<'a, F>,
     pub(crate) main: RowWindow<'a, F>,
-    pub(crate) global_cumulative_sum: SepticDigest<F>,
     pub(crate) is_first_row: F,
     pub(crate) is_last_row: F,
     pub(crate) is_transition: F,

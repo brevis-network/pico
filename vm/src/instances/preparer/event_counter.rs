@@ -46,7 +46,6 @@ pub struct StartIndices {
     pub memory_local_extra_global_start_index: usize,
     pub syscall_riscv_extra_global_lookup_start_index: usize,
     pub syscall_precompile_extra_global_lookup_start_index: usize,
-    pub global_extra_poseidon2_start_index: usize,
 }
 
 /// Precompile event counts organized by category
@@ -168,7 +167,6 @@ pub struct EventCounter {
     // System events
     pub num_syscall_events: usize,
     pub num_precompile_syscall_events: usize,
-    pub num_poseidon2_events: usize,
     pub num_global_lookup_events: usize,
     pub num_memory_read_writes: usize,
     /// The misaligned loads and stores: the `MemoryUnaligned` chip's rows, which the host
@@ -502,7 +500,6 @@ impl Traced<'_> {
     fn count<F: PrimeField32>(&self, record: &EmulationRecord, counter: &mut EventCounter) {
         self.count_alu_rows(counter);
         counter.num_global_lookup_events = record.global_lookup_events.len();
-        counter.num_poseidon2_events = record.poseidon2_events.len();
 
         self.count_cpu_extras(counter);
 
@@ -551,7 +548,6 @@ impl Traced<'_> {
             + counter.num_syscall_events;
 
         self.count_bitwise_and_shifts(counter);
-        counter.start_indices.global_extra_poseidon2_start_index = counter.num_poseidon2_events;
         GlobalChip::<F>::count_extra_records(record, counter);
     }
 
@@ -663,11 +659,6 @@ impl EventCounter {
                 "global lookup",
                 self.num_global_lookup_events,
                 record.global_lookup_events.len(),
-            ),
-            (
-                "Poseidon2",
-                self.num_poseidon2_events,
-                record.poseidon2_events.len(),
             ),
         ] {
             assert_eq!(
