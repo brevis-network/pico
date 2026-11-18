@@ -703,7 +703,7 @@ impl ProverBuilder {
             concurrency: self.concurrency,
             verify_keys: self.verify_keys,
             vk_map,
-            riscv: machine,
+            riscv: Arc::new(machine),
             riscv_vm_vk,
             program_id,
             expected_vk_pre_hash,
@@ -1184,7 +1184,7 @@ pub struct Prover {
     concurrency: NonZeroUsize,
     verify_keys: bool,
     vk_map: Option<Arc<MleVkMap>>,
-    riscv: RiscvMachine,
+    riscv: Arc<RiscvMachine>,
     riscv_vm_vk: RiscvVmVk,
     program_id: ProgramId,
     expected_vk_pre_hash: [Kb; 8],
@@ -1464,10 +1464,11 @@ impl Prover {
     ) -> Result<Proof, ProveError> {
         check_chips_provable(&records)?;
         self.riscv.check_chunk_shapes(&records)?;
-        let bundle = self
-            .riscv
-            .prove_owned(records)
-            .map_err(|e| ProveError::proving(Phase::Riscv, e.to_string()))?;
+        let bundle = self.riscv.prove_owned(records);
+        // The GPU path may prove with this machine too (see `prove_root_gpu`); its streaming GCS
+        // drain must not see this batch's terms.
+        self.riscv.discard_chunk_gcs_terms();
+        let bundle = bundle.map_err(|e| ProveError::proving(Phase::Riscv, e.to_string()))?;
         self.riscv
             .verify(&bundle, self.initial_gcs)
             .map_err(|e| ProveError::verification(Phase::Riscv, e.to_string()))?;
@@ -1829,6 +1830,9 @@ impl Prover {
             },
             event_pool_size: self.gpu_event_pool_size,
             emulation_workers: self.gpu_emulation_workers,
+            // The embedded run proves at the whitelist height; hand over these keys only then.
+            riscv: (self.log_stacked_height == WHITELIST_LOG_STACKED_HEIGHT)
+                .then(|| Arc::clone(&self.riscv)),
         };
         let out = distributed_vm::mle::embed::prove(program, stdin.into_emulator_stdin())
             .map_err(ProveError::from_embed)?;

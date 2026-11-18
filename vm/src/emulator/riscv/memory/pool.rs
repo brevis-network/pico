@@ -10,6 +10,8 @@ use std::{
 pub use crossbeam::channel::RecvTimeoutError;
 
 use super::contiguous::ContiguousRiscvMemory;
+#[cfg(feature = "cuda")]
+use crate::machine::host_memory;
 
 /// The cap on how many memories are in flight at once. A function rather than an inline read, so
 /// the startup check that warns about a pool too small for the run cannot drift from it.
@@ -17,7 +19,13 @@ pub fn memory_pool_size() -> usize {
     std::env::var("MEMORY_POOL_SIZE")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or_else(|| POOL_SIZE_FLOOR.load(Ordering::Relaxed).max(16))
+        .unwrap_or_else(|| {
+            #[cfg(feature = "cuda")]
+            if host_memory::low_memory_host() {
+                return host_memory::LOW_MEMORY_POOL_SIZE;
+            }
+            POOL_SIZE_FLOOR.load(Ordering::Relaxed).max(16)
+        })
 }
 
 /// What an unset `MEMORY_POOL_SIZE` is raised to; see [`raise_pool_size_floor`].
@@ -25,7 +33,8 @@ static POOL_SIZE_FLOOR: AtomicUsize = AtomicUsize::new(0);
 
 /// Raises the size an unset `MEMORY_POOL_SIZE` stands for to at least `needed`, while the pool is
 /// not yet built, so a run that names no size gets a pool every worker can replay from at once. A
-/// size someone set, or a pool already built, stays.
+/// size someone set, or a pool already built, stays. A `cuda` build on a low-memory host keeps
+/// [`host_memory::LOW_MEMORY_POOL_SIZE`] instead: fewer workers replay at once, for less memory.
 pub fn raise_pool_size_floor(needed: usize) {
     if Lazy::get(&GLOBAL_MEMORY_POOL).is_none() {
         POOL_SIZE_FLOOR.fetch_max(needed, Ordering::Relaxed);

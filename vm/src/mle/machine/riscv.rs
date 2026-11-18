@@ -110,11 +110,9 @@ use pico_mle_core::{
         riscv_params_with_128_bits_security,
         soundness::{admit_production_vk, UnderBudgetError},
     },
-    keygen::{compute_vk_pre_hash, types::MultiStarkVerifyingKey},
+    keygen::{compute_vk_pre_hash, types::MultiStarkVerifyingKey, CommittedPrep, PreHashMemo},
     proof::Proof,
-    prover::{
-        AirProvingContext, DeviceDataTransporter, DeviceMultiStarkProvingKey, ProvingContext,
-    },
+    prover::{AirProvingContext, DeviceMultiStarkProvingKey, ProvingContext},
     verifier::VerifierError,
     AirRef, StarkEngine, StarkProtocolConfig,
 };
@@ -800,7 +798,8 @@ pub fn riscv_constraint_dump(bucket: bool) -> String {
 }
 
 /// Ordered RISCV air list for keygen/prove. `program` is the ELF (needed by the `ProgramChip`
-/// preprocessed table; ignored by `ByteChip`).
+/// preprocessed table; ignored by `ByteChip`). Only the AIRs in [`RISCV_APP_PREP_AIR_IDS`] read
+/// the program; `keygen_reusing` relies on it.
 pub fn mle_riscv_air_refs(program: Arc<Program>, bucket: bool) -> Vec<AirRef<Sc>> {
     // Coarse-bucket the program table so the vk's preprocessed GEOMETRY is app-independent
     // (see `shape`) — whitelist mode only; without it the natural program size keeps proofs
@@ -2067,6 +2066,95 @@ pub struct RiscvMachine {
     concurrency: Option<NonZeroUsize>,
 }
 
+/// The program-independent part of the last riscv keygen in this process: every AIR's committed
+/// preprocessed table except the program's, for the same air set, height and bucketing.
+struct KeygenReuse {
+    log_stacked_height: usize,
+    bucket: bool,
+    air_names: Vec<String>,
+    preps: Vec<Option<CommittedPrep<Sc>>>,
+}
+
+/// Kept for the life of the process: a few fixed tables (Byte, KeccakTables), not per program.
+static KEYGEN_REUSE: std::sync::Mutex<Option<KeygenReuse>> = std::sync::Mutex::new(None);
+
+fn pre_hash_memo() -> PreHashMemo<Sc> {
+    static MEMO: std::sync::OnceLock<PreHashMemo<Sc>> = std::sync::OnceLock::new();
+    MEMO.get_or_init(Default::default).clone()
+}
+
+/// Keygen `airs`, reusing the tables of the last keygen of the same machine. Only the program
+/// table depends on the ELF, so a new program regenerates and commits that table alone; the keys
+/// are the ones a fresh keygen makes.
+fn keygen_reusing(
+    engine: &Engine,
+    airs: &[AirRef<Sc>],
+    log_stacked_height: usize,
+    bucket: bool,
+) -> (
+    pico_mle_core::keygen::types::MultiStarkProvingKey<Sc>,
+    MultiStarkVerifyingKey<Sc>,
+) {
+    let air_names: Vec<String> = airs.iter().map(|air| air.name()).collect();
+    let reuse = {
+        let cached = KEYGEN_REUSE.lock().unwrap_or_else(|e| e.into_inner());
+        match cached.as_ref() {
+            Some(c)
+                if c.log_stacked_height == log_stacked_height
+                    && c.bucket == bucket
+                    && c.air_names == air_names =>
+            {
+                c.preps.clone()
+            }
+            _ => vec![None; airs.len()],
+        }
+    };
+    #[cfg(debug_assertions)]
+    for (air, cached) in airs.iter().zip(&reuse) {
+        let Some(cached) = cached else { continue };
+        let mut builder =
+            pico_mle_core::keygen::MultiStarkKeygenBuilder::new(engine.config().clone());
+        builder.add_air(air.clone());
+        let fresh = builder.generate_pk().expect("preprocessed table keygen");
+        debug_assert_eq!(
+            fresh.per_air[0]
+                .vk
+                .preprocessed_data
+                .as_ref()
+                .map(|d| d.commit),
+            cached.verifier_data.as_ref().map(|d| d.commit),
+            "a reused preprocessed table no longer matches its AIR {}",
+            air.name()
+        );
+    }
+    let (pk, vk) = engine.keygen_with_app_prep_reusing(
+        airs,
+        RISCV_APP_PREP_AIR_IDS,
+        &reuse,
+        Some(pre_hash_memo()),
+    );
+    *KEYGEN_REUSE.lock().unwrap_or_else(|e| e.into_inner()) = Some(KeygenReuse {
+        log_stacked_height,
+        bucket,
+        air_names,
+        preps: non_app_preps(&pk),
+    });
+    (pk, vk)
+}
+
+/// Every AIR's committed preprocessed table except the program's.
+fn non_app_preps(
+    pk: &pico_mle_core::keygen::types::MultiStarkProvingKey<Sc>,
+) -> Vec<Option<CommittedPrep<Sc>>> {
+    pk.per_air
+        .iter()
+        .enumerate()
+        .map(|(id, air_pk)| {
+            (!RISCV_APP_PREP_AIR_IDS.contains(&id)).then(|| CommittedPrep::of(air_pk))
+        })
+        .collect()
+}
+
 impl RiscvMachine {
     /// Keygen once: build the engine from `log_stacked_height`, keygen the RISCV air set, transport
     /// the proving key to the device, and materialize the chip set for trace generation. Seeds the
@@ -2081,13 +2169,7 @@ impl RiscvMachine {
             log_stacked_height,
             bucket,
         )?;
-        let initial_gcs = if crate::mle::env_flag("SKIP_INITIAL_GCS") {
-            tracing::warn!("SKIP_INITIAL_GCS set: omitting initial GCS (negative test)");
-            None
-        } else {
-            Some(program.initial_global_cumulative_sum())
-        };
-        *machine.initial_gcs.lock().expect("gcs mutex poisoned") = initial_gcs;
+        machine.seed_initial_gcs(&program);
         Ok(machine)
     }
 
@@ -2121,14 +2203,22 @@ impl RiscvMachine {
         #[cfg(feature = "cuda")]
         engine.device_mut().set_cache_rs_code_matrix(false);
         let t_keygen = Instant::now();
-        let (pk, vk) = engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
+        let (pk, vk) = keygen_reusing(&engine, &airs, log_stacked_height, bucket);
         ledger::add_setup(ledger::Setup::Keygen, t_keygen.elapsed());
         admit_production_vk(
             "riscv",
             if cfg!(feature = "cuda") { "gpu" } else { "cpu" },
             &vk,
         )?;
-        let d_pk = engine.device().transport_pk_to_device(&pk);
+        // Only the Program table's preprocessed data depends on the program; the AIRs' GPU
+        // constraint data is shared with every earlier program's key on this card.
+        #[cfg(feature = "cuda")]
+        let d_pk = engine.device().transport_pk_to_device_cached(&pk);
+        #[cfg(not(feature = "cuda"))]
+        let d_pk = pico_mle_core::prover::DeviceDataTransporter::transport_pk_to_device(
+            engine.device(),
+            &pk,
+        );
         // Eagerly nvrtc-compile all JIT kernels here, on the main thread, before the prove worker /
         // emulate-pipeline / rayon threads spawn. Lazy JIT compilation from a prove-worker thread
         // mid-proof deadlocks libnvrtc's internal threading in the heavily-threaded prover; warming
@@ -2328,6 +2418,33 @@ impl RiscvMachine {
         let gcs = gcs_from_pvs(&proof.public_values[air_id::GLOBAL]);
         self.gcs_terms.lock().expect("gcs mutex poisoned").push(gcs);
         Ok(proof)
+    }
+
+    /// Seeds the cross-chunk GCS accumulator with `program`'s initial sum, as [`Self::new`] does,
+    /// for a machine built by [`Self::from_airs`] that a streaming run now adopts.
+    pub fn seed_initial_gcs(&self, program: &Program) {
+        let seed = if crate::mle::env_flag("SKIP_INITIAL_GCS") {
+            tracing::warn!("SKIP_INITIAL_GCS set: omitting initial GCS (negative test)");
+            None
+        } else {
+            Some(program.initial_global_cumulative_sum())
+        };
+        *self.initial_gcs.lock().expect("gcs mutex poisoned") = seed;
+    }
+
+    /// Drops the chunk GCS terms a batch [`Self::prove`] left behind; the seed stays. For a machine
+    /// a streaming run may also use, so the batch path's terms never reach its drain.
+    pub fn discard_chunk_gcs_terms(&self) {
+        self.gcs_terms.lock().expect("gcs mutex poisoned").clear();
+    }
+
+    /// Whether chunk GCS terms are waiting for a drain, e.g. from a [`Self::prove`] on this machine.
+    pub fn has_chunk_gcs_terms(&self) -> bool {
+        !self
+            .gcs_terms
+            .lock()
+            .expect("gcs mutex poisoned")
+            .is_empty()
     }
 
     /// Remove the initial-GCS seed this constructor planted. Multi-card runs one machine per
@@ -3122,6 +3239,60 @@ mod tests {
             verify_riscv(&tampered, vk_hash, &[], SepticDigest::zero()),
             Err(VerifyRiscvError::Chunk { chunk: 0, .. })
         ));
+    }
+
+    /// Keys built through `keygen_reusing`, which reuses the previous program's tables, are
+    /// byte-identical to a fresh keygen, with and without whitelist bucketing.
+    #[test]
+    fn keygen_reusing_another_programs_tables_matches_a_fresh_keygen() {
+        use crate::compiler::riscv::compiler::{Compiler, SourceType};
+        // A height no other test keygens at, so the process-wide cache entry is this test's.
+        const HEIGHT: usize = 21;
+        let engine: Engine = StarkEngine::new(riscv_params_with_128_bits_security(HEIGHT));
+        let compile = |elf: &[u8]| -> Arc<Program> {
+            Compiler::new(SourceType::RISCV, elf).unwrap().compile()
+        };
+        let programs = [
+            Arc::new(test_program()),
+            compile(include_bytes!("../../compiler/test_elf/fib-elf")),
+            compile(include_bytes!(
+                "../../compiler/test_elf/riscv64im-pico-fibnacci-elf"
+            )),
+        ];
+        let bytes = |vk: &MultiStarkVerifyingKey<Sc>| bincode::serialize(vk).unwrap();
+        for bucket in [false, true] {
+            let mut program_commits = Vec::new();
+            for (i, program) in programs.iter().enumerate() {
+                let airs = mle_riscv_air_refs(program.clone(), bucket);
+                let reused = KEYGEN_REUSE
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .is_some_and(|c| c.log_stacked_height == HEIGHT && c.bucket == bucket);
+                assert_eq!(
+                    reused,
+                    i > 0,
+                    "program {i}: reuse taken only after the first"
+                );
+                let (pk, vk) = keygen_reusing(&engine, &airs, HEIGHT, bucket);
+                let (fresh_pk, fresh_vk) =
+                    engine.keygen_with_app_prep(&airs, RISCV_APP_PREP_AIR_IDS);
+                assert_eq!(bytes(&vk), bytes(&fresh_vk), "verifying keys differ");
+                assert_eq!(pk.vk_pre_hash, fresh_pk.vk_pre_hash);
+                for (a, b) in pk.per_air.iter().zip(&fresh_pk.per_air) {
+                    assert_eq!(
+                        a.preprocessed_data.as_ref().map(|d| d.commit()),
+                        b.preprocessed_data.as_ref().map(|d| d.commit()),
+                        "{}: prover-side preprocessed data differs",
+                        a.air_name
+                    );
+                }
+                assert_eq!(non_app_preps(&pk).len(), airs.len());
+                program_commits.push(riscv_program_commit(&vk));
+            }
+            // Reuse crossed programs with different program tables, not a repeat of one.
+            assert!(program_commits.windows(2).all(|w| w[0] != w[1]));
+        }
     }
 
     /// Lean pre-hash semantics on a real RISCV keygen: mutating the **program-table** commitment
