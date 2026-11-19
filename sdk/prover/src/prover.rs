@@ -662,9 +662,14 @@ impl ProverBuilder {
 
         let program = compile(&self.elf)?;
 
-        // The riscv machine below keygens on the GPU in a `cuda` build, which needs the pool.
+        // The riscv machine below keygens on the GPU in a `cuda` build, which needs the pool, and
+        // on card 0, where the GPU pipeline adopts it.
         #[cfg(feature = "cuda")]
-        pico_vm::mle::machine::riscv::init_mle_gpu_pool(0);
+        {
+            pico_vm::mle::machine::riscv::init_mle_gpu_pool(0);
+            pico_vm::mle::cuda_mle::runtime::context::set_device(0)
+                .map_err(|e| ProveError::Gpu(format!("cannot bind card 0: {e:?}")))?;
+        }
 
         // Built once and handed on: the fit check and keygen need the same air set, and in
         // whitelist mode building it pads the program table to its bucket.
@@ -1278,6 +1283,12 @@ impl Prover {
     /// Keygen for `elf` with options.
     pub fn builder(elf: &[u8]) -> ProverBuilder {
         ProverBuilder::new(elf)
+    }
+
+    /// Tests only: whether the GPU pipeline's card 0 proves on this prover's riscv machine.
+    #[cfg(all(test, feature = "cuda"))]
+    pub(crate) fn card0_proves_on_own_riscv(&self) -> bool {
+        distributed_vm::mle::embed::card0_riscv().is_some_and(|m| Arc::ptr_eq(&m, &self.riscv))
     }
 
     /// The program this prover attests to.
@@ -1979,9 +1990,12 @@ impl Prover {
             },
             event_pool_size: self.gpu_event_pool_size,
             emulation_workers: self.gpu_emulation_workers,
-            // The embedded run proves at the whitelist height; hand over these keys only then.
-            riscv: (self.log_stacked_height == WHITELIST_LOG_STACKED_HEIGHT)
-                .then(|| Arc::clone(&self.riscv)),
+            // The embedded run proves at the whitelist height, which `build` holds a whitelist
+            // prover to, so these keys are the run's.
+            riscv: {
+                assert_eq!(self.log_stacked_height, WHITELIST_LOG_STACKED_HEIGHT);
+                Some(Arc::clone(&self.riscv))
+            },
         };
         let out = distributed_vm::mle::embed::prove(program, stdin.into_emulator_stdin())
             .map_err(ProveError::from_embed)?;

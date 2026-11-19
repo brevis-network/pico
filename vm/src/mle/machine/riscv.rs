@@ -2290,9 +2290,8 @@ pub struct RiscvMachine {
     /// chunk's index.
     chunk_tables: std::sync::Mutex<std::collections::BTreeMap<u32, ChunkTable>>,
     /// Whitelist-mode shape bucketing (see `shape`); off = natural heights, dynamic shapes.
-    /// Read only on the CPU `prove_chunk` path; the GPU path generates traces on-device and does
-    /// not bucket, so the field is unused under `cuda`.
-    #[cfg_attr(feature = "cuda", allow(dead_code))]
+    /// Read on the CPU `prove_chunk` path, where traces are bucketed; the GPU path generates traces
+    /// on-device and does not bucket.
     bucket: bool,
     /// Chunk proving concurrency of [`Self::prove`]; `None` falls back to [`prove_concurrency`].
     concurrency: Option<NonZeroUsize>,
@@ -3054,6 +3053,13 @@ impl RiscvMachine {
     /// The canonical verifying key.
     pub fn vk(&self) -> &MultiStarkVerifyingKey<Sc> {
         &self.vk
+    }
+
+    /// Whether this machine was built at `log_stacked_height`, with whitelist bucketing when
+    /// `bucket`: the settings that, with the program, decide its keys.
+    pub fn built_for(&self, log_stacked_height: usize, bucket: bool) -> bool {
+        self.bucket == bucket
+            && *self.engine.params() == riscv_params_with_128_bits_security(log_stacked_height)
     }
 
     /// The vk's app-independent pre-hash (see [`compute_vk_pre_hash`]) — this machine's keygen

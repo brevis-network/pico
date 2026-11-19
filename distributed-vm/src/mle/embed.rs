@@ -193,6 +193,14 @@ impl GpuResources {
     }
 }
 
+/// The riscv machine card 0 proves on between runs: the caller's, when the last run adopted it.
+/// For tests.
+#[cfg(feature = "cuda")]
+#[doc(hidden)]
+pub fn card0_riscv() -> Option<Arc<pico_vm::mle::machine::riscv::RiscvMachine>> {
+    super::resident_card0_riscv()
+}
+
 /// Latches the precompile-split memory tier for the visible cards (`PICO_GPU_MEM` overrides)
 /// before any emulation reads it. Fails if an earlier emulation latched another tier.
 #[cfg(feature = "cuda")]
