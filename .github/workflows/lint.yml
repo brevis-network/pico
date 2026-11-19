@@ -2,6 +2,7 @@ on:
   pull_request:
     branches:
       - main
+      - dev
       - release/v*
     paths-ignore:
       - "docs/**"
@@ -14,10 +15,11 @@ on:
   push:
     branches:
       # Cache scoping: a run may only read caches from its own ref, its base branch, or the
-      # default branch. PRs here target `main`, so without a push trigger on it no shared
-      # cache ever exists for them and every new PR's first run starts cold -- which is what
-      # the 1.4-to-11.0-minute spread on `Clippy (workspace)` across five sampled runs was.
+      # default branch. PRs here target `main` or `dev`, so without a push trigger on them no
+      # shared cache ever exists for them and every new PR's first run starts cold -- which is
+      # what the 1.4-to-11.0-minute spread on `Clippy (workspace)` across five sampled runs was.
       - main
+      - dev
     paths-ignore:
       - "docs/**"
       - "README.md"
