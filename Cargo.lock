@@ -1756,7 +1756,6 @@ dependencies = [
  "sha2",
  "strum",
  "strum_macros",
- "sysinfo",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",

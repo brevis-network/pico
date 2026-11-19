@@ -154,7 +154,7 @@ What `main` carries past `v3.1.1`. The version stays `3.1.1` until the next rele
   eth-act standards tests prove within 128 GB. `PICO_HOST_MEM=low|high` overrides the tier.
 - A GPU prove reuses the riscv keys `ProverBuilder::build` made instead of keygenning the program
   again, about 6 s less per new program.
-- The GPU pipeline's emulation runs at most `MLE_DEFERRED_RECORDS` (512; 8 below 500 GB of host memory) deferred (precompile and
+- The pipeline's emulation, CPU-only builds included, runs at most `MLE_DEFERRED_RECORDS` (512; 8 below 500 GB of host memory) deferred (precompile and
   memory) records ahead of proving them, as the history slots bound it on CPU chunks. A
   precompile-heavy guest used to queue them without limit: BLS12-381 G2 MSM grew past 500 GB of
   host memory. `0` lifts the bound.

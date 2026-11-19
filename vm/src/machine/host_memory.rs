@@ -21,10 +21,18 @@ pub const LOW_MEMORY_REPLAY_WORKERS: usize = 2;
 /// Deferred records the emulation may run ahead of proving by on a low-memory host.
 pub const LOW_MEMORY_DEFERRED_RECORDS: usize = 8;
 
-/// This host's memory, or its container's limit where there is one.
+/// This host's memory, or its container's limit where there is one; `0` when it cannot be read.
+///
+/// The container limit is the one at the cgroup mount's root. A limit set elsewhere (systemd's
+/// `MemoryMax=`, Slurm's `--mem`, a parent cgroup, `numactl --membind`) is not seen: set
+/// [`HOST_MEM_VAR`] there.
 pub fn host_bytes() -> u64 {
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
+    // sysinfo's `cgroup_limits` asserts a nonzero total, which an unreadable `/proc/meminfo` gives.
+    if sys.total_memory() == 0 {
+        return 0;
+    }
     sys.cgroup_limits().map_or(sys.total_memory(), |limits| {
         limits.total_memory.min(sys.total_memory())
     })
@@ -49,8 +57,28 @@ pub fn host_mem_setting() -> Result<Option<bool>, String> {
 /// size) wins over either tier.
 pub fn low_memory_host() -> bool {
     static LOW: OnceLock<bool> = OnceLock::new();
-    *LOW.get_or_init(|| match host_mem_setting() {
-        Ok(Some(low)) => low,
-        _ => host_bytes() < LOW_MEMORY_HOST_BYTES,
+    *LOW.get_or_init(|| {
+        let setting = host_mem_setting().unwrap_or_else(|e| {
+            tracing::warn!("{e}; detecting the host-memory tier instead");
+            None
+        });
+        let (low, source) = match setting {
+            Some(low) => (low, HOST_MEM_VAR.to_string()),
+            None => {
+                let bytes = host_bytes();
+                if bytes == 0 {
+                    tracing::warn!("cannot read this host's memory; set {HOST_MEM_VAR}");
+                }
+                (
+                    bytes < LOW_MEMORY_HOST_BYTES,
+                    format!("{bytes} bytes detected"),
+                )
+            }
+        };
+        tracing::info!(
+            "host-memory tier: {} ({source})",
+            if low { "low" } else { "high" }
+        );
+        low
     })
 }

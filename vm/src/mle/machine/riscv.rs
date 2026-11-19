@@ -2306,7 +2306,9 @@ struct KeygenReuse {
     preps: Vec<Option<CommittedPrep<Sc>>>,
 }
 
-/// Kept for the life of the process: a few fixed tables (Byte, KeccakTables), not per program.
+/// Kept for the life of the process, in host memory: the committed data (stacked matrix, RS
+/// codeword, Merkle tree) of the fixed tables (Byte, KeccakTables), which every later riscv keygen
+/// of the same air set reuses, including those of a GPU run's other cards.
 static KEYGEN_REUSE: std::sync::Mutex<Option<KeygenReuse>> = std::sync::Mutex::new(None);
 
 /// Held shared by the tests that keygen a riscv machine, and exclusively by the one that reads
@@ -3865,7 +3867,15 @@ mod tests {
                         a.air_name
                     );
                 }
-                assert_eq!(non_app_preps(&pk).len(), airs.len());
+                // Every table but the program's is handed on, the AIRs without one as empty.
+                for (id, prep) in non_app_preps(&pk).iter().enumerate() {
+                    assert_eq!(
+                        prep.is_none(),
+                        RISCV_APP_PREP_AIR_IDS.contains(&id),
+                        "{}: handed on as reusable exactly when it is not an app table",
+                        airs[id].name()
+                    );
+                }
                 program_commits.push(riscv_program_commit(&vk));
             }
             // Reuse crossed programs with different program tables, not a repeat of one.

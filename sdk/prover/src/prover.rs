@@ -436,7 +436,8 @@ impl ProverBuilder {
     /// core count: the pipeline runs one replay worker per core at most.
     ///
     /// With `aot`, or in a `cuda` build on the interpreted AOT runtime, a worker holds an emulator
-    /// memory from a pool of `MEMORY_POOL_SIZE` while it replays. Unset, the pool is 16, raised
+    /// memory from a pool of `MEMORY_POOL_SIZE` while it replays. Unset, the pool is 16 (4 in a
+    /// `cuda` build on a low-memory host, see `PICO_HOST_MEM`), raised
     /// where that is fewer to one per worker plus the batch being cut, so every worker replays at
     /// once; a smaller size caps how many do, and [`Self::build`] refuses only a pool that cannot
     /// hold the batch being cut.
@@ -582,6 +583,8 @@ impl ProverBuilder {
 
     /// What an emulation of [`Self::execute_chunked`] or [`Self::emulate`] runs with.
     fn emulation_setup(&self) -> Result<(Arc<Program>, EmulatorOpts, EmulationPath), ProveError> {
+        #[cfg(feature = "cuda")]
+        check_host_mem_setting()?;
         let chunk_size = self.resolved_chunk_size()?;
         let opts = emulator_opts(chunk_size);
         let path = self.resolved_emulation(chunk_size)?;
@@ -598,6 +601,8 @@ impl ProverBuilder {
 
     /// Keygen the RISC-V air set and check the options against each other.
     pub fn build(self) -> Result<Prover, ProveError> {
+        #[cfg(feature = "cuda")]
+        check_host_mem_setting()?;
         let chunk_size = self.resolved_chunk_size()?;
         let emulation = self.resolved_emulation(chunk_size)?;
 
@@ -964,6 +969,15 @@ fn compile(elf: &[u8]) -> Result<Arc<Program>, ProveError> {
     Ok(Compiler::new(SourceType::RISCV, elf)
         .map_err(|e| ProveError::InvalidElf(e.to_string()))?
         .compile())
+}
+
+/// Refuse a bad `PICO_HOST_MEM` while it is still an option: the host-memory tier latches on its
+/// first read, which emulation and this prover's defaults make.
+#[cfg(feature = "cuda")]
+fn check_host_mem_setting() -> Result<(), ProveError> {
+    pico_vm::machine::host_memory::host_mem_setting()
+        .map(drop)
+        .map_err(ProveError::InconsistentOptions)
 }
 
 /// Latch the visible cards' memory tier (`PICO_GPU_MEM` overrides) before any emulation reads
