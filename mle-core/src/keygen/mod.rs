@@ -192,6 +192,12 @@ impl<SC: StarkProtocolConfig> MultiStarkKeygenBuilder<SC> {
             !self.merge_preprocessed,
             "a reused preprocessed commitment is per-air; merged mode commits all tables together"
         );
+        assert_eq!(
+            prep.verifier_data.is_some(),
+            prep.prover_data.is_some(),
+            "{}: a reused preprocessed table has its commitment without its data, or the reverse",
+            air.name()
+        );
         self.partitioned_airs.push(AirKeygenBuilder {
             is_required,
             air,

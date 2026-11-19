@@ -374,8 +374,9 @@ fn switching_programs_rebuilds_the_machines_without_growing() {
 }
 
 /// Card 0 proves with the riscv keys `build` made: the same program twice, another program with a
-/// failing run in between (its keys still evicted and remade correctly), back to the first, and a
-/// batch `Phase::Riscv` prove on the shared machine before a GPU one. Every proof verifies.
+/// failing run in between (its keys still evicted and remade correctly), back to the first, a
+/// batch `Phase::Riscv` prove on the shared machine before a GPU one, and a second prover of the
+/// first program. Every proof verifies, and each run's card 0 proves on its prover's machine.
 #[test]
 #[ignore = "needs a GPU"]
 fn the_gpu_run_reuses_the_provers_riscv_keys() {
@@ -383,6 +384,10 @@ fn the_gpu_run_reuses_the_provers_riscv_keys() {
     for _ in 0..2 {
         let proof = fib.prove(Stdin::from(&N)).expect("fib");
         assert_is_fib_output(proof.committed().as_bytes(), N);
+        assert!(
+            fib.card0_proves_on_own_riscv(),
+            "card 0 adopts fib's machine"
+        );
     }
 
     let mut poseidon2 = whitelist_prover(POSEIDON2_ELF);
@@ -393,6 +398,7 @@ fn the_gpu_run_reuses_the_provers_riscv_keys() {
         .prove(Stdin::from(&POSEIDON2_ROUNDS))
         .expect("poseidon2 after a failing run");
     assert_eq!(proof.program_id(), poseidon2.program_id());
+    assert!(poseidon2.card0_proves_on_own_riscv());
 
     let proof = fib.prove(Stdin::from(&N)).expect("fib again");
     assert_is_fib_output(proof.committed().as_bytes(), N);
@@ -401,6 +407,20 @@ fn the_gpu_run_reuses_the_provers_riscv_keys() {
         .expect("a batch riscv prove on the shared machine");
     let proof = fib.prove(Stdin::from(&N)).expect("fib after a batch prove");
     assert_is_fib_output(proof.committed().as_bytes(), N);
+    assert!(fib.card0_proves_on_own_riscv());
+
+    // A second prover of the same program swaps card 0's machine for its own, and back.
+    let mut fib_again = whitelist_prover(FIB_ELF);
+    let proof = fib_again
+        .prove(Stdin::from(&N))
+        .expect("fib on a second prover");
+    assert_is_fib_output(proof.committed().as_bytes(), N);
+    assert!(fib_again.card0_proves_on_own_riscv());
+    let proof = fib
+        .prove(Stdin::from(&N))
+        .expect("fib on the first prover again");
+    assert_is_fib_output(proof.committed().as_bytes(), N);
+    assert!(fib.card0_proves_on_own_riscv());
 }
 
 /// A pipeline failure that is not the guest's poisons the process: the next prove is refused with

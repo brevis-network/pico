@@ -3,6 +3,7 @@ on:
   pull_request:
     branches:
       - main
+      - dev
       - release/v*
     paths-ignore:
       - "docs/**"
@@ -15,6 +16,7 @@ on:
   push:
     branches:
       - main
+      - dev
     paths-ignore:
       - "docs/**"
       - "README.md"
@@ -134,6 +136,12 @@ jobs:
           set -o pipefail
           cargo test --release -p pico-vm --lib -- mle::machine::riscv::tests::trace_records | tee trace-records.log
           grep -qE "test result: ok\. [1-9][0-9]* passed" trace-records.log
+      - name: Riscv keygen reusing another program's tables matches a fresh one
+        run: |
+          # The keys a GPU prove adopts from `ProverBuilder::build` come through this reuse.
+          set -o pipefail
+          cargo test --release -p pico-vm --lib -- mle::machine::riscv::tests::keygen_reusing_another_programs_tables_matches_a_fresh_keygen | tee keygen-reuse.log
+          grep -qE "test result: ok\. 1 passed" keygen-reuse.log
       - name: Poseidon2 known answers
         run: |
           # The riscv stage's Poseidon2 constants sit in its constraint DAG, so a change to them

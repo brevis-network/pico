@@ -252,8 +252,8 @@ knob_probe!(
 knob_probe!(rec_wavefront_reaches_the_vm, "MLE_REC_WAVEFRONT", true);
 
 /// A variable the crate root documents as reaching the prover must be in the list callers warn
-/// from, and nothing else may be. A row that reaches it only with the `aot` or `cuda` feature counts only in
-/// a build with it.
+/// from, and nothing else may be. A row that reaches it only with the `aot` or `cuda` feature, or only with
+/// `cuda`, counts only in a build with it.
 #[test]
 fn the_exported_variables_are_the_ones_the_crate_documents() {
     let mut documented: Vec<&str> = include_str!("../lib.rs")
@@ -263,6 +263,7 @@ fn the_exported_variables_are_the_ones_the_crate_documents() {
             cfg!(any(feature = "aot", feature = "cuda"))
                 || !line.contains("| **yes, with the `aot` or `cuda` feature")
         })
+        .filter(|line| cfg!(feature = "cuda") || !line.contains("| **yes, with the `cuda` feature"))
         .flat_map(|line| {
             let names = line.split('|').nth(1).expect("a names column");
             names.split('`').skip(1).step_by(2)

@@ -3,6 +3,7 @@ on:
   pull_request:
     branches:
       - main
+      - dev
       - release/v*
     paths:
       # Everything `cargo clippy --workspace` compiles: the members, what they path-depend on, and
@@ -29,6 +30,7 @@ on:
   push:
     branches:
       - main
+      - dev
     paths:
       - "derive/**"
       - "mle-core/**"

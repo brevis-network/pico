@@ -193,6 +193,14 @@ impl GpuResources {
     }
 }
 
+/// The riscv machine card 0 proves on between runs: the caller's, when the last run adopted it.
+/// For tests.
+#[cfg(feature = "cuda")]
+#[doc(hidden)]
+pub fn card0_riscv() -> Option<Arc<pico_vm::mle::machine::riscv::RiscvMachine>> {
+    super::resident_card0_riscv()
+}
+
 /// Latches the precompile-split memory tier for the visible cards (`PICO_GPU_MEM` overrides)
 /// before any emulation reads it. Fails if an earlier emulation latched another tier.
 #[cfg(feature = "cuda")]
@@ -484,7 +492,8 @@ fn check_pinned_memory(program: &EmbeddedProgram) -> Result<(), EmbedError> {
     }
     let host_bytes = host_memory::host_bytes();
     let pinned_bytes = pinned_event_bytes(program.event_pool_size);
-    if pinned_bytes as f64 > host_bytes as f64 * MAX_PINNED_EVENT_FRACTION {
+    // `0`: the host's memory could not be read, so there is nothing to check against.
+    if host_bytes > 0 && pinned_bytes as f64 > host_bytes as f64 * MAX_PINNED_EVENT_FRACTION {
         return Err(EmbedError::EventPoolTooLarge {
             pool_size: slots,
             pinned_bytes,

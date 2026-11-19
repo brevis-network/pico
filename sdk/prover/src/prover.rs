@@ -436,7 +436,8 @@ impl ProverBuilder {
     /// core count: the pipeline runs one replay worker per core at most.
     ///
     /// With `aot`, or in a `cuda` build on the interpreted AOT runtime, a worker holds an emulator
-    /// memory from a pool of `MEMORY_POOL_SIZE` while it replays. Unset, the pool is 16, raised
+    /// memory from a pool of `MEMORY_POOL_SIZE` while it replays. Unset, the pool is 16 (4 in a
+    /// `cuda` build on a low-memory host, see `PICO_HOST_MEM`), raised
     /// where that is fewer to one per worker plus the batch being cut, so every worker replays at
     /// once; a smaller size caps how many do, and [`Self::build`] refuses only a pool that cannot
     /// hold the batch being cut.
@@ -582,6 +583,8 @@ impl ProverBuilder {
 
     /// What an emulation of [`Self::execute_chunked`] or [`Self::emulate`] runs with.
     fn emulation_setup(&self) -> Result<(Arc<Program>, EmulatorOpts, EmulationPath), ProveError> {
+        #[cfg(feature = "cuda")]
+        check_host_mem_setting()?;
         let chunk_size = self.resolved_chunk_size()?;
         let opts = emulator_opts(chunk_size);
         let path = self.resolved_emulation(chunk_size)?;
@@ -598,6 +601,8 @@ impl ProverBuilder {
 
     /// Keygen the RISC-V air set and check the options against each other.
     pub fn build(self) -> Result<Prover, ProveError> {
+        #[cfg(feature = "cuda")]
+        check_host_mem_setting()?;
         let chunk_size = self.resolved_chunk_size()?;
         let emulation = self.resolved_emulation(chunk_size)?;
 
@@ -662,9 +667,14 @@ impl ProverBuilder {
 
         let program = compile(&self.elf)?;
 
-        // The riscv machine below keygens on the GPU in a `cuda` build, which needs the pool.
+        // The riscv machine below keygens on the GPU in a `cuda` build, which needs the pool, and
+        // on card 0, where the GPU pipeline adopts it.
         #[cfg(feature = "cuda")]
-        pico_vm::mle::machine::riscv::init_mle_gpu_pool(0);
+        {
+            pico_vm::mle::machine::riscv::init_mle_gpu_pool(0);
+            pico_vm::mle::cuda_mle::runtime::context::set_device(0)
+                .map_err(|e| ProveError::Gpu(format!("cannot bind card 0: {e:?}")))?;
+        }
 
         // Built once and handed on: the fit check and keygen need the same air set, and in
         // whitelist mode building it pads the program table to its bucket.
@@ -959,6 +969,15 @@ fn compile(elf: &[u8]) -> Result<Arc<Program>, ProveError> {
     Ok(Compiler::new(SourceType::RISCV, elf)
         .map_err(|e| ProveError::InvalidElf(e.to_string()))?
         .compile())
+}
+
+/// Refuse a bad `PICO_HOST_MEM` while it is still an option: the host-memory tier latches on its
+/// first read, which emulation and this prover's defaults make.
+#[cfg(feature = "cuda")]
+fn check_host_mem_setting() -> Result<(), ProveError> {
+    pico_vm::machine::host_memory::host_mem_setting()
+        .map(drop)
+        .map_err(ProveError::InconsistentOptions)
 }
 
 /// Latch the visible cards' memory tier (`PICO_GPU_MEM` overrides) before any emulation reads
@@ -1278,6 +1297,12 @@ impl Prover {
     /// Keygen for `elf` with options.
     pub fn builder(elf: &[u8]) -> ProverBuilder {
         ProverBuilder::new(elf)
+    }
+
+    /// Tests only: whether the GPU pipeline's card 0 proves on this prover's riscv machine.
+    #[cfg(all(test, feature = "cuda"))]
+    pub(crate) fn card0_proves_on_own_riscv(&self) -> bool {
+        distributed_vm::mle::embed::card0_riscv().is_some_and(|m| Arc::ptr_eq(&m, &self.riscv))
     }
 
     /// The program this prover attests to.
@@ -1979,9 +2004,12 @@ impl Prover {
             },
             event_pool_size: self.gpu_event_pool_size,
             emulation_workers: self.gpu_emulation_workers,
-            // The embedded run proves at the whitelist height; hand over these keys only then.
-            riscv: (self.log_stacked_height == WHITELIST_LOG_STACKED_HEIGHT)
-                .then(|| Arc::clone(&self.riscv)),
+            // The embedded run proves at the whitelist height, which `build` holds a whitelist
+            // prover to, so these keys are the run's.
+            riscv: {
+                assert_eq!(self.log_stacked_height, WHITELIST_LOG_STACKED_HEIGHT);
+                Some(Arc::clone(&self.riscv))
+            },
         };
         let out = distributed_vm::mle::embed::prove(program, stdin.into_emulator_stdin())
             .map_err(ProveError::from_embed)?;

@@ -133,6 +133,14 @@ where
             "a required AIR id is out of range"
         );
         assert_eq!(airs.len(), reuse.len(), "one reuse entry per AIR");
+        // An app table is the program's identity and outside the pre-hash: reusing another
+        // program's would change neither.
+        assert!(
+            app_prep_air_ids
+                .iter()
+                .all(|&air_id| reuse.get(air_id).is_none_or(Option::is_none)),
+            "an app preprocessed table is never reused"
+        );
         let mut keygen_builder = MultiStarkKeygenBuilder::new(self.config().clone());
         if let Some(memo) = memo {
             keygen_builder = keygen_builder.with_pre_hash_memo(memo);
@@ -155,7 +163,10 @@ where
         let pk = keygen_builder.generate_pk().unwrap();
         tracing::info!(
             "mle_keygen_detail: add_airs_ms = {add_airs_ms} (prep gen+commit, {} reused), generate_pk_ms = {} (DAG+checks)",
-            reuse.iter().filter(|p| p.is_some()).count(),
+            reuse
+                .iter()
+                .filter(|p| p.as_ref().is_some_and(|p| p.verifier_data.is_some()))
+                .count(),
             t_gen.elapsed().as_millis()
         );
         let vk = pk.get_vk();

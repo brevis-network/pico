@@ -2290,9 +2290,8 @@ pub struct RiscvMachine {
     /// chunk's index.
     chunk_tables: std::sync::Mutex<std::collections::BTreeMap<u32, ChunkTable>>,
     /// Whitelist-mode shape bucketing (see `shape`); off = natural heights, dynamic shapes.
-    /// Read only on the CPU `prove_chunk` path; the GPU path generates traces on-device and does
-    /// not bucket, so the field is unused under `cuda`.
-    #[cfg_attr(feature = "cuda", allow(dead_code))]
+    /// Read on the CPU `prove_chunk` path, where traces are bucketed; the GPU path generates traces
+    /// on-device and does not bucket.
     bucket: bool,
     /// Chunk proving concurrency of [`Self::prove`]; `None` falls back to [`prove_concurrency`].
     concurrency: Option<NonZeroUsize>,
@@ -2307,7 +2306,9 @@ struct KeygenReuse {
     preps: Vec<Option<CommittedPrep<Sc>>>,
 }
 
-/// Kept for the life of the process: a few fixed tables (Byte, KeccakTables), not per program.
+/// Kept for the life of the process, in host memory: the committed data (stacked matrix, RS
+/// codeword, Merkle tree) of the fixed tables (Byte, KeccakTables), which every later riscv keygen
+/// of the same air set reuses, including those of a GPU run's other cards.
 static KEYGEN_REUSE: std::sync::Mutex<Option<KeygenReuse>> = std::sync::Mutex::new(None);
 
 /// Held shared by the tests that keygen a riscv machine, and exclusively by the one that reads
@@ -3054,6 +3055,13 @@ impl RiscvMachine {
     /// The canonical verifying key.
     pub fn vk(&self) -> &MultiStarkVerifyingKey<Sc> {
         &self.vk
+    }
+
+    /// Whether this machine was built at `log_stacked_height`, with whitelist bucketing when
+    /// `bucket`: the settings that, with the program, decide its keys.
+    pub fn built_for(&self, log_stacked_height: usize, bucket: bool) -> bool {
+        self.bucket == bucket
+            && *self.engine.params() == riscv_params_with_128_bits_security(log_stacked_height)
     }
 
     /// The vk's app-independent pre-hash (see [`compute_vk_pre_hash`]) — this machine's keygen
@@ -3859,7 +3867,15 @@ mod tests {
                         a.air_name
                     );
                 }
-                assert_eq!(non_app_preps(&pk).len(), airs.len());
+                // Every table but the program's is handed on, the AIRs without one as empty.
+                for (id, prep) in non_app_preps(&pk).iter().enumerate() {
+                    assert_eq!(
+                        prep.is_none(),
+                        RISCV_APP_PREP_AIR_IDS.contains(&id),
+                        "{}: handed on as reusable exactly when it is not an app table",
+                        airs[id].name()
+                    );
+                }
                 program_commits.push(riscv_program_commit(&vk));
             }
             // Reuse crossed programs with different program tables, not a repeat of one.

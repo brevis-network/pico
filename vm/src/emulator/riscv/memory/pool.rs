@@ -20,11 +20,12 @@ pub fn memory_pool_size() -> usize {
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or_else(|| {
+            let floor = POOL_SIZE_FLOOR.load(Ordering::Relaxed);
             #[cfg(feature = "cuda")]
             if host_memory::low_memory_host() {
-                return host_memory::LOW_MEMORY_POOL_SIZE;
+                return floor.max(host_memory::LOW_MEMORY_POOL_SIZE);
             }
-            POOL_SIZE_FLOOR.load(Ordering::Relaxed).max(16)
+            floor.max(16)
         })
 }
 
@@ -33,8 +34,8 @@ static POOL_SIZE_FLOOR: AtomicUsize = AtomicUsize::new(0);
 
 /// Raises the size an unset `MEMORY_POOL_SIZE` stands for to at least `needed`, while the pool is
 /// not yet built, so a run that names no size gets a pool every worker can replay from at once. A
-/// size someone set, or a pool already built, stays. A `cuda` build on a low-memory host keeps
-/// [`host_memory::LOW_MEMORY_POOL_SIZE`] instead: fewer workers replay at once, for less memory.
+/// size someone set, or a pool already built, stays. A `cuda` build on a low-memory host starts
+/// from [`host_memory::LOW_MEMORY_POOL_SIZE`] instead of 16.
 pub fn raise_pool_size_floor(needed: usize) {
     if Lazy::get(&GLOBAL_MEMORY_POOL).is_none() {
         POOL_SIZE_FLOOR.fetch_max(needed, Ordering::Relaxed);
