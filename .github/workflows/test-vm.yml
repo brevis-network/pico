@@ -40,9 +40,10 @@ env:
   VK_VERIFICATION: false
 
 jobs:
-  # `mle-prove`, `vm-pins` and `compile-ffi` build the same `pico-vm` release artifacts, so they
-  # share one cache key instead of the per-job default; `mle-prove` builds the most and is the
-  # designated writer. Per-job keys would triple the cold build instead of sharing it.
+  # `mle-prove`, `vm-pins`, `vm-parity`, `compile-ffi` and `carrier` build the same `pico-vm`
+  # release artifacts, so they share one cache key instead of the per-job default; `mle-prove`
+  # builds the most and is the designated writer. Per-job keys would multiply the cold build
+  # instead of sharing it.
   mle-prove:
     name: CPU · MLE prove (fib)
     runs-on: ubuntu-latest
@@ -329,52 +330,37 @@ jobs:
           # closed-form bound.
           cargo test --release -p pico-mle-core --features test-utils,soundness-bchks25-optimized
 
-  # Its proofs cost minutes each, so it runs as its own job beside the VM lanes.
+  # Its proofs cost minutes each, so it runs as its own job beside the VM lanes, on their cache.
   carrier:
     name: CPU · MLE carrier tie
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-vm-release
+          cache-save: "false"
       - name: MLE carrier tie (fib)
         run: |
           # Doctors every riscv public-value copy but Ecall's; the recursion tree must reject it.
           RUST_LOG=info cargo run --release -p pico-vm --example test_carrier_tie
 
-  # Runs AOT code generated from ELFs (as does `aot-workers-parity`), and is the only job that
-  # builds the prover's `aot` feature; `AOT harnesses compile` builds `perf/aot` against the committed stub.
-  # The generated crates compile in `perf/aot`'s own target, which is why it runs as its own job
-  # beside the VM lanes, on its own cache key.
-  aot-parity:
-    name: CPU · AOT records against the interpreter (fib)
+  # The code generator's tests, and the only job that builds the prover's `aot` feature. Code
+  # generated from ELFs is compared with the interpreter in `aot-workers-parity`; `AOT harnesses
+  # compile` builds `perf/aot` against the committed stub. The `aot` proof peaks near 10 GB, which
+  # is why it runs as its own job beside the VM lanes.
+  aot-feature:
+    name: CPU · AOT code generator and the prover's aot feature
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
-        with:
-          # The root target holds the code generator, `perf/aot`'s the test built on its output.
-          workspaces: |
-            . -> target
-            perf/aot -> target
       - name: AOT code generator
         run: |
           # The stamp the dispatch crate exports against the one the runtime accepts, the runtime
           # dependency in every generated manifest, and the decode and forced-split regressions. No
-          # other job runs them; first, so a generator fault shows before the comparisons below.
+          # other job runs them.
           cargo test --release -p pico-aot-codegen
-      - name: Generate each guest's AOT crates and compare its records with the interpreter's
-        run: |
-          # First the committed stub's code against the interpreter's records. Then, per guest, every
-          # record the pipeline emits with the AOT snapshot thread against the interpreter's, and
-          # again with the AOT core writing the records itself; each pass fails if compiled code ran
-          # nothing. fib puts its commit tail across a chunk boundary, and poseidon2 is the cheapest
-          # guest whose precompile events the AOT core writes.
-          bash perf/aot/record_parity.sh fib poseidon2
-      - name: The committed stub is back
-        run: |
-          set -eux
-          git status --porcelain --ignored -- aot-generated
-          test -z "$(git status --porcelain --ignored -- aot-generated)"
       - name: The prover and cargo pico with the aot feature
         run: |
           # No other job builds the feature: `ProverBuilder::aot` proving and verifying fib through
@@ -389,13 +375,16 @@ jobs:
           cargo test --release -p pico-prover --features aot -- --test-threads=1 tests::pipeline:: | tee pipeline-aot-test.log
           grep -qE "test result: ok\. [1-9][0-9]* passed" pipeline-aot-test.log
 
-  # The pipeline's replay workers run as the AOT core, on guests generated from their ELFs, and their
-  # records are compared with the interpreter workers'. Records cannot show which engine replayed a
-  # chunk, so each chunk's own account is read as well. Its own job because `aot-parity` is already
-  # the longest here; bls12381-fp's run is by far the longest and peaks near 8.5 GB, so it has a leg
-  # to itself. Each leg runs both stub controls, one fib run each.
+  # Code generated from each guest's ELF against the interpreter, every pass of
+  # perf/aot/record_parity/src/lib.rs: the AOT snapshot thread's records, the AOT core's own
+  # records, and the pipeline's replay workers as AOT cores against interpreter workers. Each pass
+  # fails if compiled code ran nothing; records cannot show which engine replayed a chunk, so each
+  # chunk's own account is read as well. fib puts its commit tail across a chunk boundary, and
+  # poseidon2 is the cheapest guest whose precompile events the AOT core writes. bls12381-fp's run
+  # is by far the longest and peaks near 8.5 GB, so it has a leg to itself. Each leg runs both stub
+  # controls, one fib run each.
   aot-workers-parity:
-    name: CPU · AOT workers against interpreter workers (${{ matrix.part }})
+    name: CPU · AOT records against the interpreter (${{ matrix.part }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -411,15 +400,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
         with:
+          # The legs build the same dependencies, so they share one cache, which the longer list
+          # of guests writes.
+          cache-key: aot-records
+          cache-save: ${{ matrix.part == 'other guests' }}
           # The root target holds the code generator, `perf/aot`'s the test built on its output.
           workspaces: |
             . -> target
             perf/aot -> target
-      - name: Generate each guest's AOT crates and compare its replay workers with the interpreter's
+      - name: Generate each guest's AOT crates and compare its records with the interpreter's
         run: |
-          # The committed stub first, then per guest the pipeline's records with AOT replay workers
-          # against interpreter workers. Compiled execution is required across the run; a count the
-          # worker did not report fails it.
+          # The two stub controls first, then every pass above per guest. Compiled execution is
+          # required across the run; a count the worker did not report fails it.
           # shellcheck disable=SC2086
           bash perf/aot/record_parity.sh $GUESTS
       - name: The committed stub is back

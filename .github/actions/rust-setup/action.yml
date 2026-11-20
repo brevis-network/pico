@@ -25,7 +25,9 @@ inputs:
   cache-save:
     description: >
       Whether this job writes the cache. With a shared key exactly one job should save, otherwise
-      the lanes race to overwrite each other's entry.
+      the lanes race to overwrite each other's entry. Only a run on `main` writes: pull requests
+      and pushes to `dev` read `main`'s entries, as the default branch's, and entries of their own
+      would evict `main`'s from the repository's 10 GB.
     required: false
     default: "true"
   workspaces:
@@ -52,5 +54,5 @@ runs:
       uses: Swatinem/rust-cache@v2
       with:
         shared-key: ${{ inputs.cache-key }}
-        save-if: ${{ inputs.cache-save == 'true' }}
+        save-if: ${{ inputs.cache-save == 'true' && github.ref == 'refs/heads/main' }}
         workspaces: ${{ inputs.workspaces }}
