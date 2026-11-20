@@ -1,105 +1,17 @@
 # 📊 Benchmark Timeline Analysis – README
 
-It contains the Python scripts for extracting and visualizing timeline data — `extract_time_info.py` and `draw-timeline.py` for the FRI prover, `draw-mle-timeline.py` for the MLE one — along with the automation scripts for running experiments under various configurations.
-
----
-
-## 🧪 Bash Scripts
-
-### 1. `collect_e2e_summary.py`
-
-**Purpose:**
-Aggregates end-to-end (E2E) benchmark results from different thread configurations and summarizes them into a sortable table for analysis.
-
-**How It Works:**
-
-* Automatically detects the current Git branch name and only collects results that match files with that branch.
-* Scans subdirectories in `./logs/` named like `T2_R3` (indicating emulator and RISC-V preparer thread counts).
-* Within each folder, it reads `result-<PROVER_ID>-<BLOCK_ID>-<branch>.txt` files and extracts `E2E_total` time.
-* Appends each result into a structured table with the following columns:
-
-  * `block_id`
-  * `emulator_threads`
-  * `riscv_preparer_threads`
-  * `e2e` (total runtime in seconds)
-
-**Usage:**
-
-```bash
-python3 collect_e2e_summary.py
-```
-
-**Output:**
-
-* Prints a sorted table of E2E runtime data to the console.
-* (Optional) Uncomment the final line to save the result as a CSV.
-
-**Example Output:**
-
-```
- block_id  emulator_threads  riscv_preparer_threads     e2e
- 17106222                 3                       6  37.875
- 17106222                 2                       4  38.220
-```
-
----
-
-**Notes:**
-
-* Requires `pandas` to be installed.
-* The script is helpful for performance comparison across multiple configurations to identify the optimal threading strategy.
-* Only result files with names matching the current Git branch are considered.
-
----
-
-## 🗂 Directory Structure
-
-```
-logs/
-├── tmp/
-│   └── single-node-*.txt       # Raw logs for temp use
-├── T1_R1/
-│   ├── result-*.txt
-│   ├── single-node-*-chunk.svg
-│   └── single-node-*-gpuid.svg
-├── ...
-```
-
----
-
-## 📌 Notes
-
-* Ensure dependencies like `matplotlib`, `pandas`, and `python3` are installed.
-* Adjust `BENCH_RETH_BLOCK` in the bash scripts as needed.
-* Output visuals help identify GPU usage, idle gaps, and bottlenecks.
+The Python scripts that read the MLE prover's benchmark output: `draw-mle-timeline.py` draws a run's
+pipeline timeline, `mle-gate-metrics.py` prints the figures a benchmark gates on, and `sweep-csv.py`
+turns a block-sweep log into CSVs. Requires `python3` (stdlib only).
 
 ---
 
 ## 🔧 Python Scripts
 
-### 1. `extract_time_info.py`
+### 1. `draw-mle-timeline.py` (MLE prover)
 
 **Purpose:**
-Parses a benchmark log file and extracts timing information for various stages of computation.
-
-**Outputs:**
-
-* **CSV to stdout** – Columns: `context, start_ms, end_ms, duration_ms, unit, prover_id, emulator_id, chunk_id`
-* **Summary to stderr** – E2E time, context averages and idle times per prover.
-
-**Usage:**
-
-```bash
-python3 extract_time_info.py path/to/logfile.txt > output.csv 2> result.txt
-```
-
----
-
-### 2. `draw-mle-timeline.py` (MLE prover)
-
-**Purpose:**
-Draws the MLE prover's pipeline timeline from the span CSV the prover itself writes, so it shares no
-code and no log parsing with the FRI pair above.
+Draws the MLE prover's pipeline timeline from the span CSV the prover itself writes.
 
 **Input:** whatever `MLE_SPANS=<path>` wrote (`vm/src/mle/spans`) — one row per interval during which
 one lane was in one state: `lane,index,state,work,item,start_us,end_us`. `single_node_mle.sh` sets
@@ -169,7 +81,7 @@ message is on stderr.
 
 ---
 
-### 3. `mle-gate-metrics.py` (MLE prover)
+### 2. `mle-gate-metrics.py` (MLE prover)
 
 **Purpose:**
 Reads a run's span CSV and prints the two figures a benchmark gates on: the recording window
@@ -190,19 +102,15 @@ cannot disagree about what they read.
 python3 bench-scripts/mle-gate-metrics.py --drop-warmup --best run.spans.csv.iter{1,2,3}
 ```
 
-### 4. `draw-timeline.py` (FRI prover)
+### 3. `sweep-csv.py` (block sweeps)
 
 **Purpose:**
-Takes the CSV output from `extract_time_info.py` and creates two timeline visualizations.
-
-**Outputs:**
-
-* `chunk.svg` – Timeline grouped by `chunk_id`, colored by GPU and styled by task type.
-* `lane.svg` – Timeline grouped by compute lane (CPU/GPU/Emulator), colored by stages and labeled by chunk.
+Turns the log of a block sweep (`sweep_reth_mle.sh`, one process proving many blocks) into
+`setup.csv` (the once-per-process setup figures) and `summary.csv` (one row per block), slicing the
+log by its `MLE block:` delimiters. `sweep_reth_mle.sh` calls it; `ci/test_sweep_csv.sh` tests it.
 
 **Usage:**
 
 ```bash
-python3 draw-timeline.py output.csv chunk.svg lane.svg
+python3 bench-scripts/sweep-csv.py run.log <outdir> [--manifest manifest.csv]
 ```
-
