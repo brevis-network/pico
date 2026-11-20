@@ -6,21 +6,23 @@ The root workspace (`Cargo.toml`) has these members:
 
 | path | crate | what it is |
 |---|---|---|
-| `sdk/cli` | `pico-cli` | the `cargo pico` subcommand: `install`, `build`, `execute`, `prove`, `aot`, `new`. It has no `verify`; `prove --evm` runs gnark (`gnark/`) for the Groth16 step |
+| `sdk/cli` | `pico-cli` | the `cargo pico` subcommand: `install`, `build`, `execute`, `prove`, `aot`, `lib`, `new`. It has no `verify`; `prove --evm` runs gnark (`gnark/`) for the Groth16 step |
 | `sdk/prover` | `pico-prover` | the host prover: `Prover`, `ProverBuilder`, `Stdin`, `Phase`, `Proof`, `ProofArtifact`, `EvmBundle`. Its crate documentation is the API guide |
 | `sdk/sdk` | `pico-sdk` | the guest SDK: `entrypoint!`, `io` (`read_as`, `read_vec`, `commit`, `commit_bytes`), syscalls (`riscv_ecalls`), Poseidon2 hashing |
 | `sdk/patch-libs` | `pico-patch-libs` | syscall wrappers used by the patched crates (sha2, keccak, curves, BLS12-381, BN254, ...) |
 | `vm` | `pico-vm` | the zkVM: compiler, emulator, chips, and the machines of every phase (see below) |
 | `mle-core` | `pico-mle-core` | the MLE/WHIR STARK backend core (KoalaBear only): config, transcript, symbolic AIR, interactions, PCS / sumcheck / LogUp / WHIR prover and verifier, reference device, `StarkEngine`, and the soundness calculator |
 | `mle-cpu` | `pico-mle-cpu` | the row-major CPU device backend (`CpuBackend`, `CpuDevice`) for `pico-mle-core` |
+| `verifier` | `pico-verifier` | the stable-Rust verifier for whitelist-mode root and compress proofs, for verifiers outside the prover |
 | `cuda-mle` | `cuda-mle` | the GPU device backend for `pico-mle-core`: LogUp-GKR, zerocheck, stacked reduction and WHIR on CUDA. Built into `pico-vm` by its `cuda` feature |
 | `gpu-api` | `pico-gpu-api` | GPU trace generation for the RISC-V, precompile and recursion chips, and the CUDA bindings `pico-vm` calls. Compiled with `nvcc`, only in a `cuda` build |
-| `distributed-vm` | `distributed-vm` | the proving entry points, on the GPU (on the CPU with `PICO_CUDA=0`): `mle-single-node` (one host, one or more cards; also the two-machine split), `mle-ethproofs-single-node` and `mle-ethproofs-vk-bundle`, and the gRPC proving-network and ethproofs clients. See [`distributed-vm/README.md`](../distributed-vm/README.md) |
+| `distributed-vm` | `distributed-vm` | the proving entry points, on the GPU (on the CPU with `PICO_CUDA=0`): `mle-single-node` (one host, one or more cards; also the two-machine split), `mle-ethproofs-single-node` and `mle-ethproofs-vk-bundle`, the gRPC proving-network and ethproofs clients, and `bearer-token-gen`, which prints a token for the ethproofs server's `BEARER_TOKEN`. See [`distributed-vm/README.md`](../distributed-vm/README.md) |
 | `aot-codegen` | `pico-aot-codegen` | ahead-of-time compilation of a guest's RISC-V code to Rust crates (`cargo pico aot`, `bin/generate_crates`) |
 | `aot-runtime` | `pico-aot-runtime` | runtime types for running AOT-compiled guests |
+| `aot-pure` | `pico-aot-pure` | the ABI between pure-mode AOT code and the host that runs it (`pico-aot-runtime`) |
 | `derive` | `pico-derive` | procedural macros (`aligned_borrow_derive`, from Valida) |
 | `gnark/field-ffi` | `field-ffi` | KoalaBear arithmetic exposed to the gnark circuit's hint functions |
-| `perf` | `pico-perf` | shared benchmark code, with AOT glue behind its `aot` feature |
+| `perf` | `pico-perf` | shared benchmark code: the bench programs and inputs `distributed-vm` loads |
 
 `aot-generated` (`pico-aot-dispatch`) is not a member: it is a bootstrap stub that `cargo pico aot`
 or `generate_crates` replaces with code generated from a guest's ELF.
@@ -68,9 +70,12 @@ pico-gpu checkout, pass a `[patch]` on the command line instead of editing `Carg
 - `contracts`: the Solidity verifier (`PicoVerifier`, `IPicoVerifier`) with Foundry tests and a Groth16
   verifier from a test setup; see [`contracts/README.md`](../contracts/README.md).
 - `audits`: third-party security review reports.
-- `docs`: project documentation.
+- `docs`: project documentation. Besides the guides the README links: [`deferred.md`](deferred.md)
+  (deferred proving), [`whitelist-rebuild.md`](whitelist-rebuild.md) (rebuilding the verifying-key
+  whitelist) and [`tier-tables.md`](tier-tables.md) (re-measuring the recursion tier tables).
 - `single_node_mle.sh`, `two_machine_mle.sh`, `ethproofs_single_node_mle.sh`: launchers for the
   `distributed-vm` binaries on a CUDA host; `sweep_reth_mle.sh` proves every block input in a
   directory from one process. `bench-scripts` holds the tools that summarise and draw their logs,
-  and `ci/test_*.sh` the launchers' own tests.
+  and `ci/test_*.sh` the launchers' own tests. `run_all_tests.sh` runs the GPU trace-generation
+  tests and CPU-vs-GPU benches, which CI (no GPU) does not.
 - `.github/workflows`: CI. Each workflow's `on:` block says which branches and paths it runs on.

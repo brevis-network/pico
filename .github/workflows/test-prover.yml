@@ -10,9 +10,6 @@ on:
       - "README.md"
       - ".gitignore"
       - "Makefile"
-      - "tools/**"
-      - ".claude/**"
-      - ".agent/**"
   push:
     branches:
       - main
@@ -22,9 +19,6 @@ on:
       - "README.md"
       - ".gitignore"
       - "Makefile"
-      - "tools/**"
-      - ".claude/**"
-      - ".agent/**"
   workflow_dispatch:
 
 name: Test prover
@@ -41,7 +35,7 @@ env:
 
 jobs:
   # The host prover crate's tests prove the chain, so they run beside the VM lanes (test-vm.yml)
-  # rather than after them, split by module across three jobs so none outlasts the rest of CI.
+  # rather than after them, split by module across several jobs so none outlasts the rest of CI.
   #
   # `prover`, `prover-chain`, `prover-precompiles`, `act4` and `wrap` build one test binary
   # (`cargo test --release -p pico-prover`), so they share the `cpu-prover-release` cache, which
@@ -263,8 +257,8 @@ jobs:
         run: |
           set -eux -o pipefail
           # Compiles the circuit, which nothing above does, and needs at most 2^23 constraints.
-          # This is the dev-mode circuit CI proves to (7,233,341 constraints, 13.8% under); the
-          # whitelist-mode one a verifier is set up for (7,243,820, 13.6% under) is checked the
+          # This is the dev-mode circuit CI proves to (7,256,107 constraints, 13.5% under); the
+          # whitelist-mode one a verifier is set up for (7,256,115, 13.5% under) is checked the
           # same way on a machine that can prove it, before a setup.
           (cd gnark && CGO_LDFLAGS="-L$GITHUB_WORKSPACE/target/release -Wl,-rpath,$GITHUB_WORKSPACE/target/release" \
             go test -timeout 900s -v -run '^TestCircuitFitsGroth16Domain$' ./koalabear_verifier/) \
