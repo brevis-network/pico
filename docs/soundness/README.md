@@ -109,9 +109,9 @@ The last two are the tail after the combine root, in this order. Compress is the
 layer: the root re-proved under the inner KoalaBear-Poseidon2 config
 into the one proof that is handed out. Embed starts the on-chain path that goes on from the compress
 proof, embed → wrap → Groth16: the compress proof re-proved under the outer BN254-hashed config,
-which the wrap step keygens with `embed_params`. Their presets carry the same values, by
-choice (the compress preset's doc says why they are two presets). Both register the same recursion
-chip set as convert and combine, so the recursion bounds cover them.
+which the wrap step keygens with `embed_params_with_128_bits_security`. Their presets carry the
+same values, by choice (the compress preset's doc says why they are two presets). Both register the
+same recursion chip set as convert and combine, so the recursion bounds cover them.
 
 23 is the largest height the riscv preset can prove: with `log_blowup = 1` the RS domain is
 `2^(h+1)`, and KoalaBear's two-adicity is 24, so `MAX_RISCV_LOG_STACKED_HEIGHT` is 23 and the riscv

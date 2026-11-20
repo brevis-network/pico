@@ -88,6 +88,6 @@ s3-storage = ["object_store"]
 local_test = []
 # Two-round chunk assignment: Primary 0-7,16-23; Secondary 8-15,24-31; Dynamic 32+
 two-round-chunks = ["pico-vm/two-round-chunks"]
-# Chunk task priority (enabled by default)
+# Chunk tasks before combine tasks; off by default, so the scheduler takes combine tasks first
 chunk-priority = []
 default = []

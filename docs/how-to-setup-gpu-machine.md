@@ -96,6 +96,14 @@ Generate them once per ELF, from the repository root, before the first run:
 cargo run -r -p pico-aot-codegen --bin generate_crates -- perf/bench_data/rv64/reth-elf
 ```
 
+### Run the GPU tests
+
+CI has no GPU, so the GPU trace-generation tests and the CPU-vs-GPU benches run only by hand. Once
+the toolkit and a card are in place, run them from the repository root:
+```
+./run_all_tests.sh
+```
+
 ### Check NUMA
 
 On a host with several NUMA nodes, binding the prover to the node its GPUs hang off avoids

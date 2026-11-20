@@ -1,12 +1,10 @@
-# 📊 Benchmark Timeline Analysis – README
+# 📊 Benchmark Scripts – README
 
 The Python scripts that read the MLE prover's benchmark output: `draw-mle-timeline.py` draws a run's
 pipeline timeline, `mle-gate-metrics.py` prints the figures a benchmark gates on, and `sweep-csv.py`
 turns a block-sweep log into CSVs. Requires `python3` (stdlib only).
 
 ---
-
-## 🔧 Python Scripts
 
 ### 1. `draw-mle-timeline.py` (MLE prover)
 
