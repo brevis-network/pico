@@ -9,9 +9,6 @@ on:
       - "README.md"
       - ".gitignore"
       - "Makefile"
-      - "tools/**"
-      - ".claude/**"
-      - ".agent/**"
   push:
     branches:
       # Cache scoping: a run may only read caches from its own ref, its base branch, or the
@@ -28,9 +25,6 @@ on:
       - "README.md"
       - ".gitignore"
       - "Makefile"
-      - "tools/**"
-      - ".claude/**"
-      - ".agent/**"
   # So a bottleneck can be re-measured, or a run retried after an infrastructure failure,
   # without pushing an empty commit.
   workflow_dispatch:

@@ -10,9 +10,6 @@ on:
       - "README.md"
       - ".gitignore"
       - "Makefile"
-      - "tools/**"
-      - ".claude/**"
-      - ".agent/**"
   push:
     branches:
       - main
@@ -22,9 +19,6 @@ on:
       - "README.md"
       - ".gitignore"
       - "Makefile"
-      - "tools/**"
-      - ".claude/**"
-      - ".agent/**"
   workflow_dispatch:
 
 name: Build macOS
