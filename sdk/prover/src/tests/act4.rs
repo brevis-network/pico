@@ -9,6 +9,9 @@
 //! Every one of the 72 must execute, and prove to the riscv phase, which verifies the proof,
 //! committing `PASS` both times. A Misalign test must also make misaligned loads or stores, which
 //! the `MemoryUnaligned` chip proves, and its proof must report as many as its execution counted.
+//!
+//! `ACT4_SHARD=k/n` proves only the k-th of n near-equal parts of the 72 ([`shard`]), which CI
+//! proves side by side. Unset, a run proves all of them.
 
 use std::{
     fs,
@@ -40,6 +43,9 @@ const MISALIGN: &str = "Misalign";
 
 /// What a test writes to the public values when every result matched the reference model's.
 const PASS: &[u8] = b"PASS";
+
+/// Picks the part of the 72 a run proves: `k/n`, the k-th of n parts, counted from 1.
+const SHARD_VAR: &str = "ACT4_SHARD";
 
 /// The unpacked archive's `elfs/`, unpacked at most once per process.
 fn elf_dir() -> &'static Path {
@@ -130,27 +136,58 @@ fn each_suite_holds_its_tests() {
     }
 }
 
-/// All 72 tests run, and every failure is reported, not only the first.
+/// The part of the 72 that [`SHARD_VAR`] picks, as `(k, n)`, or all of them, `(1, 1)`, when it is
+/// unset. Part k of n is every n-th test in suite and name order from the k-th, so the parts differ
+/// by one test at most and together are the 72.
+fn shard() -> (usize, usize) {
+    let Ok(value) = std::env::var(SHARD_VAR) else {
+        return (1, 1);
+    };
+    value
+        .split_once('/')
+        .and_then(|(k, n)| {
+            let k = k.trim().parse::<usize>().ok()?;
+            let n = n.trim().parse::<usize>().ok()?;
+            (1..=n).contains(&k).then_some((k, n))
+        })
+        .unwrap_or_else(|| {
+            panic!("{SHARD_VAR}={value}: expected k/n, the k-th of n parts, 1 <= k <= n")
+        })
+}
+
+/// All 72 tests run, or the part of them [`SHARD_VAR`] picks, and every failure is reported, not
+/// only the first.
 #[test]
 fn every_test_executes_proves_and_verifies() {
+    let tests: Vec<(&str, String, PathBuf)> = MUST_PASS
+        .iter()
+        .flat_map(|&(name, _)| {
+            suite(name)
+                .into_iter()
+                .map(move |(test, path)| (name, test, path))
+        })
+        .collect();
+    assert_eq!(tests.len(), 72, "the suites hold 72 tests");
+    let (part, parts) = shard();
+    if parts > 1 {
+        eprintln!("{SHARD_VAR}={part}/{parts}: part {part} of {parts} of the 72");
+    }
     let mut failed = Vec::new();
     let mut ran = 0;
-    for (name, _) in MUST_PASS {
-        for (test, path) in suite(name) {
-            let started = Instant::now();
-            let outcome = run(&fs::read(&path).expect("read the ELF"), name == MISALIGN);
-            let seconds = started.elapsed().as_secs_f64();
-            match outcome {
-                Ok(()) => eprintln!("{test}: ok ({seconds:.1} s)"),
-                Err(why) => {
-                    eprintln!("{test}: FAILED ({seconds:.1} s): {why}");
-                    failed.push(format!("{test}: {why}"));
-                }
+    for (name, test, path) in tests.into_iter().skip(part - 1).step_by(parts) {
+        let started = Instant::now();
+        let outcome = run(&fs::read(&path).expect("read the ELF"), name == MISALIGN);
+        let seconds = started.elapsed().as_secs_f64();
+        match outcome {
+            Ok(()) => eprintln!("{test}: ok ({seconds:.1} s)"),
+            Err(why) => {
+                eprintln!("{test}: FAILED ({seconds:.1} s): {why}");
+                failed.push(format!("{test}: {why}"));
             }
-            ran += 1;
         }
+        ran += 1;
     }
-    assert_eq!(ran, 72, "the suites hold 72 tests");
+    assert!(ran > 0, "{SHARD_VAR}={part}/{parts} picks none of the 72");
     assert!(
         failed.is_empty(),
         "{} of {ran} ACT4 tests failed:\n{}",
