@@ -751,7 +751,6 @@ mod tests {
         "CHUNKS_PER_ROUND",
         "CPU_CHUNKS_PER_TASK_UNIT",
         "DYNAMIC_CHUNK_START",
-        "FRI_RISCV_ONLY",
         "GLOBAL_SCHEDULER_PORT",
         "MACHINE_ROLE",
         "MLE_CONNECT_ATTEMPTS",

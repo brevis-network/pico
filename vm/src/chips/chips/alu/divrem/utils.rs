@@ -32,7 +32,6 @@ pub fn is_word_operation(opcode: Opcode) -> bool {
 
 /// Returns `true` if the given `opcode` is a signed word operation.
 #[must_use]
-#[allow(dead_code)]
 pub fn is_signed_word_operation(opcode: Opcode) -> bool {
     opcode == Opcode::DIVW || opcode == Opcode::REMW
 }
@@ -44,7 +43,6 @@ pub fn is_unsigned_word_operation(opcode: Opcode) -> bool {
 }
 
 /// Returns `true` if the given `opcode` is NOT a word operation (i.e., 64-bit operation).
-#[allow(dead_code)]
 pub fn is_not_word_operation(opcode: Opcode) -> bool {
     !is_word_operation(opcode)
 }

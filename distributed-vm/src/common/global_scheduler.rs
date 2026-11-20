@@ -267,9 +267,9 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
         self.last_completed_block.store(block, Ordering::SeqCst);
     }
 
-    /// FRI_RISCV_ONLY terminal report: count a proven chunk with no proof payload and complete
-    /// when all chunks are in. Mirrors the no-combine branch of `report_proof` (which drops the
-    /// proof anyway) but takes no proof, so the FRI riscv `BaseProof` need not be lifted to `P`.
+    /// Terminal report: count a proven chunk with no proof payload and complete when all chunks
+    /// are in. Mirrors the no-combine branch of `report_proof` (which drops the proof anyway) but
+    /// takes no proof.
     pub fn report_chunk_terminal(&self, chunk_idx: usize) {
         if self.is_aborted() {
             return;
@@ -1097,7 +1097,7 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
     pub fn final_proof(&self) -> Option<Arc<P>> {
         if self.is_complete() {
             let tree = self.proof_tree.lock();
-            // riscv-only / no-combine completions (e.g. FRI_RISCV_ONLY) never populate
+            // riscv-only / no-combine completions never populate
             // the proof tree, so it stays empty. Only extract the collapsed combine proof
             // when the inner tree has actually reduced to a single proved node; otherwise
             // there is no final proof (return None instead of tripping final_combine_proof's

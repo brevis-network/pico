@@ -28,14 +28,12 @@ use crate::{
 const GKR_TASKS: u32 = 65536;
 
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct TraceInteractionMeta {
     pub trace_idx: usize,
     pub air_idx: usize,
     pub layout_slices: Vec<StackedSlice>,
 }
 
-// TODO: check whether anything still needs this helper.
 pub fn collect_trace_interactions<
     FK: FieldKernels,
     HS: GpuHashScheme<BaseField = FK::Val, ExtField = FK::ValExt>,

@@ -103,9 +103,9 @@ pub struct EcallChipCols<T: Copy> {
     /// `ecall.index_bitmap`, mirrored into the main trace.
     ///
     /// The mirror exists because an interaction message must be *affine in current-row
-    /// main/preprocessed columns* (`machine/utils.rs::eval_symbolic_to_virtual_pair` panics
-    /// otherwise), and `index_word_array(public_values.committed_value_digest, index_bitmap)`
-    /// is a public value times a main column. Only meaningful on COMMIT rows; unconstrained
+    /// main/preprocessed columns*, and
+    /// `index_word_array(public_values.committed_value_digest, index_bitmap)` is a public value
+    /// times a main column. Only meaningful on COMMIT rows; unconstrained
     /// elsewhere.
     pub commit_digest_bytes: Word<T>,
 
