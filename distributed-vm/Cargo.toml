@@ -20,14 +20,6 @@ name = "ethproofs-client"
 path = "bin/ethproofs_client.rs"
 
 [[bin]]
-name = "proving-network-client"
-path = "bin/proving_network_client.rs"
-
-[[bin]]
-name = "proof-test-server"
-path = "bin/proof_test_server.rs"
-
-[[bin]]
 name = "bearer-token-gen"
 path = "bin/bearer_token_gen.rs"
 

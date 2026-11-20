@@ -1,10 +1,6 @@
 use super::BlockNum;
-use crate::{ProveTaskRequest, ProvingRequest};
-use std::{
-    error::Error,
-    fs,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use crate::ProvingRequest;
+use std::{error::Error, fs};
 
 /// Where the aggregator flows expect the RISC-V vk digest on disk (was
 /// `coordinator::emulator::VK_DIGEST_PATH` before the FRI coordinator was removed).
@@ -86,22 +82,4 @@ impl From<ProvingRequest> for ProgramInput {
         let input = req.input_buffer;
         Self::Simple { block, input }
     }
-}
-
-// covnert from proving network request
-impl From<ProveTaskRequest> for ProgramInput {
-    fn from(req: ProveTaskRequest) -> Self {
-        // generate a proving network task ID
-        let task_id = task_id();
-
-        let inputs = req.inputs;
-        Self::Common { task_id, inputs }
-    }
-}
-
-// generate a proving network task ID
-fn task_id() -> u64 {
-    let now = SystemTime::now();
-    let duration = now.duration_since(UNIX_EPOCH).unwrap();
-    duration.as_secs()
 }

@@ -23,20 +23,11 @@ pub mod common;
 pub mod gateway;
 pub mod io;
 pub mod mle;
-pub mod timeline;
 
 pub fn init_optional_aot() {
     #[cfg(feature = "aot-emulator")]
     aot::register();
 }
 
-tonic::include_proto!("grpc");
 tonic::include_proto!("prover_server");
-tonic::include_proto!("proving_network");
-tonic::include_proto!("finalproof");
-tonic::include_proto!("orchestrator");
-tonic::include_proto!("proof");
-tonic::include_proto!("aggregator");
-tonic::include_proto!("subblock");
-tonic::include_proto!("proof_transfer");
 tonic::include_proto!("scheduler");
