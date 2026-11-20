@@ -358,17 +358,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
         .into()
     }
 
-    /// Get the heights of the preprocessed chips for a given program.
-    pub(crate) fn preprocessed_heights(program: &Program) -> Vec<(String, usize)> {
-        vec![
-            (
-                Self::Program(Default::default()).name(),
-                program.instructions.len(),
-            ),
-            (Self::Byte(Default::default()).name(), 1 << 17),
-        ]
-    }
-
     /// Get the heights of the chips for a given execution record.
     /// Public for the MLE shape probe (`examples/mle_shape_probe.rs`) and coarse-bucket tuning.
     pub fn riscv_heights(record: &EmulationRecord) -> Vec<(String, usize)> {

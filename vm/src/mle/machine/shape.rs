@@ -1975,8 +1975,8 @@ pub fn with_mle_preprocessed_shape(program: Arc<Program>) -> Arc<Program> {
 /// role rather than closest-fit matching: role selection is data-independent, which pins the
 /// child-shape base to exactly {C0, C1, C2, G, B} and keeps the whitelist's shape product at 50
 /// combine entries (the ordered pairs at both completeness flags). (FRI's closest-fit over a
-/// multi-shape allowed set is data-dependent, so its
-/// whole cartesian product must be preregistered — see `get_all_shape_combinations`.)
+/// multi-shape allowed set was data-dependent, so its whole cartesian product had to be
+/// preregistered.)
 /// The root is NOT a tier: it is just the last combine round with `is_complete = true`,
 /// exactly as in the FRI path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
