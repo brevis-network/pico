@@ -68,14 +68,12 @@ env:
     pico-vm/strict,pico-vm/tcmalloc,pico-vm/test-utils,pico-vm/two-round-chunks,
     pico-aot-runtime/bigint-rug,pico-aot-runtime/mmap-memory,
     pico-cli/aot,pico-cli/multi-field-transcript,pico-prover/aot,pico-prover/bigint-rug,
+    pico-prover/pure-build,pico-aot-runtime/recorder-check,pico-sdk/c-memory-functions,
     pico-prover/mmap-memory,pico-prover/multi-field-transcript,pico-prover/stage-ledger,
     pico-prover/tcmalloc,pico-sdk/coprocessor,pico-sdk/kb,pico-sdk/libm,pico-sdk/prover,
-    pico-perf/jemalloc,pico-perf/stage-ledger,
     pico-aot-dispatch/bigint-rug,pico-aot-dispatch/mmap-memory,
     distributed-vm/aot-emulator,distributed-vm/bigint-rug,distributed-vm/chunk-priority,
-    distributed-vm/jemalloc,distributed-vm/local_test,distributed-vm/mmap-memory,
-    distributed-vm/object_store,distributed-vm/s3-storage,distributed-vm/tcmalloc,
-    distributed-vm/two-round-chunks
+    distributed-vm/mmap-memory,distributed-vm/tcmalloc,distributed-vm/two-round-chunks
 
 jobs:
   fmt:
