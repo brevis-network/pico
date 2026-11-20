@@ -37,18 +37,13 @@ base64.workspace = true
 bincode.workspace = true
 clap.workspace = true
 crossbeam.workspace = true
-core_affinity.workspace = true
 cudart = { workspace = true, optional = true }
 dashmap.workspace = true
 dotenvy.workspace = true
 log.workspace = true
-object_store = { workspace = true, optional = true }
 p3-field.workspace = true
 p3-koala-bear.workspace = true
-p3-poseidon2.workspace = true
-p3-maybe-rayon.workspace = true
 pico-perf.workspace = true
-pico-sdk.workspace = true
 pico-verifier = { workspace = true, features = ["codec"] }
 # `stage-ledger` on: the driver opens the span window itself (`spans::set_origin`), validates and
 # exports what was recorded and derives figures from it (`spans::report`), none of which the inert
@@ -60,7 +55,6 @@ sha2 = { workspace = true, optional = true }
 prost-types.workspace = true
 prost.workspace = true
 rand.workspace = true
-reqwest.workspace = true
 serde.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
@@ -80,12 +74,9 @@ tonic-build.workspace = true
 [features]
 cuda = ["pico-vm/cuda", "dep:cudart"]
 tcmalloc = ["pico-vm/tcmalloc"]
-jemalloc = ["pico-vm/jemalloc"]
 bigint-rug = ["pico-vm/bigint-rug", "pico-aot-dispatch?/bigint-rug"]
 aot-emulator = ["pico-vm/aot-emulator", "dep:pico-aot-dispatch", "dep:pico-aot-runtime", "dep:sha2"]
 mmap-memory = ["pico-vm/mmap-memory", "pico-aot-dispatch?/mmap-memory"]
-s3-storage = ["object_store"]
-local_test = []
 # Two-round chunk assignment: Primary 0-7,16-23; Secondary 8-15,24-31; Dynamic 32+
 two-round-chunks = ["pico-vm/two-round-chunks"]
 # Chunk tasks before combine tasks; off by default, so the scheduler takes combine tasks first

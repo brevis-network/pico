@@ -7,13 +7,5 @@ edition.workspace = true
 anyhow.workspace = true
 bincode.workspace = true
 log.workspace = true
-pico-vm.workspace = true
-pico-sdk.workspace = true
-reqwest.workspace = true
 serde.workspace = true
 strum.workspace = true
-
-[features]
-jemalloc = ["pico-vm/jemalloc"]
-# The stage ledger and span recorder, for a run measured with `MLE_LEDGER` or `MLE_SPANS`.
-stage-ledger = ["pico-vm/stage-ledger"]

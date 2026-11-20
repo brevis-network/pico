@@ -13,12 +13,9 @@ cargo_metadata.workspace = true
 clap.workspace = true
 dirs.workspace = true
 elf.workspace = true
-env_logger.workspace = true
 futures.workspace = true
 hex.workspace = true
 indicatif.workspace = true
-num-bigint.workspace = true
-num-traits.workspace = true
 pico-aot-codegen.workspace = true
 # The type `run_with_aot` takes, which `pico-prover` does not re-export; without its default
 # features, as `pico-prover` takes it.

@@ -19,7 +19,6 @@ links = "cuda-mle"
 pico-gpu.workspace = true
 mle-core = { package = "pico-mle-core", path = "../mle-core" }
 
-rayon.workspace = true
 itertools.workspace = true
 derive-new.workspace = true
 tracing.workspace = true
@@ -32,10 +31,8 @@ serde.workspace = true
 postcard.workspace = true
 
 # used by the device runtime (src/runtime)
-lazy_static.workspace = true
 metrics.workspace = true
 bytesize = "2.0"
-ctor = "0.5"
 
 # p3
 p3-field.workspace = true

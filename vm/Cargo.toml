@@ -32,7 +32,6 @@ p3-air.workspace = true
 p3-field.workspace = true
 p3-matrix.workspace = true
 p3-util.workspace = true
-p3-keccak.workspace = true
 p3-keccak-air.workspace = true
 p3-poseidon2.workspace = true
 p3-symmetric.workspace = true
@@ -49,7 +48,6 @@ anyhow.workspace = true
 arrayref.workspace = true
 backtrace.workspace = true
 bincode.workspace = true
-bytemuck.workspace = true
 cfg-if.workspace = true
 clap.workspace = true
 cpu-time.workspace = true
@@ -59,16 +57,11 @@ csv.workspace = true
 curve25519-dalek.workspace = true
 dashmap.workspace = true
 dashu.workspace = true
-derivative.workspace = true
-derive-new.workspace = true
-derive_more.workspace = true
 elf.workspace = true
 elliptic-curve.workspace = true
 eyre.workspace = true
-getset.workspace = true
 hashbrown.workspace = true
 hex.workspace = true
-hex-literal.workspace = true
 hybrid-array.workspace = true
 itertools.workspace = true
 k256.workspace = true
@@ -80,14 +73,12 @@ num.workspace = true
 num_cpus.workspace = true
 once_cell.workspace = true
 p256.workspace = true
-paste.workspace = true
 postcard.workspace = true
 rand.workspace = true
 rayon = { workspace = true, optional = true }
 rayon-scan = { workspace = true, optional = true }
 rrs-lib.workspace = true
 rug = { workspace = true, optional = true }
-rustc-hash.workspace = true
 # libsecp256k1 (safegcd inversion) for the secp256k1 add/double precompiles, in both
 # emulators: `weierstrass::secp256k1::{secp256k1_add_words, secp256k1_double_words}`.
 secp256k1 = "0.31"
@@ -107,7 +98,6 @@ tracing.workspace = true
 typenum.workspace = true
 vec_map.workspace = true
 zkhash.workspace = true
-bitvec = "1.0.1"
 parking_lot = "0.12"
 
 # memory allocators
