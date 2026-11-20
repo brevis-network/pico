@@ -50,6 +50,23 @@ runs:
       shell: bash
       run: rustup component add ${{ inputs.components }}
 
+    # rust-cache keys on the version of every installed toolchain, and the runner image's own
+    # stable, which no job here builds with, is one of them: an image that updates it misses every
+    # cache, as jobs did on 11-20 while runners on two images ran side by side. Only the requested
+    # toolchain stays, as the default too.
+    - name: Keep only Rust ${{ inputs.toolchain }}
+      shell: bash
+      run: |
+        set -eu
+        rustup default "${{ inputs.toolchain }}"
+        for toolchain in $(rustup toolchain list | cut -d' ' -f1); do
+          case "$toolchain" in
+            "${{ inputs.toolchain }}"-*) ;;
+            *) rustup toolchain uninstall "$toolchain" ;;
+          esac
+        done
+        rustup toolchain list
+
     - name: Cargo cache
       uses: Swatinem/rust-cache@v2
       with:
