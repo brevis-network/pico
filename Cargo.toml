@@ -22,18 +22,6 @@ lto = "off"                         # Disable Link Time Optimization to avoid sy
 incremental = false                 # Disable incremental compilation to ensure reproducibility
 strip = "none"                      # Prevent release build from stripping debug symbol
 
-# Run the benchmarks in perf folder.
-[profile.perf]
-inherits = "release"
-opt-level = 3
-lto = true
-codegen-units = 1
-
-[profile.profiling]
-inherits = "release"
-#debug = "limited"
-strip = "none"
-
 [profile.fast]
 inherits = "release"
 debug = true
@@ -68,28 +56,20 @@ p3-maybe-rayon = { git = "https://github.com/brevis-network/Plonky3.git", rev = 
 p3-bn254 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "da6ca12c" }
 p3-interpolation = { git = "https://github.com/brevis-network/Plonky3.git", rev = "da6ca12c" }
 
-# For local debugging
+# For local debugging: the same crates from a Plonky3 checkout beside this one.
 # p3-air = { path = "../p3/air" }
 # p3-field = { path = "../p3/field" }
-# p3-commit = { path = "../p3/commit" }
 # p3-matrix = { path = "../p3/matrix" }
-# p3-koala-bear = { path = "../p3/koala-bear", features = ["nightly-features"] }
+# p3-koala-bear = { path = "../p3/koala-bear" }
 # p3-util = { path = "../p3/util" }
 # p3-challenger = { path = "../p3/challenger" }
 # p3-dft = { path = "../p3/dft" }
-# p3-fri = { path = "../p3/fri" }
-# p3-goldilocks = { path = "../p3/goldilocks" }
-# p3-keccak = { path = "../p3/keccak" }
 # p3-keccak-air = { path = "../p3/keccak-air" }
-# p3-blake3 = { path = "../p3/blake3" }
-# p3-mds = { path = "../p3/mds" }
-# p3-merkle-tree = { path = "../p3/merkle-tree" }
 # p3-poseidon2 = { path = "../p3/poseidon2" }
 # p3-symmetric = { path = "../p3/symmetric" }
-# p3-uni-stark = { path = "../p3/uni-stark" }
 # p3-maybe-rayon = { path = "../p3/maybe-rayon" }
 # p3-bn254 = { path = "../p3/bn254" }
-# p3-circle = { path = "../p3/circle" }
+# p3-interpolation = { path = "../p3/interpolation" }
 
 # gpu
 cudart = { git = "https://github.com/brevis-network/era-cuda.git", rev = "4277a3558fce68b5ae48bc80055046bb1d0d6ed4" }
