@@ -15,9 +15,12 @@ on:
   push:
     branches:
       # Cache scoping: a run may only read caches from its own ref, its base branch, or the
-      # default branch. PRs here target `main` or `dev`, so without a push trigger on them no
-      # shared cache ever exists for them and every new PR's first run starts cold -- which is
-      # what the 1.4-to-11.0-minute spread on `Clippy (workspace)` across five sampled runs was.
+      # default branch. Without a push trigger on `main` no shared cache ever exists and every new
+      # PR's first run starts cold -- which is what the 1.4-to-11.0-minute spread on `Clippy
+      # (workspace)` across five sampled runs was. Only a run on `main` writes the caches
+      # (rust-setup's `cache-save`): a second set, written on `dev`, evicted `main`'s from the
+      # repository's 10 GB, and a PR to `dev` reads `main`'s as the default branch's. The push to
+      # `dev` checks what was merged there.
       - main
       - dev
     paths-ignore:

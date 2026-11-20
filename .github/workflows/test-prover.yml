@@ -42,12 +42,21 @@ env:
 jobs:
   # The host prover crate's tests prove the chain, so they run beside the VM lanes (test-vm.yml)
   # rather than after them, split by module across three jobs so none outlasts the rest of CI.
+  #
+  # `prover`, `prover-chain`, `prover-precompiles`, `act4` and `wrap` build one test binary
+  # (`cargo test --release -p pico-prover`), so they share the `cpu-prover-release` cache, which
+  # `prover` writes: it also builds the crate without its default features. `cli` and `c-guest`
+  # build pico-cli and share `cpu-cli-release`, which `cli` writes. Per-job keys kept seven
+  # copies of two builds.
   prover:
     name: CPU · Host prover (core)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-prover-release
+          cache-save: "true"
       - name: Host prover crate
         run: |
           # The `chunks` tests prove across chunk boundaries at the chain's operating point and would
@@ -79,6 +88,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-prover-release
+          cache-save: "false"
       - name: The facade against the direct chain
         run: |
           # `--test-threads=1`: the facade test alone peaks near 8 GB.
@@ -92,6 +104,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-prover-release
+          cache-save: "false"
       - name: The precompile guests prove
         run: |
           # Their own process: the ed25519 guest's proof peaks near 10.5 GB alone and near 11.5 GB
@@ -113,6 +128,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-prover-release
+          cache-save: "false"
       - name: Execute, prove and verify each test
         run: |
           # `--nocapture` prints a line per test with its time. The count: a renamed module would
@@ -127,6 +145,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-cli-release
+          cache-save: "true"
       - name: cargo pico prove and execute
         run: |
           # Drives the binary, and verifies the proof file it writes in a process that proved nothing.
@@ -142,6 +163,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-cli-release
+          cache-save: "false"
       - name: clang and LLD
         run: |
           sudo apt-get update
@@ -189,6 +213,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-prover-release
+          cache-save: "false"
       - name: Wrap proof (fib), and the EVM bundle against the wrap circuit
         env:
           # The test writes the bundle's two files here for the gnark step below.
