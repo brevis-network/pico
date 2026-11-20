@@ -1,11 +1,11 @@
-use super::{Array, Builder, DslIr, Ext, Felt, SymbolicExt, Usize, Var, Variable};
+use super::{Builder, DslIr, Ext, Felt, Usize, Var, Variable};
 use crate::{
     configs::config::FieldGenericConfig,
     machine::field::{FieldBehavior, FieldType},
     primitives::consts::EXTENSION_DEGREE,
 };
-use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
-use std::ops::{Add, Mul, MulAssign};
+use p3_field::PrimeCharacteristicRing;
+use std::ops::{Add, MulAssign};
 
 impl<FC: FieldGenericConfig> Builder<FC> {
     /// The generator for the field.
@@ -16,13 +16,6 @@ impl<FC: FieldGenericConfig> Builder<FC> {
             FieldType::TypeKoalaBear => self.eval(FC::F::from_u32(3)),
             _ => unimplemented!("Unsupported field type"),
         }
-    }
-
-    /// Select a variable based on a condition.
-    pub fn select_v(&mut self, cond: Var<FC::N>, a: Var<FC::N>, b: Var<FC::N>) -> Var<FC::N> {
-        let c = self.uninit();
-        self.push_op(DslIr::CircuitSelectV(cond, a, b, c));
-        c
     }
 
     /// Select a felt based on a condition.
@@ -60,124 +53,6 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         self.eval(e)
     }
 
-    /// Exponentializes a variable to an array of bits in little endian.
-    pub fn exp_bits<V>(&mut self, x: V, power_bits: &Array<FC, Var<FC::N>>) -> V
-    where
-        V::Expression: PrimeCharacteristicRing,
-        V: Copy + Mul<Output = V::Expression> + Variable<FC>,
-    {
-        let result = self.eval(V::Expression::ONE);
-        let power_f: V = self.eval(x);
-        self.range(0, power_bits.len()).for_each(|i, builder| {
-            let bit = builder.get(power_bits, i);
-            builder
-                .if_eq(bit, FC::N::ONE)
-                .then(|builder| builder.assign(result, result * power_f));
-            builder.assign(power_f, power_f * power_f);
-        });
-        result
-    }
-
-    /// Exponentiates a felt to a list of bits in little endian.
-    pub fn exp_f_bits(&mut self, x: Felt<FC::F>, power_bits: Vec<Var<FC::N>>) -> Felt<FC::F> {
-        let mut result = self.eval(FC::F::ONE);
-        let mut power_f: Felt<_> = self.eval(x);
-        for i in 0..power_bits.len() {
-            let bit = power_bits[i];
-            let tmp = self.eval(result * power_f);
-            result = self.select_f(bit, tmp, result);
-            power_f = self.eval(power_f * power_f);
-        }
-        result
-    }
-
-    /// Exponentiates a extension to a list of bits in little endian.
-    pub fn exp_e_bits(
-        &mut self,
-        x: Ext<FC::F, FC::EF>,
-        power_bits: Vec<Var<FC::N>>,
-    ) -> Ext<FC::F, FC::EF> {
-        let mut result = self.eval(SymbolicExt::Const(FC::EF::ONE));
-        let mut power_f: Ext<_, _> = self.eval(x);
-        for i in 0..power_bits.len() {
-            let bit = power_bits[i];
-            let tmp = self.eval(result * power_f);
-            result = self.select_ef(bit, tmp, result);
-            power_f = self.eval(power_f * power_f);
-        }
-        result
-    }
-
-    /// Exponetiates a variable to a list of reversed bits with a given length.
-    ///
-    /// Reference: [p3_util::reverse_bits_len]
-    pub fn exp_reverse_bits_len<V>(
-        &mut self,
-        x: V,
-        power_bits: &Array<FC, Var<FC::N>>,
-        bit_len: impl Into<Usize<FC::N>>,
-    ) -> V
-    where
-        V::Expression: PrimeCharacteristicRing,
-        V: Copy + Mul<Output = V::Expression> + Variable<FC>,
-    {
-        let result = self.eval(V::Expression::ONE);
-        let power_f: V = self.eval(x);
-        let bit_len = bit_len.into().materialize(self);
-        let bit_len_plus_one: Var<_> = self.eval(bit_len + FC::N::ONE);
-
-        self.range(1, bit_len_plus_one).for_each(|i, builder| {
-            let index: Var<FC::N> = builder.eval(bit_len - i);
-            let bit = builder.get(power_bits, index);
-            builder
-                .if_eq(bit, FC::N::ONE)
-                .then(|builder| builder.assign(result, result * power_f));
-            builder.assign(power_f, power_f * power_f);
-        });
-        result
-    }
-
-    /// Exponentiates a variable to a list of bits in little endian.
-    pub fn exp_power_of_2_v<V>(
-        &mut self,
-        base: impl Into<V::Expression>,
-        power_log: impl Into<Usize<FC::N>>,
-    ) -> V
-    where
-        V: Variable<FC> + Copy + Mul<Output = V::Expression>,
-    {
-        let mut result: V = self.eval(base);
-        let power_log: Usize<_> = power_log.into();
-        match power_log {
-            Usize::Var(power_log) => {
-                self.range(0, power_log)
-                    .for_each(|_, builder| builder.assign(result, result * result));
-            }
-            Usize::Const(power_log) => {
-                for _ in 0..power_log {
-                    result = self.eval(result * result);
-                }
-            }
-        }
-        result
-    }
-
-    /// Exponentiates a variable to a list of bits in little endian inside a circuit.
-    pub fn exp_power_of_2_v_circuit<V>(
-        &mut self,
-        base: impl Into<V::Expression>,
-        power_log: usize,
-    ) -> V
-    where
-        V: Copy + Mul<Output = V::Expression> + Variable<FC>,
-    {
-        let mut result: V = self.eval(base);
-        for _ in 0..power_log {
-            result = self.eval(result * result)
-        }
-        result
-    }
-
     /// Multiplies `base` by `2^{log_power}`.
     pub fn sll<V>(&mut self, base: impl Into<V::Expression>, shift: Usize<FC::N>) -> V
     where
@@ -189,30 +64,10 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         result
     }
 
-    /// Creates an ext from a slice of felts.
-    pub fn ext_from_base_slice(&mut self, arr: &[Felt<FC::F>]) -> Ext<FC::F, FC::EF> {
-        assert!(arr.len() <= <FC::EF as BasedVectorSpace::<FC::F>>::DIMENSION);
-        let mut res = SymbolicExt::Const(FC::EF::ZERO);
-        for i in 0..arr.len() {
-            res += arr[i] * SymbolicExt::Const(FC::EF::ith_basis_element(i).unwrap());
-        }
-        self.eval(res)
-    }
-
     pub fn felts2ext(&mut self, felts: &[Felt<FC::F>]) -> Ext<FC::F, FC::EF> {
         assert_eq!(felts.len(), EXTENSION_DEGREE);
         let out: Ext<FC::F, FC::EF> = self.uninit();
         self.push_op(DslIr::CircuitFelts2Ext(felts.try_into().unwrap(), out));
         out
-    }
-
-    /// Converts an ext to a slice of felts inside a circuit.
-    pub fn ext2felt_circuit(
-        &mut self,
-        value: Ext<FC::F, FC::EF>,
-    ) -> [Felt<FC::F>; EXTENSION_DEGREE] {
-        let felts: [Felt<FC::F>; EXTENSION_DEGREE] = core::array::from_fn(|_| self.uninit());
-        self.push_op(DslIr::CircuitExt2Felt(felts, value));
-        felts
     }
 }
