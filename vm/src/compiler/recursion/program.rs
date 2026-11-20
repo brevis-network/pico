@@ -362,8 +362,6 @@ impl<F: Field> RecursionProgram<F> {
                 Instruction::Mem(_) => "Mem",
                 Instruction::Poseidon2(_) => "Poseidon2",
                 Instruction::Select(_) => "Select",
-                Instruction::ExpReverseBitsLen(_) => "ExpReverseBitsLen",
-                Instruction::BatchFRI(_) => "BatchFRI",
                 Instruction::HintBits(_) => "HintBits",
                 Instruction::Print(_) => "Print",
                 Instruction::HintExt2Felts(_) => "HintExt2Felts",

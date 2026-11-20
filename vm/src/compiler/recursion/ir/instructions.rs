@@ -316,16 +316,6 @@ pub enum DslIr<FC: FieldGenericConfig> {
     /// and which. Should only be used when target is a gnark circuit.
     CircuitAssertVkRoot(Box<([Felt<FC::F>; DIGEST_SIZE], [FC::F; DIGEST_SIZE])>),
 
-    /// BatchFRI loop
-    CircuitBatchFRI(
-        Box<(
-            Ext<FC::F, FC::EF>,
-            Vec<Ext<FC::F, FC::EF>>,
-            Vec<Ext<FC::F, FC::EF>>,
-            Vec<Felt<FC::F>>,
-        )>,
-    ),
-
     /// Select based on input bit
     Select(
         Felt<FC::F>,
@@ -365,9 +355,4 @@ pub enum DslIr<FC: FieldGenericConfig> {
     CycleTrackerEnter(String),
     /// Tracks the number of cycles used by a block of code annotated by the string input.
     CycleTrackerExit,
-
-    // Reverse bits exponentiation.
-    ExpReverseBitsLen(Ptr<FC::N>, Var<FC::N>, Var<FC::N>),
-    /// Reverse bits exponentiation. Output, base, exponent bits.
-    CircuitExpReverseBits(Felt<FC::F>, Felt<FC::F>, Vec<Felt<FC::F>>),
 }

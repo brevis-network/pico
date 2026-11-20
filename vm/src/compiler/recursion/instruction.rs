@@ -51,9 +51,7 @@ instruction_kinds!(
     Mem,
     Poseidon2,
     Select,
-    ExpReverseBitsLen,
     HintBits,
-    BatchFRI,
     Print,
     HintExt2Felts,
     CommitPublicValues,
@@ -89,9 +87,7 @@ impl<F> Instruction<F> {
             | Instruction::Mem(_)
             | Instruction::Poseidon2(_)
             | Instruction::Select(_)
-            | Instruction::ExpReverseBitsLen(_)
             | Instruction::HintBits(_)
-            | Instruction::BatchFRI(_)
             | Instruction::Print(_)
             | Instruction::HintExt2Felts(_)
             | Instruction::CommitPublicValues(_)
@@ -120,9 +116,7 @@ pub enum Instruction<F> {
     Mem(MemInstr<F>),
     Poseidon2(Box<Poseidon2Instr<F>>),
     Select(SelectInstr<F>),
-    ExpReverseBitsLen(ExpReverseBitsInstr<F>),
     HintBits(HintBitsInstr<F>),
-    BatchFRI(Box<BatchFRIInstr<F>>),
     Print(PrintInstr<F>),
     HintExt2Felts(HintExt2FeltsInstr<F>),
     CommitPublicValues(Box<CommitPublicValuesInstr<F>>),
@@ -269,22 +263,6 @@ pub fn poseidon2<F: PrimeCharacteristicRing>(
             input: input.map(F::from_u32).map(Address),
         },
     }))
-}
-
-pub fn exp_reverse_bits_len<F: PrimeCharacteristicRing>(
-    mult: u32,
-    base: F,
-    exp: Vec<F>,
-    result: F,
-) -> Instruction<F> {
-    Instruction::ExpReverseBitsLen(ExpReverseBitsInstr {
-        mult: F::from_u32(mult),
-        addrs: ExpReverseBitsIo {
-            base: Address(base),
-            exp: exp.into_iter().map(Address).collect(),
-            result: Address(result),
-        },
-    })
 }
 
 pub fn commit_public_values<F: PrimeCharacteristicRing>(

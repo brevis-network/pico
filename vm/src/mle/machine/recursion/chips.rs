@@ -666,8 +666,7 @@ mod dims_tests {
 
     /// The tier report has to cover the whole machine. A chip that declares no row count is
     /// unmeasurable, and one skipped silently is how a tier check comes back green over a chip
-    /// nobody looked at — which is exactly what `RecursionChipType::chip_heights` does, covering
-    /// six of the twenty-one. `recursion_tier_fit` panics on either; this holds it to that.
+    /// nobody looked at. `recursion_tier_fit` panics on either; this holds it to that.
     #[test]
     fn the_tier_report_covers_every_chip() {
         let fit = super::recursion_tier_fit(
@@ -746,9 +745,8 @@ pub fn recursion_natural_rows(program: &RecursionProgram<Kb>) -> Vec<(String, us
         .map(|chip| {
             let name = ChipBehavior::<Kb>::name(chip);
             // A chip that declares no row count cannot be measured, and skipping it silently is
-            // how a tier check comes back green over a chip nobody looked at — the failure
-            // `RecursionChipType::chip_heights` has, covering six of the twenty-one. Every
-            // recursion chip declares today; one that stops has to say so loudly.
+            // how a tier check comes back green over a chip nobody looked at. Every recursion
+            // chip declares today; one that stops has to say so loudly.
             let declared = chip.preprocessed_rows(program).unwrap_or_else(|| {
                 panic!("chip `{name}` declares no preprocessed row count, so its tier is unchecked")
             });

@@ -17,8 +17,7 @@ pub use columns::*;
 ///   - subsequent rows accumulate: acc = prev_acc + mu * val;
 ///   - the last row (is_end) writes acc to memory with the backfilled mult.
 ///
-/// Segments are delimited by the preprocessed `is_end` flag (same layout
-/// mechanics as BatchFRIChip).
+/// Segments are delimited by the preprocessed `is_end` flag.
 ///
 /// Used for the WHIR round-0 codeword fold `sum_c mu_pow[c] * opened_row[c]`,
 /// replacing 2 ExtAlu instructions per element with a single instruction per

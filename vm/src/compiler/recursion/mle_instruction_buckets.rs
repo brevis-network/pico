@@ -113,8 +113,6 @@ impl MleVariant {
             | Instruction::Mem(_)
             | Instruction::Poseidon2(_)
             | Instruction::Select(_)
-            | Instruction::ExpReverseBitsLen(_)
-            | Instruction::BatchFRI(_)
             | Instruction::CommitPublicValues(_)
             | Instruction::Hint(_)
             | Instruction::HintBits(_)

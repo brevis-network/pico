@@ -3,8 +3,8 @@
 //! chip's `ChipBehavior::preprocessed_rows` declaration is a field read instead of its own
 //! program-length scan.
 //!
-//! Separate from [`super::instruction_buckets::InstructionBuckets`] / `RecursionEventCount`
-//! because those cover only the 9-chip FRI set and skip every MLE instruction variant.
+//! Separate from [`super::instruction_buckets::InstructionBuckets`] because that covers only the
+//! base chips and skips every WHIR instruction variant.
 //!
 //! Every field must equal the row count the chip's own `generate_preprocessed` produces before
 //! padding; `declared_preprocessed_dims_match_generated` enforces the pairing per chip.
@@ -87,14 +87,10 @@ impl PrepRowCounts {
                 Instruction::UnpackBlock(_) => c.unpack_block += 1,
                 Instruction::Poseidon2Packed(_) => c.poseidon2_packed += 1,
                 Instruction::ExpBitsLen(_) => c.exp_bits_len += 1,
-                // No count kept: `CommitPublicValues` feeds a fixed-height chip,
-                // `ExpReverseBitsLen`/`BatchFRI` are FRI-set only, `Print` has no chip. Listed
-                // rather than caught by `_` so a new instruction variant fails to compile here
-                // instead of silently counting as zero rows for every chip.
-                Instruction::CommitPublicValues(_)
-                | Instruction::ExpReverseBitsLen(_)
-                | Instruction::BatchFRI(_)
-                | Instruction::Print(_) => {}
+                // No count kept: `CommitPublicValues` feeds a fixed-height chip, `Print` has no
+                // chip. Listed rather than caught by `_` so a new instruction variant fails to
+                // compile here instead of silently counting as zero rows for every chip.
+                Instruction::CommitPublicValues(_) | Instruction::Print(_) => {}
             }
         }
 
