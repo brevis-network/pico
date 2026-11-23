@@ -1,7 +1,7 @@
 # Requirements
 
-Pico 3.1 (`v3.1.1`): the default build is the CPU prover, and the `cuda` feature adds the GPU
-prover. For the 3.0 release, see this page at `v3.0.0`.
+Pico 3.2 (`v3.2.0`): the default build is the CPU prover, and the `cuda` feature adds the GPU
+prover. For an earlier release, see this page at its tag (`v3.1.1` to `v3.1.6`, `v3.0.0`).
 
 ## Host platform
 
@@ -35,19 +35,20 @@ The default build is the CPU prover and needs none of this.
 - [Rust via rustup](https://www.rust-lang.org/tools/install), with the nightly the repository pins in
   [`rust-toolchain`](../rust-toolchain): `nightly-2026-09-27`. The CLI and host code (`pico-prover`)
   build with it. `cargo pico install` installs it as well, with its `rust-src` and `cargo`
-  components, because guests build `std` from those sources.
+  components: Rust guests link the guest toolchain's prebuilt `std`, but a static library, or a
+  toolchain without a prebuilt `std`, builds `std` from those sources.
 
 Install the CLI and the guest toolchain:
 
 ```bash
 rustup toolchain install nightly-2026-09-27
-cargo +nightly-2026-09-27 install --git https://github.com/brevis-network/pico --tag v3.1.1 --locked pico-cli
+cargo +nightly-2026-09-27 install --git https://github.com/brevis-network/pico --tag v3.2.0 --locked pico-cli
 cargo pico install
 ```
 
-or, from a checkout of the repository at `v3.1.1`, `cargo install --path sdk/cli --locked`.
-`cargo install --list` shows where a CLI came from: one installed with `--tag v3.1.1` shows
-`?tag=v3.1.1`. A CLI installed from `main` before the `v3.1.0` tag reports version 3.1.0 but is
+or, from a checkout of the repository at `v3.2.0`, `cargo install --path sdk/cli --locked`.
+`cargo install --list` shows where a CLI came from: one installed with `--tag v3.2.0` shows
+`?tag=v3.2.0`. A CLI installed from `main` before the `v3.2.0` tag reports version 3.2.0 but is
 neither release.
 
 ## Only for the EVM path (`cargo pico prove --evm`)

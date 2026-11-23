@@ -1300,7 +1300,7 @@ dependencies = [
 
 [[package]]
 name = "cuda-mle"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "bytesize",
  "cc",
@@ -1660,7 +1660,7 @@ dependencies = [
 
 [[package]]
 name = "distributed-vm"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1918,7 +1918,7 @@ checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
 name = "field-ffi"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "p3-field",
  "p3-koala-bear",
@@ -3680,11 +3680,11 @@ dependencies = [
 
 [[package]]
 name = "pico-aot-pure"
-version = "3.1.1"
+version = "3.2.0"
 
 [[package]]
 name = "pico-aot-runtime"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -3708,7 +3708,7 @@ dependencies = [
 
 [[package]]
 name = "pico-cli"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -3737,7 +3737,7 @@ dependencies = [
 
 [[package]]
 name = "pico-derive"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -3750,7 +3750,7 @@ source = "git+https://github.com/brevis-network/pico-gpu.git?rev=ac963aff5d26d72
 
 [[package]]
 name = "pico-gpu-api"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "cudart-sys",
  "pico-gpu",
@@ -3760,7 +3760,7 @@ dependencies = [
 
 [[package]]
 name = "pico-mle-core"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -3798,7 +3798,7 @@ dependencies = [
 
 [[package]]
 name = "pico-mle-cpu"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "cfg-if",
  "derive-new",
@@ -3828,7 +3828,7 @@ dependencies = [
 
 [[package]]
 name = "pico-patch-libs"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "bincode",
  "elliptic-curve",
@@ -3837,7 +3837,7 @@ dependencies = [
 
 [[package]]
 name = "pico-perf"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3848,7 +3848,7 @@ dependencies = [
 
 [[package]]
 name = "pico-prover"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "bincode",
  "distributed-vm",
@@ -3868,7 +3868,7 @@ dependencies = [
 
 [[package]]
 name = "pico-sdk"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "anyhow",
  "aurora-engine-modexp",
@@ -3887,7 +3887,7 @@ dependencies = [
  "p3-field",
  "p3-koala-bear",
  "p3-symmetric",
- "pico-patch-libs 3.1.1",
+ "pico-patch-libs 3.2.0",
  "pico-vm",
  "rand 0.10.2",
  "ripemd",
@@ -3902,7 +3902,7 @@ dependencies = [
 
 [[package]]
 name = "pico-verifier"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "bincode",
  "p3-air",
@@ -3920,7 +3920,7 @@ dependencies = [
 
 [[package]]
 name = "pico-vm"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "alloy-primitives 1.6.0",
  "anyhow",

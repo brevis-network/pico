@@ -204,7 +204,11 @@ Two places, two meanings:
 - **At shape selection** (`select_riscv_shape` panics: "no MLE core shape holds this chunk" or "no
   MLE shape holds this chunk"): a chunk's natural heights exceed even the catch-all row for some
   air. The guest or workload needs a taller catch-all or a wider enumeration; that is a shape
-  table change, followed by a rebuild.
+  table change, followed by a rebuild. For a CPU chunk a whitelist prover has the chunk split
+  keep this from happening: it closes a chunk while a row of the core ladder still holds it
+  (`EmulatorOpts::ladder_fit`; `vm/src/emulator/riscv/chunk_split.rs`, "Ladder fit"). A core
+  chunk that still gets here, or to `CatchAllShape`, was emulated without the fit or is one of
+  the cases that section lists as not bounded.
 - **At a key check** (the SDK's `KeyNotWhitelisted` at Convert, Combine or Compress, or a panic "child VK
   not in the whitelist (vk map)" at the parent of a convert leaf or combine node whose key the
   prover derived): the chunk's shape was selected, but the key the prover derived is not in the
@@ -238,7 +242,10 @@ under, beside the shipped root.
 Changing the core ladder (`MLE_CORE_LADDER`) is a shape table change and goes through the
 procedure above. The fitting itself needs a corpus of natural heights taken with the probe
 (`SHAPE_PROBE_NATURAL=1`) on the same emulator chunk-cut rules the prover will run with: a corpus
-probed before a change to the chunk split lands chunks on neighbouring rows. The fitting and
+probed before a change to the chunk split lands chunks on neighbouring rows. Take the corpus of a
+workload that leaves the ladder without the ladder fit (`mle_shape_probe` emulates without it):
+under the whitelist the split closes such a chunk at the heights of today's rows, not where
+taller rows would let it run. The fitting and
 accounting tools are not part of this repository. That is the riscv core ladder; the recursion tier tables (the convert
 ladder and the combine, embed and compress rows) are re-measured by `docs/tier-tables.md`, which
 ends in this procedure, or, for the embed row alone, in a soundness-manifest regeneration.

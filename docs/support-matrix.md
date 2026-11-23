@@ -1,9 +1,9 @@
 # Pico support matrix
 
-For release `v3.1.1`, where one tree builds the CPU prover (the default) and the GPU prover (the
+For release `v3.2.0`, where one tree builds the CPU prover (the default) and the GPU prover (the
 `cuda` feature). What is not listed is not supported.
 
-| area | `v3.1.1` |
+| area | `v3.2.0` |
 |---|---|
 | Host platform | CPU build: `x86_64-unknown-linux-gnu` and macOS, no CUDA needed. GPU build (`cuda` feature): `x86_64-unknown-linux-gnu` with the CUDA Toolkit. Other hosts: not supported |
 | CUDA | Toolkit to build (`nvcc`): CI builds with 12.3, the GPU runs used 12.8, and pico-gpu is also tested with 13 on an RTX 5090. Only the `cuda` feature needs it. `CUDA_ARCH` picks the SM targets; without it the build asks `nvidia-smi`, and builds for sm_89 and sm_120 when no GPU is visible. An NVIDIA GPU to run a `cuda` build, which exits at start without one; the memory thresholds are calibrated on 32 GB cards (RTX 5090), with a 24 GB tier through `PICO_GPU_MEM`. The CUDA kernels are [pico-gpu](https://github.com/brevis-network/pico-gpu), licensed under MIT or Apache-2.0 (code derived from third-party projects keeps its original license) |
@@ -21,6 +21,7 @@ For release `v3.1.1`, where one tree builds the CPU prover (the default) and the
 | Coprocessor | `pico-sdk` feature `coprocessor`: available |
 | Soundness | Pico targets 128 bits of provable round-by-round soundness under the random-oracle model, through the compress proof (the final proof); the on-chain Groth16 step is held to BN254's security level. The number is computed by the repository's soundness calculator and recorded in its soundness manifest ([docs/soundness](./soundness/README.md)); it is a computed bound, not a formal verification. |
 | Audit | a security review of Pico 2.x by Sherlock is available in [`audits/`](../audits); it predates and does not cover the 3.x proof system |
+| 3.1 compatibility | none: misaligned accesses are proved and every store proves it misses the program's code, so the verifying keys and the whitelist with its root (`vm/src/mle/shape_vk_bins/`) differ from those of the 3.1 tags (`v3.1.1` to `v3.1.6`), and a 3.1 proof does not verify under 3.2, nor the other way round. See the [3.2 release notes](./release-notes/3.2.md) |
 | 3.0 compatibility | none: the extension field is KoalaBear⁵, and the parameters, the verifying-key whitelist with its root (`vm/src/mle/shape_vk_bins/`), the soundness manifest, and the Groth16 circuit, keys and verifier contract differ from `v3.0.0`'s |
 | 2.x compatibility | none: 2.x proofs, keys and verifier contracts are not usable. See the [migration guide](./migration-2.x-to-3.0.md) |
 | Resource figures | only the measurements in [`examples/README.md`](../examples/README.md) and [`gnark/README.md`](../gnark/README.md), summarised in [requirements.md](./requirements.md#memory); no general sizing guidance yet |

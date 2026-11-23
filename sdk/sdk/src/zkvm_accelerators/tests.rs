@@ -210,6 +210,87 @@ fn modexp() {
     assert_eq!(run("05", "02", "0000"), "0000");
 }
 
+/// The `UINT256_MUL` path, with the host's software mulmod in place of the syscall, against revm's
+/// software modexp: moduli of each width up to 256 bits, odd and even, around a limb's carry
+/// (2^256 - 1) and behind zero bytes; bases and exponents around the 32-byte chunk. Moduli too
+/// wide or zero take the software path and are checked too.
+#[test]
+fn modexp_matches_software() {
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+    let mut bytes = |n: usize| -> Vec<u8> {
+        (0..n)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                seed as u8
+            })
+            .collect()
+    };
+    let bn254_r = "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001";
+    let secp256k1_p = "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f";
+    let mut moduli: Vec<Vec<u8>> = ["01", "02", "07", "ff", bn254_r, secp256k1_p]
+        .iter()
+        .map(|m| unhex(m))
+        .collect();
+    moduli.push(vec![0xff; 32]);
+    let mut top = bytes(32);
+    top[0] |= 0x80;
+    top[31] &= 0xfe;
+    moduli.push(top);
+    for len in [5, 16, 31, 32] {
+        let mut m = bytes(len);
+        m[0] |= 1;
+        moduli.push(m);
+    }
+    let mut wide = bytes(33);
+    wide[0] |= 1;
+    moduli.push(wide);
+    moduli.push(vec![0; 32]);
+
+    for m in &moduli {
+        let mut cases = vec![];
+        for bl in [0usize, 1, 31, 32, 33, 64, 65, 100] {
+            for el in [0usize, 1, 8, 32, 33] {
+                cases.push((bytes(bl), bytes(el)));
+            }
+        }
+        cases.push((vec![0xff; 64], vec![0xff; 32]));
+        cases.push((m.clone(), vec![3]));
+        for (base, exp) in &cases {
+            for pad in [0usize, 1, 7] {
+                let mut padded = vec![0u8; pad];
+                padded.extend_from_slice(m);
+                let mut out = vec![0xcc; padded.len()];
+                let status = unsafe {
+                    zkvm_modexp(
+                        base.as_ptr(),
+                        base.len(),
+                        exp.as_ptr(),
+                        exp.len(),
+                        padded.as_ptr(),
+                        padded.len(),
+                        out.as_mut_ptr(),
+                    )
+                };
+                assert_eq!(status, ZKVM_EOK);
+                let want = aurora_engine_modexp::modexp(base, exp, &padded);
+                let n = want.len().min(padded.len());
+                let mut expected = vec![0u8; padded.len() - n];
+                expected.extend_from_slice(&want[want.len() - n..]);
+                assert_eq!(
+                    out,
+                    expected,
+                    "base {} exp {} modulus {}",
+                    hex::encode(base),
+                    hex::encode(exp),
+                    hex::encode(&padded)
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn blake2f() {
     // EIP-152's test vector 5: BLAKE2b-512("abc") after 12 rounds.

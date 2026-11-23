@@ -379,6 +379,7 @@ pub fn opts(chunk_size: u32) -> EmulatorOpts {
         cost_estimator: false,
         snapshot_main: SnapshotMainMode::Interpreter,
         replay_workers: ReplayWorkers::Interpreter,
+        ladder_fit: false,
     }
 }
 

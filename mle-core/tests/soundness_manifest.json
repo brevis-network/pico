@@ -1,20 +1,20 @@
 {
   "generated_by": "cargo run --release -p pico-vm --example mle_soundness_manifest",
-  "commit": "e21bcc04a8d466410b258d64d65a5db0d8f8e5d0",
+  "commit": "c828a089732614de1b35828365cec4e76955cd87",
   "dirty": false,
   "dirty_paths": [],
   "calculator": "closed-form",
   "program": "perf/bench_data/rv64/fib-elf, n = 10",
   "global_logup": {"bits": 133.95456126446285, "riscv_log_stacked_height": 23, "max_interaction_count": 2130706433, "log_max_message_length": 7, "pow_bits": 18, "first_whir_round_within_unique_decoding": true, "count_unit_rows": 1024, "max_count": 2076672, "note": "the alpha/beta round of a block's global LogUp, which the group proofs share and none of them contains: scored under the group machines' parameters as a proof's own LogUp round is. The tree's root bounds the real rows of each direction below the field's order (the count, in units of count_unit_rows, is at most max_count), and a table is opened under a first WHIR round within the unique-decoding radius"},
   "shipped_whitelist": "vm/src/mle/shape_vk_bins/mle_vk_map_kb.bin",
-  "apex": {"vk_root": [1617375649, 1718017032, 700754971, 2125783560, 1521471916, 1653690507, 467053689, 939690409], "riscv_vk_pre_hash": [395262773, 625474284, 1879675529, 405172446, 1707905842, 1164481549, 1361045190, 2103705732]},
+  "apex": {"vk_root": [779837149, 1460772531, 1656877187, 1741678686, 155802151, 819379250, 218597672, 205228476], "riscv_vk_pre_hash": [395262773, 625474284, 1879675529, 405172446, 1707905842, 1164481549, 1361045190, 2103705732]},
   "onchain_test_keys": {"source": "contracts/test/dev/manifest.json", "vk_root": [1809011461, 1538953797, 415712819, 1237881923, 1668336160, 331430868, 711920165, 202585591], "circuit_sha256": "84d798d53acd884fd0e20f4b20b29c03284e84e4484b9d97485602c9eee89d43", "nb_constraints": 7256115, "gnark": "v0.14.0", "note": "test keys from a single-process Groth16 setup (contracts/README.md); a deployment needs a setup ceremony"},
   "not_generated": [],
   "proof_shapes": {
     "riscv": {
-      "shapes": 389,
-      "max": {"num_airs_present": 19, "max_constraints_per_air": 4292, "max_interactions_per_air": 4966, "num_trace_columns": 7300, "max_log_height": 23, "stacked_width": 453},
-      "largest": {"name": "core:catch-all", "bytes": 8608547, "multiproof_bytes": 8229842, "shape": {"num_airs":55,"num_airs_present":19,"max_log_height":23,"num_column_openings":1038,"num_opening_parts":22,"num_cached_commitments":1,"num_public_values":260,"num_gkr_rounds":31,"stacking_widths":[443,5,4,1],"num_trace_columns":920,"max_constraints_per_air":295,"max_interactions_per_air":121}}
+      "shapes": 431,
+      "max": {"num_airs_present": 19, "max_constraints_per_air": 4292, "max_interactions_per_air": 4966, "num_trace_columns": 7300, "max_log_height": 23, "stacked_width": 459},
+      "largest": {"name": "core:catch-all", "bytes": 8708891, "multiproof_bytes": 8330186, "shape": {"num_airs":55,"num_airs_present":19,"max_log_height":23,"num_column_openings":1038,"num_opening_parts":22,"num_cached_commitments":1,"num_public_values":260,"num_gkr_rounds":31,"stacking_widths":[449,5,4,1],"num_trace_columns":920,"max_constraints_per_air":295,"max_interactions_per_air":121}}
     },
     "convert": {
       "shapes": 3,
@@ -336,7 +336,7 @@
     {
       "machine": "convert",
       "mode": "whitelist",
-      "role": "ladder row 0 (C0), shape `core:class0`",
+      "role": "ladder row 0 (C0), shape `core:class0:unaligned10`",
       "vk_pre_hash": [1131837257, 67798138, 771179589, 1869807634, 1300963965, 1167361481, 504400281, 1569002411],
       "merged_preprocessed_commit": [1796376482, 1945579985, 3082908, 859854702, 1097122621, 1865537702, 805421391, 269041590],
       "shape": {"num_airs": 21, "max_constraints_per_air": 170, "max_interactions_per_air": 34, "num_trace_columns": 1409, "log_stacked_height": 21},
@@ -348,9 +348,9 @@
     {
       "machine": "convert",
       "mode": "whitelist",
-      "role": "ladder row 1 (C1), shape `core:class21`",
+      "role": "ladder row 1 (C1), shape `core:class14:unaligned19`",
       "vk_pre_hash": [713473703, 383524316, 1496010710, 1824689809, 510196872, 1359389507, 874731024, 393955571],
-      "merged_preprocessed_commit": [1475123518, 1113728437, 113290983, 1592807479, 544217484, 1801810383, 378960036, 1653748774],
+      "merged_preprocessed_commit": [908634837, 1785536672, 1760552378, 1549096156, 184410934, 120786537, 1964502276, 1343771768],
       "shape": {"num_airs": 21, "max_constraints_per_air": 170, "max_interactions_per_air": 34, "num_trace_columns": 1409, "log_stacked_height": 21},
       "params": {"l_skip":4,"n_stack":17,"w_stack":2048,"log_blowup":2,"whir":{"k":4,"rounds":[{"num_queries":160},{"num_queries":114},{"num_queries":109}],"mu_pow_bits":13,"query_phase_pow_bits":20,"folding_pow_bits":4,"proximity":"UniqueDecoding"},"logup":{"max_interaction_count":2130706433,"log_max_message_length":7,"pow_bits":18,"challenge_mode":"Internal"},"max_constraint_degree":4},
       "soundness": {"logup_bits": 133.95456126446285, "gkr_sumcheck_bits": 152.9434234372463, "gkr_batching_bits": 153.9434234372463, "zerocheck_sumcheck_bits": 148.71460474675044, "constraint_batching_bits": 147.29237174606737, "stacked_reduction_bits": 143.48296754093667, "whir_bits": 128.3862126451148, "total_bits": 128.3862126451148},
@@ -360,7 +360,7 @@
     {
       "machine": "convert",
       "mode": "whitelist",
-      "role": "ladder row 2 (C2), shape `core:class28`",
+      "role": "ladder row 2 (C2), shape `core:class28:unaligned10`",
       "vk_pre_hash": [121955144, 1890528783, 821040813, 1149768326, 484568486, 1841613307, 1074970500, 794916101],
       "merged_preprocessed_commit": [2038558132, 2023252766, 423392703, 1822460004, 1349315558, 1087856713, 725278517, 468330054],
       "shape": {"num_airs": 21, "max_constraints_per_air": 170, "max_interactions_per_air": 34, "num_trace_columns": 1409, "log_stacked_height": 21},

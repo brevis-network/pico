@@ -29,6 +29,31 @@ const BLS12381_FP_ELF: &[u8] = include_bytes!(concat!(
     "/../../perf/bench_data/rv64/bls12381-fp-elf"
 ));
 
+/// A whitelist prover closes a chunk while a row of the core ladder still holds it; without the
+/// whitelist the chunk runs on to its clk limit. Fibonacci's loop has four Add rows in every six
+/// instructions and no row of the ladder gives Add more than 2^22, which is the catch-all's
+/// height as well, so a run of 7.2 M instructions is one chunk at the whitelist's stacked height
+/// without the whitelist, and two with it.
+#[test]
+fn a_whitelist_prover_closes_chunks_to_the_core_ladder() {
+    const LONG: u32 = 1_200_000;
+    let plain = whitelist_builder()
+        .execute_chunked(Stdin::from(&LONG))
+        .expect("execute without the whitelist");
+    let fitted = whitelist_builder()
+        .verify_keys(true)
+        .execute_chunked(Stdin::from(&LONG))
+        .expect("execute under the whitelist");
+    assert_eq!(fitted.cycles, plain.cycles);
+    assert_eq!(fitted.committed_bytes, plain.committed_bytes);
+    assert!(
+        fitted.chunks > plain.chunks,
+        "{} chunk(s) under the whitelist, {} without it",
+        fitted.chunks,
+        plain.chunks
+    );
+}
+
 #[test]
 fn the_builder_executes_the_run_the_built_prover_executes() {
     let builder = small_builder().chunk_size(CHUNK);

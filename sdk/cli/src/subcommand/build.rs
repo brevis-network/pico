@@ -37,7 +37,9 @@ pub struct BuildArgs {
     #[clap(
         long,
         action,
-        help = "Space separated extra flags to invoke `rustc` with; may be repeated"
+        help = "Space separated extra flags to invoke `rustc` with; may be repeated. \
+                --rustflags=\"-C target-feature=-unaligned-scalar-mem\" turns off the misaligned \
+                word accesses the guest is built with by default"
     )]
     pub rustflags: Vec<String>,
 

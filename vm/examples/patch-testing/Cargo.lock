@@ -3098,11 +3098,11 @@ dependencies = [
 
 [[package]]
 name = "pico-aot-pure"
-version = "3.1.1"
+version = "3.2.0"
 
 [[package]]
 name = "pico-aot-runtime"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -3126,7 +3126,7 @@ dependencies = [
 
 [[package]]
 name = "pico-derive"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -3134,7 +3134,7 @@ dependencies = [
 
 [[package]]
 name = "pico-mle-core"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "cfg-if",
  "derivative",
@@ -3166,7 +3166,7 @@ dependencies = [
 
 [[package]]
 name = "pico-mle-cpu"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "cfg-if",
  "derive-new",
@@ -3183,7 +3183,7 @@ dependencies = [
 
 [[package]]
 name = "pico-patch-libs"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "bincode",
  "elliptic-curve",
@@ -3192,7 +3192,7 @@ dependencies = [
 
 [[package]]
 name = "pico-prover"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "bincode",
  "libloading",
@@ -3209,7 +3209,7 @@ dependencies = [
 
 [[package]]
 name = "pico-sdk"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "anyhow",
  "aurora-engine-modexp",
@@ -3241,7 +3241,7 @@ dependencies = [
 
 [[package]]
 name = "pico-verifier"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "bincode",
  "p3-field",
@@ -3257,7 +3257,7 @@ dependencies = [
 
 [[package]]
 name = "pico-vm"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "anyhow",
  "arrayref",

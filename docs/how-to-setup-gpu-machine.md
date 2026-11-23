@@ -96,10 +96,32 @@ Generate them once per ELF, from the repository root, before the first run:
 cargo run -r -p pico-aot-codegen --bin generate_crates -- perf/bench_data/rv64/reth-elf
 ```
 
+The crates hold one guest's code, and a binary built with them proves that guest only: loading
+another ELF stops at once, with the two digests. For the Amsterdam guest
+(`MLE_ELF=reth-amsterdam`, see below), generate them from
+`perf/bench_data/rv64/reth-amsterdam-elf` and rebuild.
+
+### The two reth guests
+
+`perf/bench_data/rv64/` holds two guests that execute Ethereum blocks:
+
+| `MLE_ELF` | File | What it is | Inputs |
+|---|---|---|---|
+| `reth` | `reth-elf` | RSP's client on reth 1.9 and revm: mainnet up to the Osaka fork. The default of every script. | `reth-<block>.bin`, a bare `<block>.bin`, or one of the five aliases |
+| `reth-amsterdam` | `reth-amsterdam-elf` | RSP's client on reth v2.11.0 and evm2: blocks of the Amsterdam fork, and mainnet before it. | `reth-amsterdam-<block>.bin` or a bare `<block>.bin` |
+
+An input of one is not an input of the other. The fixtures of `reth-amsterdam` are Sepolia block
+12125459, which is after the fork, and mainnet block 26403932:
+```
+MLE_ELF=reth-amsterdam MLE_N=12125459 ./single_node_mle.sh 4
+```
+`ethproofs_single_node_mle.sh` takes `MLE_ELF=reth-amsterdam` the same way, and then proves the
+Sepolia fixture before it opens its port.
+
 ### Run the GPU tests
 
-CI has no GPU, so the GPU trace-generation tests and the CPU-vs-GPU benches run only by hand. Once
-the toolkit and a card are in place, run them from the repository root:
+No CI job runs the GPU trace-generation tests or the CPU-vs-GPU benches, so they run only by
+hand. Once the toolkit and a card are in place, run them from the repository root:
 ```
 ./run_all_tests.sh
 ```

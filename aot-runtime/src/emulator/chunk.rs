@@ -156,6 +156,7 @@ mod tests {
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
             global_event_cap: usize::MAX,
+            ladder_fit: false,
         };
         emu
     }

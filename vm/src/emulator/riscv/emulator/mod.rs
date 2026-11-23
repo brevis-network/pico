@@ -530,7 +530,7 @@ impl RiscvEmulator {
     #[inline(always)]
     fn refresh_chunk_split_config(&mut self) {
         self.chunk_split_config =
-            ChunkSplitConfig::for_chunk_size(self.opts.chunk_size, self.max_syscall_cycles_u32());
+            ChunkSplitConfig::for_opts(&self.opts, self.max_syscall_cycles_u32());
     }
 
     /// Capture a snapshot for a hint address (which should be uninitialized/zero).
