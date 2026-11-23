@@ -3746,6 +3746,7 @@ dependencies = [
 [[package]]
 name = "pico-gpu"
 version = "0.1.11"
+source = "git+https://github.com/brevis-network/pico-gpu.git?rev=ac963aff5d26d72de0b80b7e09705dc18e2500e9#ac963aff5d26d72de0b80b7e09705dc18e2500e9"
 
 [[package]]
 name = "pico-gpu-api"
