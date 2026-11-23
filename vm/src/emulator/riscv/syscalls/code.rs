@@ -157,6 +157,9 @@ pub enum SyscallCode {
 
     /// Executes the `BLS12381_G2_DOUBLE` precompile.
     BLS12381_G2_DOUBLE = 0x00_00_01_34,
+
+    /// Executes the `BLAKE2B_ROUNDS` precompile.
+    BLAKE2B_ROUNDS = 0x00_00_01_35,
 }
 
 impl SyscallCode {
@@ -208,6 +211,7 @@ impl SyscallCode {
             0x00_00_01_32_u32 => SyscallCode::SECP256R1_DECOMPRESS,
             0x00_01_01_33 => SyscallCode::BLS12381_G2_ADD,
             0x00_00_01_34 => SyscallCode::BLS12381_G2_DOUBLE,
+            0x00_00_01_35 => SyscallCode::BLAKE2B_ROUNDS,
             _ => return None,
         })
     }

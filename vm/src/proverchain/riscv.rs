@@ -1990,6 +1990,7 @@ mod tests {
                 cost_estimator: false,
                 snapshot_main: SnapshotMainMode::Interpreter,
                 replay_workers: crate::emulator::opts::ReplayWorkers::Interpreter,
+                ladder_fit: false,
             }),
             records: Vec::new(),
         }

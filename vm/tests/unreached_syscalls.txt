@@ -2,6 +2,7 @@
 # event-writing syscall is reached when a record carries its event, any other when the emulator
 # counted a call. record_digest_golden fails on a name here that a guest reaches, and on an
 # unreached syscall missing from here. Rewritten with the digests, never by hand.
+BLAKE2B_ROUNDS
 BLS12381_FP2_ADD
 BLS12381_FP2_SUB
 BLS12381_G2_ADD

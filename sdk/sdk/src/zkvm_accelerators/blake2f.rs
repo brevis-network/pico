@@ -1,4 +1,6 @@
-//! BLAKE2b's compression function F with a caller-chosen round count (EIP-152), in software.
+//! BLAKE2b's compression function F with a caller-chosen round count (EIP-152). Inside the zkVM
+//! the rounds run on the `BLAKE2B_ROUNDS` precompile, a few rows each however many there are;
+//! on the host, in software.
 
 use super::{arg, out, ZkvmStatus, ZKVM_EFAIL, ZKVM_EOK};
 
@@ -13,6 +15,7 @@ const IV: [u64; 8] = [
     0x5be0cd19137e2179,
 ];
 
+#[cfg(not(target_os = "zkvm"))]
 const SIGMA: [[usize; 16]; 10] = [
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
     [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
@@ -79,6 +82,35 @@ pub(super) fn compress(rounds: u32, h: &mut [u64; 8], m: &[u64; 16], t: &[u64; 2
     if last {
         v[14] = !v[14];
     }
+    run_rounds(&mut v, m, rounds);
+    for i in 0..8 {
+        h[i] ^= v[i] ^ v[i + 8];
+    }
+}
+
+/// Rounds `0..rounds` of the schedule on `v`, on the precompile: the vector and the message go
+/// into one 8-byte aligned buffer, and the rounds run as calls of at most
+/// [`MAX_ROUNDS_PER_CALL`], each a multiple of ten but the last, so every call starts at round 0
+/// of the schedule as the syscall does.
+#[cfg(target_os = "zkvm")]
+fn run_rounds(v: &mut [u64; 16], m: &[u64; 16], rounds: u32) {
+    /// The precompile's limit (`pico_vm::chips::precompiles::blake2b::MAX_ROUNDS_PER_CALL`).
+    const MAX_ROUNDS_PER_CALL: u32 = 1000;
+    let mut buffer = [0u64; 32];
+    buffer[..16].copy_from_slice(v);
+    buffer[16..].copy_from_slice(m);
+    let mut remaining = rounds;
+    while remaining > 0 {
+        let n = remaining.min(MAX_ROUNDS_PER_CALL);
+        crate::riscv_ecalls::syscall_blake2b_rounds(&mut buffer, u64::from(n));
+        remaining -= n;
+    }
+    v.copy_from_slice(&buffer[..16]);
+}
+
+/// Rounds `0..rounds` of the schedule on `v`, in software.
+#[cfg(not(target_os = "zkvm"))]
+fn run_rounds(v: &mut [u64; 16], m: &[u64; 16], rounds: u32) {
     // Ten rounds unrolled, each with its SIGMA row as a constant, so `v` stays in registers and
     // every message index folds to an immediate.
     let mut remaining = rounds;
@@ -88,17 +120,15 @@ pub(super) fn compress(rounds: u32, h: &mut [u64; 8], m: &[u64; 16], t: &[u64; 2
                 break;
             }
             remaining -= 1;
-            round::<$r>(&mut v, m);
+            round::<$r>(v, m);
         )*};
     }
     loop {
         unrolled!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
     }
-    for i in 0..8 {
-        h[i] ^= v[i] ^ v[i + 8];
-    }
 }
 
+#[cfg(not(target_os = "zkvm"))]
 #[inline(always)]
 fn round<const R: usize>(v: &mut [u64; 16], m: &[u64; 16]) {
     let s = &SIGMA[R];
@@ -112,6 +142,7 @@ fn round<const R: usize>(v: &mut [u64; 16], m: &[u64; 16]) {
     g(v, 3, 4, 9, 14, m[s[14]], m[s[15]]);
 }
 
+#[cfg(not(target_os = "zkvm"))]
 #[inline(always)]
 fn g(v: &mut [u64; 16], a: usize, b: usize, c: usize, d: usize, x: u64, y: u64) {
     v[a] = v[a].wrapping_add(v[b]).wrapping_add(x);

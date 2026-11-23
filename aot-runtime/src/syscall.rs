@@ -77,6 +77,7 @@ const fn build_extra_cycles_table() -> [u32; 256] {
     table[0x32] = 0x00; // SECP256R1_DECOMPRESS
     table[0x33] = 0x01; // BLS12381_G2_ADD
     table[0x34] = 0x00; // BLS12381_G2_DOUBLE
+    table[0x35] = 0x00; // BLAKE2B_ROUNDS
     table
 }
 
@@ -639,6 +640,10 @@ pub(crate) fn dispatch_precompile(
         }
         id if id == SyscallCode::BLS12381_G2_DOUBLE as u32 => {
             precompiles::ec::bls12381_g2_double(mem, arg1);
+            Ok(true)
+        }
+        id if id == SyscallCode::BLAKE2B_ROUNDS as u32 => {
+            precompiles::blake2b::blake2b_rounds(mem, arg1, arg2);
             Ok(true)
         }
         id if id == SyscallCode::BLS12381_DECOMPRESS as u32 => {

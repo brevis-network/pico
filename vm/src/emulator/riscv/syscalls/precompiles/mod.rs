@@ -1,3 +1,4 @@
+pub mod blake2b;
 pub mod bls12381_g2;
 pub mod ec;
 pub mod edwards;
@@ -20,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
 use tracing::info;
 
+pub use blake2b::Blake2bRoundsEvent;
 pub use ec::event::{EllipticCurveDecompressEvent, EllipticCurveDoubleEvent};
 pub use edwards::event::{EdDecompressEvent, EllipticCurveAddEvent};
 pub use fptower::event::{Fp2AddSubEvent, Fp2MulEvent, FpEvent};
@@ -97,6 +99,8 @@ pub enum PrecompileEvent {
     Bls12381G2Add(EllipticCurveAddEvent),
     /// Bls12-381 G2 double precompile event.
     Bls12381G2Double(EllipticCurveDoubleEvent),
+    /// BLAKE2b rounds precompile event.
+    Blake2bRounds(Blake2bRoundsEvent),
 }
 
 /// Trait to retrieve all the local memory events from a vec of precompile events.
@@ -162,6 +166,9 @@ impl PrecompileLocalMemory for Vec<(SyscallEvent, PrecompileEvent)> {
                     iterators.push(e.local_mem_access.iter());
                 }
                 PrecompileEvent::Poseidon2Permute(e) => {
+                    iterators.push(e.local_mem_access.iter());
+                }
+                PrecompileEvent::Blake2bRounds(e) => {
                     iterators.push(e.local_mem_access.iter());
                 } // _ => { unreachable!()}
             }

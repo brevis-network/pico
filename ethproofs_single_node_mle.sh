@@ -52,6 +52,8 @@ export CHUNK_BATCH_SIZE="${CHUNK_BATCH_SIZE:-1}"
 export MLE_HISTORY_SLOTS="${MLE_HISTORY_SLOTS:-${MLE_EVENT_POOL_SIZE:-16}}"
 
 export MEMORY_POOL_SIZE="${MEMORY_POOL_SIZE:-16}"
+# MLE_DEFERRED_RECORDS is left unset: it follows the host-memory tier (512, or 8 below 500 GB;
+# PICO_HOST_MEM overrides), as a smaller host cannot hold 512 deferred records.
 export MEMORY_RECYCLER_THREADS="${MEMORY_RECYCLER_THREADS:-4}"
 export MLE_PREWARM="${MLE_PREWARM:-1}"
 export MLE_HEAP_PREWARM_GB="${MLE_HEAP_PREWARM_GB:-6}"

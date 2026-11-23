@@ -112,6 +112,10 @@ extern "C" {
     /// Executes the Keccak-256 permutation on the given state.
     pub fn syscall_keccak_permute(state: *mut [u64; 25]);
 
+    /// Runs rounds `0..rounds` (at most 1000) of BLAKE2b's schedule on the working vector
+    /// `state[0..16]` with the message block `state[16..32]`.
+    pub fn syscall_blake2b_rounds(state: *mut [u64; 32], rounds: u64);
+
     /// Executes an uint256 multiplication on the given inputs.
     pub fn syscall_uint256_mulmod(x: *mut [u64; 4], y: *const [u64; 4]);
 

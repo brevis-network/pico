@@ -2694,6 +2694,65 @@ fn load_reth_input(n: u32) -> Vec<u8> {
     )
 }
 
+/// The file names an input of `reth-amsterdam` for block `n` may have, in the order they are
+/// tried: the fixture spelling, then the bare `<block>.bin` that RSP's `eth-proofs --stdin-dir`
+/// writes. No aliases: the number is the block's.
+fn reth_amsterdam_input_names(n: u32) -> [String; 2] {
+    [format!("reth-amsterdam-{n}.bin"), format!("{n}.bin")]
+}
+
+/// The input of the `reth-amsterdam` guest for block `n`, from [`rv64_input_dir`].
+///
+/// It is not an input `reth` can read, nor the other way round: this guest takes one buffer made
+/// of the witness blob, the contract codes, the bincode-serialized client input and the lengths
+/// of the codes and of the blob. A directory therefore holds the inputs of one of the two guests,
+/// or spells them `reth-<block>.bin` and `reth-amsterdam-<block>.bin`; a bare `<block>.bin` is
+/// handed to whichever guest is asked for that block.
+fn load_reth_amsterdam_input(n: u32) -> Vec<u8> {
+    let dir = rv64_input_dir();
+    let names = reth_amsterdam_input_names(n);
+    let mut last: Option<std::io::Error> = None;
+    for name in &names {
+        let path = format!("{dir}/{name}");
+        match std::fs::read(&path) {
+            Ok(bytes) => return bytes,
+            // As in `load_reth_input`: only a missing file moves on to the next spelling.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => last = Some(e),
+            Err(e) => panic!("failed to read reth-amsterdam input {path}: {e}"),
+        }
+    }
+    panic!(
+        "failed to read reth-amsterdam input for block {n} in {dir}: tried {} ({})",
+        names.join(", "),
+        last.map(|e| e.to_string()).unwrap_or_default()
+    )
+}
+
+#[cfg(test)]
+mod reth_amsterdam_input_tests {
+    use super::reth_amsterdam_input_names;
+
+    #[test]
+    fn the_fixture_spelling_is_tried_before_the_bare_block_number() {
+        assert_eq!(
+            reth_amsterdam_input_names(12125459),
+            [
+                "reth-amsterdam-12125459.bin".to_string(),
+                "12125459.bin".to_string()
+            ]
+        );
+    }
+
+    /// `reth`'s five selectors are block numbers here, not aliases: 188 is block 188.
+    #[test]
+    fn a_reth_alias_is_not_an_alias_here() {
+        assert_eq!(
+            reth_amsterdam_input_names(188),
+            ["reth-amsterdam-188.bin".to_string(), "188.bin".to_string()]
+        );
+    }
+}
+
 /// Build `(elf_bytes, stdin)` for the configured program.
 ///
 /// `KoalaBearPoseidon2` is used only as the stdin builder's config type-parameter
@@ -2703,6 +2762,11 @@ fn load_reth_input(n: u32) -> Vec<u8> {
 ///
 /// An ELF from disk is read once per process and name, so a file replaced or deleted under a
 /// running server neither changes nor breaks what it proves.
+///
+/// `reth-amsterdam` is RSP's client on reth v2.11.0 and evm2, which executes blocks of the
+/// Amsterdam fork. It is another program than `reth`, with another input (see
+/// [`load_reth_amsterdam_input`]), so it has a name and a file of its own, `reth-amsterdam-elf`,
+/// instead of taking `reth-elf`'s place: what proves today's mainnet stays as it is.
 fn load_program_elf(cfg: &MleSingleNodeConfig) -> Arc<[u8]> {
     if let Some(embedded) = &cfg.embedded {
         #[cfg(feature = "aot-emulator")]
@@ -2711,10 +2775,12 @@ fn load_program_elf(cfg: &MleSingleNodeConfig) -> Arc<[u8]> {
     }
     static FIB: std::sync::OnceLock<Arc<[u8]>> = std::sync::OnceLock::new();
     static RETH: std::sync::OnceLock<Arc<[u8]>> = std::sync::OnceLock::new();
+    static RETH_AMSTERDAM: std::sync::OnceLock<Arc<[u8]>> = std::sync::OnceLock::new();
     let (name, read) = match cfg.elf.as_str() {
         "fib" | "fibonacci" | "f" => ("fib", &FIB),
         "reth" => ("reth", &RETH),
-        other => panic!("unsupported --elf {other} (supported: fib | reth)"),
+        "reth-amsterdam" => ("reth-amsterdam", &RETH_AMSTERDAM),
+        other => panic!("unsupported --elf {other} (supported: fib | reth | reth-amsterdam)"),
     };
     let elf = Arc::clone(read.get_or_init(|| load_elf(name).into()));
     #[cfg(feature = "aot-emulator")]
@@ -2735,7 +2801,11 @@ fn stdin_for_block(cfg: &MleSingleNodeConfig, n: u32) -> EmulatorStdin {
             stdin.write_slice(&load_reth_input(n));
             info!("MLE single-node: reth block selector {n}");
         }
-        other => panic!("unsupported --elf {other} (supported: fib | reth)"),
+        "reth-amsterdam" => {
+            stdin.write_slice(&load_reth_amsterdam_input(n));
+            info!("MLE single-node: reth-amsterdam block {n}");
+        }
+        other => panic!("unsupported --elf {other} (supported: fib | reth | reth-amsterdam)"),
     }
     stdin.finalize()
 }
@@ -3214,9 +3284,12 @@ impl EarlyRootKeygen {
 /// `emulation_done`, so a setup-side reset leaves block 2's dispatcher taking `Complete` on its
 /// first poll and proving nothing, and leaves `emulation_done` latched so every later block
 /// silently measures stale lane behaviour while the report claims otherwise.
+#[derive(Clone)]
 struct Resident {
     program: Arc<Program>,
     provers: Vec<Arc<RiscvMachine>>,
+    /// The caller's machine card 0 adopted, by address; `None` when card 0 keygen'd its own.
+    card0_from: Option<usize>,
     #[cfg(feature = "cuda")]
     converts: Vec<Arc<GpuConvertMachine>>,
     #[cfg(feature = "cuda")]
@@ -3261,9 +3334,52 @@ struct ResidentKey {
     vk_on: bool,
     log_stacked_height: usize,
     embedded_root: Option<[KoalaBear; 8]>,
-    /// The caller's riscv machine card 0 may adopt, by address: two provers never share one
-    /// resident, so one's batch prove cannot touch the Global tables of the other's streaming run.
-    adopted_riscv: Option<usize>,
+}
+
+/// What card 0 of resident machines that otherwise fit a run is to prove on.
+enum Card0 {
+    /// The machine it has.
+    Keep,
+    /// The caller's.
+    Adopt(Arc<RiscvMachine>),
+    /// One keygen'd for the resident.
+    Keygen,
+}
+
+/// The caller's riscv machine, when card 0 can prove on it: built for the program whose identity
+/// `expected` gives (under the machine's parameters) at this height and bucketing, and holding no
+/// Global tables of a prove of its own.
+fn adoptable(
+    caller: Option<&Arc<RiscvMachine>>,
+    expected: impl FnOnce(&RiscvMachine) -> Option<pico_vm::mle::machine::riscv::ProgramIdentity>,
+    log_stacked_height: usize,
+    bucket: bool,
+) -> Option<Arc<RiscvMachine>> {
+    let machine = caller?;
+    if machine.has_chunk_tables() {
+        return None;
+    }
+    // The settings first: `expected` may commit the program's image table.
+    if !machine.built_for(log_stacked_height, bucket)
+        || machine.program_identity().is_none()
+        || machine.program_identity() != expected(machine)
+    {
+        warn!(
+            "MLE keygen: the caller's riscv machine is for another program or setting; card 0 \
+             keygens its own"
+        );
+        return None;
+    }
+    Some(Arc::clone(machine))
+}
+
+/// What two riscv machines of one program must agree on: the vk's pre-hash, and the
+/// program-table commitment it leaves out.
+fn riscv_keys(machine: &RiscvMachine) -> impl PartialEq + std::fmt::Debug {
+    (
+        machine.vk_pre_hash(),
+        pico_vm::mle::machine::riscv::riscv_program_commit(machine.vk()),
+    )
 }
 
 static RESIDENT: std::sync::Mutex<Option<(ResidentKey, Arc<Resident>)>> =
@@ -3272,16 +3388,67 @@ static RESIDENT: std::sync::Mutex<Option<(ResidentKey, Arc<Resident>)>> =
 /// The resident machines for `key`, built by `build` when the slot holds none or holds another
 /// program's. The old machines are dropped before the new ones are built, so their device memory
 /// returns to the pool first.
-fn resident_for(key: ResidentKey, build: impl FnOnce(Arc<[u8]>) -> Resident) -> Arc<Resident> {
+///
+/// Card 0 proves on the caller's machine, `caller`, when `card0` adopts it. Machines that fit but
+/// whose card 0 is not the one the run should prove on swap that machine alone: a caller's machine
+/// serves only that caller's runs, so its batch proves cannot touch another run's Global tables.
+fn resident_for(
+    key: ResidentKey,
+    caller: Option<&Arc<RiscvMachine>>,
+    card0: impl FnOnce(&Resident) -> Card0,
+    keygen_card0: impl FnOnce(&Arc<Program>) -> Arc<RiscvMachine>,
+    build: impl FnOnce(Arc<[u8]>) -> Resident,
+) -> Arc<Resident> {
     let mut slot = RESIDENT.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((held, resident)) = slot.as_ref() {
-        if *held == key {
-            return Arc::clone(resident);
+    let decision = match slot.as_ref() {
+        Some((held, resident)) if *held == key => {
+            let caller = caller.map(|m| Arc::as_ptr(m) as usize);
+            if resident.card0_from.is_some() && resident.card0_from == caller {
+                Card0::Keep
+            } else {
+                card0(resident)
+            }
         }
-        info!("MLE resident: program or settings changed; rebuilding the machines");
-    }
-    *slot = None;
-    let resident = Arc::new(build(Arc::clone(&key.elf)));
+        Some(_) => {
+            info!("MLE resident: program or settings changed; rebuilding the machines");
+            *slot = None;
+            Card0::Keygen
+        }
+        None => Card0::Keygen,
+    };
+    let Some((key, held)) = slot.take() else {
+        let resident = Arc::new(build(Arc::clone(&key.elf)));
+        *slot = Some((key, Arc::clone(&resident)));
+        return resident;
+    };
+    let (adopted, from) = match decision {
+        Card0::Keep => {
+            *slot = Some((key, Arc::clone(&held)));
+            return held;
+        }
+        Card0::Adopt(machine) => {
+            let from = Arc::as_ptr(&machine) as usize;
+            (Some(machine), Some(from))
+        }
+        Card0::Keygen => (None, None),
+    };
+    let mut next = (*held).clone();
+    drop(held);
+    let old = next.provers.remove(0);
+    let old_keys = riscv_keys(&old);
+    // Unless its caller still holds it, the old card-0 key leaves the card before a new one is
+    // made there.
+    drop(old);
+    let machine = adopted.unwrap_or_else(|| keygen_card0(&next.program));
+    assert_eq!(
+        riscv_keys(&machine),
+        old_keys,
+        "card 0's new riscv machine has another vk than the one it replaces"
+    );
+    info!("MLE resident: card 0 swaps its riscv machine; the other machines stay");
+    next.provers.insert(0, machine);
+    next.card0_from = from;
+    let resident = Arc::new(next);
     *slot = Some((key, Arc::clone(&resident)));
     resident
 }
@@ -3294,6 +3461,12 @@ fn resident_snapshot() -> Option<Arc<Resident>> {
         .unwrap_or_else(|e| e.into_inner())
         .as_ref()
         .map(|(_, resident)| Arc::clone(resident))
+}
+
+/// The riscv machine card 0 of the resident machines proves on, if there are any.
+#[cfg(feature = "cuda")]
+pub(crate) fn resident_card0_riscv() -> Option<Arc<RiscvMachine>> {
+    resident_snapshot().map(|resident| Arc::clone(&resident.provers[0]))
 }
 
 /// Drops the device keys the resident recursion pk caches added during `run`; returns how many.
@@ -3543,11 +3716,39 @@ fn run_pipeline(
         vk_on,
         log_stacked_height: cfg.log_stacked_height,
         embedded_root: embedded.map(|e| e.trusted_root),
-        adopted_riscv: embedded
-            .and_then(|e| e.riscv.as_ref())
-            .map(|m| Arc::as_ptr(m) as usize),
     };
-    let resident = resident_for(resident_key, |elf| {
+    let caller_riscv = embedded.and_then(|e| e.riscv.as_ref());
+    // Card 0's own machine, keygen'd on card 0 (the others in the loop below, on theirs).
+    let keygen_riscv = |program: &Arc<Program>, card: usize| {
+        #[cfg(feature = "cuda")]
+        pico_vm::mle::cuda_mle::runtime::context::set_device(card as i32)
+            .unwrap_or_else(|e| panic!("binding the main thread to card {card} failed: {e:?}"));
+        #[cfg(not(feature = "cuda"))]
+        let _ = card;
+        Arc::new(
+            RiscvMachine::new(program.clone(), cfg.log_stacked_height, vk_on)
+                .unwrap_or_else(|e| panic!("{e}")),
+        )
+    };
+    // Card 0 proves on the caller's machine when it can (see `resident_for`).
+    let card0 = |resident: &Resident| {
+        match (
+            // Card 0's machine holds this program's identity: read, not committed again.
+            adoptable(
+                caller_riscv,
+                |_| resident.provers[0].program_identity(),
+                cfg.log_stacked_height,
+                vk_on,
+            ),
+            resident.card0_from,
+        ) {
+            (Some(machine), _) => Card0::Adopt(machine),
+            (None, None) => Card0::Keep,
+            // Another caller's machine: not this run's to prove on.
+            (None, Some(_)) => Card0::Keygen,
+        }
+    };
+    let build = |elf: Arc<[u8]>| {
         let t_compile = Instant::now();
         let program: Arc<Program> = Compiler::new(SourceType::RISCV, &elf)
             .expect("failed to parse RISC-V ELF")
@@ -3563,28 +3764,25 @@ fn run_pipeline(
         };
         let t_keygen = Instant::now();
         let mut provers: Vec<Arc<RiscvMachine>> = Vec::with_capacity(prover_count);
+        // Card 0 takes the caller's machine when it already holds this program's keys, which
+        // keygenning again would only cost time and a second pk on the card.
+        let adopted = adoptable(
+            caller_riscv,
+            |m| {
+                pico_vm::mle::machine::riscv::ProgramIdentity::new(&program, &m.vk().inner.params)
+                    .ok()
+            },
+            cfg.log_stacked_height,
+            vk_on,
+        );
+        let card0_from = adopted.as_ref().map(|m| Arc::as_ptr(m) as usize);
+        if adopted.is_some() {
+            info!("MLE keygen: card 0 reuses the caller's riscv keys");
+        }
         for k in 0..prover_count {
-            #[cfg(feature = "cuda")]
-            pico_vm::mle::cuda_mle::runtime::context::set_device(k as i32)
-                .unwrap_or_else(|e| panic!("binding the main thread to card {k} failed: {e:?}"));
-            #[cfg(not(feature = "cuda"))]
-            let _ = k;
-            // Card 0 takes the caller's machine when it already holds this program's keys: same
-            // program, height and air set, so keygenning it again only costs time and a second pk on
-            // the card. Not when it holds Global tables from another prove.
-            let adopted = (k == 0)
-                .then(|| embedded.and_then(|e| e.riscv.clone()))
-                .flatten()
-                .filter(|m| !m.has_chunk_tables());
-            let machine = match adopted {
-                Some(machine) => {
-                    info!("MLE keygen: card 0 reuses the caller's riscv keys");
-                    machine
-                }
-                None => Arc::new(
-                    RiscvMachine::new(program.clone(), cfg.log_stacked_height, vk_on)
-                        .unwrap_or_else(|e| panic!("{e}")),
-                ),
+            let machine = match (k, &adopted) {
+                (0, Some(machine)) => Arc::clone(machine),
+                _ => keygen_riscv(&program, k),
             };
             provers.push(machine);
         }
@@ -3593,8 +3791,8 @@ fn run_pipeline(
         let prover = Arc::clone(&provers[0]);
         for (k, p) in provers.iter().enumerate().skip(1) {
             assert_eq!(
-                p.vk_pre_hash(),
-                prover.vk_pre_hash(),
+                riscv_keys(p),
+                riscv_keys(&prover),
                 "card {k} keygen'd a different riscv vk than card 0 — keygen is not deterministic"
             );
         }
@@ -3757,6 +3955,7 @@ fn run_pipeline(
         Resident {
             program,
             provers,
+            card0_from,
             #[cfg(feature = "cuda")]
             converts,
             #[cfg(feature = "cuda")]
@@ -3774,7 +3973,14 @@ fn run_pipeline(
             keygen_wall,
             shape: (prover_count, with_convert, with_combine, with_compress),
         }
-    });
+    };
+    let resident = resident_for(
+        resident_key,
+        caller_riscv,
+        card0,
+        |program| keygen_riscv(program, 0),
+        build,
+    );
     // A second block asking for a different shape would silently prove against machines built for
     // the first one — wrong card count, or a convert stage that was never constructed.
     assert_eq!(
@@ -4029,9 +4235,12 @@ fn run_pipeline(
     // thread (crossbeam Sender is Send+Sync, which the pipeline's handler requires); the event
     // precompute in `prepare_chunk_shaped` stays off this thread.
     // The embedded entry states its replay engine with its options; the CLI's is `replay`.
+    // In whitelist mode a CPU chunk needs a row of the core ladder, so the split is asked to
+    // close chunks to it; an embedded entry is a whitelist prover and states it with its options.
     let emulator_opts = embedded
         .map(|e| e.emulator_opts)
-        .unwrap_or_else(|| EmulatorOpts::bench_riscv_ops().with_replay_workers(replay));
+        .unwrap_or_else(|| EmulatorOpts::bench_riscv_ops().with_replay_workers(replay))
+        .with_ladder_fit(vk_on);
     let emulation_workers = embedded.map(|e| e.emulation_workers);
     // `MLE_PREWARM=1`: pay the process's first-touch page-fault cost HERE, before the `e2e=` window
     // opens, instead of inside the first chunk's emulate/prepare where it lands on the pipeline's

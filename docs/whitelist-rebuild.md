@@ -72,11 +72,9 @@ holds `fib-elf`, `reth-elf` and their `reth-<block>.bin` files.
 
 Leave `MLE_LOG_STACKED_HEIGHT` unset: the artifact is keyed to the stacked height the prover
 ships with (`DEFAULT_LOG_STACKED_HEIGHT`), and a build at another height is a different config.
-Set `CHUNK_SIZE=8388608` and `SPLIT_THRESHOLD=2097152`: the self-checks emulate with the default
-emulator options, whose chunk size and deferred split threshold otherwise follow the host's memory,
-while the SDK prover cuts chunks of 2^23 at the shipped stacked height and splits deferred
-records at a quarter of that, 2^21. Unpinned, (a) on another host checks chunks the prover never
-cuts.
+Set `CHUNK_SIZE=8388608`: the self-checks emulate with the default emulator options, whose chunk
+size otherwise follows the host's memory, while the SDK prover cuts chunks of 2^23 at the shipped
+stacked height. Unpinned, (a) on another host checks chunks the prover never cuts.
 
 ## Procedure
 
@@ -92,7 +90,7 @@ cuts.
    ```bash
    OUT=<a new directory outside the repository>
    mkdir -p "$OUT"
-   RUST_LOG=info CHUNK_SIZE=8388608 SPLIT_THRESHOLD=2097152 \
+   RUST_LOG=info CHUNK_SIZE=8388608 \
    MLE_VK_MAP_OUT="$OUT/mle_vk_map_kb.bin" \
    MLE_VK_MAP_THREADS=8 \
    MLE_VK_MAP_RETH_BLOCKS=17106222,18884864,23993050,24600825 \
@@ -146,8 +144,8 @@ cuts.
    figures on `MLE_VK_MERKLE_DEPTH` and the shape counts in the `MLE_RECURSION_CONVERT_LADDER` doc
    comment.)
 6. Regenerate the soundness manifest (`docs/soundness/README.md` section 2) from the repository
-   root, with `CHUNK_SIZE` and `SPLIT_THRESHOLD` unset: step 3 sets them for the builder only, and
-   the generator refuses `CHUNK_SIZE` (and `MLE_LOG_STACKED_HEIGHT`).
+   root, with `CHUNK_SIZE` unset: step 3 sets it for the builder only, and the generator refuses
+   `CHUNK_SIZE` (and `MLE_LOG_STACKED_HEIGHT`).
 
    ```bash
    cargo run --release -p pico-vm --example mle_soundness_manifest
@@ -206,7 +204,11 @@ Two places, two meanings:
 - **At shape selection** (`select_riscv_shape` panics: "no MLE core shape holds this chunk" or "no
   MLE shape holds this chunk"): a chunk's natural heights exceed even the catch-all row for some
   air. The guest or workload needs a taller catch-all or a wider enumeration; that is a shape
-  table change, followed by a rebuild.
+  table change, followed by a rebuild. For a CPU chunk a whitelist prover has the chunk split
+  keep this from happening: it closes a chunk while a row of the core ladder still holds it
+  (`EmulatorOpts::ladder_fit`; `vm/src/emulator/riscv/chunk_split.rs`, "Ladder fit"). A core
+  chunk that still gets here, or to `CatchAllShape`, was emulated without the fit or is one of
+  the cases that section lists as not bounded.
 - **At a key check** (the SDK's `KeyNotWhitelisted` at Convert, Combine or Compress, or a panic "child VK
   not in the whitelist (vk map)" at the parent of a convert leaf or combine node whose key the
   prover derived): the chunk's shape was selected, but the key the prover derived is not in the
@@ -240,7 +242,10 @@ under, beside the shipped root.
 Changing the core ladder (`MLE_CORE_LADDER`) is a shape table change and goes through the
 procedure above. The fitting itself needs a corpus of natural heights taken with the probe
 (`SHAPE_PROBE_NATURAL=1`) on the same emulator chunk-cut rules the prover will run with: a corpus
-probed before a change to the chunk split lands chunks on neighbouring rows. The fitting and
+probed before a change to the chunk split lands chunks on neighbouring rows. Take the corpus of a
+workload that leaves the ladder without the ladder fit (`mle_shape_probe` emulates without it):
+under the whitelist the split closes such a chunk at the heights of today's rows, not where
+taller rows would let it run. The fitting and
 accounting tools are not part of this repository. That is the riscv core ladder; the recursion tier tables (the convert
 ladder and the combine, embed and compress rows) are re-measured by `docs/tier-tables.md`, which
 ends in this procedure, or, for the embed row alone, in a soundness-manifest regeneration.

@@ -91,6 +91,7 @@ pub(crate) fn fib_records() -> Vec<EmulationRecord> {
         cost_estimator: false,
         snapshot_main: SnapshotMainMode::Interpreter,
         replay_workers: ReplayWorkers::Interpreter,
+        ladder_fit: false,
     };
     hold_records_unbounded();
     let final_pvs_state = Arc::new(RecordFinalPvsState::default());

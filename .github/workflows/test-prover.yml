@@ -3,26 +3,22 @@ on:
   pull_request:
     branches:
       - main
+      - dev
       - release/v*
     paths-ignore:
       - "docs/**"
       - "README.md"
       - ".gitignore"
       - "Makefile"
-      - "tools/**"
-      - ".claude/**"
-      - ".agent/**"
   push:
     branches:
       - main
+      - dev
     paths-ignore:
       - "docs/**"
       - "README.md"
       - ".gitignore"
       - "Makefile"
-      - "tools/**"
-      - ".claude/**"
-      - ".agent/**"
   workflow_dispatch:
 
 name: Test prover
@@ -39,13 +35,22 @@ env:
 
 jobs:
   # The host prover crate's tests prove the chain, so they run beside the VM lanes (test-vm.yml)
-  # rather than after them, split by module across three jobs so none outlasts the rest of CI.
+  # rather than after them, split by module across several jobs so none outlasts the rest of CI.
+  #
+  # `prover`, `prover-chain`, `prover-precompiles`, `act4` and `wrap` build one test binary
+  # (`cargo test --release -p pico-prover`), so they share the `cpu-prover-release` cache, which
+  # `prover` writes: it also builds the crate without its default features. `cli` and `c-guest`
+  # build pico-cli and share `cpu-cli-release`, which `cli` writes. Per-job keys kept seven
+  # copies of two builds.
   prover:
     name: CPU · Host prover (core)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-prover-release
+          cache-save: "true"
       - name: Host prover crate
         run: |
           # The `chunks` tests prove across chunk boundaries at the chain's operating point and would
@@ -77,6 +82,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-prover-release
+          cache-save: "false"
       - name: The facade against the direct chain
         run: |
           # `--test-threads=1`: the facade test alone peaks near 8 GB.
@@ -90,6 +98,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-prover-release
+          cache-save: "false"
       - name: The precompile guests prove
         run: |
           # Their own process: the ed25519 guest's proof peaks near 10.5 GB alone and near 11.5 GB
@@ -102,15 +113,25 @@ jobs:
   # The RISC-V architectural tests (ACT4) of Pico's RV64IM_Zicclsm target, 72 in all (act4/README.md).
   # Each checks its own results and commits `PASS` or `FAIL`. All 72 must execute, prove and
   # verify, committing `PASS`, and the proof of each of the 8 Misalign tests must report the
-  # misaligned accesses its execution counted. Its own job: 72 keygens and proofs, beside the other
-  # proving lanes.
+  # misaligned accesses its execution counted. 72 keygens and proofs in one job took past half an
+  # hour, the longest lane in CI, so four jobs beside the other proving lanes take a quarter each
+  # (`ACT4_SHARD`, see `tests::act4::shard`).
   act4:
-    name: CPU · ACT4 RV64IM_Zicclsm (72 pass)
+    name: CPU · ACT4 RV64IM_Zicclsm (part ${{ matrix.part }} of 4)
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4]
+    env:
+      ACT4_SHARD: ${{ matrix.part }}/4
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-prover-release
+          cache-save: "false"
       - name: Execute, prove and verify each test
         run: |
           # `--nocapture` prints a line per test with its time. The count: a renamed module would
@@ -125,6 +146,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-cli-release
+          cache-save: "true"
       - name: cargo pico prove and execute
         run: |
           # Drives the binary, and verifies the proof file it writes in a process that proved nothing.
@@ -140,6 +164,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-cli-release
+          cache-save: "false"
       - name: clang and LLD
         run: |
           sudo apt-get update
@@ -187,6 +214,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: cpu-prover-release
+          cache-save: "false"
       - name: Wrap proof (fib), and the EVM bundle against the wrap circuit
         env:
           # The test writes the bundle's two files here for the gnark step below.
@@ -227,8 +257,8 @@ jobs:
         run: |
           set -eux -o pipefail
           # Compiles the circuit, which nothing above does, and needs at most 2^23 constraints.
-          # This is the dev-mode circuit CI proves to (7,233,341 constraints, 13.8% under); the
-          # whitelist-mode one a verifier is set up for (7,243,820, 13.6% under) is checked the
+          # This is the dev-mode circuit CI proves to (7,256,107 constraints, 13.5% under); the
+          # whitelist-mode one a verifier is set up for (7,256,115, 13.5% under) is checked the
           # same way on a machine that can prove it, before a setup.
           (cd gnark && CGO_LDFLAGS="-L$GITHUB_WORKSPACE/target/release -Wl,-rpath,$GITHUB_WORKSPACE/target/release" \
             go test -timeout 900s -v -run '^TestCircuitFitsGroth16Domain$' ./koalabear_verifier/) \

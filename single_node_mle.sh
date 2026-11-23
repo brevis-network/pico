@@ -81,6 +81,8 @@ export MLE_HISTORY_SLOTS="${MLE_HISTORY_SLOTS:-${MLE_EVENT_POOL_SIZE:-16}}"
 # A reset keeps a memory's pages, so the memories alive, not this cap, are what the pool costs. 16
 # is what an unset MEMORY_POOL_SIZE gets at this shape; no block ends measurably later at it.
 export MEMORY_POOL_SIZE="${MEMORY_POOL_SIZE:-16}"
+# MLE_DEFERRED_RECORDS is left unset: it follows the host-memory tier (512, or 8 below 500 GB;
+# PICO_HOST_MEM overrides), as a smaller host cannot hold 512 deferred records.
 export MEMORY_RECYCLER_THREADS="${MEMORY_RECYCLER_THREADS:-4}"
 
 # First-iteration warmup. Without these, the FIRST `e2e=` of a fresh process is 419±52 ms slower

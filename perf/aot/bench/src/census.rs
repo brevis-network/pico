@@ -10,7 +10,8 @@
 //! access to its address before it. A load or store is stamped at its step's clock, and a
 //! precompile stamps its accesses from its ECALL's clock up, inside the extra cycles that ECALL is
 //! charged, so a previous stamp of the same chunk falls in the clock range of the step that made
-//! it: exactly a load's or store's clock, or inside the range of an ECALL that sent a syscall row.
+//! it: exactly a load's or store's clock (or its clock plus `C`, for a misaligned one running into
+//! the next dword), or inside the range of an ECALL that sent a syscall row.
 //! Only precompiles make stamped memory accesses from a syscall, and every precompile sends a row.
 //! A stamp that is neither is counted apart, as unattributed.
 //!
@@ -110,8 +111,7 @@ pub fn table_sizes(history: &ExecutionHistory) -> [TableSize; TABLES.len()] {
         chip_steps,
         operand_exceptions,
         syscalls,
-        // The misaligned steps are read on the host alone, at most 1024 rows a chunk, and take no
-        // region of a slot.
+        // The misaligned steps are read on the host alone and take no region of a slot.
         unaligned: _,
     } = history;
     let ChipSteps {
@@ -195,12 +195,15 @@ impl Windows {
 /// What made `history`'s access stamped `timestamp`: the step whose clock range holds it.
 fn toucher(history: &ExecutionHistory, program: &Program, timestamp: u32) -> Toucher {
     let after = history.steps.partition_point(|step| step.clk <= timestamp);
-    let Some(step) = after.checked_sub(1).map(|index| history.steps[index]) else {
+    let Some(index) = after.checked_sub(1) else {
         return Toucher::Unknown;
     };
+    let step = history.steps[index];
     let instruction = program.fetch(u64::from(step.pc));
     if instruction.is_memory_instruction()
-        && step.timestamp(MemoryAccessPosition::Memory) == timestamp
+        && (step.timestamp(MemoryAccessPosition::Memory) == timestamp
+            || (step.timestamp(MemoryAccessPosition::C) == timestamp
+                && crosses_into_next_dword(history, index)))
     {
         Toucher::Cpu
     } else if instruction.is_ecall_instruction()
@@ -213,6 +216,15 @@ fn toucher(history: &ExecutionHistory, program: &Program, timestamp: u32) -> Tou
     } else {
         Toucher::Unknown
     }
+}
+
+/// Whether step `index` is a misaligned load or store running into the next dword, whose access
+/// to that dword is stamped at the step's `C` position.
+fn crosses_into_next_dword(history: &ExecutionHistory, index: usize) -> bool {
+    history
+        .unaligned
+        .binary_search_by_key(&(index as u32), |unaligned| unaligned.step)
+        .is_ok_and(|row| history.unaligned[row].crosses == 1)
 }
 
 /// One chunk's census.
@@ -652,7 +664,7 @@ mod tests {
     use super::*;
     use pico_vm::{
         compiler::riscv::{instruction::Instruction, opcode::Opcode},
-        emulator::riscv::history::Slots,
+        emulator::riscv::history::{Slots, UnalignedStep},
     };
 
     /// Each table a different number of rows: the table at index `i` holds `i + 1`.
@@ -1072,6 +1084,40 @@ mod tests {
             windows,
             Windows {
                 after_precompile: 1,
+                unattributed: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn an_access_after_a_misaligned_steps_next_dword_is_the_cpus() {
+        let store = Instruction::new(Opcode::SD, 5, 6, 0, false, true);
+        let load = Instruction::new(Opcode::LD, 7, 6, 0, false, true);
+        // Accesses stamped at a step's `C`: a misaligned store's and a misaligned load's into the
+        // next dword, which they make; an aligned store's and a misaligned store's that stays in
+        // its dword, which they do not.
+        let steps = [
+            (store, 8, Some((0, 0))),
+            (load, 20, Some((CHUNK, 9))),
+            (store, 24, Some((0, 0))),
+            (load, 28, Some((CHUNK, 25))),
+            (store, 32, Some((0, 0))),
+            (load, 36, Some((CHUNK, 33))),
+            (load, 40, Some((0, 0))),
+            (store, 44, Some((CHUNK, 41))),
+        ];
+        let mut history = window_history(&steps);
+        let unaligned = |step, crosses| UnalignedStep {
+            step,
+            crosses,
+            next: Access::default(),
+        };
+        history.unaligned = vec![unaligned(0, 1), unaligned(4, 0), unaligned(6, 1)].into();
+        let windows = Windows::of(&history, &program(&steps));
+        assert_eq!(
+            windows,
+            Windows {
+                after_precompile: 0,
                 unattributed: 2,
             }
         );

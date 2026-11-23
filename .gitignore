@@ -40,8 +40,6 @@ aot-generated/chunks/
 # AOT related
 examples/Cargo.lock
 perf/aot/Cargo.lock
-vm/examples/patch-testing/Cargo.lock
-vm/examples/patch-testing/aot/Cargo.lock
 
 docs/archive/
 

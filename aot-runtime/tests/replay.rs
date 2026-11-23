@@ -230,6 +230,7 @@ fn witness(elf: &[u8], input: u32, chunk_size: u32) -> Witness {
         cost_estimator: false,
         snapshot_main: SnapshotMainMode::Aot,
         replay_workers: ReplayWorkers::Interpreter,
+        ladder_fit: false,
     };
     Witness::setup_for_mle_riscv(program, stdin.finalize(), opts)
 }

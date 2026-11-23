@@ -97,6 +97,7 @@ fn aot_opts(replay_workers: ReplayWorkers) -> EmulatorOpts {
         cost_estimator: false,
         snapshot_main: SnapshotMainMode::Aot,
         replay_workers,
+        ladder_fit: false,
     }
 }
 

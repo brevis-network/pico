@@ -35,6 +35,7 @@ use hashbrown::HashMap;
 use hint::{HintLenSyscall, HintReadSyscall};
 use p3_field::PrimeField32;
 use precompiles::{
+    blake2b::Blake2bRoundsSyscall,
     bls12381_g2::{Bls12381G2AddSyscall, Bls12381G2DoubleSyscall},
     edwards::{add::EdwardsAddAssignSyscall, decompress::EdwardsDecompressSyscall},
     fptower::{fp::FpSyscall, fp2_addsub::Fp2AddSubSyscall, fp2_mul::Fp2MulSyscall},
@@ -249,6 +250,8 @@ where
         SyscallCode::BLS12381_G2_DOUBLE,
         Arc::new(Bls12381G2DoubleSyscall),
     );
+
+    syscall_map.insert(SyscallCode::BLAKE2B_ROUNDS, Arc::new(Blake2bRoundsSyscall));
 
     syscall_map.insert(
         SyscallCode::BLS12381_DECOMPRESS,

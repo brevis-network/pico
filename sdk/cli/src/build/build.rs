@@ -193,6 +193,15 @@ pub fn create_cargo_build_command(subcmd: &str, rust_flags: &[&str], std_mem: bo
 /// Returns a string that can be set as the value of CARGO_ENCODED_RUSTFLAGS when compiling guests
 pub(crate) fn encode_rust_flags(rustc_flags: &[&str]) -> String {
     [
+        &[
+            // Pico proves misaligned loads and stores (Zicclsm), so the compiler may use one word
+            // access where it would otherwise put a value together a byte at a time: the reth
+            // guest of the EF p99 benchmark runs about 19% fewer instructions. Before the caller's
+            // flags, so that `-C target-feature=-unaligned-scalar-mem` among them turns it off.
+            // rustc warns that the feature is unstable; it is LLVM's, and stable there.
+            "-C",
+            "target-feature=+unaligned-scalar-mem",
+        ][..],
         rustc_flags,
         &[
             // Replace atomic ops with nonatomic versions since the guest is single threaded.
@@ -323,6 +332,25 @@ mod tests {
             args.windows(2).any(|pair| pair == ["--features", "a,b,c"]),
             "{args:?}"
         );
+    }
+
+    /// Guests are built with misaligned word accesses, and a caller's flag after the default
+    /// turns them off: rustc takes the last of two settings of one target feature.
+    #[test]
+    fn misaligned_accesses_are_on_unless_the_caller_turns_them_off() {
+        let flags = |caller: &[&str]| -> Vec<String> {
+            encode_rust_flags(caller)
+                .split('\x1f')
+                .map(str::to_string)
+                .collect()
+        };
+        let on = "target-feature=+unaligned-scalar-mem";
+        let off = "target-feature=-unaligned-scalar-mem";
+        let default = flags(&[]);
+        assert!(has(&default, on), "{default:?}");
+        let turned_off = flags(&["-C", off]);
+        let at = |flag: &str| turned_off.iter().position(|f| f == flag).unwrap();
+        assert!(at(on) < at(off), "{turned_off:?}");
     }
 
     #[test]

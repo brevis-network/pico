@@ -11,7 +11,8 @@ use crate::{
 use crate::{
     chips::{
         chips::{
-            byte::event::ByteRecordBehavior, riscv_cpu::event::CpuEvent,
+            byte::event::{ByteLookupEvent, ByteRecordBehavior},
+            riscv_cpu::event::CpuEvent,
             riscv_memory::event::MemoryRecordEnum,
         },
         ffi::FfiOption,
@@ -23,9 +24,10 @@ use crate::{
     },
     emulator::riscv::{
         emulator::guard::access_width,
-        history_view::{has_unaligned, unaligned_steps},
+        history_view::{has_unaligned, run_length, unaligned_steps},
         record::EmulationRecord,
     },
+    iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSlice, PicoSliceMut},
     machine::{chip::ChipBehavior, estimator::EventCapture},
 };
 use p3_field::{Field, PrimeField32};
@@ -53,21 +55,33 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryUnalignedChip<F> {
         );
         let mut values = vec![F::ZERO; rows * NUM_MEMORY_UNALIGNED_COLS];
         let code = input.program.code();
-        for (row, (event, next)) in values.chunks_mut(NUM_MEMORY_UNALIGNED_COLS).zip(&steps) {
-            let cols: &mut MemoryUnalignedCols<F> = row.borrow_mut();
-            self.event_to_row(event, *next, &code, cols, &mut ());
-        }
+        values[..steps.len() * NUM_MEMORY_UNALIGNED_COLS]
+            .pico_chunks_mut(NUM_MEMORY_UNALIGNED_COLS)
+            .zip(steps.pico_iter())
+            .for_each(|(row, (event, next))| {
+                let cols: &mut MemoryUnalignedCols<F> = row.borrow_mut();
+                self.event_to_row(event, *next, &code, cols, &mut ());
+            });
         RowMajorMatrix::new(values, NUM_MEMORY_UNALIGNED_COLS)
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
-        let mut blu = Vec::new();
         let code = input.program.code();
-        for (event, next) in unaligned_steps(input) {
-            let mut cols = MemoryUnalignedCols::<F>::default();
-            self.event_to_row(&event, next, &code, &mut cols, &mut blu);
+        let steps = unaligned_steps(input);
+        let parts: Vec<Vec<ByteLookupEvent>> = steps
+            .pico_chunks(run_length(steps.len()))
+            .map(|part| {
+                let mut blu = Vec::new();
+                for (event, next) in part {
+                    let mut cols = MemoryUnalignedCols::<F>::default();
+                    self.event_to_row(event, *next, &code, &mut cols, &mut blu);
+                }
+                blu
+            })
+            .collect();
+        for blu in parts {
+            extra.add_byte_lookup_events(blu);
         }
-        extra.add_byte_lookup_events(blu);
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
@@ -89,8 +103,8 @@ impl<F: PrimeField32> GpuChipBehavior<F> for MemoryUnalignedChip<F> {
         record.event_counter.num_memory_unaligned > 0
     }
 
-    /// Generated on the host, as the precompiles listed next to it are: its rows are few, at
-    /// most `1 << MLE_MEMORY_UNALIGNED_LOG_HEIGHT` a chunk. Its byte lookups go to the device
+    /// Generated on the host, as the precompiles listed next to it are, in parallel: at most
+    /// `1 << MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT` rows a chunk. Its byte lookups go to the device
     /// table, which no kernel of this chip writes.
     fn gpu_generate_extra_record_and_main(
         &self,
