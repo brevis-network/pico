@@ -46,7 +46,7 @@ use pico_vm::{
         vk_map::{vk_identity, MleVkMap, VkMapError},
     },
     primitives::consts::MAX_LOG_NUMBER_OF_CHUNKS,
-    proverchain::riscv::{check_pipeline, max_pipeline_workers},
+    proverchain::riscv::{check_pipeline_ahead, max_pipeline_workers},
 };
 #[cfg(feature = "aot")]
 use {
@@ -899,7 +899,7 @@ impl ProverBuilder {
         // The pipeline refuses the same, but only once a prove has started. The replay workers stay
         // out of it: they need the program registered, which comes last, and `aot_workers` without
         // `aot` is refused above.
-        check_pipeline(
+        check_pipeline_ahead(
             workers,
             &EmulatorOpts {
                 snapshot_main,
