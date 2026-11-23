@@ -16,11 +16,15 @@ use crate::machine::host_memory;
 /// The cap on how many memories are in flight at once. A function rather than an inline read, so
 /// the startup check that warns about a pool too small for the run cannot drift from it.
 pub fn memory_pool_size() -> usize {
+    pool_size_at(POOL_SIZE_FLOOR.load(Ordering::Relaxed))
+}
+
+/// The pool size under `floor`.
+fn pool_size_at(floor: usize) -> usize {
     std::env::var("MEMORY_POOL_SIZE")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or_else(|| {
-            let floor = POOL_SIZE_FLOOR.load(Ordering::Relaxed);
             #[cfg(feature = "cuda")]
             if host_memory::low_memory_host() {
                 return floor.max(host_memory::LOW_MEMORY_POOL_SIZE);
@@ -32,6 +36,11 @@ pub fn memory_pool_size() -> usize {
 /// What an unset `MEMORY_POOL_SIZE` is raised to; see [`raise_pool_size_floor`].
 static POOL_SIZE_FLOOR: AtomicUsize = AtomicUsize::new(0);
 
+#[cfg(test)]
+pub(crate) fn pool_size_floor() -> usize {
+    POOL_SIZE_FLOOR.load(Ordering::Relaxed)
+}
+
 /// Raises the size an unset `MEMORY_POOL_SIZE` stands for to at least `needed`, while the pool is
 /// not yet built, so a run that names no size gets a pool every worker can replay from at once. A
 /// size someone set, or a pool already built, stays. A `cuda` build on a low-memory host starts
@@ -42,13 +51,27 @@ pub fn raise_pool_size_floor(needed: usize) {
     }
 }
 
+/// The floor [`raise_pool_size_floor`]`(needed)` would leave.
+fn floor_if_raised(needed: usize) -> usize {
+    let floor = POOL_SIZE_FLOOR.load(Ordering::Relaxed);
+    if Lazy::get(&GLOBAL_MEMORY_POOL).is_none() {
+        floor.max(needed)
+    } else {
+        floor
+    }
+}
+
 /// How many memories the pool creates up front; the rest are created as it runs low.
 fn memory_pool_eager() -> usize {
+    eager_at(memory_pool_size())
+}
+
+fn eager_at(pool_size: usize) -> usize {
     std::env::var("MEMORY_POOL_EAGER")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(8)
-        .min(memory_pool_size())
+        .min(pool_size)
 }
 
 /// The pool tops itself up while it holds fewer memories than this.
@@ -62,10 +85,20 @@ fn memory_pool_low_water() -> usize {
 /// How many memories the pool ever holds: [`memory_pool_size`], unless a low-water mark of 0 stops
 /// it creating any past the eager ones.
 pub fn memory_pool_capacity() -> usize {
+    capacity_at(memory_pool_size())
+}
+
+/// What [`memory_pool_capacity`] would be after [`raise_pool_size_floor`]`(needed)`, without
+/// raising it.
+pub(crate) fn memory_pool_capacity_if_raised(needed: usize) -> usize {
+    capacity_at(pool_size_at(floor_if_raised(needed)))
+}
+
+fn capacity_at(pool_size: usize) -> usize {
     if memory_pool_low_water() == 0 {
-        memory_pool_eager()
+        eager_at(pool_size)
     } else {
-        memory_pool_size()
+        pool_size
     }
 }
 

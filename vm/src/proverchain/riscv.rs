@@ -24,8 +24,9 @@ use crate::{
             history::ExecutionHistory,
             history_arena::{GrantOrder, GrantTicket, Table},
             memory::{
-                init_memory_pool, memory_pool_capacity, memory_recycler_threads,
-                raise_pool_size_floor, ContiguousRiscvMemory, GLOBAL_MEMORY_RECYCLER,
+                init_memory_pool, memory_pool_capacity, memory_pool_capacity_if_raised,
+                memory_recycler_threads, raise_pool_size_floor, ContiguousRiscvMemory,
+                GLOBAL_MEMORY_RECYCLER,
             },
             public_values::RecordFinalPvsState,
             record::EmulationRecord,
@@ -843,6 +844,24 @@ pub fn default_pipeline_workers() -> NonZeroUsize {
 /// each holds a pool memory while it replays. A smaller pool is not refused; it caps how many
 /// workers replay at once, and the first run of the process that meets one says so.
 pub fn check_pipeline(workers: NonZeroUsize, opts: &EmulatorOpts) -> Result<(), EmulationError> {
+    check_pipeline_with(workers, opts, true)
+}
+
+/// [`check_pipeline`] for options checked ahead of a run: it judges the pool at the size the run
+/// would raise it to and leaves it unraised, so a later run with other workers (a GPU prove) sizes
+/// the pool itself.
+pub fn check_pipeline_ahead(
+    workers: NonZeroUsize,
+    opts: &EmulatorOpts,
+) -> Result<(), EmulationError> {
+    check_pipeline_with(workers, opts, false)
+}
+
+fn check_pipeline_with(
+    workers: NonZeroUsize,
+    opts: &EmulatorOpts,
+    raise: bool,
+) -> Result<(), EmulationError> {
     let cores = max_pipeline_workers();
     if workers.get() > cores {
         return Err(EmulationError::TooManyWorkers {
@@ -863,13 +882,23 @@ pub fn check_pipeline(workers: NonZeroUsize, opts: &EmulatorOpts) -> Result<(), 
     if let Some(reason) = replay_workers_refusal(opts, registered) {
         return Err(EmulationError::UnsupportedReplayWorkers(reason.into()));
     }
-    let segments = raise_pool_floor_for(workers, opts.snapshot_main);
+    let (segments, capacity) = if raise {
+        let segments = raise_pool_floor_for(workers, opts.snapshot_main);
+        (segments, memory_pool_capacity())
+    } else {
+        let segments = pooled_segments(opts.snapshot_main);
+        let needed = pool_needed(workers, segments).unwrap_or(0);
+        (segments, memory_pool_capacity_if_raised(needed))
+    };
     if let Some(reason) = history_slot_refusal(bound_in_force(), segments.unwrap_or(1)) {
         return Err(EmulationError::PipelineHistorySlots(reason));
     }
-    let capacity = memory_pool_capacity();
     if let Some(reason) = memory_pool_refusal(capacity, memory_recycler_threads(), segments) {
         return Err(EmulationError::PipelineMemoryPool(reason));
+    }
+    // The shortfall warning is left to the run.
+    if !raise {
+        return Ok(());
     }
     if let Some(shortfall) = memory_pool_shortfall(capacity, workers, segments) {
         static WARNED: std::sync::Once = std::sync::Once::new();
@@ -891,10 +920,15 @@ pub fn pipeline_workers_from_env() -> NonZeroUsize {
 /// returns those segments.
 fn raise_pool_floor_for(workers: NonZeroUsize, snapshot_main: SnapshotMainMode) -> Option<usize> {
     let segments = pooled_segments(snapshot_main);
-    if let Some(segments) = segments {
-        raise_pool_size_floor(workers.get() + segments);
+    if let Some(needed) = pool_needed(workers, segments) {
+        raise_pool_size_floor(needed);
     }
     segments
+}
+
+/// One memory per worker plus one per segment of the batch being cut, for a run that draws them.
+fn pool_needed(workers: NonZeroUsize, segments: Option<usize>) -> Option<usize> {
+    segments.map(|segments| workers.get() + segments)
 }
 
 /// Builds the memory pool ahead of a run of `workers` workers whose snapshot thread is
@@ -2215,6 +2249,73 @@ mod tests {
             ],
             Duration::from_secs(60),
             "building the pool hung",
+            MARKER,
+        );
+    }
+
+    /// A check ahead of a run leaves the pool's size to the run: `ProverBuilder::build` checks with
+    /// the CPU path's workers, which a GPU prove never runs. In a child process: the floor is
+    /// process-wide.
+    #[test]
+    fn a_check_ahead_of_the_run_leaves_the_pool_size() {
+        const CHILD_VAR: &str = "PICO_POOL_CHECK_AHEAD_PROBE";
+        const MARKER: &str = "[pool-check-ahead] only the run raised the pool";
+
+        if std::env::var(CHILD_VAR).is_ok() {
+            use crate::emulator::riscv::memory::pool_size_floor;
+            hooks::DRAW_POOL_BLOCK_PER_BATCH.store(true, Ordering::Relaxed);
+            let opts = EmulatorOpts {
+                snapshot_main: SnapshotMainMode::Interpreter,
+                ..EmulatorOpts::default()
+            };
+            let cores = NonZeroUsize::new(max_pipeline_workers()).unwrap();
+            check_pipeline_ahead(cores, &opts).expect("ahead");
+            assert_eq!(pool_size_floor(), 0, "the check ahead raised the pool");
+            check_pipeline(NonZeroUsize::MIN, &opts).expect("run");
+            assert_eq!(pool_size_floor(), 2, "one worker and one segment");
+            println!("{MARKER}");
+            return;
+        }
+        in_child(
+            "proverchain::riscv::tests::a_check_ahead_of_the_run_leaves_the_pool_size",
+            CHILD_VAR,
+            &[],
+            Duration::from_secs(60),
+            "the check hung",
+            MARKER,
+        );
+    }
+
+    /// The check ahead refuses what the run would, here a pool that never holds a memory.
+    #[test]
+    fn a_check_ahead_refuses_a_pool_the_run_refuses() {
+        const CHILD_VAR: &str = "PICO_POOL_CHECK_AHEAD_REFUSAL_PROBE";
+        const MARKER: &str = "[pool-check-ahead] refused like the run";
+
+        if std::env::var(CHILD_VAR).is_ok() {
+            hooks::DRAW_POOL_BLOCK_PER_BATCH.store(true, Ordering::Relaxed);
+            let opts = EmulatorOpts {
+                snapshot_main: SnapshotMainMode::Interpreter,
+                ..EmulatorOpts::default()
+            };
+            let workers = NonZeroUsize::new(4).unwrap();
+            assert!(matches!(
+                check_pipeline_ahead(workers, &opts),
+                Err(EmulationError::PipelineMemoryPool(_))
+            ));
+            assert!(matches!(
+                check_pipeline(workers, &opts),
+                Err(EmulationError::PipelineMemoryPool(_))
+            ));
+            println!("{MARKER}");
+            return;
+        }
+        in_child(
+            "proverchain::riscv::tests::a_check_ahead_refuses_a_pool_the_run_refuses",
+            CHILD_VAR,
+            &[("MEMORY_POOL_SIZE", "0")],
+            Duration::from_secs(60),
+            "the check hung",
             MARKER,
         );
     }
