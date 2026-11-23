@@ -1,7 +1,11 @@
 use super::memory::VALUES_SIZE;
 use crate::{
     compiler::riscv::opcode::Opcode,
-    mle::machine::shape::{MLE_GLOBAL_LOG_HEIGHT, MLE_MEMORY_UNALIGNED_LOG_HEIGHT},
+    emulator::opts::EmulatorOpts,
+    mle::machine::shape::{
+        unaligned_log_height, MLE_CORE_LADDER, MLE_GLOBAL_LOG_HEIGHT,
+        MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT,
+    },
     primitives::consts::{CHUNK_CLK_START, DIGEST_SIZE, LOCAL_MEMORY_DATAPAR},
 };
 
@@ -25,13 +29,17 @@ pub struct ChunkSplitConfig {
     /// Most LogUp-GKR leaves a chunk may grow to (`CHUNK_LEAF_CAP`); 0 turns the cap off. See
     /// [`leaf_estimate`].
     pub leaf_cap: u64,
-    /// The misaligned loads and stores a chunk may hold: the `MemoryUnaligned` chip's rows, which
-    /// every core shape fixes. A hard limit of the circuit, unlike the event arm, so
+    /// The misaligned loads and stores a chunk may hold: the most `MemoryUnaligned` rows a core
+    /// shape has. A hard limit of the circuit, unlike the event arm, so
     /// neither `CHUNK_EVENT_LIMITS_OFF` nor a commit tail in flight lifts it.
     pub misaligned_threshold: usize,
     /// The cross-chunk events a chunk may hold: the rows of its `Global` table, which has one
     /// fixed height. A hard limit of the circuit like the one above, and lifted by nothing.
     pub global_event_cap: usize,
+    /// Close a chunk while a row of the core ladder still holds its rows: what
+    /// `EmulatorOpts::ladder_fit` asks for, as a prover does in whitelist mode. See
+    /// [`ChunkSplitState::ladder_room`].
+    pub ladder_fit: bool,
 }
 
 /// Default [`ChunkSplitConfig::leaf_cap`]: 1.5 * 2^28 leaves, which at 40 B a KB5 leaf bounds the
@@ -100,6 +108,7 @@ impl ChunkSplitConfig {
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
             global_event_cap: usize::MAX,
+            ladder_fit: false,
         }
     }
 
@@ -172,8 +181,9 @@ impl ChunkSplitConfig {
             commit_tail_reserve,
             commit_tail_overrun,
             leaf_cap: leaf_cap(),
-            misaligned_threshold: 1 << MLE_MEMORY_UNALIGNED_LOG_HEIGHT,
+            misaligned_threshold: 1 << MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT,
             global_event_cap: 1 << MLE_GLOBAL_LOG_HEIGHT,
+            ladder_fit: false,
         };
         // One-shot effective-config snapshot so every bench log records the split conditions
         // it actually ran with (debug reference for OOM/chunk-count attribution).
@@ -195,6 +205,21 @@ impl ChunkSplitConfig {
                 cfg.global_event_cap,
             );
         });
+        cfg
+    }
+
+    /// The split of an emulation under `opts`: [`Self::for_chunk_size`] at their chunk size, and
+    /// the ladder fit if they ask for it.
+    #[inline(always)]
+    pub fn for_opts(opts: &EmulatorOpts, max_syscall_cycles: u32) -> Self {
+        let cfg = Self {
+            ladder_fit: opts.ladder_fit,
+            ..Self::for_chunk_size(opts.chunk_size, max_syscall_cycles)
+        };
+        // Beside the config line above: a process proves in one mode, and the mode moves the cuts
+        // of a program whose mix leaves the ladder.
+        static SNAPSHOT: std::sync::Once = std::sync::Once::new();
+        SNAPSHOT.call_once(|| tracing::info!("[chunk-split] ladder_fit={}", cfg.ladder_fit));
         cfg
     }
 }
@@ -239,12 +264,19 @@ pub fn maybe_debug_split_snapshot(
     let cut_line = clk_cut_line(max_syscall_cycles, hold, cfg);
     let clk_hit = clk >= cut_line;
     let events_hit = !hold && over_event_limit(state, cfg);
-    let leaf_hit = !hold && !state.leaf_room(LEAF_STEP_GROWTH, cfg);
+    let (max_cpu_rows, max_memory_rw) = state.row_ceilings(cfg);
+    let leaf_hit = !hold
+        && cfg.leaf_cap != 0
+        && state.leaf_estimate_after(LEAF_STEP_GROWTH, max_cpu_rows, max_memory_rw) > cfg.leaf_cap;
+    let ladder_room = state.ladder_room(max_cpu_rows);
+    let ladder_hit =
+        !hold && cfg.ladder_fit && ladder_room.is_none_or(|room| room < LEAF_STEP_GROWTH);
     let misaligned_hit = at_misaligned_cap(state, cfg);
     let reasons: Vec<&str> = [
         (clk_hit, "clk"),
         (events_hit, "events"),
         (leaf_hit, "leaf"),
+        (ladder_hit, "ladder"),
         (misaligned_hit, "misaligned"),
     ]
     .into_iter()
@@ -259,7 +291,8 @@ pub fn maybe_debug_split_snapshot(
     tracing::info!(
         "[chunk-split] chunk={chunk_idx} reason={reason} clk={clk} (cut {cut_line}, max \
          {max_chunk_clk}) commit_in_flight={} mem_rw={} (thr {}) lookups_base={} (thr {}) \
-         leaves={} (cap {}) misaligned={} (cap {}) global_clk={global_clk}",
+         leaves={} (cap {}) ladder_room={ladder_room:?} misaligned={} (cap {}) \
+         global_clk={global_clk} fit_rows={:?}",
         state.commit_in_flight,
         state.num_memory_read_write_events,
         cfg.memory_rw_threshold,
@@ -269,6 +302,7 @@ pub fn maybe_debug_split_snapshot(
         cfg.leaf_cap,
         state.num_misaligned,
         cfg.misaligned_threshold,
+        state.fit_rows(),
     );
 }
 
@@ -315,13 +349,11 @@ pub const LEAF_GLOBAL_INTERACTIONS: u64 = 6;
 pub const LEAF_MEMORY_UNALIGNED_INTERACTIONS: u64 = 28;
 /// The tables charged as a constant: the preprocessed Program (two interactions, the fetch and
 /// the code range a store checks, one row an instruction, up to 2^21 rows) and Byte (ten
-/// interactions, 2^17 rows), `MemoryUnaligned` at its most rows, the cap on a chunk's
-/// misaligned accesses, and `Global` at the height its table has in every chunk at the
+/// interactions, 2^17 rows), and `Global` at the height its table has in every chunk at the
 /// production stacked height (under it the table is shorter, and this over-counts).
-const LEAF_FIXED_ALLOWANCE: u64 = 2 * (1 << 21)
-    + 10 * (1 << 17)
-    + LEAF_MEMORY_UNALIGNED_INTERACTIONS * (1 << MLE_MEMORY_UNALIGNED_LOG_HEIGHT)
-    + LEAF_GLOBAL_INTERACTIONS * (1 << MLE_GLOBAL_LOG_HEIGHT);
+/// `MemoryUnaligned` is charged at the height its misaligned accesses take ([`unaligned_rows`]).
+const LEAF_FIXED_ALLOWANCE: u64 =
+    2 * (1 << 21) + 10 * (1 << 17) + LEAF_GLOBAL_INTERACTIONS * (1 << MLE_GLOBAL_LOG_HEIGHT);
 /// Rows below 2^l_skip (l_skip = 4) are lifted to it.
 const LEAF_MIN_ROWS: u64 = 16;
 /// Growth one instruction can add to a chip: its own four rows, four memory events and two
@@ -390,6 +422,95 @@ pub fn add_insn_leaf_rows(rows: &mut [u32; LEAF_INSN_CHIPS], opcode: Opcode) -> 
 #[inline(always)]
 fn lifted_rows(rows: u64) -> u64 {
     rows.next_power_of_two().max(LEAF_MIN_ROWS)
+}
+
+/// `MemoryUnaligned`'s rows for `misaligned` accesses: the core shape's height that holds them,
+/// one of `MLE_MEMORY_UNALIGNED_LOG_HEIGHTS`, which every core shape carries (even at none).
+#[inline]
+fn unaligned_rows(misaligned: u64) -> u64 {
+    1 << unaligned_log_height(usize::try_from(misaligned).unwrap_or(usize::MAX))
+}
+
+// ============================================================================
+// Ladder fit
+// ============================================================================
+//
+// In whitelist mode a CPU chunk proves under the first row of `MLE_CORE_LADDER` that holds its
+// rows chip by chip. One that no row holds selects the catch-all, which the provers refuse as too
+// large to prove (`CatchAllShape`), and a chunk can outgrow that one too: it stands at 2^22 rows
+// an arithmetic table, under 2^23 instructions. The clk limit admits those instructions whatever
+// they are, while the rows follow the mix: LessThan takes one for every comparison and one for
+// every branch, so a chunk more than half of which is those has no shape at all. The split
+// therefore closes a chunk while a row still holds it.
+//
+// It does so when the emulation's options ask for it (`EmulatorOpts::ladder_fit`), as a prover
+// does in whitelist mode. With the whitelist off a chunk proves at the heights it has and no row
+// is asked for, so the split leaves it as it was: a program whose mix leaves the ladder has more
+// chunks under the whitelist than without it.
+//
+// The fit reads the chips whose height differs from one row to another. Byte and Program have
+// one height in every row; Global has one in every core shape and a cap of its own
+// (`at_global_cap`). MemoryUnaligned has a cap of its own too (`at_misaligned_cap`), the most any
+// row holds, and a row's entry is the most that row holds: the fit reads it, so a chunk of many
+// misaligned accesses leaves a row whose entry is lower.
+//
+// The rows are counted never under what the traces of an unsplit replay hold, so a chunk the
+// fit lets grow selects a ladder row. MemoryReadWrite is counted over: it also takes the
+// chunk's jumps for loads. A chunk at the edge of the last row that holds it can close a little
+// early for that. What the fit does not bound:
+// - what a single step adds past `LEAF_STEP_GROWTH`, a syscall touching that many new addresses;
+// - a commit tail in flight, which the split holds for;
+// - the windows of a replay cut into segments (`MLE_SPLIT_REPLAY`). The fold keeps a window for
+//   an address on each side of a cut (`record_merge`), so a chunk replayed that way has more
+//   MemoryLocal rows than are counted here.
+
+/// The chips the fit reads beyond the per-instruction ones, as indices into a row of
+/// [`ladder_caps`].
+const FIT_MEMORY_RW: usize = LEAF_INSN_CHIPS;
+const FIT_MEMORY_LOCAL: usize = LEAF_INSN_CHIPS + 1;
+const FIT_SYSCALL: usize = LEAF_INSN_CHIPS + 2;
+const FIT_MEMORY_UNALIGNED: usize = LEAF_INSN_CHIPS + 3;
+const FIT_CHIPS: usize = LEAF_INSN_CHIPS + 4;
+
+/// The ladder's name for each of them, in index order: the `LEAF_*` chips, then the `FIT_*`
+/// ones; [`ChunkSplitState::fit_rows`] counts them. They are the chips whose height differs
+/// from one row to another, which a test holds the ladder to.
+const FIT_CHIP_NAMES: [&str; FIT_CHIPS] = [
+    "Cpu",
+    "Add",
+    "Sub",
+    "Addw",
+    "Subw",
+    "Mul",
+    "DivRem",
+    "LessThan",
+    "ShiftLeft",
+    "ShiftRight",
+    "Bitwise",
+    "Ecall",
+    "MemoryReadWrite",
+    "MemoryLocal",
+    "SyscallRiscv",
+    "MemoryUnaligned",
+];
+
+/// The rows each row of [`MLE_CORE_LADDER`] admits of each chip, built once.
+fn ladder_caps() -> &'static [[u64; FIT_CHIPS]] {
+    static CAPS: std::sync::OnceLock<Vec<[u64; FIT_CHIPS]>> = std::sync::OnceLock::new();
+    CAPS.get_or_init(|| {
+        MLE_CORE_LADDER
+            .iter()
+            .map(|row| {
+                FIT_CHIP_NAMES.map(|name| {
+                    let (_, log) = row
+                        .iter()
+                        .find(|(chip, _)| *chip == name)
+                        .unwrap_or_else(|| panic!("a core ladder row has no height for {name}"));
+                    1u64 << log
+                })
+            })
+            .collect()
+    })
 }
 
 // ============================================================================
@@ -649,7 +770,7 @@ pub struct ChunkSplitState {
 pub fn should_check_fast(clk: u32, state: &ChunkSplitState, cfg: &ChunkSplitConfig) -> bool {
     clk >= cfg.clk_fast_threshold
         || state.num_memory_read_write_events >= cfg.event_fast_threshold
-        || (cfg.leaf_cap != 0
+        || ((cfg.leaf_cap != 0 || cfg.ladder_fit)
             && state.leaf_growth.get() + LEAF_STEP_GROWTH > state.leaf_allowance.get())
         || at_misaligned_cap(state, cfg)
         || at_global_cap(state, cfg, false)
@@ -769,7 +890,8 @@ pub fn should_split(
         return is_max_chunk_size || misaligned_full || global_full;
     }
     // Checked after a step, the cap has to hold for the next one too: the estimate can jump by
-    // a whole chip's leaves when its rows pass a power of two.
+    // a whole chip's leaves when its rows pass a power of two. So has the ladder: the next step
+    // may be the row that the last ladder row to hold the chunk cannot take.
     let over_leaf_cap = !state.leaf_room(LEAF_STEP_GROWTH, cfg);
 
     is_max_chunk_size
@@ -818,6 +940,7 @@ pub fn can_fit_block(
         + mem_rw_exact as u64
         + 3 * memory_insns as u64
         + 2 * (non_register_global_lookup_base_max as u64 + u64::from(reg_write_mask.count_ones()));
+    // The leaf cap and the ladder fit both: neither lets a chip grow that much.
     if !state.leaf_room(leaf_growth, cfg) {
         return false;
     }
@@ -972,6 +1095,8 @@ impl ChunkSplitState {
         leaves += LEAF_MEMORY_LOCAL_INTERACTIONS
             * lifted_rows(local.div_ceil(LOCAL_MEMORY_DATAPAR as u64) + growth);
         leaves += LEAF_SYSCALL_INTERACTIONS * lifted_rows(self.num_syscall_events as u64 + growth);
+        leaves += LEAF_MEMORY_UNALIGNED_INTERACTIONS
+            * unaligned_rows(self.num_misaligned as u64 + growth);
         leaves
     }
 
@@ -980,43 +1105,44 @@ impl ChunkSplitState {
         self.leaf_estimate_after(0, u64::MAX, u64::MAX)
     }
 
-    /// Whether the leaf cap leaves room for every chip to grow `growth` more rows. Cheap while
-    /// the allowance of the last estimate lasts; once it is spent the estimate is redone.
+    /// Whether the leaf cap and the ladder fit leave room for every chip to grow `growth` more
+    /// rows. Cheap while the allowance of the last estimate lasts; once it is spent the estimate
+    /// is redone.
     #[inline(always)]
     pub fn leaf_room(&self, growth: u64, cfg: &ChunkSplitConfig) -> bool {
-        if cfg.leaf_cap == 0 || self.leaf_growth.get() + growth <= self.leaf_allowance.get() {
+        if (cfg.leaf_cap == 0 && !cfg.ladder_fit)
+            || self.leaf_growth.get() + growth <= self.leaf_allowance.get()
+        {
             return true;
         }
         self.refresh_leaf_allowance(cfg) && growth <= self.leaf_allowance.get()
     }
 
     /// Re-estimates, and sets the allowance to the most growth (the same for every chip) under
-    /// which the estimate stays within the cap. False if it is over the cap already.
+    /// which the estimate stays within the cap and a ladder row holds the chunk. False if it is
+    /// over the cap, or out of every row, already.
     #[cold]
     fn refresh_leaf_allowance(&self, cfg: &ChunkSplitConfig) -> bool {
-        // The clk ceiling stops Cpu below its next power of two; without this every chunk's
-        // last stretch would look one Cpu doubling away from the cap.
-        let max_cpu_rows = u64::from(cfg.max_chunk_clk() + cfg.commit_tail_overrun) / 4;
-        // Likewise the event arm: once the global lookups are past their threshold it cuts as
-        // the memory events reach theirs, and MemoryReadWrite never takes its next doubling.
-        let max_memory_rw = match self
-            .num_global_lookup_base
-            .cmp(&cfg.global_lookup_base_threshold)
-        {
-            std::cmp::Ordering::Greater => cfg.memory_rw_threshold as u64,
-            std::cmp::Ordering::Equal => cfg.memory_rw_threshold as u64 + 1,
-            std::cmp::Ordering::Less => u64::MAX,
-        };
+        let (max_cpu_rows, max_memory_rw) = self.row_ceilings(cfg);
         let fits = |growth: u64| {
-            self.leaf_estimate_after(growth, max_cpu_rows, max_memory_rw) <= cfg.leaf_cap
+            cfg.leaf_cap == 0
+                || self.leaf_estimate_after(growth, max_cpu_rows, max_memory_rw) <= cfg.leaf_cap
+        };
+        // With no ladder to fit, more than a chunk has rows.
+        let ladder_room = if cfg.ladder_fit {
+            self.ladder_room(max_cpu_rows)
+        } else {
+            Some(1 << 26)
         };
         self.leaf_growth.set(0);
-        if !fits(0) {
+        let Some(ladder_room) = ladder_room.filter(|_| fits(0)) else {
             self.leaf_allowance.set(0);
             return false;
-        }
-        // The estimate only grows with `growth`: bisect for the last value that fits.
-        let (mut lo, mut hi) = (0u64, 1u64 << 26);
+        };
+        // The estimate only grows with `growth`: bisect for the last value that fits, among
+        // those the ladder leaves. Far from the leaf cap that is the ladder's own, at the cost
+        // of one estimate.
+        let (mut lo, mut hi) = (0u64, ladder_room.min(1 << 26));
         if fits(hi) {
             lo = hi;
         } else {
@@ -1031,6 +1157,73 @@ impl ChunkSplitState {
         }
         self.leaf_allowance.set(lo);
         true
+    }
+
+    /// The rows Cpu and MemoryReadWrite can reach in this chunk, where something else stops them.
+    fn row_ceilings(&self, cfg: &ChunkSplitConfig) -> (u64, u64) {
+        // The clk ceiling stops Cpu below its next power of two; without this every chunk's
+        // last stretch would look one Cpu doubling away from the cap.
+        let max_cpu_rows = u64::from(cfg.max_chunk_clk() + cfg.commit_tail_overrun) / 4;
+        // Likewise the event arm: once the global lookups are past their threshold it cuts as
+        // the memory events reach theirs, and MemoryReadWrite never takes its next doubling.
+        let max_memory_rw = match self
+            .num_global_lookup_base
+            .cmp(&cfg.global_lookup_base_threshold)
+        {
+            std::cmp::Ordering::Greater => cfg.memory_rw_threshold as u64,
+            std::cmp::Ordering::Equal => cfg.memory_rw_threshold as u64 + 1,
+            std::cmp::Ordering::Less => u64::MAX,
+        };
+        (max_cpu_rows, max_memory_rw)
+    }
+
+    /// The chunk's rows on the chips the ladder fit reads: at least what their traces will hold.
+    ///
+    /// MemoryLocal is counted as the leaf estimate counts it. MemoryReadWrite is not: the
+    /// estimate charges it the chunk's memory events, which count every register access and
+    /// run to three times its rows. It holds a row for each load and store, and one more for
+    /// one that runs into the next dword. An instruction that is neither has its row on
+    /// another chip, unless it is a jump, and a signed division is charged two rows beside its
+    /// own; so the loads and stores are at most the instructions that left no such row.
+    ///
+    /// The base entries count a register once the chunk writes it. One the chunk only reads
+    /// has a window too, a MemoryLocal entry the estimate does not see, so the fit charges all
+    /// 32 registers from the start.
+    fn fit_rows(&self) -> [u64; FIT_CHIPS] {
+        let mut rows = [0u64; FIT_CHIPS];
+        for (chip, &insn_rows) in self.leaf_rows.iter().enumerate() {
+            rows[chip] = u64::from(insn_rows);
+        }
+        let dispatched: u64 = rows[LEAF_CPU + 1..LEAF_INSN_CHIPS].iter().sum();
+        let loads_and_stores = (rows[LEAF_CPU] + 2 * rows[LEAF_DIVREM]).saturating_sub(dispatched);
+        let unwritten = (32 - self.unique_reg_writes) as u64;
+        let local = (self.unique_address_count() + self.reopened_windows) as u64 + unwritten;
+        rows[FIT_MEMORY_RW] = loads_and_stores + self.num_misaligned as u64;
+        rows[FIT_MEMORY_LOCAL] = local.div_ceil(LOCAL_MEMORY_DATAPAR as u64);
+        rows[FIT_SYSCALL] = self.num_syscall_events as u64;
+        rows[FIT_MEMORY_UNALIGNED] = self.num_misaligned as u64;
+        rows
+    }
+
+    /// The most rows every chip can grow by and leave the chunk in a row of the core ladder, Cpu
+    /// growing to at most `max_cpu_rows`: what the row with the most room leaves. `None` if no
+    /// row holds the chunk as it stands.
+    fn ladder_room(&self, max_cpu_rows: u64) -> Option<u64> {
+        let rows = self.fit_rows();
+        ladder_caps()
+            .iter()
+            .filter_map(|caps| {
+                let mut room = u64::MAX;
+                for (chip, (&have, &cap)) in rows.iter().zip(caps).enumerate() {
+                    let left = cap.checked_sub(have)?;
+                    // The clk ceiling stops Cpu: under the row's height, it takes no room.
+                    if chip != LEAF_CPU || max_cpu_rows > cap {
+                        room = room.min(left);
+                    }
+                }
+                Some(room)
+            })
+            .max()
     }
 
     #[inline(always)]
@@ -1101,18 +1294,23 @@ impl ChunkSplitState {
 #[cfg(test)]
 mod tests {
     use super::{
-        add_insn_leaf_rows, can_fit_block, commit_tail_in_flight, should_check_fast, should_split,
-        ChunkSplitConfig, ChunkSplitState, Opcode, SimpleBitSet, BITMAP_WORDS, CHUNK_CLK_START,
+        add_insn_leaf_rows, can_fit_block, commit_tail_in_flight, ladder_caps, should_check_fast,
+        should_split, ChunkSplitConfig, ChunkSplitState, Opcode, SimpleBitSet, BITMAP_WORDS,
+        CHUNK_CLK_START, FIT_CHIPS, FIT_CHIP_NAMES, FIT_MEMORY_LOCAL, FIT_MEMORY_RW, FIT_SYSCALL,
         GLOBAL_STEP_EVENTS, GLOBAL_TAIL_EVENTS, LEAF_ADD, LEAF_ADDW, LEAF_BITWISE, LEAF_CPU,
         LEAF_DIVREM, LEAF_ECALL, LEAF_GLOBAL_INTERACTIONS, LEAF_INSN_CHIPS, LEAF_INSN_INTERACTIONS,
         LEAF_LT, LEAF_MEMORY_LOCAL_INTERACTIONS, LEAF_MEMORY_RW_INTERACTIONS,
-        LEAF_MEMORY_UNALIGNED_INTERACTIONS, LEAF_MUL, LEAF_SLL, LEAF_SR, LEAF_SUB, LEAF_SUBW,
-        LEAF_SYSCALL_INTERACTIONS,
+        LEAF_MEMORY_UNALIGNED_INTERACTIONS, LEAF_MUL, LEAF_SLL, LEAF_SR, LEAF_STEP_GROWTH,
+        LEAF_SUB, LEAF_SUBW, LEAF_SYSCALL_INTERACTIONS,
     };
     use crate::{
         chips::chips::riscv_memory::event::MemoryAccessPosition,
-        mle::machine::shape::{MLE_GLOBAL_LOG_HEIGHT, MLE_MEMORY_UNALIGNED_LOG_HEIGHT},
-        primitives::consts::BENCH_MAX_CHUNK_SIZE,
+        emulator::opts::EmulatorOpts,
+        mle::machine::shape::{
+            select_core_rung, MLE_CORE_LADDER, MLE_GLOBAL_LOG_HEIGHT,
+            MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT,
+        },
+        primitives::consts::{BENCH_MAX_CHUNK_SIZE, LOCAL_MEMORY_DATAPAR},
     };
 
     #[test]
@@ -1248,6 +1446,7 @@ mod tests {
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
             global_event_cap: usize::MAX,
+            ladder_fit: false,
         };
         let mut state = ChunkSplitState::default();
 
@@ -1280,6 +1479,7 @@ mod tests {
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
             global_event_cap: usize::MAX,
+            ladder_fit: false,
         };
         let state = ChunkSplitState {
             num_memory_read_write_events: 3,
@@ -1305,6 +1505,7 @@ mod tests {
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
             global_event_cap: usize::MAX,
+            ladder_fit: false,
         };
         let mut state = ChunkSplitState {
             num_memory_read_write_events: 3,
@@ -1330,6 +1531,7 @@ mod tests {
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
             global_event_cap: usize::MAX,
+            ladder_fit: false,
         };
         let mut state = ChunkSplitState::default();
         assert!(!should_check_fast(128, &state, &cfg));
@@ -1401,6 +1603,7 @@ mod tests {
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
             global_event_cap: usize::MAX,
+            ladder_fit: false,
         }
     }
 
@@ -1565,6 +1768,29 @@ mod tests {
         let cfg = leaf_cfg(state.leaf_estimate() + 1_000);
         assert!(can_fit_block(0, 1, 0, 0, 0, 0, &state, &cfg));
         assert!(!can_fit_block(0, 1 << 16, 0, 0, 0, 0, &state, &cfg));
+    }
+
+    /// `MemoryUnaligned` counts at the core shape's height for the chunk's misaligned accesses:
+    /// flat within a height, one step to the next past it.
+    #[test]
+    fn the_leaf_estimate_charges_the_unaligned_height_a_chunk_takes() {
+        let at = |misaligned: usize| {
+            ChunkSplitState {
+                num_misaligned: misaligned,
+                ..Default::default()
+            }
+            .leaf_estimate()
+        };
+        assert_eq!(at(0), at(1 << 10));
+        assert_eq!(
+            at((1 << 10) + 1) - at(1 << 10),
+            LEAF_MEMORY_UNALIGNED_INTERACTIONS * ((1 << 16) - (1 << 10))
+        );
+        assert_eq!(
+            at(1 << MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT) - at(0),
+            LEAF_MEMORY_UNALIGNED_INTERACTIONS
+                * ((1 << MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT) - (1 << 10))
+        );
     }
 
     #[test]
@@ -1806,6 +2032,7 @@ mod tests {
             leaf_cap: 0,
             misaligned_threshold: usize::MAX,
             global_event_cap: usize::MAX,
+            ladder_fit: false,
         };
         let state = ChunkSplitState {
             num_memory_read_write_events: 2,
@@ -1823,12 +2050,252 @@ mod tests {
     fn the_cap_is_the_shapes_height_and_off_without_splitting() {
         assert_eq!(
             ChunkSplitConfig::for_chunk_size(1 << 23, 48).misaligned_threshold,
-            1 << MLE_MEMORY_UNALIGNED_LOG_HEIGHT
+            1 << MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT
         );
         assert_eq!(
             ChunkSplitConfig::disabled(48).misaligned_threshold,
             usize::MAX
         );
+    }
+
+    /// The options carry the fit to the split; the chunk size alone does not turn it on.
+    #[test]
+    fn the_fit_is_on_when_the_options_ask_for_it() {
+        let opts = EmulatorOpts {
+            chunk_size: 1 << 23,
+            ..EmulatorOpts::default()
+        };
+        let plain = ChunkSplitConfig::for_chunk_size(1 << 23, 48);
+        assert!(!plain.ladder_fit);
+        assert!(!ChunkSplitConfig::for_opts(&opts, 48).ladder_fit);
+        let fitted = ChunkSplitConfig::for_opts(&opts.with_ladder_fit(true), 48);
+        assert!(fitted.ladder_fit);
+        // Nothing else of the split moves with it.
+        assert_eq!(fitted.clk_threshold, plain.clk_threshold);
+        assert_eq!(fitted.memory_rw_threshold, plain.memory_rw_threshold);
+        assert_eq!(fitted.leaf_cap, plain.leaf_cap);
+    }
+
+    /// The ladder fit and nothing else: no clk ceiling, no event arm, no leaf cap.
+    fn ladder_cfg() -> ChunkSplitConfig {
+        ChunkSplitConfig {
+            ladder_fit: true,
+            ..ChunkSplitConfig::disabled(0)
+        }
+    }
+
+    /// The tallest height the ladder gives `chip`, in rows.
+    fn tallest(chip: usize) -> u64 {
+        ladder_caps().iter().map(|row| row[chip]).max().unwrap()
+    }
+
+    #[test]
+    fn a_chunk_of_comparisons_and_branches_closes_under_the_lessthan_height() {
+        let cfg = ladder_cfg();
+        let mut state = ChunkSplitState::default();
+        // A LessThan row an instruction: the comparison's own, and the one a branch derives.
+        let mut steps = 0u64;
+        while !should_split(0, 0, &state, &cfg) {
+            state.count_insn(if steps.is_multiple_of(2) {
+                Opcode::SLTU
+            } else {
+                Opcode::BNE
+            });
+            steps += 1;
+        }
+        // The split keeps a step's growth under the tallest LessThan of the ladder, and closes
+        // the chunk on the first step that no longer has it. Without the fit this chunk runs to
+        // the clk ceiling, with twice the rows the catch-all has.
+        assert_eq!(steps, tallest(LEAF_LT) - LEAF_STEP_GROWTH + 1);
+        assert_eq!(u64::from(state.leaf_rows[LEAF_LT]), steps);
+
+        let off = ChunkSplitConfig::disabled(0);
+        assert!(!should_split(0, 0, &state, &off));
+    }
+
+    #[test]
+    fn the_fit_is_to_one_row_and_not_to_the_tallest_of_each_chip() {
+        // Two chips whose tallest heights are in different rows.
+        let at_tallest = |chip: usize| {
+            ladder_caps()
+                .iter()
+                .enumerate()
+                .filter(|(_, row)| row[chip] == tallest(chip))
+                .map(|(i, _)| i)
+                .collect::<Vec<_>>()
+        };
+        let pair = (LEAF_CPU + 1..LEAF_INSN_CHIPS)
+            .flat_map(|a| (a + 1..LEAF_INSN_CHIPS).map(move |b| (a, b)))
+            .find(|&(a, b)| at_tallest(a).iter().all(|row| !at_tallest(b).contains(row)));
+        // A ladder with every chip at its tallest in one row leaves this nothing to tell apart.
+        let Some((a, b)) = pair else { return };
+
+        let cfg = ladder_cfg();
+        let filled = |chips: &[usize]| {
+            let mut state = ChunkSplitState::default();
+            for &chip in chips {
+                state.add_leaf_rows(chip, (tallest(chip) - 4 * LEAF_STEP_GROWTH) as u32);
+            }
+            state
+        };
+        assert!(!should_split(0, 0, &filled(&[a]), &cfg));
+        assert!(!should_split(0, 0, &filled(&[b]), &cfg));
+        assert!(should_split(0, 0, &filled(&[a, b]), &cfg));
+    }
+
+    #[test]
+    fn can_fit_block_refuses_a_block_the_ladder_cannot_take() {
+        let cfg = ladder_cfg();
+        let mut state = ChunkSplitState::default();
+        state.add_leaf_rows(LEAF_LT, (tallest(LEAF_LT) - 100) as u32);
+        // A block is charged five rows an instruction: 50 fit under the height, 150 do not.
+        assert!(can_fit_block(0, 10, 0, 0, 0, 0, &state, &cfg));
+        assert!(!can_fit_block(0, 30, 0, 0, 0, 0, &state, &cfg));
+    }
+
+    #[test]
+    fn a_commit_tail_in_flight_holds_the_ladder_fit_and_clear_resets_it() {
+        let cfg = ChunkSplitConfig {
+            ladder_fit: true,
+            ..reserve_cfg(32)
+        };
+        let mut state = ChunkSplitState::default();
+        state.add_leaf_rows(LEAF_LT, tallest(LEAF_LT) as u32);
+        assert!(should_split(0, 0, &state, &cfg));
+        state.commit_in_flight = true;
+        assert!(!should_split(0, 0, &state, &cfg));
+
+        state.clear();
+        assert!(!should_split(0, 0, &state, &cfg));
+    }
+
+    /// The split and the prover read one ladder: a chunk has a row in the fit exactly when
+    /// `select_core_rung` finds it one short of the catch-all.
+    #[test]
+    fn the_fit_holds_a_chunk_exactly_when_the_prover_finds_it_a_ladder_row() {
+        let caps = ladder_caps();
+        assert_eq!(caps.len(), MLE_CORE_LADDER.len());
+
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move |below: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % below
+        };
+        let (mut held, mut refused) = (0, 0);
+        for _ in 0..4000 {
+            // A chunk at the edge of one row: every chip at that row's height or a little under
+            // it, and now and then one chip a row over, or at the height another row gives it.
+            let row = caps[next(caps.len() as u64) as usize];
+            let mut rows = row.map(|cap| cap - next(3).min(cap));
+            if next(2) == 0 {
+                let chip = next(FIT_CHIPS as u64) as usize;
+                rows[chip] = if next(2) == 0 {
+                    row[chip] + 1
+                } else {
+                    caps[next(caps.len() as u64) as usize][chip]
+                };
+            }
+
+            let mut state = ChunkSplitState::default();
+            for chip in 0..LEAF_INSN_CHIPS {
+                state.leaf_rows[chip] = rows[chip] as u32;
+            }
+            // MemoryReadWrite follows from the rows above; misaligned accesses take it higher.
+            state.num_misaligned =
+                rows[FIT_MEMORY_RW].saturating_sub(state.fit_rows()[FIT_MEMORY_RW]) as usize;
+            // The 32 registers are charged whatever the chunk wrote.
+            state.unique_memory_addrs =
+                (rows[FIT_MEMORY_LOCAL] as usize * LOCAL_MEMORY_DATAPAR).saturating_sub(32);
+            state.num_syscall_events = rows[FIT_SYSCALL] as usize;
+
+            let natural = FIT_CHIP_NAMES
+                .iter()
+                .map(|name| name.to_string())
+                .zip(state.fit_rows().map(|rows| rows as usize))
+                .collect();
+            let prover_holds =
+                select_core_rung(&natural).is_some_and(|(rung, _)| rung < MLE_CORE_LADDER.len());
+            assert_eq!(
+                state.ladder_room(u64::MAX).is_some(),
+                prover_holds,
+                "{natural:?}"
+            );
+            if prover_holds {
+                held += 1;
+            } else {
+                refused += 1;
+            }
+        }
+        // Both sides of the edge were drawn. A ladder with more rows refuses fewer of these.
+        assert!(
+            held > 100 && refused > 100,
+            "{held} held, {refused} refused"
+        );
+    }
+
+    #[test]
+    fn the_fit_counts_a_memory_local_entry_for_every_address_and_all_the_registers() {
+        let mut state = ChunkSplitState::default();
+        for addr in [64u64, 72, 80, 88, 96] {
+            state.track_address(addr);
+        }
+        state.record_syscall_event();
+        let rows = state.fit_rows();
+        // Five addresses and the 32 registers: 37 MemoryLocal entries, four to a row.
+        assert_eq!(rows[FIT_MEMORY_LOCAL], 10);
+        assert_eq!(rows[FIT_SYSCALL], 1);
+
+        // A register is charged once, written or only read.
+        state.track_address(5);
+        assert_eq!(state.fit_rows(), rows);
+    }
+
+    #[test]
+    fn the_fit_counts_memory_rows_by_the_instructions_and_not_by_the_memory_events() {
+        let mut state = ChunkSplitState::default();
+        for opcode in [
+            Opcode::LD,
+            Opcode::SD,
+            Opcode::LBU,
+            Opcode::ADD,
+            Opcode::BNE,
+            Opcode::DIV,
+        ] {
+            state.count_insn(opcode);
+        }
+        // What the event arm counts: three register accesses an instruction and the like.
+        state.add_memory_rw_events(17);
+        assert_eq!(state.fit_rows()[FIT_MEMORY_RW], 3);
+
+        // A jump leaves no row on another chip and passes for a load; a misaligned access takes
+        // a second row.
+        state.count_insn(Opcode::JAL);
+        state.num_misaligned = 1;
+        assert_eq!(state.fit_rows()[FIT_MEMORY_RW], 5);
+    }
+
+    /// A chip a ladder row names has one height in every row or is one the fit reads: a refit
+    /// that lets another chip's height vary has to teach the fit that chip.
+    #[test]
+    fn the_fit_reads_every_chip_whose_height_varies_across_the_ladder() {
+        let first = MLE_CORE_LADDER[0];
+        for (chip, log) in first {
+            let varies = MLE_CORE_LADDER.iter().any(|row| {
+                row.iter()
+                    .find(|(name, _)| name == chip)
+                    .is_none_or(|(_, other)| other != log)
+            });
+            assert!(
+                !varies || FIT_CHIP_NAMES.contains(chip),
+                "{chip} varies across the ladder's rows and the fit does not read it"
+            );
+        }
+        // No row names a chip the first does not.
+        for row in MLE_CORE_LADDER {
+            assert_eq!(row.len(), first.len());
+        }
     }
 
     /// `Debug` prints the same however much is marked; `marked_dwords` lists what is.

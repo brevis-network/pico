@@ -25,7 +25,7 @@ use pico_vm::{
         },
         stdin::EmulatorStdin,
     },
-    mle::machine::{riscv::emulate_with_opts, shape::MLE_MEMORY_UNALIGNED_LOG_HEIGHT},
+    mle::machine::{riscv::emulate_with_opts, shape::MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT},
 };
 
 const PC_BASE: u64 = 0x1000;
@@ -756,15 +756,18 @@ fn the_fallback_writes_the_interpreters_records() {
 /// A chunk holds as many misaligned accesses as its `MemoryUnaligned` trace has rows, and closes
 /// right after the one that fills it, mid-iteration here: the AOT core's fallback cuts each chunk
 /// where the interpreter does. The loop's two loads an iteration, an instruction apart, are a `LW`
-/// inside its dword and a `LD` across into the next; 1500 iterations make 3000.
+/// inside its dword and a `LD` across into the next; `CAP + CAP / 4` iterations make two and a
+/// half chunks' worth.
 #[test]
 fn a_chunk_closes_at_its_misaligned_cap_where_the_interpreter_closes_it() {
     use Opcode::*;
-    const CAP: usize = 1 << MLE_MEMORY_UNALIGNED_LOG_HEIGHT;
+    const CAP: usize = 1 << MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT;
+    const ITERATIONS: usize = CAP + CAP / 4;
+    // Room for a chunk of CAP / 2 iterations, five instructions each, so the cap closes it.
     const CHUNK_SIZE: u32 = 1 << 22;
     let program = program(vec![
         i(ADD, 1, 0, DATA as i64),
-        i(ADD, 2, 0, 1500),
+        i(ADD, 2, 0, ITERATIONS as i64),
         i(LW, 3, 1, 2),
         r(ADD, 4, 3, 0),
         i(LD, 5, 1, 3),
@@ -784,16 +787,17 @@ fn a_chunk_closes_at_its_misaligned_cap_where_the_interpreter_closes_it() {
         .filter(|record| record.is_cpu_chunk)
         .map(|record| (record.cpu_steps().len(), unaligned_len(record)))
         .collect();
-    // Two instructions before the loop and five an iteration: the 1024th access is the `LD` of
-    // the 512th iteration, and the next chunk starts on the instruction after it.
-    let full = 2 + 5 * 511 + 3;
+    // Two instructions before the loop and five an iteration: the CAP-th access is the `LD` of
+    // iteration CAP / 2, and the next chunk starts on the instruction after it.
+    assert!(5 * CAP / 2 < CHUNK_SIZE as usize);
+    let full = 2 + 5 * (CAP / 2 - 1) + 3;
     assert_eq!(
         interpreter,
         [
             (full, CAP),
             (full, CAP),
             // The last chunk ends with `program`'s three closing steps, `a0 = 0` and HALT.
-            (2 + 7500 + 3 - 2 * full, 3000 - 2 * CAP)
+            (2 + 5 * ITERATIONS + 3 - 2 * full, 2 * ITERATIONS - 2 * CAP)
         ]
     );
 

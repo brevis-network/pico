@@ -61,10 +61,20 @@ this CLI's release, or from the checkout at `$PICO_SOURCE`.
 
 ## Memory functions
 
-`memcpy` and `memset` are the runtime's assembly (`sdk/sdk/src/memcpy.s`, `memset.s`), and every
-guest must link them rather than another definition: a guest that links another runs correctly
-but slower. reth's ELF once kept `compiler_builtins`' `memcpy` and retired 5 % more
-instructions, and nothing reported it.
+`memcpy`, `memset` and `memcmp` (with `bcmp`, the same function) are the runtime's assembly
+(`sdk/sdk/src/memcpy.s`, `memset.s`, `memcmp.s`), and every guest must link them rather than
+another definition: a guest that links another runs correctly but slower. reth's ELF once kept
+`compiler_builtins`' `memcpy` and retired 5 % more instructions, and nothing reported it.
+
+**What they do.** Every load and store in them is naturally aligned. A misaligned access is
+proven too ("Misaligned accesses" below), but copy loops of them put up to 1.1 million in one of
+the reth guest's chunks, past the 2^19 a chunk holds, for about 1% fewer cells. Under 8 bytes they go one byte at a time. Otherwise `memcpy` and
+`memset` align the destination, then move 8-byte words: `memcpy` 64 bytes a step when the source
+is aligned too, and otherwise builds each word from the two aligned source words it straddles;
+`memset` 64 bytes a step. The last 0 to 7 bytes take one `sw`, `sh` and `sb` at most. `memcmp`
+compares 8-byte words when both pointers sit at the same offset within a word, and bytes
+otherwise. On the EF p99 reth blocks they retire 6–9 % fewer instructions than the musl
+`memcpy` / `memset` and `compiler_builtins`' byte-loop `memcmp` they replace.
 
 **How they win.** They are in the same `global_asm!` as `_start`, so in the same object file,
 and every link takes that object because `_start` is the entry point. Their definitions are
@@ -75,8 +85,8 @@ symbol rather than silently replacing Pico's; put `libpico_zkvm.a` before it on 
 so that its object is taken first and the C library's `memcpy` is never pulled in.
 
 **The static library.** `cargo pico lib` builds without `compiler-builtins-mem`, and the runtime
-adds `memmove` (compiler-builtins' algorithm, in C: `memmove.c`), musl's `memcmp` (with `bcmp`)
-and `strlen` to the same object, no slower than `compiler_builtins`' copies. `compiler_builtins`'
+adds `memmove` (compiler-builtins' algorithm, in C: `memmove.c`) and musl's `strlen` to the same
+object, no slower than `compiler_builtins`' copies. `compiler_builtins`'
 copies are hidden, and a C guest takes them in with the other builtins it needs; the linker would
 then make the library's `memcpy` and `memset` hidden too, local symbols in the guest, which
 zkevm-test-monitor's link check (`mem-link-*`) rejects.
@@ -86,10 +96,13 @@ zkevm-test-monitor's link check (`mem-link-*`) rejects.
 without a symbol table, or built with a `pico-sdk` from before the aliases, cannot be checked and
 only gets a warning.
 
-**The tests.** `vm/examples/patch-testing/guests/memory-functions` checks `memcpy`, `memset` and
-`memmove` (`compiler_builtins`') against byte-by-byte references at every source and
-destination alignment, lengths 0 to 40 and three longer ones, and `memmove` over overlapping
-ranges both ways; `sdk/prover/src/tests/memory_functions.rs` runs it.
+**The tests.** `vm/examples/patch-testing/guests/memory-functions` checks `memcpy`, `memset`,
+`memcmp`, `bcmp` and `memmove` (`compiler_builtins`') against byte-by-byte references at every
+source and destination alignment, lengths 0 to 40 and longer ones around the 16-, 32- and 64-byte
+steps, `memmove` over overlapping ranges both ways, and `memcmp` / `bcmp` on equal ranges and on
+ranges that first differ at the start, the middle or the end.
+`sdk/prover/src/tests/memory_functions.rs` runs it, and also requires the run to make no
+misaligned access; the guest is built without misaligned word accesses for that.
 
 **Cycle counts.** With cycle tracking on (`EmulatorOpts::cycle_tracker`), the emulator counts the
 instructions run inside `memcpy`, `memset`, `memmove`, `memcmp`, `bcmp` and `strlen`, and reports
@@ -97,8 +110,29 @@ them in `EmulationReport::cycle_tracker` under the function's name, beside the g
 `cycle-tracker-start` / `-end` spans. The ranges come from the ELF's symbol table (profiling only:
 the program is the segments), so a stripped ELF reports none, and a function whose work is done by
 helpers with other names, such as `compiler_builtins`' `memmove` in a Rust guest, counts only its
-own instructions. The memory-function test guest runs 3.8 M cycles in each of `memcpy` and
-`memset` out of 39 M.
+own instructions. The memory-function test guest runs 4.3 M cycles in `memcpy`, 2.9 M in `memset`
+and 8.8 M in `memcmp` out of 70 M.
+
+## Misaligned accesses
+
+A load or store whose address is not a multiple of its width runs (Zicclsm), and `cargo pico
+build` compiles guests with `-C target-feature=+unaligned-scalar-mem`, so the compiler reads and
+writes a whole word where it would otherwise put the value together a byte at a time: a 32-byte
+hash at an odd offset in RLP, a `U256` swapped on the EVM stack, a small `memcpy` it inlines. The
+reth guest of the EF p99 benchmark runs about 19% fewer instructions with it, and its chunks have
+13–15% fewer cells. rustc warns that the feature is unstable; it is LLVM's. The toolchain's
+prebuilt `std` is not compiled with it, so only the guest's own crates, and the generic code of
+`std` they instantiate, use it.
+
+Each misaligned access is a row of the `MemoryUnaligned` chip. A CPU chunk proves its accesses at
+the smallest of 2^10, 2^16, 2^17, 2^18 and 2^19 rows that holds them (`MLE_MEMORY_UNALIGNED_LOG_HEIGHTS`),
+and the chunk split closes a chunk at 2^19 of them. The reth guest makes 65,000–95,000 a chunk at
+the median and 326,000 at most.
+
+To build without it, pass `--rustflags="-C target-feature=-unaligned-scalar-mem"` (with the `=`:
+the value starts with a hyphen): it comes after the default, and the last setting of a feature
+wins. A guest built so makes next to no misaligned
+accesses and proves them at 2^10.
 
 ## Memory layout
 

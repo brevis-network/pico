@@ -182,6 +182,7 @@ fn opts() -> EmulatorOpts {
         cost_estimator: false,
         snapshot_main: SnapshotMainMode::Interpreter,
         replay_workers: ReplayWorkers::Interpreter,
+        ladder_fit: false,
     }
 }
 

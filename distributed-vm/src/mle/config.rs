@@ -29,12 +29,14 @@ pub struct MleSingleNodeConfig {
     #[clap(long, value_enum, env = "MLE_STEP", default_value = "riscv")]
     pub step: Step,
 
-    /// ELF to run: `fib` | `reth`.
+    /// ELF to run: `fib` | `reth` | `reth-amsterdam` (RSP's client on reth v2.11.0 and evm2,
+    /// for blocks of the Amsterdam fork).
     #[clap(long, env = "MLE_ELF", default_value = "fib")]
     pub elf: String,
 
     /// Program input: fibonacci sequence length, or the reth block number when `--elf reth`
-    /// (171 / 188 / 239 / 240 / 246 are aliases for the five long-standing fixtures).
+    /// (171 / 188 / 239 / 240 / 246 are aliases for the five long-standing fixtures) or
+    /// `--elf reth-amsterdam` (no aliases).
     #[clap(long, env = "MLE_N", default_value = "10")]
     pub n: u32,
 

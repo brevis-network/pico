@@ -562,7 +562,9 @@ impl ProverBuilder {
     ///
     /// On the snapshot pipeline, each record is dropped as soon as its counts are read.
     ///
-    /// The whitelist options go unchecked: they bind proving only.
+    /// The whitelist's artifact options go unchecked: they bind proving only. `verify_keys` is
+    /// read, since a whitelist prover closes its chunks while a row of the core ladder holds them
+    /// (`EmulatorOpts::ladder_fit`).
     pub fn execute_chunked(&self, stdin: Stdin) -> Result<Execution, ProveError> {
         let (program, opts, path) = self.emulation_setup()?;
         execute_program(program, opts, path, stdin)
@@ -586,7 +588,7 @@ impl ProverBuilder {
         #[cfg(feature = "cuda")]
         check_host_mem_setting()?;
         let chunk_size = self.resolved_chunk_size()?;
-        let opts = emulator_opts(chunk_size);
+        let opts = emulator_opts(chunk_size).with_ladder_fit(self.verify_keys);
         let path = self.resolved_emulation(chunk_size)?;
         let program = compile(&self.elf)?;
         self.register_aot()?;
@@ -730,7 +732,7 @@ impl ProverBuilder {
             pure: self.pure.clone(),
             elf_sha256: elf_sha256(&self.elf),
             program,
-            opts: emulator_opts(chunk_size),
+            opts: emulator_opts(chunk_size).with_ladder_fit(self.verify_keys),
             emulation,
             log_stacked_height: self.log_stacked_height,
             concurrency: self.concurrency,
@@ -1216,6 +1218,8 @@ pub(crate) fn emulator_opts(chunk_size: u32) -> EmulatorOpts {
         // AOT request rather than silently interpreting it, so the serial path keeps this one.
         snapshot_main: SnapshotMainMode::Interpreter,
         replay_workers: ReplayWorkers::Interpreter,
+        // The builder turns it on in whitelist mode (`verify_keys`).
+        ladder_fit: false,
     }
 }
 

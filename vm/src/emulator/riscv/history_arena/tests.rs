@@ -121,7 +121,7 @@ fn census_constants_are_the_committed_capacity_table() {
 #[test]
 fn a_census_slot_is_its_tables_and_nothing_else() {
     let layout = SlotLayout::new(&HistoryCapacity::CENSUS, &ROW_SHAPES).expect("a layout");
-    assert_eq!(layout.bytes(), 697_061_444);
+    assert_eq!(layout.bytes(), 701_786_188);
     let mut regions: Vec<(usize, usize)> = Table::ALL
         .into_iter()
         .map(|table| {

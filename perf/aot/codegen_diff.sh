@@ -34,6 +34,11 @@ if [ ! -x "$base_tree/target/release/generate_crates" ]; then
   rm -rf "$base_tree"
   mkdir -p "$base_tree"
   git -C "$ROOT" archive "$base_commit" | tar -x -C "$base_tree"
+  # The GPU line's workspace has the untracked private kernel checkout as a path dependency, which
+  # the archive lacks; link this tree's in. The diff means something only if BASE pins the same one.
+  if [ -e "$ROOT/private-pico-gpu" ] && [ ! -e "$base_tree/private-pico-gpu" ]; then
+    ln -s "$(cd "$ROOT/private-pico-gpu" && pwd -P)" "$base_tree/private-pico-gpu"
+  fi
   (cd "$base_tree" && cargo build --release -p pico-aot-codegen --bin generate_crates \
     --target-dir "$base_tree/target")
 fi

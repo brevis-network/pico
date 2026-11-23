@@ -90,14 +90,25 @@ fn runtime_threads() -> usize {
 
 /// Which block the prewarm run proves.
 ///
-/// 188 is the alias for 18884864, the smallest reth fixture committed to the tree -- a real
-/// mainnet block, small enough (30 transactions, 10 chunks) that warming up costs seconds rather
-/// than a full production block's worth.
-fn prewarm_block() -> u32 {
+/// For `reth`, 188: the alias for 18884864, the smallest reth fixture committed to the tree -- a
+/// real mainnet block, small enough (30 transactions, 10 chunks) that warming up costs seconds
+/// rather than a full production block's worth.
+///
+/// For `reth-amsterdam`, 12125459: the fixture of that guest that is an Amsterdam block (Sepolia,
+/// 49 transactions, 48 chunks), so that the self-test this run doubles as goes through the
+/// fork's own paths. 188 would not do: it names an input only `reth` can read.
+fn prewarm_block(elf: &str) -> u32 {
     std::env::var("MLE_ETHPROOFS_PREWARM_BLOCK")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(188)
+        .unwrap_or(default_prewarm_block(elf))
+}
+
+fn default_prewarm_block(elf: &str) -> u32 {
+    match elf {
+        "reth-amsterdam" => 12125459,
+        _ => 188,
+    }
 }
 
 fn prewarm_enabled() -> bool {
@@ -129,7 +140,7 @@ fn prewarm_enabled() -> bool {
 /// prove the fixture it ships with will not prove RSP's blocks either -- better to find out now
 /// than to accept a block and fail holding it, which from RSP's side is an unanswerable poll.
 fn prewarm(cfg: &MleEthProofsConfig) {
-    let block = prewarm_block();
+    let block = prewarm_block(&cfg.node.elf);
     let started = Instant::now();
     info!("prewarm: proving fixture block selector {block} before opening the port");
 

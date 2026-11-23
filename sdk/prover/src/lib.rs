@@ -47,8 +47,8 @@
 //! In whitelist mode ([`ProverBuilder::shipped_whitelist`] needs no files), [`Prover::vk_bundle`]
 //! and [`Proof::export_v3`] give the bytes `pico_verifier::verify(bundle, envelope, committed)`
 //! takes, on stable Rust and without this crate. Under a whitelist other than the shipped one,
-//! `pico_verifier::verify_with_root` takes its root. `pico_verifier` verifies the combine root; a
-//! compress proof verifies only in this crate for now (`TODO(compress-apex)`).
+//! `pico_verifier::verify_with_root` takes its root. `pico_verifier::verify_compress` verifies a
+//! compress proof, exported with [`Proof::export_compress_v5`].
 //!
 //! # Persisting a proof
 //!

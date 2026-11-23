@@ -2694,6 +2694,65 @@ fn load_reth_input(n: u32) -> Vec<u8> {
     )
 }
 
+/// The file names an input of `reth-amsterdam` for block `n` may have, in the order they are
+/// tried: the fixture spelling, then the bare `<block>.bin` that RSP's `eth-proofs --stdin-dir`
+/// writes. No aliases: the number is the block's.
+fn reth_amsterdam_input_names(n: u32) -> [String; 2] {
+    [format!("reth-amsterdam-{n}.bin"), format!("{n}.bin")]
+}
+
+/// The input of the `reth-amsterdam` guest for block `n`, from [`rv64_input_dir`].
+///
+/// It is not an input `reth` can read, nor the other way round: this guest takes one buffer made
+/// of the witness blob, the contract codes, the bincode-serialized client input and the lengths
+/// of the codes and of the blob. A directory therefore holds the inputs of one of the two guests,
+/// or spells them `reth-<block>.bin` and `reth-amsterdam-<block>.bin`; a bare `<block>.bin` is
+/// handed to whichever guest is asked for that block.
+fn load_reth_amsterdam_input(n: u32) -> Vec<u8> {
+    let dir = rv64_input_dir();
+    let names = reth_amsterdam_input_names(n);
+    let mut last: Option<std::io::Error> = None;
+    for name in &names {
+        let path = format!("{dir}/{name}");
+        match std::fs::read(&path) {
+            Ok(bytes) => return bytes,
+            // As in `load_reth_input`: only a missing file moves on to the next spelling.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => last = Some(e),
+            Err(e) => panic!("failed to read reth-amsterdam input {path}: {e}"),
+        }
+    }
+    panic!(
+        "failed to read reth-amsterdam input for block {n} in {dir}: tried {} ({})",
+        names.join(", "),
+        last.map(|e| e.to_string()).unwrap_or_default()
+    )
+}
+
+#[cfg(test)]
+mod reth_amsterdam_input_tests {
+    use super::reth_amsterdam_input_names;
+
+    #[test]
+    fn the_fixture_spelling_is_tried_before_the_bare_block_number() {
+        assert_eq!(
+            reth_amsterdam_input_names(12125459),
+            [
+                "reth-amsterdam-12125459.bin".to_string(),
+                "12125459.bin".to_string()
+            ]
+        );
+    }
+
+    /// `reth`'s five selectors are block numbers here, not aliases: 188 is block 188.
+    #[test]
+    fn a_reth_alias_is_not_an_alias_here() {
+        assert_eq!(
+            reth_amsterdam_input_names(188),
+            ["reth-amsterdam-188.bin".to_string(), "188.bin".to_string()]
+        );
+    }
+}
+
 /// Build `(elf_bytes, stdin)` for the configured program.
 ///
 /// `KoalaBearPoseidon2` is used only as the stdin builder's config type-parameter
@@ -2703,6 +2762,11 @@ fn load_reth_input(n: u32) -> Vec<u8> {
 ///
 /// An ELF from disk is read once per process and name, so a file replaced or deleted under a
 /// running server neither changes nor breaks what it proves.
+///
+/// `reth-amsterdam` is RSP's client on reth v2.11.0 and evm2, which executes blocks of the
+/// Amsterdam fork. It is another program than `reth`, with another input (see
+/// [`load_reth_amsterdam_input`]), so it has a name and a file of its own, `reth-amsterdam-elf`,
+/// instead of taking `reth-elf`'s place: what proves today's mainnet stays as it is.
 fn load_program_elf(cfg: &MleSingleNodeConfig) -> Arc<[u8]> {
     if let Some(embedded) = &cfg.embedded {
         #[cfg(feature = "aot-emulator")]
@@ -2711,10 +2775,12 @@ fn load_program_elf(cfg: &MleSingleNodeConfig) -> Arc<[u8]> {
     }
     static FIB: std::sync::OnceLock<Arc<[u8]>> = std::sync::OnceLock::new();
     static RETH: std::sync::OnceLock<Arc<[u8]>> = std::sync::OnceLock::new();
+    static RETH_AMSTERDAM: std::sync::OnceLock<Arc<[u8]>> = std::sync::OnceLock::new();
     let (name, read) = match cfg.elf.as_str() {
         "fib" | "fibonacci" | "f" => ("fib", &FIB),
         "reth" => ("reth", &RETH),
-        other => panic!("unsupported --elf {other} (supported: fib | reth)"),
+        "reth-amsterdam" => ("reth-amsterdam", &RETH_AMSTERDAM),
+        other => panic!("unsupported --elf {other} (supported: fib | reth | reth-amsterdam)"),
     };
     let elf = Arc::clone(read.get_or_init(|| load_elf(name).into()));
     #[cfg(feature = "aot-emulator")]
@@ -2735,7 +2801,11 @@ fn stdin_for_block(cfg: &MleSingleNodeConfig, n: u32) -> EmulatorStdin {
             stdin.write_slice(&load_reth_input(n));
             info!("MLE single-node: reth block selector {n}");
         }
-        other => panic!("unsupported --elf {other} (supported: fib | reth)"),
+        "reth-amsterdam" => {
+            stdin.write_slice(&load_reth_amsterdam_input(n));
+            info!("MLE single-node: reth-amsterdam block {n}");
+        }
+        other => panic!("unsupported --elf {other} (supported: fib | reth | reth-amsterdam)"),
     }
     stdin.finalize()
 }
@@ -4165,9 +4235,12 @@ fn run_pipeline(
     // thread (crossbeam Sender is Send+Sync, which the pipeline's handler requires); the event
     // precompute in `prepare_chunk_shaped` stays off this thread.
     // The embedded entry states its replay engine with its options; the CLI's is `replay`.
+    // In whitelist mode a CPU chunk needs a row of the core ladder, so the split is asked to
+    // close chunks to it; an embedded entry is a whitelist prover and states it with its options.
     let emulator_opts = embedded
         .map(|e| e.emulator_opts)
-        .unwrap_or_else(|| EmulatorOpts::bench_riscv_ops().with_replay_workers(replay));
+        .unwrap_or_else(|| EmulatorOpts::bench_riscv_ops().with_replay_workers(replay))
+        .with_ladder_fit(vk_on);
     let emulation_workers = embedded.map(|e| e.emulation_workers);
     // `MLE_PREWARM=1`: pay the process's first-touch page-fault cost HERE, before the `e2e=` window
     // opens, instead of inside the first chunk's emulate/prepare where it lands on the pipeline's

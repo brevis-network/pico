@@ -44,6 +44,12 @@ pub struct EmulatorOpts {
     /// Selects which emulator replays each snapshot in the pipeline's workers.
     #[serde(default)]
     pub replay_workers: ReplayWorkers,
+    /// Close a chunk while a row of the core ladder still holds its rows (`chunk_split`, "Ladder
+    /// fit"). A prover in whitelist mode asks for it: there a CPU chunk proves under a row of
+    /// the ladder or not at all. Off, a chunk is cut as it is without the whitelist, where it
+    /// proves at the heights it has.
+    #[serde(default)]
+    pub ladder_fit: bool,
 }
 
 impl Default for EmulatorOpts {
@@ -73,6 +79,7 @@ impl Default for EmulatorOpts {
             cost_estimator: false,
             snapshot_main: SnapshotMainMode::Interpreter,
             replay_workers: ReplayWorkers::default(),
+            ladder_fit: false,
         }
     }
 }
@@ -167,6 +174,11 @@ impl EmulatorOpts {
             replay_workers,
             ..self
         }
+    }
+
+    /// `ladder_fit` as given: a prover passes whether it proves under the whitelist.
+    pub fn with_ladder_fit(self, ladder_fit: bool) -> Self {
+        Self { ladder_fit, ..self }
     }
 }
 
@@ -301,7 +313,24 @@ mod tests {
                 cost_estimator: false,
                 snapshot_main: SnapshotMainMode::Aot,
                 replay_workers: ReplayWorkers::Interpreter,
+                ladder_fit: false,
             }
         );
+    }
+
+    /// Options serialized before `ladder_fit` existed still load, with the fit off; a prover sets
+    /// it when it builds its options, and nothing reads it off a saved value.
+    #[test]
+    fn serde_backward_compat_deserializes_without_ladder_fit() {
+        let opts = EmulatorOpts::default().with_ladder_fit(true);
+        let mut value = serde_json::to_value(opts).expect("serialize");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("ladder_fit")
+            .expect("ladder_fit is serialized");
+        let back: EmulatorOpts = serde_json::from_value(value).expect("deserialize");
+        assert!(!back.ladder_fit);
+        assert_eq!(back.with_ladder_fit(true), opts);
     }
 }
