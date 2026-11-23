@@ -89,6 +89,7 @@ pub fn local_mem_access_mut(event: &mut PrecompileEvent) -> &mut Vec<MemoryLocal
         }
         PrecompileEvent::Uint256Mul(e) => &mut e.local_mem_access,
         PrecompileEvent::Poseidon2Permute(e) => &mut e.local_mem_access,
+        PrecompileEvent::Blake2bRounds(e) => &mut e.local_mem_access,
     }
 }
 

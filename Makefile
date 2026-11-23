@@ -17,10 +17,10 @@ fmt:
 	cargo fmt --all
 	for w in examples perf/aot perf/bench_apps vm/examples/patch-testing; do (cd $$w && cargo fmt --all) || exit 1; done
 
-# The clippy runs of CI's lint job, in the same order and with the same lint flags. The first three
-# are capped at warn, as in CI, so they fail only on errors. CPU build: the CUDA crates `cuda-mle`
-# and `gpu-api` are left out. CI regenerates `aot-generated/` first, so on a fresh tree this lints
-# the bootstrap stub instead.
+# A quick local subset of CI's lint job, not the same commands: CI (lint.yml) lints the whole
+# workspace with every CPU feature (`CPU_FEATURES`) under `-D warnings`, while the first three runs
+# here are capped at warn, so they fail only on errors. CPU build: the CUDA crates `cuda-mle` and
+# `gpu-api` are left out. This target and CI both lint the committed `aot-generated/` stub.
 lint:
 	cargo clippy --workspace --lib --exclude pico-sdk --exclude cuda-mle --exclude pico-gpu-api -- --cap-lints=warn
 	cargo clippy -p pico-aot-codegen --bins -- --cap-lints=warn

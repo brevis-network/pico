@@ -56,9 +56,9 @@ pub const MLE_RISCV_MAIN_LOG_HEIGHTS: &[(&str, usize)] = &[
     // so this sits at the stacked cap beside Cpu rather than a notch under it. reth reaches
     // 2^23 in 2 of the 658 chunks of the 13-block reth corpus.
     ("MemoryReadWrite", 23),
-    // One row per misaligned load or store. The chunk split caps a CPU chunk at this many,
-    // so every ladder row carries the same height and a chunk never leaves its row for them.
-    ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+    // One row per misaligned load or store. The chunk split caps a CPU chunk at this many; a
+    // ladder row takes the smallest of `MLE_MEMORY_UNALIGNED_LOG_HEIGHTS` that holds its chunk's.
+    ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
     ("SyscallRiscv", 22),
     ("Ecall", 22),
     // Global carries every chunk kind, at one height in all three families.
@@ -114,13 +114,28 @@ pub const MLE_RISCV_MAIN_LOG_HEIGHTS: &[(&str, usize)] = &[
     ("EdDecompress", 12),
     ("Bls12381G2AddAssign", 12),
     ("Bls12381G2DoubleAssign", 12),
+    // A row per round, the split's full block (`blake2b::ROUNDS_PER_BLOCK_LOG`); the control
+    // sibling a row per call, its own cap (`blake2b::CALLS_PER_BLOCK_LOG`).
+    ("Blake2bRound", 19),
+    ("Blake2bControl", 14),
 ];
 
-/// The `MemoryUnaligned` height in every core shape, the catch-all included: the chunk split closes
-/// a CPU chunk once it holds this many misaligned loads and stores
-/// (`ChunkSplitConfig::misaligned_threshold`). 2^10 rows of its 87 columns cost about 0.02 ms a
-/// chunk, and add 28 x 2^10 to a row's TI.
-pub const MLE_MEMORY_UNALIGNED_LOG_HEIGHT: usize = 10;
+/// The heights `MemoryUnaligned` takes in a core shape, smallest first: a chunk proves its
+/// misaligned loads and stores on the smallest that holds them, so each ladder row is in the
+/// whitelist once per height up to its own (`MLE_CORE_LADDER`).
+///
+/// A guest built with `+unaligned-scalar-mem` makes them by the hundred thousand: the reth guest
+/// of the EF p99 benchmark has a median of 65,000-95,000 a CPU chunk and at most 326,000 on four
+/// blocks, most of them reading 32-byte hashes out of RLP at odd offsets. A guest built without it
+/// makes next to none, and stays at 2^10. Rounded up to these five heights, a chunk pads 0.4% of
+/// its cells, against 0.3% for every power of two.
+pub const MLE_MEMORY_UNALIGNED_LOG_HEIGHTS: &[usize] = &[10, 16, 17, 18, 19];
+
+/// The most rows `MemoryUnaligned` has in a core shape, the catch-all's height: the chunk split
+/// closes a CPU chunk once it holds this many misaligned loads and stores
+/// (`ChunkSplitConfig::misaligned_threshold`). Its 28 interactions a row add 28 x 2^19, 0.027 x
+/// 2^29, to a row's TI.
+pub const MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT: usize = 19;
 
 /// The floor every present air pads to: `2^l_skip` rows, the smallest the MLE prover packs.
 pub const MLE_MIN_LOG_HEIGHT: usize = 4;
@@ -244,6 +259,11 @@ pub fn bucket_log_height(chip_name: &str, is_cpu_chunk: bool) -> usize {
 /// Byte is a fixed-height table, Program is machine-wide and Global proves at one fixed height,
 /// so all three are the same in every row.
 ///
+/// `MemoryUnaligned` is the one chip a row does not pin: its entry is the most the row holds, and
+/// a chunk on the row takes the smallest of [`MLE_MEMORY_UNALIGNED_LOG_HEIGHTS`] that holds its
+/// misaligned accesses (`core_rungs`). The fit and the prices above are at 2^10, from guests that
+/// made none; every row takes 2^19 but row 32, already at 0.98 x 2^29, which stops at 2^18.
+///
 /// The envelope rows sit at [`MLE_CORE_ENVELOPE_ROWS`]; sorted by price they land between the
 /// classes, so a chunk a class holds can still take an envelope row that is cheaper and also
 /// holds it. The fitting tools and the corpus are not part of this repository.
@@ -252,7 +272,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 22),
         ("MemoryReadWrite", 20),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 20),
         ("Sub", 15),
         ("LessThan", 19),
@@ -274,7 +294,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 22),
         ("MemoryReadWrite", 21),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 16),
         ("LessThan", 20),
@@ -296,7 +316,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 21),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 19),
         ("LessThan", 21),
@@ -318,7 +338,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 16),
         ("LessThan", 20),
@@ -340,7 +360,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 21),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 18),
         ("LessThan", 22),
@@ -362,7 +382,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 17),
         ("LessThan", 21),
@@ -384,7 +404,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 21),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 18),
         ("LessThan", 21),
@@ -406,7 +426,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 21),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 19),
         ("LessThan", 21),
@@ -428,7 +448,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 17),
         ("LessThan", 21),
@@ -450,7 +470,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 18),
         ("LessThan", 21),
@@ -472,7 +492,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 17),
         ("LessThan", 20),
@@ -494,7 +514,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 16),
         ("LessThan", 20),
@@ -516,7 +536,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 17),
         ("LessThan", 21),
@@ -538,7 +558,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 19),
         ("LessThan", 21),
@@ -560,7 +580,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 18),
         ("LessThan", 20),
@@ -582,7 +602,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 18),
         ("LessThan", 21),
@@ -604,7 +624,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 18),
         ("LessThan", 21),
@@ -626,7 +646,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 21),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 17),
         ("LessThan", 22),
@@ -648,7 +668,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 18),
         ("LessThan", 21),
@@ -670,7 +690,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 18),
         ("LessThan", 21),
@@ -692,7 +712,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 18),
         ("LessThan", 21),
@@ -714,7 +734,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 19),
         ("LessThan", 21),
@@ -736,7 +756,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 20),
         ("LessThan", 21),
@@ -758,7 +778,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 20),
         ("LessThan", 21),
@@ -780,7 +800,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 20),
         ("LessThan", 21),
@@ -802,7 +822,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 18),
         ("LessThan", 22),
@@ -824,7 +844,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 23),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 17),
         ("LessThan", 20),
@@ -846,7 +866,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 20),
         ("LessThan", 22),
@@ -868,7 +888,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 23),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 20),
         ("LessThan", 21),
@@ -890,7 +910,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 23),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 21),
         ("Sub", 19),
         ("LessThan", 22),
@@ -912,7 +932,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 23),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 20),
         ("LessThan", 22),
@@ -934,7 +954,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 20),
         ("LessThan", 22),
@@ -956,7 +976,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", 18), // 2^19 would take the row past TI = 2^29
         ("Add", 22),
         ("Sub", 20),
         ("LessThan", 22),
@@ -979,7 +999,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 20),
         ("LessThan", 22),
@@ -1002,7 +1022,7 @@ pub const MLE_CORE_LADDER: &[&[(&str, usize)]] = &[
     &[
         ("Cpu", 23),
         ("MemoryReadWrite", 22),
-        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_LOG_HEIGHT),
+        ("MemoryUnaligned", MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT),
         ("Add", 22),
         ("Sub", 19),
         ("LessThan", 21),
@@ -1049,8 +1069,22 @@ fn precompile_control_sibling(kind: &str) -> Option<&'static str> {
         "ShaCompress" => Some("ShaCompressControl"),
         "ShaExtend" => Some("ShaExtendControl"),
         "KeccakPermute" => Some("KeccakControl"),
+        "Blake2bRound" => Some("Blake2bControl"),
         _ => None,
     }
+}
+
+/// The height the BLAKE2b control chip and the precompile syscall table pad to beside a round
+/// chip of `2^round_log`: `2^min(round_log, CALLS_PER_BLOCK_LOG)`, which holds the record's calls
+/// (each runs at least one round, and the split closes a block at `2^CALLS_PER_BLOCK_LOG`
+/// calls). A call runs a caller-chosen number of rounds, so the calls are a second free variable
+/// beside the rounds; pinning their height to the rounds' keeps the whitelist to one control
+/// height per round height, at the cost of padding a record of few long calls.
+pub fn blake2b_call_log_height(round_log: usize) -> usize {
+    round_log.clamp(
+        MLE_MIN_LOG_HEIGHT,
+        crate::chips::precompiles::blake2b::CALLS_PER_BLOCK_LOG,
+    )
 }
 
 /// Memory+Regional lookups a chip's air declares per row, counted off the air itself.
@@ -1162,6 +1196,10 @@ pub fn mle_precompile_shapes() -> Vec<MlePrecompileShape> {
         .into_iter()
         .filter(|(kind, _)| super::riscv::air_id_for(kind).is_some())
     {
+        if kind == "Blake2bRound" {
+            out.extend(blake2b_precompile_shapes());
+            continue;
+        }
         let rows_per_event = precompile_rows_per_event(&kind) as u128;
         let control = precompile_control_sibling(&kind);
         // The most memory lookups one event can raise: its rows on the compute air, plus the one
@@ -1236,6 +1274,54 @@ pub fn mle_precompile_shapes() -> Vec<MlePrecompileShape> {
     out
 }
 
+/// The BLAKE2b family's shapes. The round chip's rows are the record's rounds and its control
+/// sibling's the calls, and a call runs a caller-chosen number of rounds, so the two heights are
+/// independent: the control chip and the syscall table take [`blake2b_call_log_height`] of the
+/// round height, which `select_riscv_shape` pads them to, and MemoryLocal is swept as for every
+/// kind, up to what `2^calls` calls can touch. Global is at [`MLE_GLOBAL_LOG_HEIGHT`] here too, so
+/// it only rules out the points whose fewest events do not fit the table.
+fn blake2b_precompile_shapes() -> Vec<MlePrecompileShape> {
+    use crate::primitives::consts::LOCAL_MEMORY_DATAPAR;
+    const KIND: &str = "Blake2bRound";
+    const CONTROL: &str = "Blake2bControl";
+    // The round chip raises no memory lookups; a call's are its control row's, which bound the
+    // local entries it adds.
+    let mem_per_call = memory_lookups_per_row(CONTROL) as u128;
+    let memory_local_cap = bucket_log_height("MemoryLocal", false);
+    let global_rows = 1u128 << bucket_log_height("Global", false);
+    let mut out = Vec::new();
+    for kind_log_height in MLE_MIN_LOG_HEIGHT..=bucket_log_height(KIND, false) {
+        let calls_log = blake2b_call_log_height(kind_log_height);
+        if calls_log > bucket_log_height("SyscallPrecompile", false)
+            || calls_log > bucket_log_height(CONTROL, false)
+        {
+            continue;
+        }
+        let local_hi = (1u128 << calls_log) * mem_per_call;
+        for memory_local in MLE_MIN_LOG_HEIGHT..=memory_local_cap {
+            let l_hi = ((1u128 << memory_local) * LOCAL_MEMORY_DATAPAR as u128).min(local_hi);
+            let l_lo = if memory_local == MLE_MIN_LOG_HEIGHT {
+                1
+            } else {
+                (1u128 << (memory_local - 1)) * LOCAL_MEMORY_DATAPAR as u128 + 1
+            };
+            // The fewest cross-chunk events the point raises, one call's and one per local entry
+            // (every entry a first touch), must fit the Global table.
+            if l_hi < l_lo || l_lo + 1 > global_rows {
+                continue;
+            }
+            out.push(MlePrecompileShape {
+                kind: KIND.to_string(),
+                kind_log_height,
+                control: Some((CONTROL.to_string(), calls_log)),
+                syscall_precompile: calls_log,
+                memory_local,
+            });
+        }
+    }
+    out
+}
+
 /// Every riscv shape the whitelist admits, labelled by family, in a stable order.
 ///
 /// This is the enumeration `build_vk_map` keys the whitelist on and the tier probe walks: the
@@ -1248,11 +1334,8 @@ pub fn mle_riscv_shapes() -> Vec<(String, Vec<(String, usize)>)> {
     let global = ("Global".to_string(), bucket_log_height("Global", false));
     let mut out = Vec::new();
 
-    for (i, class) in MLE_CORE_LADDER.iter().enumerate() {
-        out.push((
-            format!("core:class{i}"),
-            class.iter().map(|(n, h)| (n.to_string(), *h)).collect(),
-        ));
+    for (i, unaligned, shape) in core_rungs() {
+        out.push((format!("core:class{i}:unaligned{unaligned}"), shape));
     }
     out.push((
         "core:catch-all".to_string(),
@@ -1518,7 +1601,10 @@ pub fn mle_natural_heights_from_counter(
                 for (table, log) in precompile_tables(kind) {
                     out.insert(table.to_string(), 1 << log);
                 }
-                out.insert(kind.clone(), precompile_kind_rows(kind, events));
+                out.insert(
+                    kind.clone(),
+                    precompile_kind_rows(kind, counter.get_precompile_kind_units(kind, code)),
+                );
                 out.insert("SyscallPrecompile".to_string(), events);
                 out.insert(
                     "MemoryLocal".to_string(),
@@ -1600,9 +1686,13 @@ pub fn select_core_rung(
         })
     };
     if !force_catch_all {
+        // A row's `MemoryUnaligned` entry is the most it holds, so `dominates` finds the first
+        // row that holds the chunk; the chunk then takes that row at the smallest height that
+        // holds its misaligned accesses, which is no costlier than any later row.
+        let unaligned = natural.get("MemoryUnaligned").copied().unwrap_or(0);
         for (i, class) in MLE_CORE_LADDER.iter().enumerate() {
             if dominates(class) {
-                return Some((i, class.iter().map(|(n, h)| (n.to_string(), *h)).collect()));
+                return Some((i, core_rung_shape(class, unaligned_log_height(unaligned))));
             }
         }
     }
@@ -1612,6 +1702,55 @@ pub fn select_core_rung(
         .collect();
     let refs: Vec<(&str, usize)> = catch_all.iter().map(|(n, h)| (n.as_str(), *h)).collect();
     dominates(&refs).then_some((MLE_CORE_LADDER.len(), catch_all))
+}
+
+/// The smallest of [`MLE_MEMORY_UNALIGNED_LOG_HEIGHTS`] that holds `rows` misaligned accesses, or
+/// the largest when none does (the caller's row then does not hold the chunk either).
+pub fn unaligned_log_height(rows: usize) -> usize {
+    MLE_MEMORY_UNALIGNED_LOG_HEIGHTS
+        .iter()
+        .copied()
+        .find(|log| rows <= 1 << log)
+        .unwrap_or(MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT)
+}
+
+/// `class` with `MemoryUnaligned` at 2^`unaligned`.
+fn core_rung_shape(class: &[(&str, usize)], unaligned: usize) -> Vec<(String, usize)> {
+    class
+        .iter()
+        .map(|(n, h)| {
+            let h = if *n == "MemoryUnaligned" {
+                unaligned
+            } else {
+                *h
+            };
+            (n.to_string(), h)
+        })
+        .collect()
+}
+
+/// A core shape a ladder row proves under: `(row, MemoryUnaligned log height, shape)`.
+pub type CoreRung = (usize, usize, Vec<(String, usize)>);
+
+/// Every [`CoreRung`]: each row once per height of [`MLE_MEMORY_UNALIGNED_LOG_HEIGHTS`] up to its
+/// own entry, in ladder order and smallest height first.
+pub fn core_rungs() -> Vec<CoreRung> {
+    MLE_CORE_LADDER
+        .iter()
+        .enumerate()
+        .flat_map(|(i, class)| {
+            let most = class
+                .iter()
+                .find(|(n, _)| *n == "MemoryUnaligned")
+                .map(|(_, h)| *h)
+                .expect("every ladder row names MemoryUnaligned");
+            MLE_MEMORY_UNALIGNED_LOG_HEIGHTS
+                .iter()
+                .copied()
+                .filter(move |log| *log <= most)
+                .map(move |log| (i, log, core_rung_shape(class, log)))
+        })
+        .collect()
 }
 
 /// Whether a core shape is the catch-all row: every air at its `MLE_RISCV_MAIN_LOG_HEIGHTS`
@@ -1655,7 +1794,14 @@ pub fn select_riscv_shape(
             r if MLE_CORE_ENVELOPE_ROWS.contains(&r) => format!("envelope{r}"),
             r => format!("class{r}"),
         };
-        tracing::info!(target: "mle_shape", "core chunk takes rung {name}");
+        let unaligned = class
+            .iter()
+            .find(|(n, _)| n == "MemoryUnaligned")
+            .map_or(0, |(_, h)| *h);
+        tracing::info!(
+            target: "mle_shape",
+            "core chunk takes rung {name}, MemoryUnaligned at 2^{unaligned}"
+        );
         debug_assert_eq!(
             class.len(),
             present.len(),
@@ -1668,7 +1814,7 @@ pub fn select_riscv_shape(
         "deferred chunk takes its natural heights ({} airs)",
         present.len()
     );
-    let shape: Vec<(String, usize)> = present
+    let mut shape: Vec<(String, usize)> = present
         .iter()
         .map(|name| {
             if name == "Byte" || name == "Program" {
@@ -1697,8 +1843,33 @@ pub fn select_riscv_shape(
             (name.clone(), log)
         })
         .collect();
+    pad_blake2b_calls_under_rounds(&mut shape);
     assert_whitelist_shape(&shape, natural);
     shape
+}
+
+/// Pad a BLAKE2b chunk's control chip and syscall table to [`blake2b_call_log_height`] of its
+/// round chip, the one call height the enumeration lists per round height. The calls fit under
+/// it (each runs a round or more, and the split caps them), so this only ever pads.
+fn pad_blake2b_calls_under_rounds(shape: &mut [(String, usize)]) {
+    let Some(rounds) = shape
+        .iter()
+        .find(|(name, _)| name == "Blake2bRound")
+        .map(|(_, log)| *log)
+    else {
+        return;
+    };
+    let calls = blake2b_call_log_height(rounds);
+    for (name, log) in shape.iter_mut() {
+        if name == "Blake2bControl" || name == "SyscallPrecompile" {
+            assert!(
+                *log <= calls,
+                "a BLAKE2b chunk's {name} needs 2^{log}, above the 2^{calls} its 2^{rounds} rounds \
+                 allow: a call ran no rounds, or the split let the calls past their cap"
+            );
+            *log = calls;
+        }
+    }
 }
 
 /// Every riscv shape the whitelist admits, each sorted by chip name, built once per process.
@@ -1844,15 +2015,19 @@ pub enum RecursionTier {
 /// the nearest row above it and the combine machine learns one child layout per row
 /// (`preregister_standard_shapes`).
 ///
-/// Of the 4,413 whitelist shapes, row 0 (W 21) holds 3,901: core classes 0 to 20, the 399
-/// memory shapes and every precompile shape but keccak's, the two BLS12-381 G2 kinds' and 47 of
-/// Bls12381DoubleAssign's; row 1 (W 35) 334: core classes 21 to 27, the 279 keccak shapes, those
-/// 47 and core row 34; row 2 (W 68) the 178 left, core classes 28 to 32, core row 33, the
-/// catch-all and the 171 G2 shapes, which set its ExtAlu and MleOpen heights. Row 2 sits over
-/// row 1 on every chip (`convert_ladder_rows_close_under_the_last`). Of the 4,713 chunks of the
-/// 80-block p99 corpus 4,256 take row 0, 457 row 1 and none row 2, and the padding costs 2.3%
-/// over the natural heights. The global LogUp's image node pads to row 0 at every tier of its
-/// table.
+/// Of the 4,737 whitelist shapes, row 0 (W 21) holds 4,155: 90 core shapes (classes 0 to 13 at
+/// every `MemoryUnaligned` height, classes 14 to 20 at the lower ones), the 399 memory shapes and
+/// every precompile shape but keccak's, the two BLS12-381 G2 kinds' and 47 of
+/// Bls12381DoubleAssign's; row 1 (W 35) 381: 55 core shapes (classes 14 to 20 at the higher
+/// `MemoryUnaligned` heights, 21 to 27 and core row 34 at all), the 279 keccak shapes and those
+/// 47; row 2 (W 68) the 201 left, core classes 28 to 32, core row 33, the catch-all and the 171 G2
+/// shapes, which set its ExtAlu and MleOpen heights. A class moves up a row at a higher
+/// `MemoryUnaligned` height on the convert program's `Poseidon2Packed` table, which the taller
+/// trace lengthens past row 0's 2^17 (class 19 from 2^17 to 2^18 at 2^16 misaligned rows). Row 2
+/// sits over row 1 on every chip (`convert_ladder_rows_close_under_the_last`). Of the 4,713
+/// chunks of the 80-block p99 corpus (built without misaligned accesses, so all at 2^10) 4,256
+/// take row 0, 457 row 1 and none row 2, and the padding costs 2.3% over the natural heights. The
+/// global LogUp's image node pads to row 0 at every tier of its table.
 ///
 /// Fitted (2026-11-13) over that corpus, with the natural riscv heights of the same day under
 /// the 33-row core ladder and the convert heights `examples/mle_tier_probe.rs` measured over the
@@ -2127,7 +2302,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(seen, 53, "the machine's air list changed size");
+        assert_eq!(seen, 55, "the machine's air list changed size");
     }
 
     /// The three kinds the split sizes by the hardware-tier threshold rather than by cells: their
@@ -2330,6 +2505,8 @@ mod tests {
         for (kind, _) in RiscvChipType::<Kb>::get_all_precompile_chips()
             .into_iter()
             .filter(|(kind, _)| crate::mle::machine::riscv::air_id_for(kind).is_some())
+            // Its rounds and calls are independent; `every_blake2b_chunk_selects_a_whitelist_shape`.
+            .filter(|(kind, _)| kind != "Blake2bRound")
         {
             let rows_per_event = precompile_rows_per_event(&kind);
             let control = precompile_control_sibling(&kind);
@@ -2390,6 +2567,55 @@ mod tests {
         assert!(chunks > 0, "the sweep selected no chunk");
     }
 
+    /// Every BLAKE2b chunk the split can form selects a whitelist shape: `rounds` up to the full
+    /// block, `calls` from one up to the fewer of the rounds and the call cap, `local` up to what
+    /// the calls can touch and the Global table can hold, each walked over its height boundaries,
+    /// and the global event count `2 * local + calls` put on each power of two it reaches.
+    #[test]
+    fn every_blake2b_chunk_selects_a_whitelist_shape() {
+        use crate::{
+            chips::precompiles::blake2b::{CALLS_PER_BLOCK_LOG, ROUNDS_PER_BLOCK_LOG},
+            primitives::consts::LOCAL_MEMORY_DATAPAR,
+        };
+        let global_rows_cap = 1usize << bucket_log_height("Global", false);
+        let local_cap = (1usize << bucket_log_height("MemoryLocal", false)) * LOCAL_MEMORY_DATAPAR;
+        let mem_per_call = memory_lookups_per_row("Blake2bControl");
+        let mut checked = 0usize;
+        for rounds in edges(1 << ROUNDS_PER_BLOCK_LOG) {
+            for calls in edges(rounds.min(1 << CALLS_PER_BLOCK_LOG)) {
+                let local_max = (calls * mem_per_call)
+                    .min(local_cap)
+                    .min((global_rows_cap - calls) / 2);
+                let mut locals = edges(local_max);
+                locals.extend(
+                    edges(local_max.div_ceil(LOCAL_MEMORY_DATAPAR))
+                        .into_iter()
+                        .map(|rows| rows * LOCAL_MEMORY_DATAPAR)
+                        .flat_map(|l| [l, l + 1]),
+                );
+                locals.extend(
+                    (0..usize::BITS)
+                        .map(|k| 1usize << k)
+                        .flat_map(|p| [p - 1, p, p + 1])
+                        .filter(|e| *e > calls && (e - calls) % 2 == 0)
+                        .map(|e| (e - calls) / 2),
+                );
+                for local in locals.into_iter().filter(|l| (1..=local_max).contains(l)) {
+                    let shape = select_deferred(&[
+                        ("Blake2bRound", rounds),
+                        ("Blake2bControl", calls),
+                        ("SyscallPrecompile", calls),
+                        ("MemoryLocal", local.div_ceil(LOCAL_MEMORY_DATAPAR)),
+                        ("Global", 2 * local + calls),
+                    ]);
+                    assert_eq!(shape["Global"], MLE_GLOBAL_LOG_HEIGHT);
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 0, "the sweep checked nothing");
+    }
+
     /// Every memory chunk under the caps selects a whitelist shape. MemoryInitialize and
     /// MemoryFinalize take a row per event and Global `init + fin`; the sweep puts `init + fin`
     /// on each power of two, the full Global table among them, as well as walking each side's
@@ -2435,7 +2661,43 @@ mod tests {
     /// shipped-artifact test derives the same count from the config and holds the artifact to it.
     #[test]
     fn the_whitelist_shape_count_is_pinned() {
-        assert_eq!(mle_riscv_shapes().len(), 4_413, "riscv whitelist shapes");
+        assert_eq!(mle_riscv_shapes().len(), 4_737, "riscv whitelist shapes");
+    }
+
+    /// A core chunk takes its ladder row at the smallest `MemoryUnaligned` height that holds its
+    /// misaligned accesses, on each side of every height, and the shape it takes is a whitelist
+    /// shape. Past the most the chunk split lets a chunk hold, no shape holds it.
+    #[test]
+    fn a_core_chunk_takes_the_smallest_unaligned_height_that_holds_it() {
+        let mut natural: BTreeMap<String, usize> = MLE_CORE_LADDER[0]
+            .iter()
+            .map(|(name, log)| (name.to_string(), 1usize << log))
+            .collect();
+        let most = 1usize << MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT;
+        let mut cases = vec![(0, 10), (1, 10)];
+        for pair in MLE_MEMORY_UNALIGNED_LOG_HEIGHTS.windows(2) {
+            cases.push((1 << pair[0], pair[0]));
+            cases.push(((1 << pair[0]) + 1, pair[1]));
+        }
+        cases.push((most, MLE_MEMORY_UNALIGNED_MAX_LOG_HEIGHT));
+        for (rows, want) in cases {
+            natural.insert("MemoryUnaligned".to_string(), rows);
+            let (rung, mut shape) = select_core_rung(&natural).expect("row 0 holds the chunk");
+            assert_eq!(rung, 0, "{rows} misaligned accesses");
+            let got = shape
+                .iter()
+                .find(|(n, _)| n == "MemoryUnaligned")
+                .unwrap()
+                .1;
+            assert_eq!(got, want, "{rows} misaligned accesses");
+            shape.sort();
+            assert!(
+                whitelist_shapes().contains(&shape),
+                "{rows}: not a whitelist shape"
+            );
+        }
+        natural.insert("MemoryUnaligned".to_string(), most + 1);
+        assert!(select_core_rung(&natural).is_none());
     }
 
     /// The global LogUp reads every chunk's event table at one height, the production operating
@@ -2478,11 +2740,11 @@ mod tests {
         );
     }
 
-    /// Every ladder row has to prove on a card: TI = sum(interactions x height) over the row's
-    /// chips must stay under 2^29, where the GKR size m goes from 29 to 30 and the leaf buffer
-    /// outgrows the card. The interaction counts come off a real keygen, so a chip that gains an
-    /// interaction moves the rows here rather than at proving time. The heaviest row, row
-    /// 32, is at 0.98 x 2^29.
+    /// Every ladder row has to prove on a card at each `MemoryUnaligned` height it takes: TI =
+    /// sum(interactions x height) over the row's chips must stay under 2^29, where the GKR size m
+    /// goes from 29 to 30 and the leaf buffer outgrows the card. The interaction counts come off
+    /// a real keygen, so a chip that gains an interaction moves the rows here rather than at
+    /// proving time. And a row stops below 2^19 only where the next height would cross the line.
     #[test]
     fn core_ladder_rows_stay_under_the_gpu_line() {
         use crate::mle::machine::riscv::{
@@ -2512,17 +2774,44 @@ mod tests {
             RISCV_APP_PREP_AIR_IDS,
             crate::mle::machine::riscv::RISCV_REQUIRED_AIR_IDS,
         );
-        for (r, row) in MLE_CORE_LADDER.iter().enumerate() {
-            let ti: u64 = row
-                .iter()
+        let ti = |row: &[(String, usize)]| -> u64 {
+            row.iter()
                 .map(|(name, log)| {
                     let id = air_id_for(name).unwrap_or_else(|| panic!("no air id for {name}"));
                     vk.inner.per_air[id].num_interactions() as u64 * (1u64 << log)
                 })
-                .sum();
+                .sum()
+        };
+        for (r, unaligned, row) in core_rungs() {
+            let ti = ti(&row);
+            eprintln!(
+                "core ladder row {r}, MemoryUnaligned 2^{unaligned}: TI {:.4} x 2^29",
+                ti as f64 / (1u64 << 29) as f64
+            );
             assert!(
                 ti < 1 << 29,
-                "core ladder row {r}: TI = {ti} = {:.3} x 2^29 crosses the GPU line",
+                "core ladder row {r} with MemoryUnaligned at 2^{unaligned}: TI = {ti} = {:.3} x \
+                 2^29 crosses the GPU line",
+                ti as f64 / (1u64 << 29) as f64
+            );
+        }
+        for (r, class) in MLE_CORE_LADDER.iter().enumerate() {
+            let most = class
+                .iter()
+                .find(|(n, _)| *n == "MemoryUnaligned")
+                .unwrap()
+                .1;
+            let Some(&next) = MLE_MEMORY_UNALIGNED_LOG_HEIGHTS
+                .iter()
+                .find(|log| **log > most)
+            else {
+                continue;
+            };
+            let ti = ti(&core_rung_shape(class, next));
+            assert!(
+                ti >= 1 << 29,
+                "core ladder row {r} stops at MemoryUnaligned 2^{most}, but 2^{next} keeps it at \
+                 {:.3} x 2^29",
                 ti as f64 / (1u64 << 29) as f64
             );
         }

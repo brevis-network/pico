@@ -98,9 +98,9 @@ pub fn unaligned_len(record: &EmulationRecord) -> usize {
 #[must_use]
 pub fn unaligned_steps(record: &EmulationRecord) -> Vec<(CpuEvent, Option<MemoryRecordEnum>)> {
     let history = history_of(record);
-    history
-        .unaligned
-        .iter()
+    // A guest built with misaligned word accesses makes hundreds of thousands a chunk.
+    history.unaligned[..]
+        .pico_iter()
         .map(|unaligned| {
             let index = unaligned.step as usize;
             let event = step_cpu_event(history, &record.program, index);

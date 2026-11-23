@@ -51,9 +51,10 @@ mkdir -p /tmp/act4 && tar -xJf act4/act4-elfs-4.1.0-pico-rv64im-zicclsm.tar.xz -
 # /tmp/act4/elfs/I/I-add-00.elf, ...
 ```
 
-CI runs it as `ACT4 RV64IM_Zicclsm (72 pass)`. By hand, `cargo test --release -p pico-prover --
---test-threads=1 tests::act4::` proves it on the CPU, and the same module with `--features cuda` on
-a machine with a card proves it on the GPU.
+CI proves it in four parts side by side, `ACT4 RV64IM_Zicclsm (part k of 4)`: `ACT4_SHARD=k/4`
+proves every fourth test from the k-th, and unset, the module proves all 72. The `cargo test`
+command above proves it on the CPU; with `--features cuda`, on a machine with a card, it proves on
+the GPU.
 
 ## How they were built
 

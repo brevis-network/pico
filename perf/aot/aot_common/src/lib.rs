@@ -47,8 +47,7 @@ pub fn next_state_batch_impl(
     emu.batch_chunk_target = opts.chunk_batch_size;
     emu.batch_chunks_emulated = 0;
     emu.batch_stop = false;
-    emu.chunk_split_config =
-        ChunkSplitConfig::for_chunk_size(opts.chunk_size, emu.max_syscall_cycles);
+    emu.chunk_split_config = ChunkSplitConfig::for_opts(&opts, emu.max_syscall_cycles);
 
     emu.save_batch_start_state();
     let mut snapshot = emu.build_snapshot_state();

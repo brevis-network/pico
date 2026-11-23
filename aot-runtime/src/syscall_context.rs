@@ -39,6 +39,7 @@ use pico_vm::{
         syscalls::{
             host::{Precompile, SyscallHost},
             precompiles::{
+                blake2b::Blake2bRoundsSyscall,
                 bls12381_g2::{Bls12381G2AddSyscall, Bls12381G2DoubleSyscall},
                 edwards::{add::EdwardsAddAssignSyscall, decompress::EdwardsDecompressSyscall},
                 fptower::{fp::FpSyscall, fp2_addsub::Fp2AddSubSyscall, fp2_mul::Fp2MulSyscall},
@@ -284,6 +285,7 @@ fn vm_precompile(code: SyscallCode) -> Option<Run> {
         },
         C::BLS12381_G2_ADD => |ctx, code, a, b| Bls12381G2AddSyscall.emulate(ctx, code, a, b),
         C::BLS12381_G2_DOUBLE => |ctx, code, a, b| Bls12381G2DoubleSyscall.emulate(ctx, code, a, b),
+        C::BLAKE2B_ROUNDS => |ctx, code, a, b| Blake2bRoundsSyscall.emulate(ctx, code, a, b),
         C::BLS12381_DECOMPRESS => |ctx, code, a, b| {
             WeierstrassDecompressSyscall::<Bls12381>::new().emulate(ctx, code, a, b)
         },

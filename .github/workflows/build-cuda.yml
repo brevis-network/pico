@@ -3,6 +3,7 @@ on:
   pull_request:
     branches:
       - main
+      - dev
       - release/v*
     paths:
       # Everything `cargo clippy --workspace` compiles: the members, what they path-depend on, and
@@ -10,10 +11,12 @@ on:
       - "derive/**"
       - "mle-core/**"
       - "mle-cpu/**"
+      - "verifier/**"
       - "cuda-mle/**"
       - "vm/**"
       - "aot-codegen/**"
       - "aot-runtime/**"
+      - "aot-pure/**"
       - "aot-generated/**"
       - "sdk/**"
       - "gnark/field-ffi/**"
@@ -29,14 +32,17 @@ on:
   push:
     branches:
       - main
+      - dev
     paths:
       - "derive/**"
       - "mle-core/**"
       - "mle-cpu/**"
+      - "verifier/**"
       - "cuda-mle/**"
       - "vm/**"
       - "aot-codegen/**"
       - "aot-runtime/**"
+      - "aot-pure/**"
       - "aot-generated/**"
       - "sdk/**"
       - "gnark/field-ffi/**"
@@ -104,7 +110,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "v1-cuda12.3"
-          save-if: ${{ github.event_name == 'push' }}
+          # Only a run on `main` writes, as in rust-setup's `cache-save`.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # Capped at warn as before the merge: `strict` still turns compiler warnings into errors.
       - name: Clippy with `cuda`
         run: |

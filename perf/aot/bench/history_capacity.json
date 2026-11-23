@@ -9,7 +9,7 @@
   },
   "blocks": [
     {
-      "elf_sha256": "5beb9a2b7bbe3ae465bcebead3d5d8f900d334fa472b2681216b3d0fe77aeef5",
+      "elf_sha256": "0aaec9fa631a9086110825093dbba1dcd52d8527321527dff12e7becd1534746",
       "input_sha256": [
         "556a0bc9d7604afe73fa7b0899112fc7f35b3607c56da2494e83f1ab1214b645"
       ],
@@ -17,7 +17,7 @@
         "file:reth-23993050.bin"
       ],
       "tree": {
-        "commit": "1c5f3e5e8",
+        "commit": "f86f86402",
         "dirty": false
       },
       "replay_split": {
@@ -25,7 +25,7 @@
         "chunks": 1,
         "from_chunk": null
       },
-      "chunks": 39,
+      "chunks": 36,
       "max_rows": [
         {
           "table": "steps",
@@ -34,83 +34,83 @@
         },
         {
           "table": "reads",
-          "rows": 14397449,
-          "chunk": 11
+          "rows": 14420870,
+          "chunk": 30
         },
         {
           "table": "writes",
-          "rows": 7543831,
-          "chunk": 37
+          "rows": 7603958,
+          "chunk": 35
         },
         {
           "table": "operand_exceptions",
-          "rows": 508,
-          "chunk": 5
+          "rows": 380,
+          "chunk": 4
         },
         {
           "table": "syscalls",
-          "rows": 103389,
-          "chunk": 5
+          "rows": 92736,
+          "chunk": 4
         },
         {
           "table": "add",
-          "rows": 2670319,
+          "rows": 2700406,
           "chunk": 3
         },
         {
           "table": "sub",
-          "rows": 275713,
+          "rows": 285594,
           "chunk": 3
         },
         {
           "table": "mul",
-          "rows": 95948,
-          "chunk": 7
+          "rows": 102853,
+          "chunk": 6
         },
         {
           "table": "bitwise",
-          "rows": 987290,
-          "chunk": 37
+          "rows": 1050374,
+          "chunk": 4
         },
         {
           "table": "shift_left",
-          "rows": 1020899,
+          "rows": 1019055,
           "chunk": 1
         },
         {
           "table": "shift_right",
-          "rows": 1000331,
+          "rows": 1049504,
           "chunk": 1
         },
         {
           "table": "lt",
-          "rows": 179923,
+          "rows": 201406,
           "chunk": 5
         },
         {
           "table": "divrem",
-          "rows": 822,
-          "chunk": 10
+          "rows": 817,
+          "chunk": 8
         },
         {
           "table": "memory",
-          "rows": 3796935,
-          "chunk": 37
+          "rows": 4283972,
+          "chunk": 7
         },
         {
           "table": "ecall",
-          "rows": 104407,
-          "chunk": 5
+          "rows": 93498,
+          "chunk": 4
         },
         {
           "table": "branch",
-          "rows": 2401384,
+          "rows": 2509187,
           "chunk": 1
         }
       ]
     },
     {
-      "elf_sha256": "5beb9a2b7bbe3ae465bcebead3d5d8f900d334fa472b2681216b3d0fe77aeef5",
+      "elf_sha256": "0aaec9fa631a9086110825093dbba1dcd52d8527321527dff12e7becd1534746",
       "input_sha256": [
         "622e12f6ab93780df3fee61a85fa62599aed8c402e03ca1355ff84f6346c3e46"
       ],
@@ -118,7 +118,7 @@
         "file:reth-17106222.bin"
       ],
       "tree": {
-        "commit": "1c5f3e5e8",
+        "commit": "f86f86402",
         "dirty": false
       },
       "replay_split": {
@@ -130,82 +130,82 @@
       "max_rows": [
         {
           "table": "steps",
-          "rows": 8387739,
+          "rows": 8387644,
           "chunk": 1
         },
         {
           "table": "reads",
-          "rows": 14103913,
-          "chunk": 5
+          "rows": 14105513,
+          "chunk": 4
         },
         {
           "table": "writes",
-          "rows": 7459655,
-          "chunk": 6
+          "rows": 7397687,
+          "chunk": 5
         },
         {
           "table": "operand_exceptions",
-          "rows": 264,
-          "chunk": 4
+          "rows": 420,
+          "chunk": 3
         },
         {
           "table": "syscalls",
-          "rows": 53139,
-          "chunk": 4
+          "rows": 92617,
+          "chunk": 3
         },
         {
           "table": "add",
-          "rows": 2679907,
+          "rows": 2721919,
           "chunk": 2
         },
         {
           "table": "sub",
-          "rows": 278479,
+          "rows": 288417,
           "chunk": 2
         },
         {
           "table": "mul",
-          "rows": 91555,
+          "rows": 93306,
           "chunk": 4
         },
         {
           "table": "bitwise",
-          "rows": 924094,
-          "chunk": 4
+          "rows": 1039691,
+          "chunk": 3
         },
         {
           "table": "shift_left",
-          "rows": 988661,
+          "rows": 967788,
           "chunk": 1
         },
         {
           "table": "shift_right",
-          "rows": 961191,
+          "rows": 964766,
           "chunk": 1
         },
         {
           "table": "lt",
-          "rows": 174595,
-          "chunk": 4
+          "rows": 182141,
+          "chunk": 3
         },
         {
           "table": "divrem",
-          "rows": 565,
-          "chunk": 5
-        },
-        {
-          "table": "memory",
-          "rows": 3581216,
-          "chunk": 6
-        },
-        {
-          "table": "ecall",
-          "rows": 53671,
+          "rows": 683,
           "chunk": 4
         },
         {
+          "table": "memory",
+          "rows": 3366856,
+          "chunk": 5
+        },
+        {
+          "table": "ecall",
+          "rows": 93463,
+          "chunk": 3
+        },
+        {
           "table": "branch",
-          "rows": 2449818,
+          "rows": 2480712,
           "chunk": 1
         }
       ]
@@ -221,93 +221,93 @@
     {
       "table": "reads",
       "row_bytes": 16,
-      "max_rows": 14397449,
-      "capacity": 15837194
+      "max_rows": 14420870,
+      "capacity": 15862957
     },
     {
       "table": "writes",
       "row_bytes": 24,
-      "max_rows": 7543831,
-      "capacity": 8298215
+      "max_rows": 7603958,
+      "capacity": 8364354
     },
     {
       "table": "operand_exceptions",
       "row_bytes": 16,
-      "max_rows": 508,
-      "capacity": 559
+      "max_rows": 420,
+      "capacity": 462
     },
     {
       "table": "syscalls",
       "row_bytes": 40,
-      "max_rows": 103389,
-      "capacity": 113728
+      "max_rows": 92736,
+      "capacity": 102010
     },
     {
       "table": "add",
       "row_bytes": 4,
-      "max_rows": 2679907,
-      "capacity": 2947898
+      "max_rows": 2721919,
+      "capacity": 2994111
     },
     {
       "table": "sub",
       "row_bytes": 4,
-      "max_rows": 278479,
-      "capacity": 306327
+      "max_rows": 288417,
+      "capacity": 317259
     },
     {
       "table": "mul",
       "row_bytes": 4,
-      "max_rows": 95948,
-      "capacity": 105543
+      "max_rows": 102853,
+      "capacity": 113139
     },
     {
       "table": "bitwise",
       "row_bytes": 4,
-      "max_rows": 987290,
-      "capacity": 1086019
+      "max_rows": 1050374,
+      "capacity": 1155412
     },
     {
       "table": "shift_left",
       "row_bytes": 4,
-      "max_rows": 1020899,
-      "capacity": 1122989
+      "max_rows": 1019055,
+      "capacity": 1120961
     },
     {
       "table": "shift_right",
       "row_bytes": 4,
-      "max_rows": 1000331,
-      "capacity": 1100365
+      "max_rows": 1049504,
+      "capacity": 1154455
     },
     {
       "table": "lt",
       "row_bytes": 4,
-      "max_rows": 179923,
-      "capacity": 197916
+      "max_rows": 201406,
+      "capacity": 221547
     },
     {
       "table": "divrem",
       "row_bytes": 4,
-      "max_rows": 822,
-      "capacity": 905
+      "max_rows": 817,
+      "capacity": 899
     },
     {
       "table": "memory",
       "row_bytes": 4,
-      "max_rows": 3796935,
-      "capacity": 4176629
+      "max_rows": 4283972,
+      "capacity": 4712370
     },
     {
       "table": "ecall",
       "row_bytes": 4,
-      "max_rows": 104407,
-      "capacity": 114848
+      "max_rows": 93498,
+      "capacity": 102848
     },
     {
       "table": "branch",
       "row_bytes": 4,
-      "max_rows": 2449818,
-      "capacity": 2694800
+      "max_rows": 2509187,
+      "capacity": 2760106
     }
   ],
-  "slot_bytes": 697061444
+  "slot_bytes": 701786188
 }

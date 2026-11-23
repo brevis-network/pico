@@ -71,6 +71,7 @@ use crate::{
             field::secp256k1::Secp256k1BaseField,
         },
         precompiles::{
+            blake2b::{Blake2bControlChip, Blake2bRoundChip},
             bls12381_g2::{add::Bls12381G2AddChip, double::Bls12381G2DoubleChip},
             edwards::{EdAddAssignChip, EdDecompressChip},
             fptower::{fp::FpOpChip, fp2_addsub::Fp2AddSubChip, fp2_mul::Fp2MulChip},
@@ -483,6 +484,10 @@ pub mod air_id {
     /// The BLS12-381 G2 add and double precompiles.
     pub const BLS12381_G2_ADD: usize = 51;
     pub const BLS12381_G2_DOUBLE: usize = 52;
+    /// The BLAKE2b rounds precompile: its control chip (syscall + memory, one row per call) and
+    /// its round chip (one row per round), appended last so the ids above stay put.
+    pub const BLAKE2B_CONTROL: usize = 53;
+    pub const BLAKE2B_ROUND: usize = 54;
 }
 
 /// Maps brevis chip `name()` → AIR id for the core set. Chips not listed are excluded from both
@@ -543,6 +548,8 @@ const INCLUDED: &[(&str, usize)] = &[
     ("KeccakTables", air_id::KECCAK_TABLES),
     ("Bls12381G2AddAssign", air_id::BLS12381_G2_ADD),
     ("Bls12381G2DoubleAssign", air_id::BLS12381_G2_DOUBLE),
+    ("Blake2bControl", air_id::BLAKE2B_CONTROL),
+    ("Blake2bRound", air_id::BLAKE2B_ROUND),
 ];
 
 /// Chips whose padding rows differ from each other: the sliced KeccakPermute pads with dummy
@@ -999,6 +1006,8 @@ pub fn mle_riscv_air_refs(program: Arc<Program>, bucket: bool) -> Vec<AirRef<Sc>
         Arc::new(crate::chips::precompiles::keccak256::KeccakTables::<Kb>::default()),
         Arc::new(Bls12381G2AddChip::<Kb>::default()),
         Arc::new(Bls12381G2DoubleChip::<Kb>::default()),
+        Arc::new(Blake2bControlChip::<Kb>::default()),
+        Arc::new(Blake2bRoundChip::<Kb>::default()),
     ]
 }
 
@@ -2281,9 +2290,8 @@ pub struct RiscvMachine {
     /// chunk's index.
     chunk_tables: std::sync::Mutex<std::collections::BTreeMap<u32, ChunkTable>>,
     /// Whitelist-mode shape bucketing (see `shape`); off = natural heights, dynamic shapes.
-    /// Read only on the CPU `prove_chunk` path; the GPU path generates traces on-device and does
-    /// not bucket, so the field is unused under `cuda`.
-    #[cfg_attr(feature = "cuda", allow(dead_code))]
+    /// Read on the CPU `prove_chunk` path, where traces are bucketed; the GPU path generates traces
+    /// on-device and does not bucket.
     bucket: bool,
     /// Chunk proving concurrency of [`Self::prove`]; `None` falls back to [`prove_concurrency`].
     concurrency: Option<NonZeroUsize>,
@@ -2298,8 +2306,15 @@ struct KeygenReuse {
     preps: Vec<Option<CommittedPrep<Sc>>>,
 }
 
-/// Kept for the life of the process: a few fixed tables (Byte, KeccakTables), not per program.
+/// Kept for the life of the process, in host memory: the committed data (stacked matrix, RS
+/// codeword, Merkle tree) of the fixed tables (Byte, KeccakTables), which every later riscv keygen
+/// of the same air set reuses, including those of a GPU run's other cards.
 static KEYGEN_REUSE: std::sync::Mutex<Option<KeygenReuse>> = std::sync::Mutex::new(None);
+
+/// Held shared by the tests that keygen a riscv machine, and exclusively by the one that reads
+/// [`KEYGEN_REUSE`] between its keygens, so no other test's keygen replaces the entry under it.
+#[cfg(test)]
+pub(crate) static KEYGEN_REUSE_TEST_LOCK: std::sync::RwLock<()> = std::sync::RwLock::new(());
 
 fn pre_hash_memo() -> PreHashMemo<Sc> {
     static MEMO: std::sync::OnceLock<PreHashMemo<Sc>> = std::sync::OnceLock::new();
@@ -3042,6 +3057,13 @@ impl RiscvMachine {
         &self.vk
     }
 
+    /// Whether this machine was built at `log_stacked_height`, with whitelist bucketing when
+    /// `bucket`: the settings that, with the program, decide its keys.
+    pub fn built_for(&self, log_stacked_height: usize, bucket: bool) -> bool {
+        self.bucket == bucket
+            && *self.engine.params() == riscv_params_with_128_bits_security(log_stacked_height)
+    }
+
     /// The vk's app-independent pre-hash (see [`compute_vk_pre_hash`]) — this machine's keygen
     /// identity. The orchestrator uses it to assert that per-card keygens of the same program
     /// agree.
@@ -3338,6 +3360,7 @@ mod tests {
             cost_estimator: false,
             snapshot_main: SnapshotMainMode::Interpreter,
             replay_workers: crate::emulator::opts::ReplayWorkers::Interpreter,
+            ladder_fit: false,
         }
     }
 
@@ -3797,6 +3820,10 @@ mod tests {
     #[test]
     fn keygen_reusing_another_programs_tables_matches_a_fresh_keygen() {
         use crate::compiler::riscv::compiler::{Compiler, SourceType};
+        // The cache holds one machine's tables: no other test keygens while this one reads it.
+        let _exclusive = KEYGEN_REUSE_TEST_LOCK
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         // A height no other test keygens at, so the process-wide cache entry is this test's.
         const HEIGHT: usize = 21;
         let engine: Engine = StarkEngine::new(riscv_params_with_128_bits_security(HEIGHT));
@@ -3841,7 +3868,15 @@ mod tests {
                         a.air_name
                     );
                 }
-                assert_eq!(non_app_preps(&pk).len(), airs.len());
+                // Every table but the program's is handed on, the AIRs without one as empty.
+                for (id, prep) in non_app_preps(&pk).iter().enumerate() {
+                    assert_eq!(
+                        prep.is_none(),
+                        RISCV_APP_PREP_AIR_IDS.contains(&id),
+                        "{}: handed on as reusable exactly when it is not an app table",
+                        airs[id].name()
+                    );
+                }
                 program_commits.push(riscv_program_commit(&vk));
             }
             // Reuse crossed programs with different program tables, not a repeat of one.
@@ -4032,7 +4067,7 @@ mod tests {
             "SyscallPrecompile",
             "the precompile block ends at the precompile syscall table"
         );
-        assert_eq!(air_id::BLS12381_G2_DOUBLE, INCLUDED.len() - 1);
+        assert_eq!(air_id::BLAKE2B_ROUND, INCLUDED.len() - 1);
         // One air ref per table row, in order (constructed cheaply from an empty program).
         let airs = mle_riscv_air_refs(Arc::new(Program::default()), false);
         assert_eq!(airs.len(), INCLUDED.len());
@@ -4099,8 +4134,8 @@ mod tests {
         );
 
         // `BYTE_CHIP_INDEX`, `ECALL_CHIP_INDEX`, `HOST_TRACEGEN_PRECOMPILE_INDICES`,
-        // `MEMORY_UNALIGNED_CHIP_INDEX`, `KECCAK_TABLES_CHIP_INDEX` and `G2_CHIP_INDICES`: the
-        // list's tail, after the precompile block.
+        // `MEMORY_UNALIGNED_CHIP_INDEX`, `KECCAK_TABLES_CHIP_INDEX`, `G2_CHIP_INDICES` and
+        // `BLAKE2B_CHIP_INDICES`: the list's tail, after the precompile block.
         let tail = [
             "Byte",
             "Ecall",
@@ -4111,6 +4146,8 @@ mod tests {
             "KeccakTables",
             "Bls12381G2AddAssign",
             "Bls12381G2DoubleAssign",
+            "Blake2bControl",
+            "Blake2bRound",
         ];
         assert_eq!(
             listed[listed.len() - tail.len()..],

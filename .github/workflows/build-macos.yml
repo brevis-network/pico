@@ -3,26 +3,22 @@ on:
   pull_request:
     branches:
       - main
+      - dev
       - release/v*
     paths-ignore:
       - "docs/**"
       - "README.md"
       - ".gitignore"
       - "Makefile"
-      - "tools/**"
-      - ".claude/**"
-      - ".agent/**"
   push:
     branches:
       - main
+      - dev
     paths-ignore:
       - "docs/**"
       - "README.md"
       - ".gitignore"
       - "Makefile"
-      - "tools/**"
-      - ".claude/**"
-      - ".agent/**"
   workflow_dispatch:
 
 name: Build macOS

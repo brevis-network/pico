@@ -19,6 +19,12 @@
 //! height-neutral rest to the ledger's `KNOBS`, so a variable the VM starts to read is sorted
 //! before it can slip past the key.
 //!
+//! `EmulatorOpts` also holds the ladder fit (`ladder_fit`, which a prover sets under the
+//! whitelist), and the key leaves it out. It moves a cut only where a chunk would take no row of
+//! the core ladder, and every chunk of the programs pinned here takes one, so a run with the
+//! whitelist and a run without it hit the same entry. A program whose mix leaves the ladder is cut
+//! otherwise under the whitelist, and is to be recorded in one mode only.
+//!
 //! The `height-witness` feature, off by default and implying `cuda`, fills two hooks.
 //! [`begin_pipeline`] reads the key where the snapshot pipeline starts. [`chunk`], where
 //! `prepare_chunk_shaped` has just run the GPU preparer's event counter, asserts the counter's
@@ -624,6 +630,8 @@ mod tests {
         "MLE_LOG_STACKED_HEIGHT",
         "MLE_SHAPE_MARGIN",
         "MLE_FORCE_CATCH_ALL",
+        // It also has the split close chunks to the core ladder, which moves no cut of a program
+        // the golden file pins (the module doc).
         "VK_VERIFICATION",
         "MLE_VK_MAP",
         "MLE_VK_ROOT",

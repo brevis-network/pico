@@ -75,6 +75,12 @@ pub enum LookupType {
     /// block's external `(alpha, beta)`. No machine but the group machines uses it, and no AIR
     /// receives on it: the fractional sums are added up across the block's group proofs.
     GlobalLogUp = 17,
+
+    /// The chain of one `BLAKE2B_ROUNDS` call between `Blake2bControl` (syscall + memory, one row
+    /// per call) and `Blake2bRound` (one row per round): `[chunk, clk, tag, k, s, 64 limbs]`, the
+    /// working vector entering round `k` (tag 0) or the message block in schedule order `s`
+    /// (tag 1).
+    Blake2bRound = 18,
 }
 
 impl LookupType {
@@ -248,6 +254,7 @@ mod tests {
             (LookupType::KeccakChi, 15),
             (LookupType::KeccakXor5, 16),
             (LookupType::GlobalLogUp, 17),
+            (LookupType::Blake2bRound, 18),
         ] {
             assert_eq!(kind as u16, value);
         }

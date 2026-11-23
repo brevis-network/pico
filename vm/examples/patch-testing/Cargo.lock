@@ -67,7 +67,7 @@ dependencies = [
  "cfg-if",
  "const-hex",
  "derive_more 0.99.20",
- "hex-literal 0.4.1",
+ "hex-literal",
  "itoa",
  "k256 0.13.3",
  "keccak-asm",
@@ -1567,7 +1567,7 @@ dependencies = [
  "cfg-if",
  "digest 0.10.7",
  "elliptic-curve",
- "hex-literal 0.4.1",
+ "hex-literal",
  "pico-patch-libs",
  "signature",
  "spki",
@@ -2051,12 +2051,6 @@ name = "hex-literal"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
-
-[[package]]
-name = "hex-literal"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e712f64ec3850b98572bffac52e2c6f282b29fe6c5fa6d42334b30be438d95c1"
 
 [[package]]
 name = "hkdf"
@@ -2646,16 +2640,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "p3-keccak"
-version = "0.5.4"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=da6ca12c#da6ca12c71912ec213d3c5af68b14509d2099bc3"
-dependencies = [
- "p3-symmetric",
- "p3-util",
- "tiny-keccak 2.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "p3-keccak-air"
 version = "0.5.4"
 source = "git+https://github.com/brevis-network/Plonky3.git?rev=da6ca12c#da6ca12c71912ec213d3c5af68b14509d2099bc3"
@@ -3114,11 +3098,11 @@ dependencies = [
 
 [[package]]
 name = "pico-aot-pure"
-version = "3.1.1"
+version = "3.2.0"
 
 [[package]]
 name = "pico-aot-runtime"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -3142,16 +3126,15 @@ dependencies = [
 
 [[package]]
 name = "pico-derive"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
- "proc-macro2",
  "quote",
  "syn 1.0.109",
 ]
 
 [[package]]
 name = "pico-mle-core"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "cfg-if",
  "derivative",
@@ -3183,7 +3166,7 @@ dependencies = [
 
 [[package]]
 name = "pico-mle-cpu"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "cfg-if",
  "derive-new",
@@ -3200,7 +3183,7 @@ dependencies = [
 
 [[package]]
 name = "pico-patch-libs"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "bincode",
  "elliptic-curve",
@@ -3209,7 +3192,7 @@ dependencies = [
 
 [[package]]
 name = "pico-prover"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "bincode",
  "libloading",
@@ -3226,7 +3209,7 @@ dependencies = [
 
 [[package]]
 name = "pico-sdk"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "anyhow",
  "aurora-engine-modexp",
@@ -3241,7 +3224,6 @@ dependencies = [
  "keccak",
  "lazy_static",
  "p256 0.13.2 (git+https://github.com/brevis-network/elliptic-curves?rev=94ffb195ad1d91a0d6678dfbc3432f83e25162b4)",
- "p3-challenger",
  "p3-field",
  "p3-koala-bear",
  "p3-symmetric",
@@ -3259,7 +3241,7 @@ dependencies = [
 
 [[package]]
 name = "pico-verifier"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "bincode",
  "p3-field",
@@ -3275,14 +3257,12 @@ dependencies = [
 
 [[package]]
 name = "pico-vm"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "anyhow",
  "arrayref",
  "backtrace",
  "bincode",
- "bitvec",
- "bytemuck",
  "cfg-if",
  "clap",
  "core_affinity",
@@ -3292,16 +3272,11 @@ dependencies = [
  "curve25519-dalek 4.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "dashmap",
  "dashu",
- "derivative",
- "derive-new",
- "derive_more 2.1.1",
  "elf",
  "elliptic-curve",
  "eyre",
- "getset",
  "hashbrown 0.14.5",
  "hex",
- "hex-literal 1.1.0",
  "hybrid-array",
  "itertools 0.13.0",
  "k256 0.13.3",
@@ -3316,7 +3291,6 @@ dependencies = [
  "p3-air",
  "p3-bn254",
  "p3-field",
- "p3-keccak",
  "p3-keccak-air",
  "p3-koala-bear",
  "p3-matrix",
@@ -3325,7 +3299,6 @@ dependencies = [
  "p3-symmetric",
  "p3-util",
  "parking_lot",
- "paste",
  "pico-derive",
  "pico-mle-core",
  "pico-mle-cpu",
@@ -3335,7 +3308,6 @@ dependencies = [
  "rayon",
  "rayon-scan",
  "rrs-lib",
- "rustc-hash",
  "secp256k1 0.31.1",
  "serde",
  "serde_json",

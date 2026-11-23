@@ -361,8 +361,7 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
     }
 
     /// Acquire next task for a worker
-    /// Default (`chunk-priority` feature): Chunk tasks have priority over combine tasks
-    /// Without feature: Combine tasks have priority (Legacy)
+    /// Combine tasks have priority by default; the `chunk-priority` feature puts chunk tasks first.
     pub fn acquire_task(&self, worker_id: &str) -> AcquireResult<P> {
         // Check if already complete
         if self.completed.load(Ordering::SeqCst) {
@@ -372,7 +371,7 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
         // Task priority order depends on feature flag
         #[cfg(feature = "chunk-priority")]
         {
-            // Default: Chunk tasks first, then combine tasks
+            // Chunk tasks first, then combine tasks
             if let Some(result) = self.try_acquire_chunk_task(worker_id) {
                 return result;
             }
@@ -382,7 +381,7 @@ impl<P: Clone + Send + Sync + 'static> GlobalScheduler<P> {
         }
         #[cfg(not(feature = "chunk-priority"))]
         {
-            // Without feature: Combine tasks first, then chunk tasks
+            // Default: combine tasks first, then chunk tasks
             if let Some(result) = self.try_acquire_combine_task(worker_id) {
                 return result;
             }

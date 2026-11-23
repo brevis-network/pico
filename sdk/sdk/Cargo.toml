@@ -11,7 +11,6 @@ categories = { workspace = true }
 bincode.workspace = true
 serde.workspace = true
 anyhow.workspace = true
-p3-challenger.workspace = true
 p3-field.workspace = true
 p3-koala-bear.workspace = true
 p3-symmetric.workspace = true

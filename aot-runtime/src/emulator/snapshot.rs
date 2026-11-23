@@ -28,8 +28,7 @@ impl AotEmulatorCore {
         self.batch_chunk_target = opts.chunk_batch_size;
         self.batch_chunks_emulated = 0;
         self.batch_stop = false;
-        self.chunk_split_config =
-            ChunkSplitConfig::for_chunk_size(opts.chunk_size, self.max_syscall_cycles);
+        self.chunk_split_config = ChunkSplitConfig::for_opts(&opts, self.max_syscall_cycles);
         self.save_batch_start_state();
 
         (start_chunk, start_cycle)

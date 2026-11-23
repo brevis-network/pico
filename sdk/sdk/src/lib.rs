@@ -127,16 +127,16 @@ mod zkvm {
         syscall_halt(exit_code as u32);
     }
 
-    // `_start`, `memcpy` and `memset` in one `global_asm!`, which is one object file: the one
-    // `_start` is in, which every link takes because `_start` is the entry point. So these strong
-    // definitions are always linked, and always win over `compiler_builtins`' weak ones (the
-    // guest build enables `compiler-builtins-mem`). In separate `global_asm!`s they could land in
-    // another object that a link need not take, and lose without an error; reth's ELF did, at a
-    // cost of 5 % of its instructions. `cargo pico build` checks the outcome through the
+    // `_start`, `memcpy`, `memset`, `memcmp` and `bcmp` in one `global_asm!`, which is one object
+    // file: the one `_start` is in, which every link takes because `_start` is the entry point. So
+    // these strong definitions are always linked, and always win over `compiler_builtins`' weak
+    // ones (the guest build enables `compiler-builtins-mem`). In separate `global_asm!`s they could
+    // land in another object that a link need not take, and lose without an error; reth's ELF
+    // did, at a cost of 5 % of its instructions. `cargo pico build` checks the outcome through the
     // `__pico_memcpy` / `__pico_memset` aliases. `_stack_top` and `__global_pointer$` come from
     // `pico.ld`.
-    // With `c-memory-functions`, the static library's build, `memmove`, `memcmp`, `bcmp` and
-    // `strlen` join them: that build has no `compiler_builtins` copies of the family.
+    // With `c-memory-functions`, the static library's build, `memmove` and `strlen` join them:
+    // that build has no `compiler_builtins` copies of the family.
     macro_rules! start_and_memory_functions {
         ($($more:tt)*) => {
             core::arch::global_asm!(
@@ -152,9 +152,12 @@ mod zkvm {
         call __start;
     "#,
                 include_str!("memcpy.s"),
-                // `memset.s` names no section, and `memcpy.s` ends in `.note.GNU-stack`.
+                // Each file is `.text`; the separators keep one that ends in another section, as
+                // `memmove.s` and `strlen.s` do, from carrying the next into it.
                 ".text",
                 include_str!("memset.s"),
+                ".text",
+                include_str!("memcmp.s"),
                 $($more)*
                 r#"
     .globl __pico_memcpy;
@@ -173,11 +176,7 @@ mod zkvm {
         ".text",
         include_str!("memmove.s"),
         ".text",
-        include_str!("memcmp.s"),
-        ".text",
         include_str!("strlen.s"),
-        ".text",
-        ".globl bcmp\n.set bcmp, memcmp\n",
     );
 
     pub fn zkvm_getrandom(_s: &mut [u8]) -> Result<(), getrandom::Error> {
