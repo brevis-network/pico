@@ -32,8 +32,8 @@ const MAX_GUEST_WORD_ADDR: u64 = EMULATOR_MEMORY_SIZE_BYTES - WORD_SIZE as u64;
 
 /// The most instructions the preprocessed program table can hold.
 ///
-/// It carries one row per instruction, and the tallest `program_heights` entry across
-/// `RiscvShapeConfig` is `2^22` rows, so a larger program has no shape to fit into.
+/// It carries one row per instruction. `2^22` is the bound the FRI shape config set, kept as the
+/// limit; a longer program is refused.
 const MAX_INSTRUCTIONS: usize = 1 << 22;
 
 /// RISC-V ELF (Executable and Linkable Format) File.

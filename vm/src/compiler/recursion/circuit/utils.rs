@@ -4,57 +4,9 @@ use crate::{
         word::Word,
     },
     configs::config::FieldGenericConfig,
-    primitives::consts::{DIGEST_SIZE, NUM_BITS},
+    primitives::consts::NUM_BITS,
 };
-use p3_bn254::Bn254;
-use p3_field::{PrimeCharacteristicRing, PrimeField32};
-
-pub fn fields_to_bn254<F: PrimeField32>(digest: &[F; 8]) -> Bn254 {
-    let mut result = Bn254::ZERO;
-    for word in digest.iter() {
-        // Since the KoalaBear prime is less than 2^31, we can shift by 31 bits each time and still be
-        // within the Bn254 field, so we don't have to truncate the top 3 bits.
-        result *= Bn254::from_u64(1 << 31);
-        result += Bn254::from_u32(word.as_canonical_u32());
-    }
-    result
-}
-
-/// Convert 32 KoalaBear bytes into a Bn254 field element. The first byte's most significant 3 bits
-/// (which would become the 3 most significant bits) are truncated.
-#[allow(dead_code)]
-pub fn field_bytes_to_bn254<F: PrimeField32>(bytes: &[F; 32]) -> Bn254 {
-    let mut result = Bn254::ZERO;
-    for (i, byte) in bytes.iter().enumerate() {
-        debug_assert!(byte < &F::from_u32(256));
-        if i == 0 {
-            // 32 bytes is more than Bn254 prime, so we need to truncate the top 3 bits.
-            result = Bn254::from_u32(byte.as_canonical_u32() & 0x1f);
-        } else {
-            result *= Bn254::from_u32(256);
-            result += Bn254::from_u32(byte.as_canonical_u32());
-        }
-    }
-    result
-}
-
-#[allow(dead_code)]
-pub fn felts_to_bn254_var<FC: FieldGenericConfig>(
-    builder: &mut Builder<FC>,
-    digest: &[Felt<FC::F>; DIGEST_SIZE],
-) -> Var<FC::N> {
-    let var_2_31: Var<_> = builder.constant(FC::N::from_u32(1 << 31));
-    let result = builder.constant(FC::N::ZERO);
-    for (i, word) in digest.iter().enumerate() {
-        let word_var = builder.felt2var_circuit(*word);
-        if i == 0 {
-            builder.assign(result, word_var);
-        } else {
-            builder.assign(result, result * var_2_31 + word_var);
-        }
-    }
-    result
-}
+use p3_field::PrimeCharacteristicRing;
 
 /// Decompose `byte` into its canonical little-endian bits **and prove that it really is a byte**,
 /// i.e. that its canonical value lies in `[0, 256)`.
@@ -87,7 +39,6 @@ pub(crate) fn felt_to_byte_bits<FC: FieldGenericConfig>(
     byte_bits
 }
 
-#[allow(dead_code)]
 pub fn felt_bytes_to_bn254_var<FC: FieldGenericConfig>(
     builder: &mut Builder<FC>,
     bytes: &[Felt<FC::F>; 32],
@@ -116,7 +67,6 @@ pub fn felt_bytes_to_bn254_var<FC: FieldGenericConfig>(
     result
 }
 
-#[allow(dead_code)]
 pub fn words_to_bytes<T: Copy>(words: &[Word<T>]) -> Vec<T> {
     words.iter().flat_map(|w| w.0).collect::<Vec<_>>()
 }

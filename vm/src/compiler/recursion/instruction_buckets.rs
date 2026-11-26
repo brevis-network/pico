@@ -20,8 +20,6 @@ pub struct InstructionBuckets<F> {
     pub mem_var_accesses: Box<[MemoryAccessCols<F>]>,
     pub select: Box<[SelectInstr<F>]>,
     pub poseidon2: Box<[Poseidon2Instr<F>]>,
-    pub exp_reverse_bits: Box<[ExpReverseBitsInstr<F>]>,
-    pub batch_fri: Box<[Box<BatchFRIInstr<F>>]>,
     pub commit_public_values: Box<[Box<CommitPublicValuesInstr<F>>]>,
 }
 
@@ -34,8 +32,6 @@ impl<F: Field> InstructionBuckets<F> {
         let mut n_mem_var = 0usize;
         let mut n_select = 0usize;
         let mut n_poseidon2 = 0usize;
-        let mut n_exp_reverse_bits = 0usize;
-        let mut n_batch_fri = 0usize;
         let mut n_commit_pv = 0usize;
 
         for instr in instructions {
@@ -45,8 +41,6 @@ impl<F: Field> InstructionBuckets<F> {
                 Instruction::Mem(_) => n_mem_const += 1,
                 Instruction::Select(_) => n_select += 1,
                 Instruction::Poseidon2(_) => n_poseidon2 += 1,
-                Instruction::ExpReverseBitsLen(_) => n_exp_reverse_bits += 1,
-                Instruction::BatchFRI(_) => n_batch_fri += 1,
                 Instruction::CommitPublicValues(_) => n_commit_pv += 1,
                 Instruction::Hint(HintInstr { output_addrs_mults }) => {
                     n_mem_var += output_addrs_mults.len();
@@ -87,8 +81,6 @@ impl<F: Field> InstructionBuckets<F> {
         let mut mem_var_accesses = Vec::with_capacity(n_mem_var);
         let mut select = Vec::with_capacity(n_select);
         let mut poseidon2 = Vec::with_capacity(n_poseidon2);
-        let mut exp_reverse_bits = Vec::with_capacity(n_exp_reverse_bits);
-        let mut batch_fri = Vec::with_capacity(n_batch_fri);
         let mut commit_pv = Vec::with_capacity(n_commit_pv);
 
         // Second pass: extract data (preserving original instruction order)
@@ -99,8 +91,6 @@ impl<F: Field> InstructionBuckets<F> {
                 Instruction::Mem(x) => mem_const.push(MemInstrFfi::from(x)),
                 Instruction::Select(x) => select.push(*x),
                 Instruction::Poseidon2(x) => poseidon2.push(x.as_ref().clone()),
-                Instruction::ExpReverseBitsLen(x) => exp_reverse_bits.push(x.clone()),
-                Instruction::BatchFRI(x) => batch_fri.push(x.clone()),
                 Instruction::CommitPublicValues(x) => commit_pv.push(x.clone()),
                 Instruction::Hint(HintInstr { output_addrs_mults }) => {
                     for am in output_addrs_mults {
@@ -148,8 +138,6 @@ impl<F: Field> InstructionBuckets<F> {
             mem_var_accesses: mem_var_accesses.into(),
             select: select.into(),
             poseidon2: poseidon2.into(),
-            exp_reverse_bits: exp_reverse_bits.into(),
-            batch_fri: batch_fri.into(),
             commit_public_values: commit_pv.into(),
         }
     }

@@ -5,11 +5,10 @@ use crate::{
     compiler::recursion::{
         program::RecursionProgram,
         types::{
-            AssertZeroExtEvent, BaseAluEvent, BatchFRIEvent, BinaryFoldStepEvent,
-            CommitPublicValuesEvent, DigestSelectEvent, ExpBitsLenEvent, ExpReverseBitsEvent,
-            ExtAluEvent, ExtDotProductEvent, FracFoldEvent, GkrSumcheckRoundEvent, HornerEvalEvent,
-            LagrangeEvalD2Event, MleOpenEvent, PackBlockEvent, Poseidon2Event, SelectEvent,
-            UnivariateFoldEvent, UnpackBlockEvent,
+            AssertZeroExtEvent, BaseAluEvent, BinaryFoldStepEvent, CommitPublicValuesEvent,
+            DigestSelectEvent, ExpBitsLenEvent, ExtAluEvent, ExtDotProductEvent, FracFoldEvent,
+            GkrSumcheckRoundEvent, HornerEvalEvent, LagrangeEvalD2Event, MleOpenEvent,
+            PackBlockEvent, Poseidon2Event, SelectEvent, UnivariateFoldEvent, UnpackBlockEvent,
         },
     },
     emulator::{record::RecordBehavior, recursion::public_values::RecursionPublicValues},
@@ -33,9 +32,7 @@ pub struct RecursionRecord<F> {
 
     pub select_events: Vec<SelectEvent<F>>,
     pub poseidon2_events: Vec<Poseidon2Event<F>>,
-    pub exp_reverse_bits_len_events: Vec<ExpReverseBitsEvent<F>>,
     pub exp_bits_len_events: Vec<ExpBitsLenEvent<F>>,
-    pub batch_fri_events: Vec<BatchFRIEvent<F>>,
     pub commit_pv_hash_events: Vec<CommitPublicValuesEvent<F>>,
 
     // WHIR verifier chip events.
@@ -84,9 +81,7 @@ impl<F: serde::Serialize> RecursionRecord<F> {
             public_values,
             poseidon2_events,
             select_events,
-            exp_reverse_bits_len_events,
             exp_bits_len_events,
-            batch_fri_events,
             commit_pv_hash_events,
             assert_zero_ext_events,
             frac_fold_events,
@@ -127,9 +122,7 @@ impl<F: serde::Serialize> RecursionRecord<F> {
             public_values,
             poseidon2_events,
             select_events,
-            exp_reverse_bits_len_events,
             exp_bits_len_events,
-            batch_fri_events,
             commit_pv_hash_events,
             assert_zero_ext_events,
             frac_fold_events,
@@ -163,14 +156,9 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
         stats.insert("select_events".to_string(), self.select_events.len());
         stats.insert("poseidon2_events".to_string(), self.poseidon2_events.len());
         stats.insert(
-            "exp_reverse_bits_events".to_string(),
-            self.exp_reverse_bits_len_events.len(),
-        );
-        stats.insert(
             "exp_bits_len_events".to_string(),
             self.exp_bits_len_events.len(),
         );
-        stats.insert("batch_fri_events".to_string(), self.batch_fri_events.len());
         stats.insert(
             "commit_pv_hash_events".to_string(),
             self.commit_pv_hash_events.len(),
@@ -237,9 +225,7 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
             public_values: _,
             poseidon2_events,
             select_events,
-            exp_reverse_bits_len_events,
             exp_bits_len_events,
-            batch_fri_events,
             commit_pv_hash_events,
             assert_zero_ext_events,
             frac_fold_events,
@@ -261,9 +247,7 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
         mem_var_events.append(&mut other.mem_var_events);
         poseidon2_events.append(&mut other.poseidon2_events);
         select_events.append(&mut other.select_events);
-        exp_reverse_bits_len_events.append(&mut other.exp_reverse_bits_len_events);
         exp_bits_len_events.append(&mut other.exp_bits_len_events);
-        batch_fri_events.append(&mut other.batch_fri_events);
         commit_pv_hash_events.append(&mut other.commit_pv_hash_events);
         assert_zero_ext_events.append(&mut other.assert_zero_ext_events);
         frac_fold_events.append(&mut other.frac_fold_events);
@@ -319,9 +303,7 @@ impl<F: Field> RecursionRecord<F> {
             public_values,
             poseidon2_events,
             select_events,
-            exp_reverse_bits_len_events,
             exp_bits_len_events,
-            batch_fri_events,
             commit_pv_hash_events,
             assert_zero_ext_events,
             frac_fold_events,
@@ -343,9 +325,7 @@ impl<F: Field> RecursionRecord<F> {
             && mem_var_events.is_empty()
             && poseidon2_events.is_empty()
             && select_events.is_empty()
-            && exp_reverse_bits_len_events.is_empty()
             && exp_bits_len_events.is_empty()
-            && batch_fri_events.is_empty()
             && commit_pv_hash_events.is_empty()
             && assert_zero_ext_events.is_empty()
             && frac_fold_events.is_empty()

@@ -1,7 +1,6 @@
 // other hpps
-#include "tracegen/recursion/batch_fri.cuh"
+#include "common/exception.cuh" // CUDA_OK and cuda_error, which byte.cuh uses without including
 #include "tracegen/riscv/byte.cuh"
-#include "tracegen/recursion/exp_bits.cuh"
 #include "tracegen/riscv/instruction.cuh"
 #include "tracegen/precompiles/keccak_consts.cuh"
 #include "tracegen/precompiles/keccak_permute.cuh"
@@ -301,53 +300,6 @@ namespace pico_gpu {
       return generate_main(digest, trace, num_cols, stream);
     } // cuda_public_values_generate_main
   } // namespace public_values
-
-  namespace exp_bits {
-    PICO_FFI
-    RustError::by_value cuda_exp_bits_generate_preprocessed(
-      const ExpReverseBitsInstrFfi<field_t>* instrs,
-      size_t instrs_len,
-      const Address<field_t>* addrs,
-      field_t* trace,
-      size_t num_cols,
-      cudaStream_t stream)
-    {
-      return generate_preprocessed(instrs, instrs_len, addrs, trace, num_cols, stream);
-    } // cuda_exp_bits_generate_preprocessed
-    PICO_FFI
-    RustError::by_value cuda_exp_bits_generate_main(
-      const ExpReverseBitsFfiEvent<field_t>* events,
-      size_t events_len,
-      field_t* bits,
-      field_t* trace,
-      size_t num_cols,
-      cudaStream_t stream)
-    {
-      return generate_main(events, events_len, bits, trace, num_cols, stream);
-    } // cuda_exp_bits_generate_main
-  } // namespace exp_bits
-
-  namespace batch_fri {
-    PICO_FFI
-    RustError::by_value cuda_batch_fri_generate_preprocessed(
-      const BatchFRIInstrFfi<field_t>* instrs,
-      size_t num_instrs,
-      const Address<field_t>* p_at_x,
-      const Address<field_t>* p_at_z,
-      const Address<field_t>* alpha_pow,
-      field_t* trace,
-      size_t num_cols,
-      cudaStream_t stream)
-    {
-      return generate_preprocessed(instrs, num_instrs, p_at_x, p_at_z, alpha_pow, trace, num_cols, stream);
-    } // cuda_batch_fri_generate_preprocessed
-    PICO_FFI
-    RustError::by_value cuda_batch_fri_generate_main(
-      const BatchFRIEvent<field_t>* events, size_t events_len, field_t* trace, size_t num_cols, cudaStream_t stream)
-    {
-      return generate_main(events, events_len, trace, num_cols, stream);
-    } // cuda_batch_fri_generate_main
-  } // namespace batch_fri
 
   namespace recursion_memory_const {
     PICO_FFI

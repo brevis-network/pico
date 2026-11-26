@@ -22,13 +22,6 @@ pub fn env_flag(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// `FRI_RISCV_ONLY` (cached): riscv-only benchmark mode — prove each chunk and report it
-/// terminally, skipping convert/recursion. Cached so the per-chunk prover path doesn't
-/// re-read the environment, and truthy-checked (via `env_flag`) so `FRI_RISCV_ONLY=0` disables.
-pub fn fri_riscv_only() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| env_flag("FRI_RISCV_ONLY"))
-}
 pub fn env_usize(name: &str) -> Option<usize> {
     std::env::var(name).ok().and_then(|s| s.parse().ok())
 }

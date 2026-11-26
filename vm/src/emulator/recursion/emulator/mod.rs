@@ -24,19 +24,16 @@ use itertools::Itertools;
 use p3_field::{ExtensionField, Field, InjectiveMonomial, PrimeCharacteristicRing, PrimeField32};
 use p3_poseidon2::{ExternalLayer, InternalLayer, Poseidon2};
 use p3_symmetric::Permutation;
-use p3_util::reverse_bits_len;
 
 use crate::compiler::recursion::types::{
-    AssertZeroExtEvent, AssertZeroExtInstr, BaseAluEvent, BaseAluInstr, BatchFRIBaseVecIo,
-    BatchFRIEvent, BatchFRIExtSingleIo, BatchFRIExtVecIo, BatchFRIInstr, BinaryFoldStepEvent,
+    AssertZeroExtEvent, AssertZeroExtInstr, BaseAluEvent, BaseAluInstr, BinaryFoldStepEvent,
     BinaryFoldStepInstr, CommitPublicValuesEvent, DigestSelectEvent, DigestSelectInstr,
-    ExpBitsLenEvent, ExpBitsLenInstr, ExpReverseBitsEvent, ExpReverseBitsInstr, ExpReverseBitsIo,
-    ExtAluEvent, ExtAluInstr, ExtDotProductEvent, ExtDotProductInstr, FracFoldEvent, FracFoldInstr,
-    GkrSumcheckRoundEvent, GkrSumcheckRoundInstr, HornerEvalEvent, HornerEvalInstr,
-    LagrangeEvalD2Event, LagrangeEvalD2Instr, MemAccessKind, MemInstr, MemIo, MleOpenEvent,
-    MleOpenInstr, PackBlockEvent, PackBlockInstr, Poseidon2Event, Poseidon2Instr, Poseidon2Io,
-    Poseidon2PackedInstr, SelectEvent, SelectInstr, SelectIo, UnivariateFoldEvent,
-    UnivariateFoldInstr, UnpackBlockEvent, UnpackBlockInstr,
+    ExpBitsLenEvent, ExpBitsLenInstr, ExtAluEvent, ExtAluInstr, ExtDotProductEvent,
+    ExtDotProductInstr, FracFoldEvent, FracFoldInstr, GkrSumcheckRoundEvent, GkrSumcheckRoundInstr,
+    HornerEvalEvent, HornerEvalInstr, LagrangeEvalD2Event, LagrangeEvalD2Instr, MemAccessKind,
+    MemInstr, MemIo, MleOpenEvent, MleOpenInstr, PackBlockEvent, PackBlockInstr, Poseidon2Event,
+    Poseidon2Instr, Poseidon2Io, Poseidon2PackedInstr, SelectEvent, SelectInstr, SelectIo,
+    UnivariateFoldEvent, UnivariateFoldInstr, UnpackBlockEvent, UnpackBlockInstr,
 };
 use thiserror::Error;
 
@@ -67,9 +64,7 @@ macro_rules! record_event_vecs {
             mem_var_events,
             select_events,
             poseidon2_events,
-            exp_reverse_bits_len_events,
             exp_bits_len_events,
-            batch_fri_events,
             commit_pv_hash_events,
             assert_zero_ext_events,
             frac_fold_events,
@@ -87,7 +82,7 @@ macro_rules! record_event_vecs {
         )
     };
 }
-const RECORD_EVENT_VECS: usize = 22;
+const RECORD_EVENT_VECS: usize = 20;
 
 /// The window the prover's plans use: wide enough that 93-98% of a recursion program's
 /// permutations land in levels of 16 or more, small enough to stay in cache.
@@ -220,10 +215,6 @@ where
 
     pub nb_select: usize,
 
-    pub nb_exp_reverse_bits: usize,
-
-    pub nb_batch_fri: usize,
-
     pub nb_print_f: usize,
 
     pub nb_print_e: usize,
@@ -328,8 +319,6 @@ where
             nb_wide_poseidons: 0,
             nb_bit_decompositions: 0,
             nb_select: 0,
-            nb_exp_reverse_bits: 0,
-            nb_batch_fri: 0,
             nb_ext_ops: 0,
             nb_base_ops: 0,
             nb_memory_ops: 0,
@@ -360,16 +349,6 @@ where
             "   |- {:<26}: {}",
             "Poseidon Operations:",
             self.nb_poseidons
-        );
-        tracing::info!(
-            "   |- {:<26}: {}",
-            "Exp Reverse Bits Operations:",
-            self.nb_exp_reverse_bits
-        );
-        tracing::info!(
-            "   |- {:<26}: {}",
-            "BatchFRI Operations:",
-            self.nb_batch_fri
         );
         tracing::info!("   |- {:<26}: {}", "Field Operations:", self.nb_base_ops);
         tracing::info!("   |- {:<26}: {}", "Extension Operations:", self.nb_ext_ops);
@@ -436,8 +415,6 @@ where
             nb_memory_ops: 0,
             nb_branch_ops: 0,
             nb_select: 0,
-            nb_exp_reverse_bits: 0,
-            nb_batch_fri: 0,
             nb_print_f: 0,
             nb_print_e: 0,
             depth_log: Vec::new(),
@@ -701,8 +678,6 @@ where
             self.nb_memory_ops += c.nb_memory_ops;
             self.nb_branch_ops += c.nb_branch_ops;
             self.nb_select += c.nb_select;
-            self.nb_exp_reverse_bits += c.nb_exp_reverse_bits;
-            self.nb_batch_fri += c.nb_batch_fri;
             self.nb_print_f += c.nb_print_f;
             self.nb_print_e += c.nb_print_e;
         }
@@ -902,28 +877,6 @@ where
                     in2,
                 })
             }
-            Instruction::ExpReverseBitsLen(ExpReverseBitsInstr {
-                addrs: ExpReverseBitsIo { base, exp, result },
-                mult,
-            }) => {
-                self.nb_exp_reverse_bits += 1;
-                let base_val = self.memory.mr(base).val[0];
-                let exp_bits: Vec<_> = exp.iter().map(|bit| self.memory.mr(*bit).val[0]).collect();
-                let exp_val = exp_bits
-                    .iter()
-                    .enumerate()
-                    .fold(0, |acc, (i, &val)| acc + val.as_canonical_u32() * (1 << i));
-                let out =
-                    base_val.exp_u64(reverse_bits_len(exp_val as usize, exp_bits.len()) as u64);
-                self.memory.mw(result, Block::from(out), mult);
-                self.record
-                    .exp_reverse_bits_len_events
-                    .push(ExpReverseBitsEvent {
-                        result: out,
-                        base: base_val,
-                        exp: exp_bits,
-                    });
-            }
             Instruction::HintBits(HintBitsInstr {
                 output_addrs_mults,
                 input_addr,
@@ -939,53 +892,6 @@ where
                     self.memory.mw(addr, bit, mult);
                     self.record.mem_var_events.push(MemEvent { inner: bit });
                 }
-            }
-
-            Instruction::BatchFRI(instr) => {
-                let BatchFRIInstr {
-                    base_vec_addrs,
-                    ext_single_addrs,
-                    ext_vec_addrs,
-                    acc_mult,
-                } = *instr;
-
-                let mut acc = EF::ZERO;
-                let p_at_xs = base_vec_addrs
-                    .p_at_x
-                    .iter()
-                    .map(|addr| self.memory.mr(*addr).val[0])
-                    .collect_vec();
-                let p_at_zs = ext_vec_addrs
-                    .p_at_z
-                    .iter()
-                    .map(|addr| self.memory.mr(*addr).val.ext::<EF>())
-                    .collect_vec();
-                let alpha_pows: Vec<_> = ext_vec_addrs
-                    .alpha_pow
-                    .iter()
-                    .map(|addr| self.memory.mr(*addr).val.ext::<EF>())
-                    .collect_vec();
-
-                self.nb_batch_fri += p_at_zs.len();
-                for m in 0..p_at_zs.len() {
-                    acc += alpha_pows[m] * (p_at_zs[m] - EF::from(p_at_xs[m]));
-                    self.record.batch_fri_events.push(BatchFRIEvent {
-                        base_vec: BatchFRIBaseVecIo { p_at_x: p_at_xs[m] },
-                        ext_single: BatchFRIExtSingleIo {
-                            acc: Block::from(acc.as_basis_coefficients_slice()),
-                        },
-                        ext_vec: BatchFRIExtVecIo {
-                            p_at_z: Block::from(p_at_zs[m].as_basis_coefficients_slice()),
-                            alpha_pow: Block::from(alpha_pows[m].as_basis_coefficients_slice()),
-                        },
-                    });
-                }
-
-                let _ = self.memory.mw(
-                    ext_single_addrs.acc,
-                    Block::from(acc.as_basis_coefficients_slice()),
-                    acc_mult,
-                );
             }
 
             Instruction::CommitPublicValues(instr) => {

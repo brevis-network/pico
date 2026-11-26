@@ -5934,7 +5934,7 @@ fn run_pipeline(
     // With a tree the root asserts that the global LogUp's sum is zero, and the root (or the
     // compress proof over it) was accepted above; without one nothing of this run checks the
     // chunks against each other, and a two-machine secondary's tree has its root on the
-    // primary. The bench scripts count this line's last clause (`bench-arm.sh`, `sweep-csv.py`).
+    // primary. The bench scripts count this line's last clause (`sweep-csv.py`).
     let cross_chunk = if !with_combine || is_mle_secondary() {
         ""
     } else if verify || !with_compress || vk_on {

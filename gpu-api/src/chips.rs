@@ -448,43 +448,6 @@ unsafe extern "C" {
         stream: cudaStream_t,
     ) -> Error;
 
-    pub fn cuda_exp_bits_generate_preprocessed(
-        d_events: *const c_void,
-        event_size: usize,
-        d_bits: *const c_void,
-        d_trace: *mut c_void,
-        num_cols: usize,
-        stream: cudaStream_t,
-    ) -> Error;
-
-    pub fn cuda_exp_bits_generate_main(
-        d_events: *const c_void,
-        event_size: usize,
-        d_bits: *const c_void,
-        d_trace: *mut c_void,
-        num_cols: usize,
-        stream: cudaStream_t,
-    ) -> Error;
-
-    pub fn cuda_batch_fri_generate_preprocessed(
-        d_instrs: *const c_void,
-        instrs_size: usize,
-        d_p_at_x: *const c_void,
-        d_p_at_z: *const c_void,
-        d_alpha_pow: *const c_void,
-        d_trace: *mut c_void,
-        num_cols: usize,
-        stream: cudaStream_t,
-    ) -> Error;
-
-    pub fn cuda_batch_fri_generate_main(
-        d_events: *const c_void,
-        event_size: usize,
-        d_trace: *mut c_void,
-        num_cols: usize,
-        stream: cudaStream_t,
-    ) -> Error;
-
     pub fn cuda_recursion_mem_const_generate_preprocessed(
         d_events: *const c_void,
         event_size: usize,

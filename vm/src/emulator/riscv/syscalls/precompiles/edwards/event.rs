@@ -8,8 +8,7 @@ use crate::{
         gadgets::{
             curves::{
                 edwards::WORDS_FIELD_ELEMENT, weierstrass::secp256k1::secp256k1_add_words,
-                AffinePoint, CurveType, EllipticCurve, COMPRESSED_POINT_BYTES,
-                NUM_BYTES_FIELD_ELEMENT,
+                AffinePoint, CurveType, EllipticCurve,
             },
             utils::field_params::{FieldParameters, NumWords},
         },
@@ -170,48 +169,6 @@ pub struct EdDecompressEvent {
     pub y_memory_records: [MemoryReadRecord; WORDS_FIELD_ELEMENT],
     /// The local memory access events.
     pub local_mem_access: Vec<MemoryLocalEvent>,
-}
-
-/// Edwards Decompress Event FFI.
-///
-/// This event is emitted when an edwards decompression operation is performed.
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-#[repr(C)]
-pub struct EdDecompressEventFFI {
-    /// The chunk number.
-    pub chunk: u32,
-    /// The clock cycle.
-    pub clk: u32,
-    /// The pointer to the point.
-    pub ptr: u32,
-    /// The sign bit of the point.
-    pub sign: bool,
-    /// The comprssed y coordinate as a list of bytes.
-    pub y_bytes: [u8; COMPRESSED_POINT_BYTES],
-    /// The decompressed x coordinate as a list of bytes.
-    pub decompressed_x_bytes: [u8; NUM_BYTES_FIELD_ELEMENT],
-    /// The memory records for the x coordinate.
-    pub x_memory_records: [MemoryWriteRecord; WORDS_FIELD_ELEMENT],
-    /// The memory records for the y coordinate.
-    pub y_memory_records: [MemoryReadRecord; WORDS_FIELD_ELEMENT],
-}
-
-impl From<&EdDecompressEvent> for EdDecompressEventFFI {
-    fn from(_value: &EdDecompressEvent) -> Self {
-        todo!("fix required fields to u64");
-        /*
-        Self {
-            chunk: value.chunk,
-            clk: value.clk.try_into().unwrap(),
-            ptr: value.ptr.try_into().unwrap(),
-            sign: value.sign,
-            y_bytes: value.y_bytes,
-            decompressed_x_bytes: value.decompressed_x_bytes,
-            x_memory_records: value.x_memory_records,
-            y_memory_records: value.y_memory_records,
-        }
-        */
-    }
 }
 
 /// Create an elliptic curve add event. It takes two pointers to memory locations, reads the points

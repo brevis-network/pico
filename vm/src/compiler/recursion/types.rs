@@ -1,6 +1,6 @@
 // TODO: move parts of the code to compiler
 
-use p3_field::{PrimeCharacteristicRing, PrimeField64};
+use p3_field::PrimeField64;
 use pico_derive::AlignedBorrow;
 use rand::{
     distr::{Distribution, StandardUniform},
@@ -258,6 +258,8 @@ where
 
 pub type Poseidon2Event<F> = Poseidon2Io<F>;
 
+pub type Poseidon2Instr<F> = Poseidon2SkinnyInstr<F>;
+
 /*
 Select-related
  */
@@ -314,117 +316,6 @@ where
 pub type SelectEvent<F> = SelectIo<F>;
 
 /*
-ExpReverseBits-related
- */
-
-/// The inputs and outputs to an exp-reverse-bits operation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExpReverseBitsIo<V> {
-    pub base: V,
-    // The bits of the exponent in little-endian order in a vec.
-    pub exp: Vec<V>,
-    pub result: V,
-}
-
-/// The inputs and outputs to an exp-reverse-bits operation.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub struct ExpReverseBitsIoFfi<V> {
-    pub base: V,
-    pub result: V,
-    pub len: usize,
-    pub initial_row: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub struct ExpReverseBitsFfiEvent<F> {
-    pub base: F,
-    pub result: F,
-    pub len: usize,
-    pub initial_row: usize,
-}
-
-pub fn preprocess_exp_reverse_bits_instr_ffi<F: Copy>(
-    instrs: &[&ExpReverseBitsInstr<F>],
-) -> (Vec<ExpReverseBitsInstrFfi<F>>, Vec<Address<F>>) {
-    let mut row = 0;
-    (
-        instrs
-            .iter()
-            .map(|inst| {
-                let result = ExpReverseBitsInstrFfi {
-                    addrs: ExpReverseBitsIoFfi {
-                        base: inst.addrs.base,
-                        result: inst.addrs.result,
-                        len: inst.addrs.exp.len(),
-                        initial_row: row,
-                    },
-                    mult: inst.mult,
-                };
-                row += result.addrs.len;
-                result
-            })
-            .collect(),
-        instrs
-            .iter()
-            .flat_map(|inst| inst.addrs.exp.iter().copied())
-            .collect(),
-    )
-}
-
-pub fn preprocess_exp_reverse_bits_ffi<F: Copy>(
-    events: &[ExpReverseBitsEvent<F>],
-) -> (Vec<ExpReverseBitsFfiEvent<F>>, Vec<F>) {
-    let mut row = 0;
-    (
-        events
-            .iter()
-            .map(|event| {
-                let result = ExpReverseBitsFfiEvent {
-                    base: event.base,
-                    result: event.result,
-                    len: event.exp.len(),
-                    initial_row: row,
-                };
-                row += result.len;
-                result
-            })
-            .collect(),
-        events
-            .iter()
-            .flat_map(|event| event.exp.iter().copied())
-            .collect(),
-    )
-}
-
-pub type Poseidon2Instr<F> = Poseidon2SkinnyInstr<F>;
-
-/// An instruction invoking the exp-reverse-bits operation.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ExpReverseBitsInstr<F> {
-    pub addrs: ExpReverseBitsIo<Address<F>>,
-    pub mult: F,
-}
-
-/// An FFI-safe instruction invoking the exp-reverse-bits operation.
-#[derive(Clone, Debug)]
-#[repr(C)]
-pub struct ExpReverseBitsInstrFfi<F> {
-    pub addrs: ExpReverseBitsIoFfi<Address<F>>,
-    pub mult: F,
-}
-
-/// The event encoding the inputs and outputs of an exp-reverse-bits operation. The `len` operand is
-/// now stored as the length of the `exp` field.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExpReverseBitsEvent<F> {
-    pub base: F,
-    pub exp: Vec<F>,
-    pub result: F,
-}
-
-/*
 ExpBitsLen-related
  */
 
@@ -460,164 +351,6 @@ pub struct ExpBitsLenEvent<F> {
     pub base: F,
     pub bit_src: F,
     pub num_bits: u32,
-}
-
-/*
-BatchFRI-related
- */
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BatchFRIIo<V> {
-    pub ext_single: BatchFRIExtSingleIo<Block<V>>,
-    pub ext_vec: BatchFRIExtVecIo<Vec<Block<V>>>,
-    pub base_vec: BatchFRIBaseVecIo<V>,
-}
-
-/// The extension-field-valued single inputs to the batch FRI operation.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[repr(C)]
-pub struct BatchFRIExtSingleIo<V> {
-    pub acc: V,
-}
-
-/// The extension-field-valued vector inputs to the batch FRI operation.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[repr(C)]
-pub struct BatchFRIExtVecIo<V> {
-    pub p_at_z: V,
-    pub alpha_pow: V,
-}
-
-/// The base-field-valued vector inputs to the batch FRI operation.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[repr(C)]
-pub struct BatchFRIBaseVecIo<V> {
-    pub p_at_x: V,
-}
-
-/// An instruction invoking the batch FRI operation. Addresses for extension field elements are of
-/// the same type as for base field elements.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BatchFRIInstr<F> {
-    pub base_vec_addrs: BatchFRIBaseVecIo<Vec<Address<F>>>,
-    pub ext_single_addrs: BatchFRIExtSingleIo<Address<F>>,
-    pub ext_vec_addrs: BatchFRIExtVecIo<Vec<Address<F>>>,
-    pub acc_mult: F,
-}
-
-impl<F: PrimeCharacteristicRing> Distribution<BatchFRIInstr<F>> for StandardUniform
-where
-    StandardUniform: Distribution<F> + Distribution<Address<F>>,
-{
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> BatchFRIInstr<F> {
-        let len = rng.random_range(4..8);
-        let mut p_at_x = Vec::with_capacity(len);
-        let mut p_at_z = Vec::with_capacity(len);
-        let mut alpha_pow = Vec::with_capacity(len);
-        for _ in 0..len {
-            p_at_x.push(rng.random());
-            p_at_z.push(rng.random());
-            alpha_pow.push(rng.random());
-        }
-        BatchFRIInstr {
-            base_vec_addrs: BatchFRIBaseVecIo { p_at_x },
-            ext_single_addrs: BatchFRIExtSingleIo { acc: rng.random() },
-            ext_vec_addrs: BatchFRIExtVecIo { p_at_z, alpha_pow },
-            acc_mult: F::ONE,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub struct BatchFRIInstrFfi<F> {
-    pub ext_single_addrs: BatchFRIExtSingleIo<Address<F>>,
-    pub acc_mult: F,
-    pub offset: usize,
-    pub len: usize,
-}
-
-// preprocess into separate vectors instead of unpacking the vectors to optimize for memory
-// allow: domain-complex signature — tuple reflects prover data-flow structure
-#[allow(clippy::type_complexity)]
-pub fn preprocess_batch_fri_ffi<F: Copy>(
-    insts: &[impl AsRef<BatchFRIInstr<F>>],
-) -> (
-    Vec<BatchFRIInstrFfi<F>>,
-    Vec<Address<F>>,
-    Vec<Address<F>>,
-    Vec<Address<F>>,
-    bool,
-    usize,
-) {
-    let mut offset = 0;
-    let mut result = Vec::with_capacity(insts.len());
-    let hueristic = insts
-        .first()
-        .map(|x| x.as_ref().base_vec_addrs.p_at_x.len())
-        .unwrap_or_default();
-    let mut good_heuristic = true;
-    let mut p_at_x = Vec::with_capacity(hueristic * insts.len());
-    let mut p_at_z = Vec::with_capacity(hueristic * insts.len());
-    let mut alpha_pow = Vec::with_capacity(hueristic * insts.len());
-
-    for inst in insts {
-        let inst = inst.as_ref();
-        assert_eq!(
-            inst.base_vec_addrs.p_at_x.len(),
-            inst.ext_vec_addrs.p_at_z.len()
-        );
-        assert_eq!(
-            inst.ext_vec_addrs.p_at_z.len(),
-            inst.ext_vec_addrs.alpha_pow.len()
-        );
-        let len = inst.base_vec_addrs.p_at_x.len();
-        result.push(BatchFRIInstrFfi {
-            ext_single_addrs: inst.ext_single_addrs,
-            acc_mult: inst.acc_mult,
-            offset,
-            len,
-        });
-        p_at_x.extend_from_slice(&inst.base_vec_addrs.p_at_x);
-        p_at_z.extend_from_slice(&inst.ext_vec_addrs.p_at_z);
-        alpha_pow.extend_from_slice(&inst.ext_vec_addrs.alpha_pow);
-        offset += len;
-
-        if len != hueristic {
-            good_heuristic = false;
-        }
-    }
-
-    (result, p_at_x, p_at_z, alpha_pow, good_heuristic, offset)
-}
-
-/// The event encoding the data of a single iteration within the batch FRI operation.
-/// For any given event, we are accessing a single element of the `Vec` inputs, so that the event
-/// is not a type alias for `BatchFRIIo` like many of the other events.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[repr(C)]
-pub struct BatchFRIEvent<F> {
-    pub base_vec: BatchFRIBaseVecIo<F>,
-    pub ext_single: BatchFRIExtSingleIo<Block<F>>,
-    pub ext_vec: BatchFRIExtVecIo<Block<F>>,
-}
-
-impl<F> Distribution<BatchFRIEvent<F>> for StandardUniform
-where
-    StandardUniform: Distribution<F> + Distribution<Block<F>>,
-{
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> BatchFRIEvent<F> {
-        BatchFRIEvent {
-            base_vec: BatchFRIBaseVecIo {
-                p_at_x: rng.random(),
-            },
-            ext_single: BatchFRIExtSingleIo { acc: rng.random() },
-            ext_vec: BatchFRIExtVecIo {
-                p_at_z: rng.random(),
-                alpha_pow: rng.random(),
-            },
-        }
-    }
 }
 
 /*

@@ -1,9 +1,7 @@
 //! The lookup (interaction) vocabulary shared across proving backends.
 //!
 //! `LookupType`/`LookupScope`/`SymbolicLookup` are what a chip's `looking()`/`looked()` calls
-//! speak, so they live in `pico-mle-core` alongside the `ChipBuilder` stack. The legacy FRI
-//! lowering of these into `VirtualPairCol` (`VirtualPairLookup`, `symbolic_to_virtual_pair`) stays
-//! in `vm`.
+//! speak, so they live in `pico-mle-core` alongside the `ChipBuilder` stack.
 
 use p3_field::Field;
 use serde::{Deserialize, Serialize};
@@ -81,30 +79,6 @@ pub enum LookupType {
     /// working vector entering round `k` (tag 0) or the message block in schedule order `s`
     /// (tag 1).
     Blake2bRound = 18,
-}
-
-impl LookupType {
-    /// Omits [`Self::ShaCompress`], [`Self::ShaExtend`] and [`Self::KeccakPermute`]. It now has
-    /// no caller at all -- it existed for the legacy FRI
-    /// verifier's per-bus cumulative-sum check, which predates those buses, and adding them there
-    /// would change FRI verification.
-    // TODO(fri-removal): delete with FRI.
-    pub fn all_types() -> impl Iterator<Item = Self> {
-        [
-            Self::Memory,
-            Self::Program,
-            Self::Instruction,
-            Self::Alu,
-            Self::Byte,
-            Self::Range,
-            Self::Field,
-            Self::Syscall,
-            Self::Poseidon2,
-            Self::Global,
-            Self::Ecall,
-        ]
-        .into_iter()
-    }
 }
 
 /// Index of the `kind` element in a Global-bus lookup message (8 message words, `is_send`,

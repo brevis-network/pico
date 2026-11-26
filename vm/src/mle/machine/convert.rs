@@ -156,8 +156,7 @@ impl ConvertMachine {
         // `ChipBehavior` methods, while `MetaChip::new` builds FRI parts that are discarded and
         // re-derived in `engine.keygen_merged_preprocessed`.
         //
-        // TODO(fri-removal): carry bare `RecursionChipType<Kb>` enums instead of `MetaChip`. Until
-        // then the FRI-only `VirtualPairLookup` / `symbolic_to_virtual_pair` can't be deleted.
+        // TODO: carry bare `RecursionChipType<Kb>` enums instead of `MetaChip`.
         let chips = RecursionChipType::<Kb>::mle_recursion_chips();
 
         let t_layouts = std::time::Instant::now();
