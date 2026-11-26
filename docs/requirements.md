@@ -75,7 +75,7 @@ emulates with up to 16 replay workers, has not been measured on them:
 | what | machine | peak memory | wall clock |
 |---|---|---|---|
 | fibonacci, `prove` (RISC-V phase) | Apple M4 laptop, 10 cores, 24 GB | 6.7 GB | 25 s |
-| tendermint, prover defaults (19.1 M cycles) | 124-core server, 920 GB | 116 GB | 2 min 27 s |
+| tendermint, prover defaults (16.3 M cycles) | 124-core server, 920 GB | 116 GB | 2 min 19 s |
 | Groth16 setup of the wrap circuit | 124-core server | 15.5 GB | 3 min 48 s |
 | Groth16 prove of the wrap circuit | 124-core server | 11.2 GB | 23 s |
 | fibonacci to the compress proof, one chunk at a time | 16 cores of that server | 6.1 GB | 2 min 17 s |

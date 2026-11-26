@@ -87,21 +87,21 @@ The prover checks the guest's three committed values (both header hashes, then t
 verdict) against the same verification run on the host: first on an emulation, then on the proof.
 
 **It needs a large machine.** It proves at the prover's defaults, and on a 124-core, 920 GB server
-the run of 19.1 million cycles takes 2 min 27 s at a 116 GB peak. It does not fit a laptop.
+the run of 16.3 million cycles takes 2 min 19 s at a 116 GB peak. It does not fit a laptop.
 
 A smaller machine can trade proving time for memory through `Prover::builder`. Measured on the same
 server with proving limited to 10 threads (`RAYON_NUM_THREADS=10`):
 
 | options | chunks | peak memory | wall clock |
 |---|---|---|---|
-| the defaults: `log_stacked_height` 23, `concurrency` 4 | 3 | 129 GB | 6 min 37 s |
-| `log_stacked_height(21)`, `concurrency(1)` | 10 | 20 GB | 9 min 30 s |
-| `log_stacked_height(20)`, `concurrency(1)` | 19 | 14 GB | 12 min 16 s |
+| the defaults: `log_stacked_height` 23, `concurrency` 4 | 3 | 112 GB | 6 min 34 s |
+| `log_stacked_height(21)`, `concurrency(1)` | 8 | 20 GB | 7 min 35 s |
+| `log_stacked_height(20)`, `concurrency(1)` | 16 | 14 GB | 11 min 29 s |
 
 A lower stacked height gives more, smaller chunks, and `concurrency` bounds the recursion proofs
 that follow the chunks as well as the chunks, so at 1 the run proves one proof at a time
 throughout (the convert programs' keys, one per distinct chunk shape, are generated
-together). Two chunks at a time at height 20 took 11 min 19 s and peaked at 28 GB. The last
+together). Two chunks at a time at height 20 took 10 min 16 s and peaked at 25 GB. The last
 two rows of the table stay under 24 GB.
 
 Every figure in this section was taken with serial emulation (`ProverBuilder::serial_emulation`);
