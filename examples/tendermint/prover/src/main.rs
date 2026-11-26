@@ -10,7 +10,7 @@
 //! host before spending minutes proving. Then `Prover::prove` proves the whole chain to one combine
 //! root and verifies it in process.
 //!
-//! It needs a large machine: at the prover's defaults it peaks near 200 GB. `examples/README.md`
+//! It needs a large machine: at the prover's defaults it peaks near 120 GB. `examples/README.md`
 //! has the measurements, and the options that trade proving time for memory.
 //!
 //! This runs in dev mode, as the fibonacci example does, so this prover's program id is not the one
